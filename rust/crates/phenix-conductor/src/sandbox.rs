@@ -811,6 +811,7 @@ mod tests {
         authority.ipc.insert(granted.to_string_lossy().into_owned());
         let bwrap = env::var_os("PHENIX_BWRAP").unwrap_or_else(|| OsString::from("bwrap"));
         let bash = env::var_os("PHENIX_BASH").unwrap_or_else(|| OsString::from("bash"));
+        let socat = env::var_os("PHENIX_SOCAT").unwrap_or_else(|| OsString::from("socat"));
         let mut command = ExecutionSandbox::new(&authority, &state)
             .configure_bwrap(&bwrap, &workspace, &[], WorkspaceMount::ReadOnly)
             .unwrap();
@@ -818,10 +819,13 @@ mod tests {
             .arg("--")
             .arg(bash)
             .arg("-c")
-            .arg("test -S \"$1\" && test ! -S \"$2\"")
+            .arg(
+                "test -S \"$1\" && test ! -S \"$2\" \\\n                 && \"$3\" -u /dev/null \"UNIX-CONNECT:$1\" \\\n                 && ! \"$3\" -u /dev/null \"UNIX-CONNECT:$2\"",
+            )
             .arg("phenix-ipc-test")
             .arg(&granted)
             .arg(&ungranted)
+            .arg(socat)
             .output()
             .unwrap();
 

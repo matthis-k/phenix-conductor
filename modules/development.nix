@@ -397,6 +397,7 @@
                   pkgs.rsync
                   pkgs.rustc
                   pkgs.slirp4netns
+                  pkgs.socat
                   pkgs.util-linux
                 ];
                 exec = ''
@@ -411,7 +412,7 @@
                       -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null
                   fi
 
-                  timeout --signal=KILL 180 cargo test --workspace --lib --bins --locked -- --nocapture --test-threads=1
+                  timeout --signal=KILL 300 cargo test --workspace --lib --bins --locked -- --nocapture --test-threads=1
                 '';
               };
 
