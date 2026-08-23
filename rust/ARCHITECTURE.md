@@ -217,7 +217,11 @@ Reload creates a new revision. Existing sessions do not silently change meaning.
 
 ## Persistence and debug export
 
-The target durable store is SQLite in WAL mode. Durable state includes sessions, lineage, configuration revisions, accepted submission order, execution metadata, canonical events, attempt groups, and other conductor-owned state required for recovery.
+Each discovered workspace or worktree uses one canonical SQLite database in WAL mode. The default path is `$XDG_STATE_HOME/phenix/workspaces/<workspace-key>/workspace.db`, with the XDG user-state fallback when `XDG_STATE_HOME` is unset. The workspace key derives from the canonical `WorkspaceId`. An explicit state path changes storage location only.
+
+The database records the canonical `WorkspaceId` and canonical root. Startup validates both before configuration binding, backend registration, or frontend service. Schema migrations are ordered and transactional. A failed migration prevents the conductor from serving the workspace. `spec/workspace-persistence.md` defines this contract.
+
+Durable state includes sessions, lineage, configuration revisions, accepted submission order, execution metadata, canonical events, attempt groups, and other conductor-owned state required for recovery.
 
 Live backend handles, cancellation handles, streams, sandboxes, frontend connections, and frontend service providers are process-local.
 
