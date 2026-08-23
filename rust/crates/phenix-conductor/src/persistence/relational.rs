@@ -84,11 +84,11 @@ impl SqliteStore {
         {
             std::fs::create_dir_all(parent)?;
         }
-        let connection = Connection::open(&self.path)?;
+        let mut connection = Connection::open(&self.path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
-        migrate(&connection)?;
+        migrate(&mut connection)?;
         Ok(connection)
     }
 
@@ -163,7 +163,7 @@ impl SqliteStore {
     }
 }
 
-fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
+fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
              version INTEGER PRIMARY KEY,
@@ -180,24 +180,40 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
             "database schema version {version} is newer than supported version {DATABASE_SCHEMA_VERSION}"
         )));
     }
-    if version == 0 {
-        connection.execute_batch(include_str!("../../migrations/0001_runtime.sql"))?;
-        connection.execute("INSERT INTO schema_migrations(version) VALUES (1)", [])?;
+    for (target, sql) in [
+        (1, include_str!("../../migrations/0001_runtime.sql")),
+        (
+            2,
+            include_str!("../../migrations/0002_orchestration_data.sql"),
+        ),
+        (
+            3,
+            include_str!("../../migrations/0003_diagnostic_patches.sql"),
+        ),
+        (
+            4,
+            include_str!("../../migrations/0004_language_observations.sql"),
+        ),
+    ] {
+        if version < target {
+            apply_migration(connection, target, sql)?;
+        }
     }
-    if version < 2 {
-        connection.execute_batch(include_str!("../../migrations/0002_orchestration_data.sql"))?;
-        connection.execute("INSERT INTO schema_migrations(version) VALUES (2)", [])?;
-    }
-    if version < 3 {
-        connection.execute_batch(include_str!("../../migrations/0003_diagnostic_patches.sql"))?;
-        connection.execute("INSERT INTO schema_migrations(version) VALUES (3)", [])?;
-    }
-    if version < 4 {
-        connection.execute_batch(include_str!(
-            "../../migrations/0004_language_observations.sql"
-        ))?;
-        connection.execute("INSERT INTO schema_migrations(version) VALUES (4)", [])?;
-    }
+    Ok(())
+}
+
+fn apply_migration(
+    connection: &mut Connection,
+    version: i64,
+    sql: &str,
+) -> Result<(), PersistenceError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transaction.execute_batch(sql)?;
+    transaction.execute(
+        "INSERT INTO schema_migrations(version) VALUES (?1)",
+        params![version],
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -2470,6 +2486,45 @@ mod tests {
             .unwrap();
         runtime.close_session(&session.id).unwrap();
         runtime.journal().clone()
+    }
+
+    #[test]
+    fn failed_migration_rolls_back_schema_and_version() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations (
+                     version INTEGER PRIMARY KEY,
+                     applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                 );",
+            )
+            .unwrap();
+
+        let error = apply_migration(
+            &mut connection,
+            1,
+            "CREATE TABLE migration_probe(value INTEGER);\n             INSERT INTO missing_table(value) VALUES (1);",
+        )
+        .unwrap_err();
+        assert!(matches!(error, PersistenceError::Sql(_)));
+
+        let probe_exists = connection
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'migration_probe'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .unwrap();
+        let version = connection
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(probe_exists, None);
+        assert_eq!(version, 0);
     }
 
     #[test]

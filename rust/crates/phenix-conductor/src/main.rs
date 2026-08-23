@@ -2,8 +2,7 @@ use clap::Parser;
 use phenix_backend_acp::{AcpBackend, AcpBackendConfig};
 use phenix_backend_native::{PhenixBackend, BACKEND_ID as PHENIX_BACKEND_ID};
 use phenix_conductor::{
-    CompiledConfiguration, ConductorRuntime, ConductorServer, ContextRegistry, SkillRegistry,
-    SqliteStore,
+    CompiledConfiguration, ConductorServer, ContextRegistry, SkillRegistry, SqliteStore,
 };
 use phenix_core::{BackendId, ProviderId};
 use std::error::Error;
@@ -14,6 +13,7 @@ mod configuration;
 #[cfg(unix)]
 mod local_service;
 mod workspace;
+mod workspace_state;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,7 +30,7 @@ struct Arguments {
     #[arg(long, value_name = "FILE")]
     configuration: Vec<PathBuf>,
 
-    /// Durable conductor SQLite database. If omitted the process is ephemeral.
+    /// Override the canonical workspace SQLite database path for tests or debugging.
     #[arg(long, value_name = "FILE")]
     state: Option<PathBuf>,
 
@@ -57,22 +57,17 @@ struct Arguments {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments = Arguments::parse();
-    if arguments.socket.is_some() && arguments.state.is_none() {
-        return Err("--socket requires --state so the persistent service has durable state".into());
-    }
-
     let cwd = arguments
         .cwd
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let workspace = workspace::Workspace::discover(&cwd)?;
-    let mut server = match arguments.state {
-        Some(path) => ConductorServer::load_or_new(SqliteStore::new(path), workspace.id().clone())?,
-        None => {
-            let mut runtime = ConductorRuntime::new();
-            runtime.bind_workspace(workspace.id().clone())?;
-            ConductorServer::new(runtime)
-        }
+    let state_path = match arguments.state {
+        Some(path) => path,
+        None => workspace_state::default_database_path(workspace.descriptor())?,
     };
+    let store = SqliteStore::new(state_path);
+    let mut server = ConductorServer::load_or_new(store.clone(), workspace.id().clone())?;
+    store.ensure_workspace_identity(workspace.descriptor())?;
     server.install_workspace_consistency(workspace.descriptor().clone())?;
 
     let mut base_configuration = CompiledConfiguration::default();
