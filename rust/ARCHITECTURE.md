@@ -20,6 +20,20 @@ Multiple frontends may submit to the same session. The conductor assigns durable
 
 Child executions inside one root execution may execute concurrently when their dependencies and workspace authority permit it.
 
+## Frontend service providers
+
+A live frontend may advertise service providers that the conductor can use over that frontend's existing connection. Provider advertisements, source connection identity, pending calls, notification subscriptions, and execution-to-frontend routes are process-local state.
+
+A frontend connection owns only the service providers it advertises. It does not gain ownership of a Phenix session. When a frontend submits a root execution, that root binds to the submitting connection for execution-scoped frontend-service routing. Descendants use the same route. Another frontend may submit to the same session, but it cannot answer service calls for that root.
+
+Conductor-owned workspace services may instead inspect the live provider catalog, select one connection whose descriptor satisfies their required capabilities, and address that connection directly. They do not create synthetic execution ownership to reach a frontend service.
+
+Frontend service requests use conductor-assigned correlation IDs and receive one typed success or error response. Notifications are one-way in both directions. Frontend-to-conductor notifications are accepted only from a connection that currently advertises the named provider, then carry that source connection identity to the conductor-owned subscriber. The generic transport does not persist notifications.
+
+A frontend may replace its advertised provider set while connected. Disconnect removes its provider set, execution routes, and pending calls. Process restart removes all frontend-service state even when durable executions are restored.
+
+Frontend services are adapters for capabilities that live in a frontend process. They do not add durable configuration, callable ownership, session ownership, or ambient IPC authority. Executions do not receive arbitrary frontend IPC; conductor-owned code decides when and how a provider is used.
+
 ## Session and conversation identity
 
 A `Session` is the long-lived Phenix conversation. Model and backend conversations are implementation details.
@@ -191,7 +205,7 @@ Reload creates a new revision. Existing sessions do not silently change meaning.
 
 The target durable store is SQLite in WAL mode. Durable state includes sessions, lineage, configuration revisions, accepted submission order, execution metadata, canonical events, attempt groups, and other conductor-owned state required for recovery.
 
-Live backend handles, cancellation handles, streams, sandboxes, and frontend connections are process-local.
+Live backend handles, cancellation handles, streams, sandboxes, frontend connections, and frontend service providers are process-local.
 
 The conductor builds one canonical `SessionDebugBundle` on demand. Serializers encode that bundle; serializers do not independently query runtime state. JSON is the first encoding, not the persistence model.
 
