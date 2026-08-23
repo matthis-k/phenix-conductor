@@ -14,7 +14,7 @@ use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
 use std::sync::{mpsc, MutexGuard};
 use std::thread;
 
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)]
 #[path = "server_base.rs"]
 mod base;
 #[path = "frontend_services.rs"]
