@@ -14,9 +14,17 @@ use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
 use std::sync::{mpsc, MutexGuard};
 use std::thread;
 
-#[allow(dead_code, clippy::too_many_arguments)]
+#[expect(
+    dead_code,
+    clippy::too_many_arguments,
+    reason = "the private base transport is wrapped by the frontend-aware transport in this slice"
+)]
 #[path = "server_base.rs"]
 mod base;
+#[expect(
+    dead_code,
+    reason = "provider discovery and inbound subscriptions are consumed by the stacked workspace language-service slice"
+)]
 #[path = "frontend_services.rs"]
 mod frontend_services;
 
@@ -106,6 +114,11 @@ impl ConductorServer {
             .map_err(map_frontend_service_error)
     }
 
+    #[expect(
+        dead_code,
+        private_interfaces,
+        reason = "consumed by the stacked workspace language-service slice"
+    )]
     pub(crate) fn frontend_service_providers(
         &self,
     ) -> Result<Vec<(FrontendConnectionId, FrontendServiceProviderDescriptor)>, ProtocolError> {
@@ -114,6 +127,11 @@ impl ConductorServer {
             .map_err(map_frontend_service_error)
     }
 
+    #[expect(
+        dead_code,
+        private_interfaces,
+        reason = "consumed by the stacked workspace language-service slice"
+    )]
     pub(crate) fn request_frontend_service_on(
         &self,
         connection: FrontendConnectionId,
@@ -124,6 +142,11 @@ impl ConductorServer {
             .map_err(map_frontend_service_error)
     }
 
+    #[expect(
+        dead_code,
+        private_interfaces,
+        reason = "consumed by the stacked workspace language-service slice"
+    )]
     pub(crate) fn subscribe_frontend_service_notifications(
         &self,
     ) -> Result<mpsc::Receiver<FrontendServiceInboundNotification>, ProtocolError> {
@@ -205,6 +228,11 @@ impl ConductorService {
             .map_err(map_frontend_service_error)
     }
 
+    #[expect(
+        dead_code,
+        private_interfaces,
+        reason = "consumed by the stacked workspace language-service slice"
+    )]
     pub(crate) fn frontend_service_providers(
         &self,
     ) -> Result<Vec<(FrontendConnectionId, FrontendServiceProviderDescriptor)>, ProtocolError> {
@@ -213,6 +241,11 @@ impl ConductorService {
             .map_err(map_frontend_service_error)
     }
 
+    #[expect(
+        dead_code,
+        private_interfaces,
+        reason = "consumed by the stacked workspace language-service slice"
+    )]
     pub(crate) fn request_frontend_service_on(
         &self,
         connection: FrontendConnectionId,
@@ -223,6 +256,11 @@ impl ConductorService {
             .map_err(map_frontend_service_error)
     }
 
+    #[expect(
+        dead_code,
+        private_interfaces,
+        reason = "consumed by the stacked workspace language-service slice"
+    )]
     pub(crate) fn subscribe_frontend_service_notifications(
         &self,
     ) -> Result<mpsc::Receiver<FrontendServiceInboundNotification>, ProtocolError> {
