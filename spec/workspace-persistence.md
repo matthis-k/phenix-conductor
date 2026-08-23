@@ -34,7 +34,7 @@ Workspace identity validation and schema migration complete before configuration
 
 ## Migrations
 
-Schema migrations are ordered and transactional. The store rejects schema versions newer than the running conductor.
+Schema migrations are ordered and transactional. Each migration commits its schema changes and matching `schema_migrations` row in one immediate transaction. The store rejects schema versions newer than the running conductor.
 
 A failed migration prevents workspace startup. The conductor must not expose a runtime backed by a partly migrated database.
 
