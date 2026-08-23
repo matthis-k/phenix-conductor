@@ -293,6 +293,33 @@ pub enum ExecutionState {
     Interrupted,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OrchestrationInterfaceContext {
+    pub input: Value,
+    pub nodes: BTreeMap<OrchestrationNodeId, OrchestrationNodeOutcome>,
+    pub task: OrchestrationInterfaceTask,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OrchestrationNodeOutcome {
+    pub execution_id: Option<ExecutionId>,
+    pub state: Option<ExecutionState>,
+    pub input: Option<Value>,
+    pub output: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OrchestrationInterfaceTask {
+    Synthesize,
+    Recover {
+        failed_node: Option<OrchestrationNodeId>,
+        failed_execution: ExecutionId,
+        failed_callable: CallableId,
+        failure: FailureAttemptSummary,
+    },
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExecutionTerminationCause {

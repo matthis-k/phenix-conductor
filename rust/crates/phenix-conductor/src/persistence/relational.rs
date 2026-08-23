@@ -2215,6 +2215,7 @@ impl ConductorRuntime {
             ConfigRevisionSlot {
                 fingerprint: config_fingerprint.clone(),
                 configuration: None,
+                ordinal: 1,
             },
         );
         runtime.next_config_revision = 1;

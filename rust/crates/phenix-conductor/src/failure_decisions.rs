@@ -5,9 +5,10 @@ use crate::{
 use phenix_core::{
     AttemptGroup, CallableId, CallableKind, ExecutionEventKind, ExecutionId, ExecutionKind,
     ExecutionState, ExecutionSummary, FailureAttemptSummary, OrchestrationFailureDecision,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, OrchestrationValueBinding,
+    OrchestrationFailureDecisionRecord, OrchestrationInterfaceContext, OrchestrationInterfaceTask,
+    OrchestrationNodeId, OrchestrationNodeOutcome, OrchestrationValueBinding,
 };
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -124,7 +125,8 @@ impl ConductorRuntime {
                     return Err(invalid());
                 }
                 self.ensure_decider_delegates(decider_execution_id, &callable)?;
-                let recovery = self.create_recovery_agent(&parent_id, &callable, objective)?;
+                let recovery =
+                    self.create_recovery_agent(&parent_id, &callable, objective, None)?;
                 self.record_orchestration_failure_decision(OrchestrationFailureDecisionRecord {
                     parent_execution: parent_id.clone(),
                     failed_child: failed_child_id.clone(),
@@ -182,7 +184,7 @@ impl ConductorRuntime {
         &mut self,
         failed_execution_id: &ExecutionId,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let (parent_id, callable, original_goal) = {
+        let (parent_id, callable, original_goal, authority_ceiling) = {
             let failed = self
                 .executions
                 .get(failed_execution_id)
@@ -205,7 +207,7 @@ impl ConductorRuntime {
                     failed_child: failed_execution_id.clone(),
                 });
             };
-            (parent_id, callable, input.clone())
+            (parent_id, callable, input.clone(), failed.authority.clone())
         };
 
         let existing_group = self
@@ -265,7 +267,12 @@ impl ConductorRuntime {
 Retry context JSON:
 {serialized}"
         );
-        let retry = self.create_recovery_agent(&parent_id, &callable, retry_input)?;
+        let retry = self.create_recovery_agent(
+            &parent_id,
+            &callable,
+            retry_input,
+            Some(&authority_ceiling),
+        )?;
         self.record_domain_event(DomainEvent::AttemptRetryStarted {
             group_id,
             execution_id: retry.id.clone(),
@@ -273,7 +280,7 @@ Retry context JSON:
         Ok(retry)
     }
 
-    fn runtime_failure_summary(
+    pub(crate) fn runtime_failure_summary(
         &self,
         execution_id: &ExecutionId,
         attempt: u32,
@@ -418,6 +425,7 @@ Retry context JSON:
         parent_id: &ExecutionId,
         callable: &CallableId,
         objective: String,
+        restrictions: Option<&phenix_core::ExecutionAuthority>,
     ) -> Result<ExecutionSummary, ConductorError> {
         let callables = self
             .configuration_for_execution(parent_id)?
@@ -461,7 +469,7 @@ Retry context JSON:
         self.record_execution_created(
             child.clone(),
             JournalExecutionPayload::from(&payload),
-            None,
+            restrictions,
         )?;
         Ok(child)
     }
@@ -515,25 +523,50 @@ Retry context JSON:
             .get(failed_child_id)
             .ok_or_else(|| ConductorError::UnknownExecution(failed_child_id.clone()))?
             .clone();
-        let failed_callable = failed
-            .summary
-            .callable
-            .as_ref()
-            .map(ToString::to_string)
-            .unwrap_or_else(|| "unknown".to_owned());
-        let context = serde_json::json!({
-            "parent_execution": parent_id,
-            "failed_child": failed_child_id,
-            "failed_callable": failed_callable,
-            "state": "failed"
-        });
-        let objective = format!(
-            "Decide how the orchestration should handle this failed child. Use the failure-decision tool exactly once.
-
-Failure context JSON:
-{context}"
-        );
-        let interface = self.create_recovery_agent(parent_id, interface_agent, objective)?;
+        let failed_callable = failed.summary.callable.clone().ok_or_else(|| {
+            ConductorError::InvalidFailureDecision {
+                parent_execution: parent_id.clone(),
+                failed_child: failed_child_id.clone(),
+            }
+        })?;
+        let ExecutionPayload::Orchestration { input } = &self
+            .executions
+            .get(parent_id)
+            .expect("orchestration parent exists")
+            .payload
+        else {
+            return Err(ConductorError::NonModelExecution(parent_id.clone()));
+        };
+        let attempt = self
+            .attempt_groups
+            .values()
+            .find_map(|group| group.attempt_for_execution(failed_child_id))
+            .unwrap_or(1);
+        let failure = self.runtime_failure_summary(failed_child_id, attempt)?;
+        let context = self.orchestration_interface_context(
+            parent_id,
+            input,
+            OrchestrationInterfaceTask::Recover {
+                failed_node: self.orchestration_node_for_execution(failed_child_id),
+                failed_execution: failed_child_id.clone(),
+                failed_callable,
+                failure,
+            },
+        )?;
+        let context = serde_json::to_value(context)
+            .expect("typed orchestration interface context is JSON serializable");
+        let descriptor = self
+            .configuration_for_execution(parent_id)?
+            .callables
+            .descriptor(interface_agent)?;
+        crate::validate_json_schema(&descriptor.input_schema, &context).map_err(|message| {
+            ConductorError::InvalidExecutionData {
+                execution_id: parent_id.clone(),
+                message: format!("interface recovery input: {message}"),
+            }
+        })?;
+        let objective = context.to_string();
+        let interface = self.create_recovery_agent(parent_id, interface_agent, objective, None)?;
         self.record_domain_event(DomainEvent::OrchestrationFailureInterfaceStarted {
             parent_execution: parent_id.clone(),
             failed_child: failed_child_id.clone(),
@@ -806,7 +839,13 @@ Failure context JSON:
                 ExecutionState::Pending | ExecutionState::Running => Ok(()),
             };
         }
-        let context = self.orchestration_synthesis_context(execution_id, input)?;
+        let context = self.orchestration_interface_context(
+            execution_id,
+            input,
+            OrchestrationInterfaceTask::Synthesize,
+        )?;
+        let context = serde_json::to_value(context)
+            .expect("typed orchestration interface context is JSON serializable");
         let descriptor = self
             .configuration_for_execution(execution_id)?
             .callables
@@ -915,11 +954,12 @@ Failure context JSON:
         }
     }
 
-    fn orchestration_synthesis_context(
+    fn orchestration_interface_context(
         &self,
         execution_id: &ExecutionId,
         input: &Value,
-    ) -> Result<Value, ConductorError> {
+        task: OrchestrationInterfaceTask,
+    ) -> Result<OrchestrationInterfaceContext, ConductorError> {
         let callable = self
             .executions
             .get(execution_id)
@@ -929,24 +969,116 @@ Failure context JSON:
             .configuration_for_execution(execution_id)?
             .callables
             .orchestration(callable)?;
-        let mut nodes = Map::new();
+        let mut nodes = BTreeMap::new();
         for node in &definition.nodes {
-            let child = self.effective_orchestration_node_execution(execution_id, &node.id)?;
+            let Some(initial_child) =
+                self.initial_orchestration_node_execution(execution_id, &node.id)
+            else {
+                nodes.insert(
+                    node.id.clone(),
+                    OrchestrationNodeOutcome {
+                        execution_id: None,
+                        state: None,
+                        input: None,
+                        output: None,
+                    },
+                );
+                continue;
+            };
+            let child = self.effective_orchestration_execution(&initial_child)?;
             let record = self
                 .executions
                 .get(&child)
                 .expect("effective orchestration node invariant");
             nodes.insert(
-                node.id.to_string(),
-                json!({
-                    "execution_id": child,
-                    "state": record.summary.state,
-                    "input": self.orchestration_node_inputs.get(&(execution_id.clone(), node.id.clone())),
-                    "output": self.execution_outputs.get(&record.summary.id),
-                }),
+                node.id.clone(),
+                OrchestrationNodeOutcome {
+                    execution_id: Some(child),
+                    state: Some(record.summary.state.clone()),
+                    input: self
+                        .orchestration_node_inputs
+                        .get(&(execution_id.clone(), node.id.clone()))
+                        .cloned(),
+                    output: self.execution_outputs.get(&record.summary.id).cloned(),
+                },
             );
         }
-        Ok(json!({ "input": input, "nodes": nodes }))
+        Ok(OrchestrationInterfaceContext {
+            input: input.clone(),
+            nodes,
+            task,
+        })
+    }
+
+    fn initial_orchestration_node_execution(
+        &self,
+        execution_id: &ExecutionId,
+        node: &OrchestrationNodeId,
+    ) -> Option<ExecutionId> {
+        self.orchestration_nodes
+            .iter()
+            .find_map(|(child_id, candidate)| {
+                (candidate == node
+                    && self
+                        .executions
+                        .get(child_id)
+                        .and_then(|execution| execution.summary.parent_execution.as_ref())
+                        == Some(execution_id))
+                .then(|| child_id.clone())
+            })
+    }
+
+    fn orchestration_node_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Option<OrchestrationNodeId> {
+        let mut current = execution_id.clone();
+        let mut visited = BTreeSet::new();
+        loop {
+            if !visited.insert(current.clone()) {
+                return None;
+            }
+            if let Some(node) = self.orchestration_nodes.get(&current) {
+                return Some(node.clone());
+            }
+            current = self
+                .orchestration_decisions
+                .values()
+                .find_map(|decision| match &decision.decision {
+                    OrchestrationFailureDecision::Retry { execution_id }
+                    | OrchestrationFailureDecision::ChooseAnotherChild { execution_id }
+                        if execution_id == &current =>
+                    {
+                        Some(decision.failed_child.clone())
+                    }
+                    _ => None,
+                })?;
+        }
+    }
+
+    fn effective_orchestration_execution(
+        &self,
+        initial: &ExecutionId,
+    ) -> Result<ExecutionId, ConductorError> {
+        let mut current = initial.clone();
+        let mut visited = BTreeSet::new();
+        loop {
+            if !visited.insert(current.clone()) {
+                return Err(ConductorError::InvalidLifecycle(current));
+            }
+            let Some(decision) = self.orchestration_decisions.get(&current) else {
+                return Ok(current);
+            };
+            match &decision.decision {
+                OrchestrationFailureDecision::Retry { execution_id }
+                | OrchestrationFailureDecision::ChooseAnotherChild { execution_id } => {
+                    current = execution_id.clone();
+                }
+                OrchestrationFailureDecision::Continue | OrchestrationFailureDecision::Fail => {
+                    return Ok(current);
+                }
+            }
+        }
     }
 
     fn orchestration_node_states(
@@ -1008,8 +1140,9 @@ mod tests {
     use super::*;
     use phenix_core::{
         AgentDefinition, BackendId, CallableDescriptor, CallableKind, CallablePolicy,
-        CapabilitySet, ExecutionAuthority, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
-        ProviderId,
+        CapabilitySet, ExecutionAuthority, ExecutionTarget, FilesystemAuthority, InferenceOptions,
+        ModelId, ModelTarget, OrchestrationDefinition, OrchestrationNode, ProviderId,
+        RepositoryAuthority,
     };
     use serde_json::json;
 
@@ -1124,6 +1257,105 @@ mod tests {
                 .unwrap()
                 .failures,
             vec![failure]
+        );
+    }
+
+    #[test]
+    fn retry_preserves_the_failed_attempt_authority_ceiling() {
+        let mut runtime = ConductorRuntime::new();
+        let primary = CallableId::parse("agent.primary").unwrap();
+        let interface = CallableId::parse("agent.interface").unwrap();
+        let orchestration_callable = CallableId::parse("orchestration.retry").unwrap();
+        let descriptor = |id: CallableId, kind| CallableDescriptor {
+            id,
+            kind,
+            description: "test callable".to_owned(),
+            input_schema: json!({"type": "object"}),
+            output_schema: json!({"type": "object"}),
+            capabilities: CapabilitySet::default(),
+            policy: CallablePolicy::default(),
+        };
+        let mut broad = ExecutionAuthority::read_only();
+        broad.filesystem = FilesystemAuthority::Write;
+        broad.repository = RepositoryAuthority::Write;
+        runtime
+            .register_agent(AgentDefinition::new(
+                descriptor(primary.clone(), CallableKind::Agent),
+                broad,
+            ))
+            .unwrap();
+        let mut interface_authority = ExecutionAuthority::read_only();
+        interface_authority.callables.insert(primary.clone());
+        runtime
+            .register_agent(AgentDefinition::new(
+                descriptor(interface.clone(), CallableKind::Agent),
+                interface_authority,
+            ))
+            .unwrap();
+        let node_id = OrchestrationNodeId::parse("primary").unwrap();
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: descriptor(orchestration_callable.clone(), CallableKind::Orchestration),
+                interface_agent: Some(interface.clone()),
+                nodes: vec![OrchestrationNode {
+                    id: node_id.clone(),
+                    callable: primary.clone(),
+                    depends_on: Vec::new(),
+                    objective: Some("try the goal".to_owned()),
+                    input_bindings: BTreeMap::new(),
+                }],
+                output_bindings: BTreeMap::new(),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, target()).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let orchestration = runtime
+            .create_child(
+                &root.id,
+                ExecutionKind::Orchestration,
+                orchestration_callable,
+                ExecutionPayload::Orchestration { input: json!({}) },
+                None,
+            )
+            .unwrap();
+        runtime
+            .set_state(&orchestration.id, ExecutionState::Running)
+            .unwrap();
+        let restriction = ExecutionAuthority::read_only();
+        let failed = runtime
+            .start_agent_with_node(
+                &orchestration.id,
+                &primary,
+                "try the goal",
+                Some(node_id),
+                Some(&restriction),
+            )
+            .unwrap();
+        runtime
+            .set_state(&failed.id, ExecutionState::Failed)
+            .unwrap();
+        let decider = runtime
+            .orchestration_interfaces
+            .get(&failed.id)
+            .cloned()
+            .unwrap();
+        runtime
+            .set_state(&decider, ExecutionState::Running)
+            .unwrap();
+        let retry = runtime
+            .decide_orchestration_failure(&decider, OrchestrationFailureDecisionRequest::Retry)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            runtime.execution_authority(&failed.id).unwrap(),
+            restriction
+        );
+        assert_eq!(runtime.execution_authority(&retry.id).unwrap(), restriction);
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert_eq!(
+            restored.execution_authority(&retry.id).unwrap(),
+            restriction
         );
     }
 }

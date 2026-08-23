@@ -106,7 +106,7 @@ pub(super) fn register_into(
         tool_descriptor(
             "bash",
             format!(
-                "Execute a Bash command in the current Phenix workspace ({}). Read-only executions see protected workspace paths read-only while configured scratch roots stay writable. Write-authority executions use a disposable overlay and apply protected changes only if the complete pre-command protected manifest is unchanged. Git metadata remains disposable for write-authority executions.",
+                "Execute a Bash command in the current Phenix workspace ({}). Read-only executions see protected workspace paths read-only while configured scratch roots stay writable. Write-authority executions use a disposable overlay and apply protected changes only if the complete pre-command protected manifest is unchanged. Git metadata is read-only unless repository-write authority was granted.",
                 root.display()
             ),
             json!({

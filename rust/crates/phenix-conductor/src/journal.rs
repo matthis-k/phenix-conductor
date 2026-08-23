@@ -395,6 +395,7 @@ pub(crate) fn apply_domain_event(
                 ConfigRevisionSlot {
                     fingerprint: fingerprint.clone(),
                     configuration: None,
+                    ordinal: *state.next_config_revision + 1,
                 },
             );
             *state.current_config_revision = revision.clone();
@@ -464,12 +465,16 @@ pub(crate) fn apply_domain_event(
             session_id,
             config_revision,
         } => {
-            if !state.config_revisions.contains_key(config_revision) {
-                return Err(JournalError::InvalidEvent(format!(
-                    "session {session_id} rebase references unknown config revision {config_revision}"
-                )));
-            }
-            let session = state.sessions.get_mut(session_id).ok_or_else(|| {
+            let target_ordinal = state
+                .config_revisions
+                .get(config_revision)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "session {session_id} rebase references unknown config revision {config_revision}"
+                    ))
+                })?
+                .ordinal;
+            let session = state.sessions.get(session_id).ok_or_else(|| {
                 JournalError::InvalidEvent(format!(
                     "rebase references unknown session {session_id}"
                 ))
@@ -479,6 +484,17 @@ pub(crate) fn apply_domain_event(
                     "closed session {session_id} cannot be rebased"
                 )));
             }
+            let current_ordinal = state.config_revisions[&session.summary.config_revision].ordinal;
+            if target_ordinal <= current_ordinal {
+                return Err(JournalError::InvalidEvent(format!(
+                    "session {session_id} cannot rebase from {} to non-newer revision {config_revision}",
+                    session.summary.config_revision
+                )));
+            }
+            let session = state
+                .sessions
+                .get_mut(session_id)
+                .expect("validated session exists");
             session.summary.config_revision = config_revision.clone();
         }
         DomainEvent::SessionRenamed { session_id, name } => {
@@ -1201,9 +1217,12 @@ pub(crate) fn apply_domain_event(
                     "workspace checkpoint references unknown execution {execution_id}"
                 ))
             })?;
-            if execution.summary.state != ExecutionState::Pending {
+            if !matches!(
+                execution.summary.state,
+                ExecutionState::Pending | ExecutionState::Running
+            ) {
                 return Err(JournalError::InvalidEvent(format!(
-                    "workspace checkpoint references non-pending execution {execution_id}"
+                    "workspace checkpoint references inactive execution {execution_id}"
                 )));
             }
             if execution.authority.filesystem != FilesystemAuthority::Write {

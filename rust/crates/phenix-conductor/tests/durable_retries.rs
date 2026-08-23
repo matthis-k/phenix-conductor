@@ -218,6 +218,27 @@ fn retry_is_one_durable_decision_with_runtime_owned_failure_context() {
 }
 
 #[test]
+fn failure_interface_receives_typed_orchestration_context_and_outcomes() {
+    let (mut runtime, orchestration, first) = setup(true);
+    let interface = fail_and_start_interface(&mut runtime, &orchestration.id, &first.id);
+    let invocation = runtime.resolve_invocation(&interface.id).unwrap();
+    let context: serde_json::Value = serde_json::from_str(&invocation.prompt).unwrap();
+
+    assert_eq!(context["input"], json!({"objective": "recover safely"}));
+    assert_eq!(
+        context["nodes"]["primary"]["execution_id"],
+        first.id.as_str()
+    );
+    assert_eq!(context["nodes"]["primary"]["state"], "failed");
+    assert_eq!(context["nodes"]["after"]["execution_id"], json!(null));
+    assert_eq!(context["nodes"]["after"]["state"], json!(null));
+    assert_eq!(context["task"]["type"], "recover");
+    assert_eq!(context["task"]["failed_node"], "primary");
+    assert_eq!(context["task"]["failed_execution"], first.id.as_str());
+    assert_eq!(context["task"]["failure"]["reason"], "execution failed");
+}
+
+#[test]
 fn replacement_obeys_interface_delegation_and_unblocks_the_original_node() {
     let (mut runtime, orchestration, first) = setup(true);
     let interface = fail_and_start_interface(&mut runtime, &orchestration.id, &first.id);

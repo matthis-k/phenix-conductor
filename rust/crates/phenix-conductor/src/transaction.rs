@@ -540,7 +540,7 @@ mod tests {
         let output = transaction
             .execute(
                 &bash(),
-                "printf new > source.txt; printf git-new > .git/index; printf scratch-new > target/cache; printf temporary > /tmp/phenix-only",
+                "printf new > source.txt; if printf git-new > .git/index 2>/dev/null; then exit 70; fi; printf scratch-new > target/cache; printf temporary > /tmp/phenix-only",
             )
             .unwrap();
 

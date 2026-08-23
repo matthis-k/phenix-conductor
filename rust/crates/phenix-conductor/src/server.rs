@@ -805,10 +805,9 @@ impl ConductorServer {
                 "workspace consistency is not installed",
             )
         })?;
-        let mut runtime = self
+        let request = self
             .lock_runtime()
-            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?;
-        let request = runtime
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?
             .workspace_lease_request(execution_id)
             .map_err(map_conductor_error)?;
         if request.mode != WorkspaceLeaseMode::Write {
@@ -817,10 +816,21 @@ impl ConductorServer {
                 "workspace checkpoints require filesystem-write authority",
             ));
         }
+        if !self
+            .workspace_leases
+            .holds_write(&request.workspace_id, execution_id)
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?
+        {
+            return Err(protocol_error(
+                ErrorCode::InvalidRequest,
+                "workspace checkpoints require the execution's active write lease",
+            ));
+        }
         let files = consistency
             .checkpoint_baseline()
             .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?;
-        runtime
+        self.lock_runtime()
+            .map_err(|error| protocol_error(ErrorCode::BackendProtocol, error.to_string()))?
             .record_workspace_checkpoint(execution_id, request.workspace_id, files)
             .map_err(map_conductor_error)?;
         Ok(Reply::Accepted)
@@ -1149,7 +1159,6 @@ fn execute_execution(
     context: &ExecutionWorkerContext,
 ) -> Result<(), ServerError> {
     let runtime = &context.runtime;
-    let backends = &context.backends;
     let active_scopes = &context.active_scopes;
     let workspace_leases = &context.workspace_leases;
     let workspace_consistency = context.workspace_consistency.as_ref();
@@ -1205,7 +1214,7 @@ fn execute_execution(
             let mut runtime_guard = runtime
                 .lock()
                 .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
-            runtime_guard.record_workspace_checkpoint(execution_id, workspace_id, files)?;
+            runtime_guard.record_workspace_checkpoint(execution_id, workspace_id.clone(), files)?;
         }
         persist_shared(runtime, store, persist_lock)?;
     }
@@ -1236,33 +1245,36 @@ fn execute_execution(
     };
 
     match provider_kind {
-        ExecutionProviderKind::Model => execute_model_execution(
-            execution_id,
-            runtime,
-            backends,
-            active_scopes,
-            store,
-            persist_lock,
-        ),
+        ExecutionProviderKind::Model => {
+            execute_model_execution(execution_id, &workspace_id, context)
+        }
         _ => execute_provider_execution(execution_id, runtime, active_scopes, store, persist_lock),
     }
 }
 
 fn execute_model_execution(
     execution_id: &ExecutionId,
-    runtime: &SharedRuntime,
-    backends: &BTreeMap<BackendId, SharedBackend>,
-    active_scopes: &ActiveScopes,
-    store: Option<&SqliteStore>,
-    persist_lock: &Arc<Mutex<()>>,
+    workspace_id: &WorkspaceId,
+    context: &ExecutionWorkerContext,
 ) -> Result<(), ServerError> {
+    let runtime = &context.runtime;
+    let backends = &context.backends;
+    let active_scopes = &context.active_scopes;
+    let workspace_leases = &context.workspace_leases;
+    let workspace_consistency = context.workspace_consistency.as_ref();
+    let store = context.store.as_ref();
+    let persist_lock = &context.persist_lock;
     let resolved = {
         let mut runtime_guard = runtime
             .lock()
             .map_err(|_| ServerError::StatePoisoned("conductor runtime"))?;
         let mut resolved = runtime_guard.resolve_invocation(execution_id);
         if let Ok(invocation) = &mut resolved {
-            if let Err(error) = semantic_tools::extend_semantic_tools(&runtime_guard, invocation) {
+            if let Err(error) = semantic_tools::extend_semantic_tools(
+                &runtime_guard,
+                invocation,
+                workspace_consistency.is_some() && workspace_id.as_str() != IN_MEMORY_WORKSPACE_ID,
+            ) {
                 resolved = Err(error);
             }
         }
@@ -1373,6 +1385,9 @@ fn execute_model_execution(
         runtime: runtime.clone(),
         execution_id: execution_id.clone(),
         allowed_tools: prepared.allowed_tools(),
+        workspace_id: workspace_id.clone(),
+        workspace_leases: workspace_leases.clone(),
+        workspace_consistency: workspace_consistency.cloned(),
         store: store.cloned(),
         persist_lock: persist_lock.clone(),
     };
@@ -1580,6 +1595,9 @@ struct SharedRuntimeHost {
     runtime: SharedRuntime,
     execution_id: ExecutionId,
     allowed_tools: BTreeSet<CallableId>,
+    workspace_id: WorkspaceId,
+    workspace_leases: WorkspaceLeaseManager,
+    workspace_consistency: Option<WorkspaceConsistency>,
     store: Option<SqliteStore>,
     persist_lock: Arc<Mutex<()>>,
 }
@@ -1622,6 +1640,30 @@ impl BackendHost for SharedRuntimeHost {
     }
 
     fn invoke_tool(&mut self, invocation: ToolInvocation) -> Result<ToolResult, BackendError> {
+        let workspace_checkpoint = if invocation.callable.as_str()
+            == semantic_tools::WORKSPACE_CHECKPOINT_ID
+            && self.allowed_tools.contains(&invocation.callable)
+        {
+            let holds_write = self
+                .workspace_leases
+                .holds_write(&self.workspace_id, &self.execution_id)
+                .map_err(|error| BackendError::Protocol(error.to_string()))?;
+            if !holds_write {
+                None
+            } else {
+                let files = self
+                    .workspace_consistency
+                    .as_ref()
+                    .ok_or_else(|| {
+                        BackendError::Protocol("workspace consistency is not installed".to_owned())
+                    })?
+                    .checkpoint_baseline()
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?;
+                Some((self.workspace_id.clone(), files))
+            }
+        } else {
+            None
+        };
         let result = {
             let mut runtime = self.lock_runtime()?;
             if runtime.execution_state(&self.execution_id) != Some(ExecutionState::Running) {
@@ -1636,6 +1678,7 @@ impl BackendHost for SharedRuntimeHost {
                     &self.execution_id,
                     &self.allowed_tools,
                     invocation,
+                    workspace_checkpoint,
                 )?
             } else {
                 runtime.invoke_tool(&self.execution_id, &self.allowed_tools, invocation)?
@@ -2366,6 +2409,18 @@ mod tests {
             })
             .unwrap();
 
+        assert!(server.capture_workspace_checkpoint(&execution.id).is_err());
+        server
+            .lock_runtime()
+            .unwrap()
+            .set_state(&execution.id, ExecutionState::Running)
+            .unwrap();
+        let request = server
+            .lock_runtime()
+            .unwrap()
+            .workspace_lease_request(&execution.id)
+            .unwrap();
+        let _lease = server.workspace_leases.acquire(request).unwrap();
         server.capture_workspace_checkpoint(&execution.id).unwrap();
         std::fs::write(workspace.join("source.txt"), "two").unwrap();
         server.capture_workspace_checkpoint(&execution.id).unwrap();
@@ -2384,6 +2439,75 @@ mod tests {
             2
         );
         std::fs::remove_file(database).unwrap();
+        std::fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn writer_semantic_checkpoint_requires_and_uses_the_live_lease() {
+        let workspace = temporary_database().with_extension("semantic-checkpoint-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("source.txt"), "one").unwrap();
+        let workspace_id = WorkspaceId::parse("workspace:semantic-checkpoint").unwrap();
+        let mut runtime = ConductorRuntime::new();
+        let mut authority = ExecutionAuthority::read_only();
+        authority.filesystem = FilesystemAuthority::Write;
+        runtime
+            .register_agent(AgentDefinition::new(
+                descriptor("agent.writer", CallableKind::Agent),
+                authority,
+            ))
+            .unwrap();
+        runtime.bind_workspace(workspace_id.clone()).unwrap();
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(model_target()))
+            .unwrap();
+        let execution = runtime.submit(&session.id, "write").unwrap();
+        runtime
+            .set_state(&execution.id, ExecutionState::Running)
+            .unwrap();
+        let mut server = ConductorServer::new(runtime);
+        server
+            .install_workspace_consistency(WorkspaceDescriptor {
+                id: workspace_id.clone(),
+                root: workspace.clone(),
+                scratch_paths: BTreeSet::new(),
+            })
+            .unwrap();
+        let checkpoint = CallableId::parse(semantic_tools::WORKSPACE_CHECKPOINT_ID).unwrap();
+        let mut host = SharedRuntimeHost {
+            runtime: server.runtime.clone(),
+            execution_id: execution.id.clone(),
+            allowed_tools: BTreeSet::from([checkpoint.clone()]),
+            workspace_id: workspace_id.clone(),
+            workspace_leases: server.workspace_leases.clone(),
+            workspace_consistency: server.workspace_consistency.clone(),
+            store: None,
+            persist_lock: server.persist_lock.clone(),
+        };
+        let invocation = || ToolInvocation {
+            callable: checkpoint.clone(),
+            arguments_json: "{}".to_owned(),
+        };
+
+        assert!(!host.invoke_tool(invocation()).unwrap().success);
+        let request = server
+            .lock_runtime()
+            .unwrap()
+            .workspace_lease_request(&execution.id)
+            .unwrap();
+        let _lease = server.workspace_leases.acquire(request).unwrap();
+        assert!(host.invoke_tool(invocation()).unwrap().success);
+        assert!(server
+            .lock_runtime()
+            .unwrap()
+            .journal()
+            .entries
+            .iter()
+            .any(|entry| matches!(
+                entry.event,
+                DomainEvent::WorkspaceCheckpointCaptured { ref execution_id, .. }
+                    if execution_id == &execution.id
+            )));
         std::fs::remove_dir_all(workspace).unwrap();
     }
 

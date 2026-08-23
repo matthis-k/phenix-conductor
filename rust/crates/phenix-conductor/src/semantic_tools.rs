@@ -4,15 +4,18 @@ use crate::{
 use phenix_backend::{BackendError, ToolInvocation, ToolResult};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionKind, ExecutionSummary, SkillId,
+    ExecutionEventKind, ExecutionKind, ExecutionSummary, FileVersion, FilesystemAuthority, SkillId,
+    WorkspaceId,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 pub(super) const ORCHESTRATION_LIST_ID: &str = "phenix_orchestration_list";
 pub(super) const ORCHESTRATION_START_ID: &str = "phenix_orchestration_start";
 pub(super) const ORCHESTRATION_DECIDE_FAILURE_ID: &str = "phenix_orchestration_decide_failure";
+pub(super) const WORKSPACE_CHECKPOINT_ID: &str = "phenix_workspace_checkpoint";
 pub(super) const SKILL_LOAD_ID: &str = "phenix_skill_load";
 pub(super) const SKILL_RESOURCE_READ_ID: &str = "phenix_skill_resource_read";
 
@@ -48,6 +51,7 @@ struct SkillResourceReadInput {
 pub(super) fn extend_semantic_tools(
     runtime: &ConductorRuntime,
     resolved: &mut ResolvedInvocation,
+    workspace_checkpoints_available: bool,
 ) -> Result<(), ConductorError> {
     let is_root = runtime.snapshot().executions.iter().any(|execution| {
         execution.id == resolved.execution_id && execution.kind == ExecutionKind::Root
@@ -77,6 +81,17 @@ pub(super) fn extend_semantic_tools(
             .callables
             .push(skill_resource_read_descriptor());
     }
+    if workspace_checkpoints_available
+        && runtime
+            .execution_authority(&resolved.execution_id)?
+            .filesystem
+            == FilesystemAuthority::Write
+    {
+        resolved
+            .tools
+            .callables
+            .push(workspace_checkpoint_descriptor());
+    }
     Ok(())
 }
 
@@ -86,6 +101,7 @@ pub(super) fn is_semantic_tool(id: &CallableId) -> bool {
         ORCHESTRATION_LIST_ID
             | ORCHESTRATION_START_ID
             | ORCHESTRATION_DECIDE_FAILURE_ID
+            | WORKSPACE_CHECKPOINT_ID
             | SKILL_LOAD_ID
             | SKILL_RESOURCE_READ_ID
     )
@@ -96,6 +112,7 @@ pub(super) fn invoke(
     execution_id: &phenix_core::ExecutionId,
     allowed_tools: &BTreeSet<CallableId>,
     invocation: ToolInvocation,
+    workspace_checkpoint: Option<(WorkspaceId, BTreeMap<PathBuf, FileVersion>)>,
 ) -> Result<ToolResult, BackendError> {
     if !allowed_tools.contains(&invocation.callable) || !is_semantic_tool(&invocation.callable) {
         return Err(BackendError::Protocol(format!(
@@ -177,6 +194,15 @@ pub(super) fn invoke(
                     .expect("successful decision is durably recorded");
                 serde_json::to_string(&record).map_err(|error| error.to_string())
             }),
+        WORKSPACE_CHECKPOINT_ID => parse_list(&invocation.arguments_json).and_then(|()| {
+            let (workspace_id, files) = workspace_checkpoint.ok_or_else(|| {
+                "execution does not hold an active workspace write lease".to_owned()
+            })?;
+            runtime
+                .record_workspace_checkpoint(execution_id, workspace_id, files)
+                .map_err(|error| error.to_string())?;
+            Ok(json!({"captured": true}).to_string())
+        }),
         _ => unreachable!("semantic tool was checked before dispatch"),
     };
     let result = tool_result(outcome);
@@ -192,6 +218,28 @@ pub(super) fn invoke(
         )
         .map_err(conductor_protocol_error)?;
     Ok(result)
+}
+
+fn workspace_checkpoint_descriptor() -> CallableDescriptor {
+    CallableDescriptor {
+        id: CallableId::parse(WORKSPACE_CHECKPOINT_ID).expect("static checkpoint id"),
+        kind: CallableKind::Tool,
+        description: "Capture a recovery checkpoint before starting a materially different approach within the current write phase.".to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+        }),
+        output_schema: json!({
+            "type": "object",
+            "required": ["captured"],
+            "properties": {"captured": {"const": true}}
+        }),
+        capabilities: CapabilitySet::default(),
+        policy: CallablePolicy {
+            requires_permission: false,
+        },
+    }
 }
 
 fn tool_result(outcome: Result<String, String>) -> ToolResult {

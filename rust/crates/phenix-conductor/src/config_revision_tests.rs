@@ -279,3 +279,42 @@ fn session_rebase_requires_compatible_routing_profile() {
         }) if session_id == session.id && revision == replacement
     ));
 }
+
+#[test]
+fn session_rebase_rejects_older_revisions_at_runtime_and_replay() {
+    let mut runtime = ConductorRuntime::new();
+    let profile = RoutingProfileId::parse("route").unwrap();
+    let first = runtime
+        .reload_configuration(routed_configuration(&profile, "first"))
+        .unwrap();
+    let session = runtime
+        .create_session(None, None, ExecutionTarget::Routed(profile.clone()))
+        .unwrap();
+    let second = runtime
+        .reload_configuration(routed_configuration(&profile, "second"))
+        .unwrap();
+    runtime.rebase_session(&session.id, &second).unwrap();
+
+    assert!(matches!(
+        runtime.rebase_session(&session.id, &first),
+        Err(ConductorError::IncompatibleSessionRebase {
+            session_id,
+            revision,
+            ..
+        }) if session_id == session.id && revision == first
+    ));
+
+    let mut journal = runtime.journal().clone();
+    let config_revision = journal
+        .entries
+        .iter_mut()
+        .find_map(|entry| match &mut entry.event {
+            DomainEvent::SessionConfigRebased {
+                config_revision, ..
+            } => Some(config_revision),
+            _ => None,
+        })
+        .unwrap();
+    *config_revision = first;
+    assert!(ConductorRuntime::restore(journal).is_err());
+}

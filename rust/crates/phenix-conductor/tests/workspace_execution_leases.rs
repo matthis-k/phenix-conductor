@@ -1,6 +1,6 @@
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendExecutionRequest, BackendHost,
-    BackendSession, BackendSessionRequest,
+    BackendSession, BackendSessionRequest, ToolPresentation,
 };
 use phenix_conductor::{ConductorRuntime, ConductorServer, DomainEvent};
 use phenix_core::{
@@ -40,7 +40,7 @@ struct BlockingWriterSession {
 impl Backend for BlockingWriterBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            tool_presentations: BTreeSet::new(),
+            tool_presentations: BTreeSet::from([ToolPresentation::Native]),
             images: false,
             persistent_sessions: false,
         }

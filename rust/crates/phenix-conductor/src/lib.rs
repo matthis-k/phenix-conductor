@@ -383,6 +383,7 @@ impl CompiledConfiguration {
 pub(crate) struct ConfigRevisionSlot {
     pub fingerprint: ConfigRevisionFingerprint,
     pub configuration: Option<CompiledConfiguration>,
+    pub ordinal: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -482,6 +483,7 @@ impl ConductorRuntime {
             ConfigRevisionSlot {
                 fingerprint: fingerprint.clone(),
                 configuration: Some(configuration),
+                ordinal: 1,
             },
         )]);
         Self {
@@ -533,7 +535,8 @@ impl ConductorRuntime {
         Ok(())
     }
 
-    fn record_domain_event(&mut self, event: DomainEvent) -> Result<(), ConductorError> {
+    fn record_domain_event(&mut self, mut event: DomainEvent) -> Result<(), ConductorError> {
+        redact_domain_event(&mut event, &self.executions, &self.attempt_groups);
         let frontend_event = match &event {
             DomainEvent::FrontendEvent { event } => Some(event.clone()),
             _ => None,
@@ -594,6 +597,8 @@ impl ConductorRuntime {
         let effective = restrictions.map_or(configured.clone(), |requested| {
             configured.attenuate(requested)
         });
+        let (secret_names, secret_values) = secret_material(&effective);
+        redact_execution_payload(&mut payload, &secret_names, &secret_values);
         payload.set_authority(effective);
         self.record_domain_event(DomainEvent::ExecutionCreated { execution, payload })
     }
@@ -1228,6 +1233,18 @@ impl ConductorRuntime {
             return Ok(session);
         }
         let configuration = self.configuration_revision(revision)?;
+        let current_ordinal = self.config_revisions[&session.config_revision].ordinal;
+        let target_ordinal = self.config_revisions[revision].ordinal;
+        if target_ordinal <= current_ordinal {
+            return Err(ConductorError::IncompatibleSessionRebase {
+                session_id: session_id.clone(),
+                revision: revision.clone(),
+                reason: format!(
+                    "target is not newer than current revision {}",
+                    session.config_revision
+                ),
+            });
+        }
         if let ExecutionTarget::Routed(profile) = &session.default_target {
             if !configuration.routing.contains(profile) {
                 return Err(ConductorError::IncompatibleSessionRebase {
@@ -1459,7 +1476,26 @@ impl ConductorRuntime {
         callable: &CallableId,
         input: impl Into<Value>,
     ) -> Result<ExecutionSummary, ConductorError> {
-        let input = input.into();
+        self.start_orchestration_inner(parent_id, callable, input.into(), None)
+    }
+
+    pub fn start_orchestration_with_restrictions(
+        &mut self,
+        parent_id: &ExecutionId,
+        callable: &CallableId,
+        input: impl Into<Value>,
+        restrictions: &ExecutionAuthority,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        self.start_orchestration_inner(parent_id, callable, input.into(), Some(restrictions))
+    }
+
+    fn start_orchestration_inner(
+        &mut self,
+        parent_id: &ExecutionId,
+        callable: &CallableId,
+        input: Value,
+        restrictions: Option<&ExecutionAuthority>,
+    ) -> Result<ExecutionSummary, ConductorError> {
         let callables = self
             .configuration_for_execution(parent_id)?
             .callables
@@ -1491,7 +1527,7 @@ impl ConductorRuntime {
             ExecutionKind::Orchestration,
             callable.clone(),
             ExecutionPayload::Orchestration { input },
-            None,
+            restrictions,
         )?;
         self.set_state(&summary.id, ExecutionState::Running)?;
         self.advance_orchestration(&summary.id)?;
@@ -1844,12 +1880,19 @@ impl ConductorRuntime {
             .summary
             .session_id
             .clone();
-        let event = ExecutionEvent {
+        let mut event = ExecutionEvent {
             sequence: self.next_event + 1,
             session_id,
             execution_id: execution_id.clone(),
             kind,
         };
+        let authority = &self
+            .executions
+            .get(execution_id)
+            .expect("event execution was resolved above")
+            .authority;
+        let (secret_names, secret_values) = secret_material(authority);
+        redact_event(&mut event, &secret_names, &secret_values);
         self.record_domain_event(DomainEvent::FrontendEvent {
             event: event.clone(),
         })?;
@@ -1910,7 +1953,7 @@ impl ConductorRuntime {
     pub fn record_execution_output(
         &mut self,
         execution_id: &ExecutionId,
-        output: Value,
+        mut output: Value,
     ) -> Result<(), ConductorError> {
         let execution = self
             .executions
@@ -1922,6 +1965,8 @@ impl ConductorRuntime {
                 message: "output was already recorded".to_owned(),
             });
         }
+        let (secret_names, secret_values) = secret_material(&execution.authority);
+        redact_value(&mut output, &secret_names, &secret_values);
         if let Some(callable) = execution.summary.callable.as_ref() {
             let descriptor = self
                 .configuration_for_execution(execution_id)?
@@ -2111,6 +2156,10 @@ impl ConductorRuntime {
             .values()
             .filter(|group| execution_ids.contains(&group.parent_execution))
             .cloned()
+            .map(|mut group| {
+                redact_attempt_group(&mut group, &secret_names, &secret_values);
+                group
+            })
             .collect();
         for event in &events {
             match &event.kind {
@@ -2374,7 +2423,9 @@ impl ConductorRuntime {
                                 .map_err(conductor_protocol_error)?;
                         }
                     }
-                    for patch in outcome.diagnostic_write_patches.iter().cloned() {
+                    for mut patch in outcome.diagnostic_write_patches.iter().cloned() {
+                        let (_, secret_values) = secret_material(&context.authority);
+                        redact_text(&mut patch.patch, &secret_values);
                         self.record_domain_event(DomainEvent::DiagnosticWritePatchCaptured {
                             patch,
                         })
@@ -2466,6 +2517,125 @@ fn validate_json_schema(schema: &Value, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
+fn redact_domain_event(
+    event: &mut DomainEvent,
+    executions: &BTreeMap<ExecutionId, ExecutionRecord>,
+    attempt_groups: &BTreeMap<AttemptGroupId, AttemptGroup>,
+) {
+    let material_for = |execution_id: &ExecutionId| {
+        executions
+            .get(execution_id)
+            .map(|execution| secret_material(&execution.authority))
+            .unwrap_or_default()
+    };
+    match event {
+        DomainEvent::ExecutionCreated { payload, .. } => {
+            let (names, values) = secret_material(payload.authority());
+            redact_execution_payload(payload, &names, &values);
+        }
+        DomainEvent::FrontendEvent { event } => {
+            let (names, values) = material_for(&event.execution_id);
+            redact_event(event, &names, &values);
+        }
+        DomainEvent::AttemptGroupCreated { group } => {
+            let (names, values) = group
+                .attempts
+                .first()
+                .map(&material_for)
+                .unwrap_or_default();
+            redact_attempt_group(group, &names, &values);
+        }
+        DomainEvent::AttemptFailureRecorded { group_id, failure } => {
+            let (names, values) = attempt_groups
+                .get(group_id)
+                .and_then(|group| group.attempts.first())
+                .map(&material_for)
+                .unwrap_or_default();
+            redact_failure_summary(failure, &names, &values);
+        }
+        DomainEvent::OrchestrationNodeInputBound {
+            execution_id,
+            input,
+            ..
+        }
+        | DomainEvent::ExecutionOutputRecorded {
+            execution_id,
+            output: input,
+        } => {
+            let (names, values) = material_for(execution_id);
+            redact_value(input, &names, &values);
+        }
+        DomainEvent::DiagnosticWritePatchCaptured { patch } => {
+            let (_, values) = material_for(&patch.execution_id);
+            redact_text(&mut patch.patch, &values);
+        }
+        _ => {}
+    }
+}
+
+fn secret_material(authority: &ExecutionAuthority) -> (BTreeSet<String>, BTreeSet<String>) {
+    let names = authority.secrets.clone();
+    let values = names
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .filter(|value| !value.is_empty())
+        .collect();
+    (names, values)
+}
+
+fn redact_execution_payload(
+    payload: &mut JournalExecutionPayload,
+    secret_names: &BTreeSet<String>,
+    secret_values: &BTreeSet<String>,
+) {
+    match payload {
+        JournalExecutionPayload::Invocation { input, .. } => {
+            if let Ok(mut value) = serde_json::from_str::<Value>(input) {
+                redact_value(&mut value, secret_names, secret_values);
+                *input = value.to_string();
+            } else {
+                redact_text(input, secret_values);
+            }
+        }
+        JournalExecutionPayload::Orchestration { input, .. } => {
+            redact_value(input, secret_names, secret_values);
+        }
+    }
+}
+
+fn redact_attempt_group(
+    group: &mut AttemptGroup,
+    secret_names: &BTreeSet<String>,
+    secret_values: &BTreeSet<String>,
+) {
+    redact_text(&mut group.goal, secret_values);
+    for failure in &mut group.failures {
+        redact_failure_summary(failure, secret_names, secret_values);
+    }
+}
+
+fn redact_failure_summary(
+    failure: &mut phenix_core::FailureAttemptSummary,
+    secret_names: &BTreeSet<String>,
+    secret_values: &BTreeSet<String>,
+) {
+    for text in [
+        &mut failure.approach,
+        &mut failure.failure_at,
+        &mut failure.reason,
+    ] {
+        if let Ok(mut value) = serde_json::from_str::<Value>(text) {
+            redact_value(&mut value, secret_names, secret_values);
+            *text = value.to_string();
+        } else {
+            redact_text(text, secret_values);
+        }
+    }
+    for completed in &mut failure.completed_work {
+        redact_text(completed, secret_values);
+    }
+}
+
 fn redact_event(
     event: &mut ExecutionEvent,
     secret_names: &BTreeSet<String>,
@@ -2517,6 +2687,8 @@ fn redact_value(
 }
 
 fn redact_text(text: &mut String, secrets: &BTreeSet<String>) {
+    let mut secrets = secrets.iter().collect::<Vec<_>>();
+    secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
     for secret in secrets {
         if text.contains(secret) {
             *text = text.replace(secret, "[REDACTED]");
@@ -2858,6 +3030,78 @@ mod tests {
     }
 
     #[test]
+    fn child_orchestration_accepts_and_replays_invocation_restrictions() {
+        let mut runtime = ConductorRuntime::new();
+        let worker = CallableId::parse("agent.worker").unwrap();
+        let orchestration = CallableId::parse("orchestration.restricted").unwrap();
+        let maximum = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &[],
+            &[],
+            &[],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(agent("agent.worker"), maximum))
+            .unwrap();
+        runtime
+            .register_orchestration(OrchestrationDefinition {
+                descriptor: CallableDescriptor {
+                    id: orchestration.clone(),
+                    kind: CallableKind::Orchestration,
+                    description: "restricted orchestration".to_owned(),
+                    input_schema: json!({"type": "object"}),
+                    output_schema: json!({"type": "object"}),
+                    capabilities: CapabilitySet::default(),
+                    policy: CallablePolicy::default(),
+                },
+                interface_agent: None,
+                nodes: vec![phenix_core::OrchestrationNode {
+                    id: OrchestrationNodeId::parse("work").unwrap(),
+                    callable: worker.clone(),
+                    depends_on: Vec::new(),
+                    objective: Some("work".to_owned()),
+                    input_bindings: BTreeMap::new(),
+                }],
+                output_bindings: BTreeMap::new(),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let mut restrictions = ExecutionAuthority::read_only();
+        restrictions.callables.insert(worker);
+        let execution = runtime
+            .start_orchestration_with_restrictions(
+                &root.id,
+                &orchestration,
+                json!({}),
+                &restrictions,
+            )
+            .unwrap();
+        let node = runtime
+            .snapshot()
+            .executions
+            .into_iter()
+            .find(|candidate| candidate.parent_execution.as_ref() == Some(&execution.id))
+            .unwrap();
+
+        assert_eq!(
+            runtime.execution_authority(&execution.id).unwrap(),
+            restrictions
+        );
+        assert_eq!(
+            runtime.execution_authority(&node.id).unwrap().filesystem,
+            FilesystemAuthority::ReadOnly
+        );
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert_eq!(
+            restored.execution_authority(&execution.id).unwrap(),
+            restrictions
+        );
+    }
+
+    #[test]
     fn debug_bundle_is_complete_and_redacts_granted_secret_fields() {
         let mut runtime = ConductorRuntime::new();
         runtime
@@ -2966,6 +3210,84 @@ mod tests {
         assert!(bundle.workspace_authority[&root.id].secrets.is_empty());
         assert!(!serialized.contains("credential-value"));
         assert!(serialized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn granted_secret_text_is_scrubbed_before_retry_persistence() {
+        let secret_name = "PHENIX_DURABLE_REDACTION_TEST_TOKEN";
+        let secret_value = "durable-redaction-value-7f03";
+        std::env::set_var(secret_name, secret_value);
+        let mut runtime = ConductorRuntime::new();
+        let callable = CallableId::parse("agent.secret").unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent(callable.as_str()),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[secret_name],
+                    &[],
+                ),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let root = runtime.submit(&session.id, "root").unwrap();
+        let child = runtime
+            .start_agent(
+                &root.id,
+                &callable,
+                format!("use {secret_value} without persisting it"),
+            )
+            .unwrap();
+        let tool_call_id = runtime.new_tool_call_id();
+        runtime
+            .push_event(
+                &child.id,
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id,
+                    output: format!("failed with credential {secret_value}"),
+                    success: false,
+                },
+            )
+            .unwrap();
+        runtime
+            .set_state(&child.id, ExecutionState::Failed)
+            .unwrap();
+        let failure = runtime.runtime_failure_summary(&child.id, 1).unwrap();
+        let group = AttemptGroup::from_first_failure(
+            runtime.new_attempt_group_id(),
+            root.id,
+            callable,
+            format!("goal containing {secret_value}"),
+            failure,
+        );
+        runtime
+            .record_domain_event(DomainEvent::AttemptGroupCreated { group })
+            .unwrap();
+        std::env::remove_var(secret_name);
+
+        let journal = serde_json::to_string(runtime.journal()).unwrap();
+        let bundle = runtime
+            .build_session_debug_bundle(
+                &session.id,
+                WorkspaceDescriptor {
+                    id: WorkspaceId::parse("workspace:in-memory").unwrap(),
+                    root: PathBuf::new(),
+                    scratch_paths: BTreeSet::new(),
+                },
+                &BTreeMap::new(),
+            )
+            .unwrap();
+        let exported = serde_json::to_string(&bundle).unwrap();
+
+        assert!(!journal.contains(secret_value));
+        assert!(!exported.contains(secret_value));
+        assert_eq!(
+            bundle.attempt_groups[0].failures[0].reason,
+            "failed with credential [REDACTED]"
+        );
     }
 
     #[test]
