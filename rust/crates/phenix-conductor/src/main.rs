@@ -66,8 +66,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         None => workspace_state::default_database_path(workspace.descriptor())?,
     };
     let store = SqliteStore::new(state_path);
+    let existing_store = store.path().exists();
+    if existing_store {
+        // Reject a reused state path before runtime recovery can interrupt or persist
+        // executions from a different workspace. Existing conductor databases always
+        // have the runtime_metadata/sessions tables needed for this identity check.
+        store.ensure_workspace_identity(workspace.descriptor())?;
+    }
     let mut server = ConductorServer::load_or_new(store.clone(), workspace.id().clone())?;
-    store.ensure_workspace_identity(workspace.descriptor())?;
+    if !existing_store {
+        store.ensure_workspace_identity(workspace.descriptor())?;
+    }
     server.install_workspace_consistency(workspace.descriptor().clone())?;
 
     let mut base_configuration = CompiledConfiguration::default();
