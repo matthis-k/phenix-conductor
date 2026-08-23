@@ -1403,6 +1403,7 @@ mod tests {
         let context: Value = serde_json::from_str(input).unwrap();
         assert_eq!(context["input"], json!({}));
         assert_eq!(context["nodes"]["work"]["output"], json!({}));
+        assert_eq!(context["task"]["type"], "synthesize");
         runtime
             .record_execution_output(&interface, json!({"answer": 42}))
             .unwrap();

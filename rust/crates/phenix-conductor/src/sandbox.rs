@@ -147,12 +147,7 @@ impl<'a> ExecutionSandbox<'a> {
         for (_, absolute) in scratch_mounts {
             process.arg("--bind").arg(absolute).arg(absolute);
         }
-        if self.authority.repository == RepositoryAuthority::Write {
-            let git = workspace.join(".git");
-            if git.exists() {
-                process.arg("--bind").arg(&git).arg(&git);
-            }
-        }
+        mount_repository_metadata(&mut process, workspace, self.authority.repository)?;
         self.mask_ungranted_sockets(&mut process, workspace, scratch_mounts)?;
         self.mount_ipc(&mut process)?;
         process.arg("--chdir").arg(workspace);
@@ -295,6 +290,131 @@ impl<'a> ExecutionSandbox<'a> {
             }
         }
         Ok(())
+    }
+}
+
+fn mount_repository_metadata(
+    process: &mut Command,
+    workspace: &Path,
+    authority: RepositoryAuthority,
+) -> Result<(), String> {
+    let git = workspace.join(".git");
+    let Ok(metadata) = fs::symlink_metadata(&git) else {
+        return Ok(());
+    };
+    let mount_flag = match authority {
+        RepositoryAuthority::Read => "--ro-bind",
+        RepositoryAuthority::Write => "--bind",
+    };
+    if metadata.is_dir() {
+        process.arg(mount_flag).arg(&git).arg(&git);
+        return Ok(());
+    }
+    if !metadata.is_file() {
+        return Err(format!(
+            "workspace Git metadata pointer is not a file or directory: {}",
+            git.display()
+        ));
+    }
+
+    let gitdir = resolve_gitdir_pointer(&git)?;
+    let common = resolve_common_gitdir(&gitdir)?;
+    let mut metadata_roots = if gitdir.starts_with(&common) {
+        vec![common]
+    } else {
+        vec![common, gitdir]
+    };
+    metadata_roots.sort();
+    metadata_roots.dedup();
+
+    // The worktree pointer is repository structure, not working-tree content.
+    // Keep it immutable even when the execution may write the referenced Git
+    // metadata.
+    process.arg("--ro-bind").arg(&git).arg(&git);
+    for root in metadata_roots {
+        create_external_mount_parents(process, workspace, &root);
+        process.arg(mount_flag).arg(&root).arg(&root);
+    }
+    Ok(())
+}
+
+fn resolve_gitdir_pointer(pointer: &Path) -> Result<PathBuf, String> {
+    let contents = fs::read_to_string(pointer).map_err(|error| {
+        format!(
+            "failed to read linked-worktree Git pointer {}: {error}",
+            pointer.display()
+        )
+    })?;
+    let target = contents
+        .trim()
+        .strip_prefix("gitdir:")
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "workspace Git pointer has invalid contents: {}",
+                pointer.display()
+            )
+        })?;
+    let target = PathBuf::from(target);
+    let target = if target.is_absolute() {
+        target
+    } else {
+        pointer
+            .parent()
+            .expect("workspace .git pointer has a parent")
+            .join(target)
+    };
+    canonical_git_directory(&target, "linked-worktree Git directory")
+}
+
+fn resolve_common_gitdir(gitdir: &Path) -> Result<PathBuf, String> {
+    let pointer = gitdir.join("commondir");
+    let Ok(contents) = fs::read_to_string(&pointer) else {
+        return Ok(gitdir.to_path_buf());
+    };
+    let target = PathBuf::from(contents.trim());
+    if target.as_os_str().is_empty() {
+        return Err(format!(
+            "linked-worktree common Git pointer is empty: {}",
+            pointer.display()
+        ));
+    }
+    let target = if target.is_absolute() {
+        target
+    } else {
+        gitdir.join(target)
+    };
+    canonical_git_directory(&target, "common Git directory")
+}
+
+fn canonical_git_directory(path: &Path, label: &str) -> Result<PathBuf, String> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|error| format!("failed to resolve {label} {}: {error}", path.display()))?;
+    if canonical == Path::new("/") || !canonical.is_dir() {
+        return Err(format!("{label} is not a directory: {}", path.display()));
+    }
+    Ok(canonical)
+}
+
+fn create_external_mount_parents(process: &mut Command, workspace: &Path, destination: &Path) {
+    let mut parents = destination
+        .parent()
+        .into_iter()
+        .flat_map(Path::ancestors)
+        .filter(|path| *path != Path::new("/"))
+        .filter(|path| {
+            !matches!(
+                path.to_str(),
+                Some("/tmp" | "/run" | "/etc" | "/dev" | "/proc")
+            )
+        })
+        .filter(|path| !path.starts_with(workspace))
+        .filter(|path| !path_is_under_runtime_mount(path))
+        .collect::<Vec<_>>();
+    parents.reverse();
+    for parent in parents {
+        process.arg("--dir").arg(parent);
     }
 }
 
@@ -664,6 +784,15 @@ mod tests {
         workspace
     }
 
+    fn command_has_mount(command: &SandboxCommand, flag: &str, path: &Path) -> bool {
+        let arguments = command.process.get_args().collect::<Vec<_>>();
+        arguments.windows(3).any(|window| {
+            window[0] == std::ffi::OsStr::new(flag)
+                && window[1] == path.as_os_str()
+                && window[2] == path.as_os_str()
+        })
+    }
+
     #[test]
     fn sandbox_command_clears_ambient_credentials_and_isolates_network_and_home() {
         let state = ExecutionSandboxState::create().unwrap();
@@ -706,10 +835,73 @@ mod tests {
                 WorkspaceMount::ReadOnly,
             )
             .unwrap();
-        let debug = format!("{:?}", command.process);
-
-        assert!(debug.contains(root.join(".git").to_string_lossy().as_ref()));
+        assert!(command_has_mount(&command, "--bind", &root.join(".git")));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn repository_read_overlays_git_metadata_read_only() {
+        let root = empty_workspace("repository-read");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let upper = root.with_extension("upper");
+        let work = root.with_extension("work");
+        fs::create_dir_all(&upper).unwrap();
+        fs::create_dir_all(&work).unwrap();
+        let state = ExecutionSandboxState::create().unwrap();
+        let read_authority = authority();
+        let command = ExecutionSandbox::new(&read_authority, &state)
+            .configure_bwrap(
+                std::ffi::OsStr::new("bwrap"),
+                &root,
+                &[],
+                WorkspaceMount::Overlay {
+                    upper: &upper,
+                    work: &work,
+                },
+            )
+            .unwrap();
+
+        assert!(command_has_mount(&command, "--ro-bind", &root.join(".git")));
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(upper).unwrap();
+        fs::remove_dir_all(work).unwrap();
+    }
+
+    #[test]
+    fn linked_worktree_mounts_external_common_git_directory() {
+        let root = empty_workspace("linked-worktree");
+        let common = root.with_extension("common-git");
+        let gitdir = common.join("worktrees/linked");
+        fs::create_dir_all(&gitdir).unwrap();
+        fs::write(gitdir.join("commondir"), "../..").unwrap();
+        fs::write(root.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
+        let common = fs::canonicalize(common).unwrap();
+        let state = ExecutionSandboxState::create().unwrap();
+        let read_authority = authority();
+        let command = ExecutionSandbox::new(&read_authority, &state)
+            .configure_bwrap(
+                std::ffi::OsStr::new("bwrap"),
+                &root,
+                &[],
+                WorkspaceMount::ReadOnly,
+            )
+            .unwrap();
+
+        assert!(command_has_mount(&command, "--ro-bind", &root.join(".git")));
+        assert!(command_has_mount(&command, "--ro-bind", &common));
+        let mut write_authority = authority();
+        write_authority.repository = RepositoryAuthority::Write;
+        let write_command = ExecutionSandbox::new(&write_authority, &state)
+            .configure_bwrap(
+                std::ffi::OsStr::new("bwrap"),
+                &root,
+                &[],
+                WorkspaceMount::ReadOnly,
+            )
+            .unwrap();
+        assert!(command_has_mount(&write_command, "--bind", &common));
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(common).unwrap();
     }
 
     #[test]

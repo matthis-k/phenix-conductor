@@ -101,6 +101,22 @@ impl WorkspaceLeaseManager {
         }
         ready.notify_all();
     }
+
+    pub(super) fn holds_write(
+        &self,
+        workspace_id: &WorkspaceId,
+        execution_id: &ExecutionId,
+    ) -> Result<bool, WorkspaceLeaseError> {
+        let (lock, _) = &*self.state;
+        let state = lock
+            .lock()
+            .map_err(|_| WorkspaceLeaseError::StatePoisoned)?;
+        Ok(state
+            .workspaces
+            .get(workspace_id)
+            .and_then(|holders| holders.writer.as_ref())
+            == Some(execution_id))
+    }
 }
 
 pub(super) struct WorkspaceLease {
