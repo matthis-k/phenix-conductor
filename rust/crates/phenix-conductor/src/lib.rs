@@ -42,10 +42,11 @@ use phenix_core::{
     DebugResolvedRoute, DebugWorkspaceCheckpoint, DiagnosticWritePatch, ExecutionAuthority,
     ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
     ExecutionState, ExecutionSummary, ExecutionTarget, ExecutionTerminationCause,
-    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, RoutingProfile,
-    RoutingProfileDescriptor, SessionDebugBundle, SessionId, SessionState, SessionSummary,
-    SkillDescriptor, SkillId, ToolCallId, WorkspaceDescriptor, WorkspaceId, WorkspaceLeaseRequest,
+    ExecutionWorkspaceValidity, FileObservation, FileVersion, LanguageObservation,
+    LanguageOperation, ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord,
+    OrchestrationNodeId, RoutingProfile, RoutingProfileDescriptor, SessionDebugBundle, SessionId,
+    SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId, WorkspaceDescriptor,
+    WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde::{Deserialize, Serialize};
@@ -1034,6 +1035,13 @@ impl ConductorRuntime {
             execution_id: execution_id.clone(),
             observation,
         })
+    }
+
+    pub fn record_language_observation(
+        &mut self,
+        observation: LanguageObservation,
+    ) -> Result<(), ConductorError> {
+        self.record_domain_event(DomainEvent::LanguageObservationRecorded { observation })
     }
 
     pub fn execution_authority(
@@ -2406,11 +2414,19 @@ impl ConductorRuntime {
                     let authority = self
                         .execution_authority(execution_id)
                         .map_err(conductor_protocol_error)?;
+                    let workspace_id = self.workspace_id.clone();
+                    let language_configuration = self
+                        .configuration_for_execution(execution_id)
+                        .map_err(conductor_protocol_error)?
+                        .language_service_configuration()
+                        .clone();
                     let sandbox_state = self
                         .execution_sandbox_state(execution_id)
                         .map_err(|error| BackendError::Protocol(error.to_string()))?;
                     let context = callables::ToolExecutionContext {
                         execution_id: execution_id.clone(),
+                        workspace_id,
+                        language_configuration,
                         authority,
                         sandbox_state,
                     };
@@ -2430,6 +2446,10 @@ impl ConductorRuntime {
                             patch,
                         })
                         .map_err(conductor_protocol_error)?;
+                    }
+                    for observation in outcome.language_observations.iter().cloned() {
+                        self.record_language_observation(observation)
+                            .map_err(conductor_protocol_error)?;
                     }
                     outcome.into_backend_result()
                 }
@@ -2568,6 +2588,13 @@ fn redact_domain_event(
         DomainEvent::DiagnosticWritePatchCaptured { patch } => {
             let (_, values) = material_for(&patch.execution_id);
             redact_text(&mut patch.patch, &values);
+        }
+        DomainEvent::LanguageObservationRecorded { observation } => {
+            let (names, values) = material_for(&observation.execution);
+            redact_value(&mut observation.result.value, &names, &values);
+            if let LanguageOperation::WorkspaceSymbols { query } = &mut observation.operation {
+                redact_text(query, &values);
+            }
         }
         _ => {}
     }

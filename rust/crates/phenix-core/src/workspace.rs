@@ -1,6 +1,9 @@
 #[path = "language.rs"]
 mod language;
 pub use language::*;
+#[path = "language_operations.rs"]
+mod language_operations;
+pub use language_operations::*;
 
 use crate::{CallableId, CapabilitySet, ExecutionId, WorkspaceId};
 use serde::{Deserialize, Serialize};

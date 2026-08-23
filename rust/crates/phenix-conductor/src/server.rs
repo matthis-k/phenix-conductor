@@ -2,8 +2,8 @@ use crate::{CompiledConfiguration, ConductorRuntime, SqliteStore};
 use phenix_backend::Backend;
 use phenix_core::{
     ActiveLanguageProvider, BackendCatalog, BackendId, ExecutionEventKind, ExecutionId,
-    ExecutionState, LanguageServiceConfiguration, LanguageServiceKind, WorkspaceDescriptor,
-    WorkspaceId,
+    ExecutionState, LanguageProviderId, LanguageProviderSource, LanguageServiceConfiguration,
+    LanguageServiceKind, WorkspaceDescriptor, WorkspaceId,
 };
 use phenix_protocol::{
     ClientEnvelope, ErrorCode, FrontendConnectionCommand, FrontendConnectionEvent,
@@ -13,6 +13,7 @@ use phenix_protocol::{
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
+use std::path::PathBuf;
 use std::sync::{mpsc, MutexGuard};
 use std::thread;
 
@@ -23,6 +24,10 @@ mod base;
 mod frontend_services;
 #[path = "language_frontend.rs"]
 mod language_frontend;
+#[path = "language_tools.rs"]
+mod language_tools;
+#[path = "managed_language.rs"]
+mod managed_language;
 
 pub use base::ServerError;
 use frontend_services::{
@@ -30,6 +35,8 @@ use frontend_services::{
     FrontendServiceRouterError,
 };
 use language_frontend::{FrontendLanguageServiceError, FrontendLanguageServices};
+use language_tools::LanguageToolRuntime;
+use managed_language::{ManagedLanguageError, ManagedLanguageProviders};
 
 const FRONTEND_OUTPUT_BUFFER: usize = 256;
 
@@ -37,6 +44,8 @@ pub struct ConductorServer {
     inner: base::ConductorServer,
     frontend_services: FrontendServiceRouter,
     language_services: FrontendLanguageServices,
+    managed_language: ManagedLanguageProviders,
+    workspace_root: Option<PathBuf>,
 }
 
 impl ConductorServer {
@@ -46,6 +55,8 @@ impl ConductorServer {
             inner: base::ConductorServer::new(runtime),
             frontend_services: FrontendServiceRouter::default(),
             language_services: FrontendLanguageServices::default(),
+            managed_language: ManagedLanguageProviders::default(),
+            workspace_root: None,
         }
     }
 
@@ -54,6 +65,8 @@ impl ConductorServer {
             inner: base::ConductorServer::load_or_new(store, workspace_id)?,
             frontend_services: FrontendServiceRouter::default(),
             language_services: FrontendLanguageServices::default(),
+            managed_language: ManagedLanguageProviders::default(),
+            workspace_root: None,
         })
     }
 
@@ -61,6 +74,7 @@ impl ConductorServer {
         &mut self,
         descriptor: WorkspaceDescriptor,
     ) -> Result<(), ServerError> {
+        self.workspace_root = Some(descriptor.root.clone());
         self.inner.install_workspace_consistency(descriptor)
     }
 
@@ -68,7 +82,15 @@ impl ConductorServer {
         &self,
         configuration: &mut CompiledConfiguration,
     ) -> Result<(), ServerError> {
-        self.inner.install_workspace_tools_into(configuration)
+        self.inner.install_workspace_tools_into(configuration)?;
+        LanguageToolRuntime::new(
+            self.workspace_root.clone(),
+            self.frontend_services.clone(),
+            self.language_services.clone(),
+            self.managed_language.clone(),
+        )
+        .register_into(configuration)?;
+        Ok(())
     }
 
     pub fn install_workspace_tools(&mut self) -> Result<(), ServerError> {
@@ -97,13 +119,14 @@ impl ConductorServer {
         service: &LanguageServiceKind,
     ) -> Result<Option<ActiveLanguageProvider>, ProtocolError> {
         let (workspace, configuration) = self.language_context()?;
+        let live_managed = self.live_managed(&workspace, service, &configuration)?;
         self.language_services
             .reconcile(
                 &workspace,
                 service,
                 &configuration,
                 &self.frontend_services,
-                &BTreeMap::new(),
+                &live_managed,
             )
             .map_err(map_frontend_language_error)
     }
@@ -145,6 +168,71 @@ impl ConductorServer {
             workspace,
             configuration.language_service_configuration().clone(),
         ))
+    }
+
+    fn live_managed(
+        &self,
+        workspace: &WorkspaceId,
+        service: &LanguageServiceKind,
+        configuration: &LanguageServiceConfiguration,
+    ) -> Result<BTreeMap<LanguageProviderId, u64>, ProtocolError> {
+        let Some(root) = &self.workspace_root else {
+            return Ok(BTreeMap::new());
+        };
+        let requirement = configuration.requirement_for(service);
+        let mut definitions = configuration
+            .managed_for(service)
+            .into_iter()
+            .filter(|definition| {
+                definition
+                    .capabilities
+                    .satisfies(&requirement.required_capabilities)
+            })
+            .collect::<Vec<_>>();
+        definitions.sort_by(|left, right| left.provider.cmp(&right.provider));
+        let current = self
+            .language_services
+            .current(workspace, service)
+            .map_err(map_frontend_language_error)?;
+        let selected = current
+            .as_ref()
+            .filter(|active| matches!(active.source, LanguageProviderSource::Managed { .. }))
+            .and_then(|active| {
+                definitions
+                    .iter()
+                    .find(|definition| definition.provider == active.provider)
+            })
+            .or_else(|| {
+                requirement
+                    .preferred_provider
+                    .as_ref()
+                    .and_then(|preferred| {
+                        definitions
+                            .iter()
+                            .find(|definition| &definition.provider == preferred)
+                    })
+            });
+        let selected = if selected.is_some() {
+            selected
+        } else if current
+            .as_ref()
+            .is_some_and(|active| matches!(active.source, LanguageProviderSource::Frontend { .. }))
+            || self
+                .language_services
+                .has_eligible_frontend(service, configuration, &self.frontend_services)
+                .map_err(map_frontend_language_error)?
+        {
+            None
+        } else {
+            definitions.first()
+        };
+        match selected {
+            Some(definition) => self
+                .managed_language
+                .ensure_definitions(root, [definition.clone()])
+                .map_err(map_managed_language_error_without_execution),
+            None => Ok(BTreeMap::new()),
+        }
     }
 
     pub fn request_frontend_service(
@@ -205,15 +293,31 @@ impl ConductorServer {
     {
         let router = self.frontend_services.clone();
         let hook_router = router.clone();
-        serve_frontend_transport(input, output, router, false, |input, output, connection| {
-            let mut on_root = |root: &ExecutionId| {
-                hook_router
-                    .bind_execution(connection, root.clone())
-                    .map_err(map_frontend_router_server_error)
-            };
-            self.inner
-                .serve_ndjson_with_root_hook(input, output, &mut on_root)
-        })
+        let (workspace, configuration) = self
+            .language_context()
+            .map_err(|error| ServerError::Io(io::Error::other(error.message)))?;
+        let language_notifications = FrontendLanguageNotificationObserver {
+            workspace,
+            configuration,
+            services: self.language_services.clone(),
+            router: router.clone(),
+        };
+        serve_frontend_transport(
+            input,
+            output,
+            router,
+            language_notifications,
+            false,
+            |input, output, connection| {
+                let mut on_root = |root: &ExecutionId| {
+                    hook_router
+                        .bind_execution(connection, root.clone())
+                        .map_err(map_frontend_router_server_error)
+                };
+                self.inner
+                    .serve_ndjson_with_root_hook(input, output, &mut on_root)
+            },
+        )
     }
 }
 
@@ -222,7 +326,9 @@ pub struct ConductorService {
     inner: base::ConductorService,
     frontend_services: FrontendServiceRouter,
     language_services: FrontendLanguageServices,
+    managed_language: ManagedLanguageProviders,
     workspace_id: WorkspaceId,
+    workspace_root: Option<PathBuf>,
     language_configuration: LanguageServiceConfiguration,
 }
 
@@ -241,7 +347,9 @@ impl ConductorService {
             inner: base::ConductorService::new(server.inner)?,
             frontend_services: server.frontend_services,
             language_services: server.language_services,
+            managed_language: server.managed_language,
             workspace_id,
+            workspace_root: server.workspace_root,
             language_configuration,
         })
     }
@@ -253,28 +361,42 @@ impl ConductorService {
     {
         let router = self.frontend_services.clone();
         let hook_router = router.clone();
-        serve_frontend_transport(input, output, router, true, |input, output, connection| {
-            let mut on_root = |root: &ExecutionId| {
-                hook_router
-                    .bind_execution(connection, root.clone())
-                    .map_err(map_frontend_router_server_error)
-            };
-            self.inner
-                .serve_connection_with_root_hook(input, output, &mut on_root)
-        })
+        let language_notifications = FrontendLanguageNotificationObserver {
+            workspace: self.workspace_id.clone(),
+            configuration: self.language_configuration.clone(),
+            services: self.language_services.clone(),
+            router: router.clone(),
+        };
+        serve_frontend_transport(
+            input,
+            output,
+            router,
+            language_notifications,
+            true,
+            |input, output, connection| {
+                let mut on_root = |root: &ExecutionId| {
+                    hook_router
+                        .bind_execution(connection, root.clone())
+                        .map_err(map_frontend_router_server_error)
+                };
+                self.inner
+                    .serve_connection_with_root_hook(input, output, &mut on_root)
+            },
+        )
     }
 
     pub fn active_language_provider(
         &self,
         service: &LanguageServiceKind,
     ) -> Result<Option<ActiveLanguageProvider>, ProtocolError> {
+        let live_managed = self.live_managed(service)?;
         self.language_services
             .reconcile(
                 &self.workspace_id,
                 service,
                 &self.language_configuration,
                 &self.frontend_services,
-                &BTreeMap::new(),
+                &live_managed,
             )
             .map_err(map_frontend_language_error)
     }
@@ -295,6 +417,74 @@ impl ConductorService {
                 params,
             )
             .map_err(map_frontend_language_error)
+    }
+
+    fn live_managed(
+        &self,
+        service: &LanguageServiceKind,
+    ) -> Result<BTreeMap<LanguageProviderId, u64>, ProtocolError> {
+        let Some(root) = &self.workspace_root else {
+            return Ok(BTreeMap::new());
+        };
+        let requirement = self.language_configuration.requirement_for(service);
+        let mut definitions = self
+            .language_configuration
+            .managed_for(service)
+            .into_iter()
+            .filter(|definition| {
+                definition
+                    .capabilities
+                    .satisfies(&requirement.required_capabilities)
+            })
+            .collect::<Vec<_>>();
+        definitions.sort_by(|left, right| left.provider.cmp(&right.provider));
+        let current = self
+            .language_services
+            .current(&self.workspace_id, service)
+            .map_err(map_frontend_language_error)?;
+        let selected = current
+            .as_ref()
+            .filter(|active| matches!(active.source, LanguageProviderSource::Managed { .. }))
+            .and_then(|active| {
+                definitions
+                    .iter()
+                    .find(|definition| definition.provider == active.provider)
+            })
+            .or_else(|| {
+                requirement
+                    .preferred_provider
+                    .as_ref()
+                    .and_then(|preferred| {
+                        definitions
+                            .iter()
+                            .find(|definition| &definition.provider == preferred)
+                    })
+            });
+        let selected = if selected.is_some() {
+            selected
+        } else if current
+            .as_ref()
+            .is_some_and(|active| matches!(active.source, LanguageProviderSource::Frontend { .. }))
+            || self
+                .language_services
+                .has_eligible_frontend(
+                    service,
+                    &self.language_configuration,
+                    &self.frontend_services,
+                )
+                .map_err(map_frontend_language_error)?
+        {
+            None
+        } else {
+            definitions.first()
+        };
+        match selected {
+            Some(definition) => self
+                .managed_language
+                .ensure_definitions(root, [definition.clone()])
+                .map_err(map_managed_language_error_without_execution),
+            None => Ok(BTreeMap::new()),
+        }
     }
 
     pub fn request_frontend_service(
@@ -349,10 +539,58 @@ impl ConductorService {
     }
 }
 
+fn map_managed_language_error_without_execution(error: ManagedLanguageError) -> ProtocolError {
+    let code = match &error {
+        ManagedLanguageError::StatePoisoned | ManagedLanguageError::WorkspacePath(_) => {
+            ErrorCode::InvalidRequest
+        }
+        ManagedLanguageError::Io(_)
+        | ManagedLanguageError::ProviderUnavailable(_)
+        | ManagedLanguageError::ProviderChanged(_) => ErrorCode::BackendTransport,
+        ManagedLanguageError::Protocol(_) => ErrorCode::BackendProtocol,
+        ManagedLanguageError::Remote(_) => ErrorCode::ToolFailure,
+    };
+    ProtocolError {
+        code,
+        message: error.to_string(),
+        session_id: None,
+        execution_id: None,
+    }
+}
+
+#[derive(Clone)]
+struct FrontendLanguageNotificationObserver {
+    workspace: WorkspaceId,
+    configuration: LanguageServiceConfiguration,
+    services: FrontendLanguageServices,
+    router: FrontendServiceRouter,
+}
+
+impl FrontendLanguageNotificationObserver {
+    fn accept(
+        &self,
+        connection: FrontendConnectionId,
+        notification: FrontendServiceNotification,
+    ) -> Result<(), FrontendLanguageServiceError> {
+        let inbound = FrontendServiceInboundNotification {
+            connection,
+            notification,
+        };
+        self.services.accept_diagnostics_notification(
+            &self.workspace,
+            &self.configuration,
+            &self.router,
+            &inbound,
+        )?;
+        Ok(())
+    }
+}
+
 fn serve_frontend_transport<R, W, F>(
     input: R,
     output: W,
     router: FrontendServiceRouter,
+    language_notifications: FrontendLanguageNotificationObserver,
     normalize_disconnect: bool,
     serve: F,
 ) -> Result<(), ServerError>
@@ -390,8 +628,13 @@ where
             Ok(())
         });
 
-        let filtered =
-            FrontendCommandReader::new(input, router.clone(), connection_id, line_sender.clone());
+        let filtered = FrontendCommandReader::new(
+            input,
+            router.clone(),
+            language_notifications,
+            connection_id,
+            line_sender.clone(),
+        );
         let observed = ObservingLineWriter::new(line_sender.clone(), router.clone());
         let result = serve(BufReader::new(filtered), observed, connection_id);
 
@@ -413,6 +656,7 @@ struct FrontendCommandReader<R> {
     input: R,
     current: Cursor<Vec<u8>>,
     router: FrontendServiceRouter,
+    language_notifications: FrontendLanguageNotificationObserver,
     connection: FrontendConnectionId,
     output: mpsc::Sender<Vec<u8>>,
 }
@@ -421,6 +665,7 @@ impl<R> FrontendCommandReader<R> {
     fn new(
         input: R,
         router: FrontendServiceRouter,
+        language_notifications: FrontendLanguageNotificationObserver,
         connection: FrontendConnectionId,
         output: mpsc::Sender<Vec<u8>>,
     ) -> Self {
@@ -428,6 +673,7 @@ impl<R> FrontendCommandReader<R> {
             input,
             current: Cursor::new(Vec::new()),
             router,
+            language_notifications,
             connection,
             output,
         }
@@ -490,10 +736,16 @@ impl<R: BufRead> FrontendCommandReader<R> {
 
     fn handle_connection_event(&self, event: FrontendConnectionEvent) -> io::Result<()> {
         match event {
-            FrontendConnectionEvent::FrontendServiceNotification { notification } => self
-                .router
-                .accept_notification(self.connection, notification)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string())),
+            FrontendConnectionEvent::FrontendServiceNotification { notification } => {
+                self.router
+                    .accept_notification(self.connection, notification.clone())
+                    .map_err(|error| {
+                        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+                    })?;
+                self.language_notifications
+                    .accept(self.connection, notification)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+            }
         }
     }
 

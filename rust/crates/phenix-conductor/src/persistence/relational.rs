@@ -19,7 +19,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 3;
+const DATABASE_SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -192,6 +192,12 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
         connection.execute_batch(include_str!("../../migrations/0003_diagnostic_patches.sql"))?;
         connection.execute("INSERT INTO schema_migrations(version) VALUES (3)", [])?;
     }
+    if version < 4 {
+        connection.execute_batch(include_str!(
+            "../../migrations/0004_language_observations.sql"
+        ))?;
+        connection.execute("INSERT INTO schema_migrations(version) VALUES (4)", [])?;
+    }
     Ok(())
 }
 
@@ -283,6 +289,7 @@ fn event_type(event: &DomainEvent) -> &'static str {
         DomainEvent::OrchestrationSynthesisStarted { .. } => "orchestration_synthesis_started",
         DomainEvent::ExecutionOutputRecorded { .. } => "execution_output_recorded",
         DomainEvent::DiagnosticWritePatchCaptured { .. } => "diagnostic_write_patch_captured",
+        DomainEvent::LanguageObservationRecorded { .. } => "language_observation_recorded",
         DomainEvent::InvocationResolved { .. } => "invocation_resolved",
         DomainEvent::WorkspaceCheckpointCaptured { .. } => "workspace_checkpoint_captured",
         DomainEvent::WorkspaceFileObserved { .. } => "workspace_file_observed",
@@ -557,6 +564,30 @@ fn insert_event(
                     patch.path.to_string_lossy(),
                     patch.patch.as_str(),
                     sequence,
+                ],
+            )?;
+        }
+        DomainEvent::LanguageObservationRecorded { observation } => {
+            let operation_value = serde_json::to_value(&observation.operation)
+                .map_err(|error| invalid(format!("cannot encode language operation: {error}")))?;
+            let result_value = serde_json::to_value(&observation.result)
+                .map_err(|error| invalid(format!("cannot encode language result: {error}")))?;
+            let operation = insert_value(transaction, &operation_value)?;
+            let result = insert_value(transaction, &result_value)?;
+            transaction.execute(
+                "INSERT INTO language_observations(
+                     recorded_sequence, execution_id, workspace_id, service_kind, provider_id,
+                     provider_epoch, operation_value_id, result_value_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    sequence,
+                    observation.execution.to_string(),
+                    observation.workspace.to_string(),
+                    observation.service.to_string(),
+                    observation.provider.to_string(),
+                    sql_u64(observation.provider_epoch, "language provider epoch")?,
+                    operation,
+                    result,
                 ],
             )?;
         }
@@ -1236,6 +1267,48 @@ fn load_event(
                     execution_id: parse_id(execution, "execution", ExecutionId::parse)?,
                     path: PathBuf::from(path),
                     patch,
+                },
+            })
+        }
+        "language_observation_recorded" => {
+            let row = connection.query_row(
+                "SELECT execution_id, workspace_id, service_kind, provider_id, provider_epoch,
+                        operation_value_id, result_value_id
+                 FROM language_observations WHERE recorded_sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                },
+            )?;
+            let operation = serde_json::from_value(load_value(connection, row.5)?)
+                .map_err(|error| invalid(format!("invalid stored language operation: {error}")))?;
+            let result = serde_json::from_value(load_value(connection, row.6)?)
+                .map_err(|error| invalid(format!("invalid stored language result: {error}")))?;
+            Ok(DomainEvent::LanguageObservationRecorded {
+                observation: phenix_core::LanguageObservation {
+                    execution: parse_id(row.0, "execution", ExecutionId::parse)?,
+                    workspace: parse_id(row.1, "workspace", WorkspaceId::parse)?,
+                    service: parse_id(
+                        row.2,
+                        "language service",
+                        phenix_core::LanguageServiceKind::parse,
+                    )?,
+                    provider: parse_id(
+                        row.3,
+                        "language provider",
+                        phenix_core::LanguageProviderId::parse,
+                    )?,
+                    provider_epoch: runtime_u64(row.4, "language provider epoch")?,
+                    operation,
+                    result,
                 },
             })
         }
@@ -2353,6 +2426,33 @@ mod tests {
                     execution_id: execution.id.clone(),
                     path: PathBuf::from("src/lib.rs"),
                     patch: "@@ -1 +1 @@\n-old\n+new\n".to_owned(),
+                },
+            })
+            .unwrap();
+        runtime
+            .record_language_observation(phenix_core::LanguageObservation {
+                execution: execution.id.clone(),
+                workspace: session.workspace_id.clone(),
+                service: phenix_core::LanguageServiceKind::parse("rust").unwrap(),
+                provider: phenix_core::LanguageProviderId::parse("rust-analyzer").unwrap(),
+                provider_epoch: 3,
+                operation: phenix_core::LanguageOperation::Definition {
+                    document: PathBuf::from("src/lib.rs"),
+                    position: phenix_core::LanguagePosition {
+                        line: 4,
+                        character: 2,
+                    },
+                },
+                result: phenix_core::LanguageOperationResult {
+                    value: serde_json::json!({"locations": []}),
+                    documents: vec![phenix_core::LanguageDocumentIdentity {
+                        path: PathBuf::from("src/lib.rs"),
+                        workspace_version: Some(FileVersion::Present {
+                            content_hash: "later-hash".to_owned(),
+                            kind: FileKind::Regular,
+                        }),
+                        provenance: phenix_core::LanguageDocumentProvenance::WorkspaceBacked,
+                    }],
                 },
             })
             .unwrap();
