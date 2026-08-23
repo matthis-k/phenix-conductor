@@ -7,6 +7,116 @@ use phenix_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
+use std::fmt::{self, Display, Formatter};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InvalidFrontendServiceProviderId;
+
+impl Display for InvalidFrontendServiceProviderId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str("frontend service provider identifier must not be empty")
+    }
+}
+
+impl std::error::Error for InvalidFrontendServiceProviderId {}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FrontendServiceProviderId(String);
+
+impl FrontendServiceProviderId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, InvalidFrontendServiceProviderId> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            Err(InvalidFrontendServiceProviderId)
+        } else {
+            Ok(Self(value))
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Display for FrontendServiceProviderId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FrontendServiceProviderDescriptor {
+    pub id: FrontendServiceProviderId,
+    #[serde(default)]
+    pub capabilities: BTreeSet<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FrontendServiceRequest {
+    pub provider: FrontendServiceProviderId,
+    pub method: String,
+    #[serde(default)]
+    pub params: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FrontendServiceNotification {
+    pub provider: FrontendServiceProviderId,
+    pub method: String,
+    #[serde(default)]
+    pub params: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FrontendServiceError {
+    pub code: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum FrontendServiceResponsePayload {
+    Ok { result: Value },
+    Error { error: FrontendServiceError },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FrontendServiceResponse {
+    pub id: u64,
+    #[serde(flatten)]
+    pub response: FrontendServiceResponsePayload,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FrontendConnectionCommand {
+    SetFrontendServiceProviders {
+        id: u64,
+        providers: Vec<FrontendServiceProviderDescriptor>,
+    },
+}
+
+impl FrontendConnectionCommand {
+    #[must_use]
+    pub fn id(&self) -> u64 {
+        match self {
+            Self::SetFrontendServiceProviders { id, .. } => *id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FrontendConnectionEvent {
+    FrontendServiceNotification {
+        notification: FrontendServiceNotification,
+    },
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeSnapshot {
@@ -82,6 +192,15 @@ pub enum Command {
 pub struct ClientMessage {
     pub id: u64,
     pub command: Command,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ClientEnvelope {
+    Command(ClientMessage),
+    ConnectionCommand(FrontendConnectionCommand),
+    ConnectionEvent(FrontendConnectionEvent),
+    FrontendServiceResponse(FrontendServiceResponse),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -161,6 +280,13 @@ pub enum ServerMessage {
     },
     Event {
         event: ExecutionEvent,
+    },
+    FrontendServiceRequest {
+        id: u64,
+        request: FrontendServiceRequest,
+    },
+    FrontendServiceNotification {
+        notification: FrontendServiceNotification,
     },
 }
 
@@ -348,5 +474,97 @@ mod tests {
         let value = serde_json::to_value(ErrorCode::ExecutionProviderFailure)
             .expect("serialize error code");
         assert_eq!(value, "execution_provider_failure");
+    }
+
+    fn frontend_provider() -> FrontendServiceProviderDescriptor {
+        FrontendServiceProviderDescriptor {
+            id: FrontendServiceProviderId::parse("web").unwrap(),
+            capabilities: BTreeSet::from(["search".to_owned(), "fetch".to_owned()]),
+        }
+    }
+
+    #[test]
+    fn frontend_provider_registration_is_connection_protocol_state() {
+        let message = ClientEnvelope::ConnectionCommand(
+            FrontendConnectionCommand::SetFrontendServiceProviders {
+                id: 20,
+                providers: vec![frontend_provider()],
+            },
+        );
+        let value = serde_json::to_value(message).unwrap();
+        assert_eq!(value["type"], "set_frontend_service_providers");
+        assert_eq!(value["id"], 20);
+        assert_eq!(value["providers"][0]["id"], "web");
+        assert_eq!(
+            value["providers"][0]["capabilities"],
+            serde_json::json!(["fetch", "search"])
+        );
+        assert!(value.get("command").is_none());
+    }
+
+    #[test]
+    fn reverse_request_and_response_have_correlated_ids() {
+        let request = ServerMessage::FrontendServiceRequest {
+            id: 41,
+            request: FrontendServiceRequest {
+                provider: FrontendServiceProviderId::parse("web").unwrap(),
+                method: "search".to_owned(),
+                params: serde_json::json!({"query": "nixos"}),
+            },
+        };
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["type"], "frontend_service_request");
+        assert_eq!(value["id"], 41);
+        assert_eq!(value["request"]["provider"], "web");
+        assert_eq!(value["request"]["method"], "search");
+
+        let response = ClientEnvelope::FrontendServiceResponse(FrontendServiceResponse {
+            id: 41,
+            response: FrontendServiceResponsePayload::Ok {
+                result: serde_json::json!({"items": []}),
+            },
+        });
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["id"], 41);
+        assert_eq!(value["status"], "ok");
+        assert_eq!(value["result"], serde_json::json!({"items": []}));
+        assert!(value.get("command").is_none());
+    }
+
+    #[test]
+    fn frontend_notifications_are_one_way_in_both_directions() {
+        let notification = FrontendServiceNotification {
+            provider: FrontendServiceProviderId::parse("web").unwrap(),
+            method: "invalidate".to_owned(),
+            params: serde_json::json!({"key": "cache"}),
+        };
+        let outbound = ServerMessage::FrontendServiceNotification {
+            notification: notification.clone(),
+        };
+        let value = serde_json::to_value(outbound).unwrap();
+        assert_eq!(value["type"], "frontend_service_notification");
+        assert_eq!(value["notification"]["provider"], "web");
+        assert!(value.get("id").is_none());
+
+        let inbound =
+            ClientEnvelope::ConnectionEvent(FrontendConnectionEvent::FrontendServiceNotification {
+                notification,
+            });
+        let value = serde_json::to_value(inbound).unwrap();
+        assert_eq!(value["type"], "frontend_service_notification");
+        assert_eq!(value["notification"]["provider"], "web");
+        assert!(value.get("id").is_none());
+    }
+
+    #[test]
+    fn client_envelope_keeps_existing_command_wire_shape() {
+        let envelope = ClientEnvelope::Command(ClientMessage {
+            id: 7,
+            command: Command::GetSnapshot,
+        });
+        let value = serde_json::to_value(envelope).unwrap();
+        assert_eq!(value["id"], 7);
+        assert_eq!(value["command"]["type"], "get_snapshot");
+        assert!(value.get("type").is_none());
     }
 }
