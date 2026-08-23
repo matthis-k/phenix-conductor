@@ -130,7 +130,7 @@ A descriptor has a stable provider ID and a set of capability strings.
 }
 ```
 
-Provider IDs route calls. Capabilities let conductor-owned integrations decide whether a live provider satisfies their contract. Method names and JSON payloads remain provider-specific, so new frontend services do not require a new transport envelope.
+Provider IDs route calls. Capabilities let conductor-owned integrations decide whether a live provider satisfies their contract. Capability advertisement does not alter execution authority or callable delegation. Method names and JSON payloads remain provider-specific, so new frontend services do not require a new transport envelope.
 
 The source connection identity is process-local routing state. It is not part of the descriptor sent by the frontend and is never durable.
 
