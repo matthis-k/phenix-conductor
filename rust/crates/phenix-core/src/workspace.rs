@@ -1,3 +1,7 @@
+#[path = "language.rs"]
+mod language;
+pub use language::*;
+
 use crate::{CallableId, CapabilitySet, ExecutionId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

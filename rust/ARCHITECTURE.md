@@ -34,6 +34,18 @@ A frontend may replace its advertised provider set while connected. Disconnect r
 
 Frontend services are adapters for capabilities that live in a frontend process. They do not add durable configuration, callable ownership, session ownership, or ambient IPC authority. Executions do not receive arbitrary frontend IPC; conductor-owned code decides when and how a provider is used.
 
+## Workspace language services
+
+The conductor owns one active language-service provider for each workspace and language-service kind. A provider may be frontend-linked or conductor-managed. The conductor selects one provider that satisfies the complete required capability set and never combines state from multiple providers.
+
+Managed provider definitions, capability requirements, and configured preferences are immutable configuration semantics. They contribute to the compiled configuration fingerprint. Live frontend registrations, selected connection identity, managed process handles, and provider epochs are process-local workspace state.
+
+A provider lifetime has a monotonically increasing epoch. Disconnect, replacement, capability loss, or managed process restart ends the old epoch. Work dispatched under an ended epoch fails instead of being replayed against the replacement provider.
+
+Frontend-linked providers use the generic frontend-service catalog. Their advertised capabilities do not grant execution authority or callable delegation. Executions later borrow typed conductor-owned language operations; they never receive the frontend connection or raw language-server transport.
+
+`spec/language-service.md` defines provider identity, capability negotiation, selection, epochs, and failover in detail.
+
 ## Session and conversation identity
 
 A `Session` is the long-lived Phenix conversation. Model and backend conversations are implementation details.
