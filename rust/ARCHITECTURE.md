@@ -42,9 +42,11 @@ Managed provider definitions, capability requirements, and configured preference
 
 A provider lifetime has a monotonically increasing epoch. Disconnect, replacement, capability loss, or managed process restart ends the old epoch. Work dispatched under an ended epoch fails instead of being replayed against the replacement provider.
 
-Frontend-linked providers use the generic frontend-service catalog. Their advertised capabilities do not grant execution authority or callable delegation. Executions later borrow typed conductor-owned language operations; they never receive the frontend connection or raw language-server transport.
+Frontend-linked providers use the generic frontend-service catalog. Their advertised capabilities do not grant execution authority or callable delegation. Executions borrow typed conductor-owned language tools through the normal callable policy and filesystem-read authority checks; they never receive the frontend connection or raw language-server transport.
 
-`spec/language-service.md` defines provider identity, capability negotiation, selection, epochs, and failover in detail.
+Managed language-server processes live at workspace scope and survive individual executions. A consumed language result becomes a durable observation bound to the consuming execution, provider epoch, typed operation, and exact document provenance. Diagnostics notifications update process-local current state; they become durable only when an execution consumes a diagnostic result. An ended provider epoch invalidates in-flight work instead of replaying it against a replacement provider.
+
+`spec/language-service.md` defines provider identity, capability negotiation, selection, epochs, and failover. `spec/language-intelligence.md` defines execution operations, document synchronization, diagnostics, and consumed observations.
 
 ## Session and conversation identity
 

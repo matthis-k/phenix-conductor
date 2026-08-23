@@ -3,8 +3,9 @@ use super::frontend_services::{
     FrontendServiceRouterError,
 };
 use phenix_core::{
-    ActiveLanguageProvider, LanguageProviderCandidate, LanguageProviderCapabilities,
-    LanguageProviderId, LanguageProviderSource, LanguageServiceConfiguration, LanguageServiceError,
+    ActiveLanguageProvider, LanguageDocumentProvenance, LanguageOperationResult,
+    LanguageProviderCandidate, LanguageProviderCapabilities, LanguageProviderId,
+    LanguageProviderSource, LanguageServiceConfiguration, LanguageServiceError,
     LanguageServiceKind, LanguageServiceManager, WorkspaceId,
 };
 use phenix_protocol::{
@@ -36,12 +37,19 @@ struct FrontendLanguageBinding {
     epoch: u64,
 }
 
+#[derive(Clone, Debug)]
+struct FrontendDiagnosticsSnapshot {
+    epoch: u64,
+    result: LanguageOperationResult,
+}
+
 #[derive(Default)]
 struct FrontendLanguageState {
     manager: LanguageServiceManager,
     connection_aliases: BTreeMap<FrontendConnectionId, u64>,
     next_connection_alias: u64,
     bindings: BTreeMap<(WorkspaceId, LanguageServiceKind), FrontendLanguageBinding>,
+    diagnostics: BTreeMap<(WorkspaceId, LanguageServiceKind), FrontendDiagnosticsSnapshot>,
 }
 
 #[derive(Clone, Default)]
@@ -112,6 +120,13 @@ impl FrontendLanguageServices {
             live_managed,
         );
         let key = (workspace.clone(), service.clone());
+        if state.diagnostics.get(&key).is_some_and(|snapshot| {
+            active
+                .as_ref()
+                .is_none_or(|active| snapshot.epoch != active.epoch)
+        }) {
+            state.diagnostics.remove(&key);
+        }
         match &active {
             Some(active) => {
                 if let LanguageProviderSource::Frontend { connection } = active.source {
@@ -146,6 +161,43 @@ impl FrontendLanguageServices {
             }
         }
         Ok(active)
+    }
+
+    pub(super) fn current(
+        &self,
+        workspace: &WorkspaceId,
+        service: &LanguageServiceKind,
+    ) -> Result<Option<ActiveLanguageProvider>, FrontendLanguageServiceError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| FrontendLanguageServiceError::StatePoisoned)?
+            .manager
+            .active(workspace, service)
+            .cloned())
+    }
+
+    pub(super) fn has_eligible_frontend(
+        &self,
+        service: &LanguageServiceKind,
+        configuration: &LanguageServiceConfiguration,
+        router: &FrontendServiceRouter,
+    ) -> Result<bool, FrontendLanguageServiceError> {
+        let live = router.live_providers()?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| FrontendLanguageServiceError::StatePoisoned)?;
+        let requirement = configuration.requirement_for(service);
+        Ok(frontend_candidates(&mut state, live)?
+            .into_iter()
+            .any(|candidate| {
+                candidate.candidate.service == *service
+                    && candidate
+                        .candidate
+                        .capabilities
+                        .satisfies(&requirement.required_capabilities)
+            }))
     }
 
     pub(super) fn request(
@@ -196,10 +248,6 @@ impl FrontendLanguageServices {
         Ok(result)
     }
 
-    // The managed-LSP slice consumes this seam when it subscribes to frontend
-    // diagnostics and provider-state notifications. The current slice owns and
-    // tests the source/epoch validation contract.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(super) fn validate_notification(
         &self,
         workspace: &WorkspaceId,
@@ -227,6 +275,110 @@ impl FrontendLanguageServices {
         }
         Ok(active.epoch)
     }
+
+    pub(super) fn accept_diagnostics_notification(
+        &self,
+        workspace: &WorkspaceId,
+        configuration: &LanguageServiceConfiguration,
+        router: &FrontendServiceRouter,
+        inbound: &FrontendServiceInboundNotification,
+    ) -> Result<bool, FrontendLanguageServiceError> {
+        if inbound.notification.method != "language.diagnostics" {
+            return Ok(false);
+        }
+        let service = service_from_frontend_provider(&inbound.notification.provider)?;
+        let epoch =
+            self.validate_notification(workspace, &service, configuration, router, inbound)?;
+        let result: LanguageOperationResult =
+            serde_json::from_value(inbound.notification.params.clone()).map_err(|error| {
+                FrontendLanguageServiceError::InvalidDescriptor(format!(
+                    "invalid language diagnostics notification: {error}"
+                ))
+            })?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| FrontendLanguageServiceError::StatePoisoned)?;
+        let active = state
+            .manager
+            .active(workspace, &service)
+            .ok_or(LanguageServiceError::ProviderChanged)?;
+        if active.epoch != epoch || !active.capabilities.shared_diagnostics {
+            return Err(LanguageServiceError::ProviderChanged.into());
+        }
+        validate_result_provenance(active, &result)?;
+        state.diagnostics.insert(
+            (workspace.clone(), service),
+            FrontendDiagnosticsSnapshot { epoch, result },
+        );
+        Ok(true)
+    }
+
+    pub(super) fn diagnostics(
+        &self,
+        workspace: &WorkspaceId,
+        service: &LanguageServiceKind,
+    ) -> Result<Option<LanguageOperationResult>, FrontendLanguageServiceError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| FrontendLanguageServiceError::StatePoisoned)?;
+        let Some(active) = state.manager.active(workspace, service) else {
+            return Ok(None);
+        };
+        Ok(state
+            .diagnostics
+            .get(&(workspace.clone(), service.clone()))
+            .filter(|snapshot| snapshot.epoch == active.epoch)
+            .map(|snapshot| snapshot.result.clone()))
+    }
+}
+
+fn service_from_frontend_provider(
+    provider: &FrontendServiceProviderId,
+) -> Result<LanguageServiceKind, FrontendLanguageServiceError> {
+    let id = provider.as_str();
+    let remainder = id.strip_prefix(PROVIDER_PREFIX).ok_or_else(|| {
+        FrontendLanguageServiceError::InvalidDescriptor(format!(
+            "provider id {id:?} is not a language provider"
+        ))
+    })?;
+    let (service, _) = remainder.split_once('/').ok_or_else(|| {
+        FrontendLanguageServiceError::InvalidDescriptor(format!(
+            "provider id {id:?} must use language/<service>/<provider>"
+        ))
+    })?;
+    LanguageServiceKind::parse(service.to_owned()).map_err(|error| {
+        FrontendLanguageServiceError::InvalidDescriptor(format!(
+            "provider id {id:?} has an invalid service identity: {error}"
+        ))
+    })
+}
+
+fn validate_result_provenance(
+    active: &ActiveLanguageProvider,
+    result: &LanguageOperationResult,
+) -> Result<(), FrontendLanguageServiceError> {
+    if !active.capabilities.dirty_buffers
+        && result
+            .documents
+            .iter()
+            .any(|document| document.provenance != LanguageDocumentProvenance::WorkspaceBacked)
+    {
+        return Err(FrontendLanguageServiceError::InvalidDescriptor(
+            "frontend language provider returned non-workspace document state without dirty_buffers capability".to_owned(),
+        ));
+    }
+    if result.documents.iter().any(|document| {
+        document.provenance == LanguageDocumentProvenance::WorkspaceBacked
+            && document.workspace_version.is_none()
+    }) {
+        return Err(FrontendLanguageServiceError::InvalidDescriptor(
+            "workspace-backed frontend language result omitted its exact workspace version"
+                .to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn frontend_candidates(

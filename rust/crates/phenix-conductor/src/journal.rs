@@ -5,9 +5,9 @@ use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, DiagnosticWritePatch, ExecutionAuthority,
     ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
     ExecutionState, ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation,
-    FileVersion, FilesystemAuthority, ModelTarget, OrchestrationFailureDecision,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, SessionId, SessionState,
-    SessionSummary, ToolCallId, WorkspaceId,
+    FileVersion, FilesystemAuthority, LanguageObservation, ModelTarget,
+    OrchestrationFailureDecision, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
+    SessionId, SessionState, SessionSummary, ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -160,6 +160,9 @@ pub enum DomainEvent {
     },
     DiagnosticWritePatchCaptured {
         patch: DiagnosticWritePatch,
+    },
+    LanguageObservationRecorded {
+        observation: LanguageObservation,
     },
     InvocationResolved {
         execution_id: ExecutionId,
@@ -1163,6 +1166,32 @@ pub(crate) fn apply_domain_event(
                 )));
             }
             state.diagnostic_write_patches.push(patch.clone());
+        }
+        DomainEvent::LanguageObservationRecorded { observation } => {
+            let execution = state
+                .executions
+                .get(&observation.execution)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "language observation references unknown execution {}",
+                        observation.execution
+                    ))
+                })?;
+            let session = state
+                .sessions
+                .get(&execution.summary.session_id)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "language observation execution {} references unknown session {}",
+                        observation.execution, execution.summary.session_id
+                    ))
+                })?;
+            if session.summary.workspace_id != observation.workspace {
+                return Err(JournalError::InvalidEvent(format!(
+                    "language observation for {} uses workspace {} instead of {}",
+                    observation.execution, observation.workspace, session.summary.workspace_id
+                )));
+            }
         }
         DomainEvent::InvocationResolved {
             execution_id,
