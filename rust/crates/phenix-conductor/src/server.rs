@@ -1,8 +1,9 @@
 use crate::{CompiledConfiguration, ConductorRuntime, SqliteStore};
 use phenix_backend::Backend;
 use phenix_core::{
-    BackendCatalog, BackendId, ExecutionEventKind, ExecutionId, ExecutionState,
-    WorkspaceDescriptor, WorkspaceId,
+    ActiveLanguageProvider, BackendCatalog, BackendId, ExecutionEventKind, ExecutionId,
+    ExecutionState, LanguageServiceConfiguration, LanguageServiceKind, WorkspaceDescriptor,
+    WorkspaceId,
 };
 use phenix_protocol::{
     ClientEnvelope, ErrorCode, FrontendConnectionCommand, FrontendConnectionEvent,
@@ -10,6 +11,7 @@ use phenix_protocol::{
     ProtocolError, Reply, ResponsePayload, ServerMessage,
 };
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
 use std::sync::{mpsc, MutexGuard};
 use std::thread;
@@ -19,18 +21,22 @@ use std::thread;
 mod base;
 #[path = "frontend_services.rs"]
 mod frontend_services;
+#[path = "language_frontend.rs"]
+mod language_frontend;
 
 pub use base::ServerError;
 use frontend_services::{
     FrontendConnectionId, FrontendServiceInboundNotification, FrontendServiceRouter,
     FrontendServiceRouterError,
 };
+use language_frontend::{FrontendLanguageServiceError, FrontendLanguageServices};
 
 const FRONTEND_OUTPUT_BUFFER: usize = 256;
 
 pub struct ConductorServer {
     inner: base::ConductorServer,
     frontend_services: FrontendServiceRouter,
+    language_services: FrontendLanguageServices,
 }
 
 impl ConductorServer {
@@ -39,6 +45,7 @@ impl ConductorServer {
         Self {
             inner: base::ConductorServer::new(runtime),
             frontend_services: FrontendServiceRouter::default(),
+            language_services: FrontendLanguageServices::default(),
         }
     }
 
@@ -46,6 +53,7 @@ impl ConductorServer {
         Ok(Self {
             inner: base::ConductorServer::load_or_new(store, workspace_id)?,
             frontend_services: FrontendServiceRouter::default(),
+            language_services: FrontendLanguageServices::default(),
         })
     }
 
@@ -82,6 +90,61 @@ impl ConductorServer {
     #[must_use]
     pub fn catalogs(&self) -> Vec<BackendCatalog> {
         self.inner.catalogs()
+    }
+
+    pub fn active_language_provider(
+        &self,
+        service: &LanguageServiceKind,
+    ) -> Result<Option<ActiveLanguageProvider>, ProtocolError> {
+        let (workspace, configuration) = self.language_context()?;
+        self.language_services
+            .reconcile(
+                &workspace,
+                service,
+                &configuration,
+                &self.frontend_services,
+                &BTreeMap::new(),
+            )
+            .map_err(map_frontend_language_error)
+    }
+
+    pub fn request_frontend_language_service(
+        &self,
+        service: &LanguageServiceKind,
+        method: String,
+        params: Value,
+    ) -> Result<Value, ProtocolError> {
+        let (workspace, configuration) = self.language_context()?;
+        self.language_services
+            .request(
+                &workspace,
+                service,
+                &configuration,
+                &self.frontend_services,
+                method,
+                params,
+            )
+            .map_err(map_frontend_language_error)
+    }
+
+    fn language_context(
+        &self,
+    ) -> Result<(WorkspaceId, LanguageServiceConfiguration), ProtocolError> {
+        let runtime = self.inner.runtime();
+        let workspace = runtime.workspace_id().clone();
+        let configuration =
+            runtime
+                .current_compiled_configuration()
+                .map_err(|error| ProtocolError {
+                    code: ErrorCode::InvalidRequest,
+                    message: error.to_string(),
+                    session_id: None,
+                    execution_id: None,
+                })?;
+        Ok((
+            workspace,
+            configuration.language_service_configuration().clone(),
+        ))
     }
 
     pub fn request_frontend_service(
@@ -158,13 +221,28 @@ impl ConductorServer {
 pub struct ConductorService {
     inner: base::ConductorService,
     frontend_services: FrontendServiceRouter,
+    language_services: FrontendLanguageServices,
+    workspace_id: WorkspaceId,
+    language_configuration: LanguageServiceConfiguration,
 }
 
 impl ConductorService {
     pub fn new(server: ConductorServer) -> Result<Self, ServerError> {
+        let (workspace_id, language_configuration) = {
+            let runtime = server.inner.runtime();
+            let workspace_id = runtime.workspace_id().clone();
+            let configuration = runtime.current_compiled_configuration()?;
+            (
+                workspace_id,
+                configuration.language_service_configuration().clone(),
+            )
+        };
         Ok(Self {
             inner: base::ConductorService::new(server.inner)?,
             frontend_services: server.frontend_services,
+            language_services: server.language_services,
+            workspace_id,
+            language_configuration,
         })
     }
 
@@ -184,6 +262,39 @@ impl ConductorService {
             self.inner
                 .serve_connection_with_root_hook(input, output, &mut on_root)
         })
+    }
+
+    pub fn active_language_provider(
+        &self,
+        service: &LanguageServiceKind,
+    ) -> Result<Option<ActiveLanguageProvider>, ProtocolError> {
+        self.language_services
+            .reconcile(
+                &self.workspace_id,
+                service,
+                &self.language_configuration,
+                &self.frontend_services,
+                &BTreeMap::new(),
+            )
+            .map_err(map_frontend_language_error)
+    }
+
+    pub fn request_frontend_language_service(
+        &self,
+        service: &LanguageServiceKind,
+        method: String,
+        params: Value,
+    ) -> Result<Value, ProtocolError> {
+        self.language_services
+            .request(
+                &self.workspace_id,
+                service,
+                &self.language_configuration,
+                &self.frontend_services,
+                method,
+                params,
+            )
+            .map_err(map_frontend_language_error)
     }
 
     pub fn request_frontend_service(
@@ -476,6 +587,34 @@ fn send_server_message(
 
 fn map_frontend_router_server_error(_error: FrontendServiceRouterError) -> ServerError {
     ServerError::StatePoisoned("frontend service router")
+}
+
+fn map_frontend_language_error(error: FrontendLanguageServiceError) -> ProtocolError {
+    let code = match &error {
+        FrontendLanguageServiceError::Language(phenix_core::LanguageServiceError::Unavailable) => {
+            ErrorCode::UnsupportedCapability
+        }
+        FrontendLanguageServiceError::Language(
+            phenix_core::LanguageServiceError::ProviderChanged,
+        )
+        | FrontendLanguageServiceError::Frontend(FrontendServiceRouterError::Disconnected)
+        | FrontendLanguageServiceError::Frontend(FrontendServiceRouterError::OutputClosed) => {
+            ErrorCode::BackendTransport
+        }
+        FrontendLanguageServiceError::Frontend(FrontendServiceRouterError::Remote(_)) => {
+            ErrorCode::ToolFailure
+        }
+        FrontendLanguageServiceError::StatePoisoned
+        | FrontendLanguageServiceError::InvalidDescriptor(_)
+        | FrontendLanguageServiceError::Language(_)
+        | FrontendLanguageServiceError::Frontend(_) => ErrorCode::InvalidRequest,
+    };
+    ProtocolError {
+        code,
+        message: error.to_string(),
+        session_id: None,
+        execution_id: None,
+    }
 }
 
 fn map_frontend_service_error(error: FrontendServiceRouterError) -> ProtocolError {
