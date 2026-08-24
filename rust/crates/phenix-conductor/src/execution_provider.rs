@@ -186,3 +186,80 @@ impl ConductorRuntime {
         Ok((resource, injection))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CompiledConfiguration, ContextRegistry, SkillRegistry};
+    use phenix_core::{
+        BackendId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
+    };
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn fixture_root() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("phenix-context-injection-journal-{nonce}"))
+    }
+
+    fn write(path: impl AsRef<Path>, content: &str) {
+        let path = path.as_ref();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+
+    fn fixed_target() -> ExecutionTarget {
+        ExecutionTarget::Fixed(ModelTarget {
+            backend: BackendId::parse("mock").unwrap(),
+            provider: ProviderId::parse("mock").unwrap(),
+            model: ModelId::parse("mock").unwrap(),
+            inference: InferenceOptions::default(),
+        })
+    }
+
+    #[test]
+    fn context_load_records_durable_injection_history() {
+        let root = fixture_root();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        write(root.join("CONTRIBUTING.md"), "exact project context");
+
+        let mut configuration = CompiledConfiguration::default();
+        configuration.install_context_registry(ContextRegistry::discover(&root).unwrap());
+        configuration.install_skill_registry(SkillRegistry::discover(&root).unwrap());
+
+        let mut runtime = ConductorRuntime::new();
+        runtime.reload_configuration(configuration).unwrap();
+        let session = runtime.create_session(None, None, fixed_target()).unwrap();
+        let execution = runtime.submit(&session.id, "load project context").unwrap();
+        let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
+        let descriptor = runtime
+            .context_descriptors_for_execution(&execution.id)
+            .unwrap()
+            .into_iter()
+            .find(|descriptor| descriptor.id == id)
+            .unwrap();
+
+        runtime
+            .load_context_for_execution(
+                &execution.id,
+                &id,
+                &descriptor.revision,
+                ContextInjectionRequester::Agent,
+                ContextInjectionLifetime::SingleRequest,
+                "agent requested exact project context",
+            )
+            .unwrap();
+
+        let durable = serde_json::to_string(&runtime.journal).unwrap();
+        assert!(
+            durable.contains("agent requested exact project context"),
+            "context load must record its canonical injection in durable journal history"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}
