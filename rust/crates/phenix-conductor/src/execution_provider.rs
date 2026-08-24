@@ -2,7 +2,7 @@ use crate::{CallableOperation, ConductorError, ConductorRuntime, DomainEvent, Ex
 use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
     ContextInjectionRequester, ContextResourceId, ContextResourceKind, ContextResourceRevision,
-    ContextRevision, ExecutionId, ExecutionState, SessionId, SkillInvocationPolicy,
+    ContextRevision, ContextScope, ExecutionId, ExecutionState, SessionId, SkillInvocationPolicy,
 };
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
@@ -156,6 +156,51 @@ impl ConductorRuntime {
         Ok((provider, request))
     }
 
+    fn ensure_context_scope_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+        scope: &ContextScope,
+    ) -> Result<(), ConductorError> {
+        let execution = self
+            .executions
+            .get(execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?;
+        let session_id = execution.summary.session_id.clone();
+        let config_revision = execution.config_revision.clone();
+        let workspace_id = self
+            .sessions
+            .get(&session_id)
+            .ok_or_else(|| ConductorError::UnknownSession(session_id.clone()))?
+            .summary
+            .workspace_id
+            .clone();
+
+        let allowed = match scope {
+            ContextScope::Workspace {
+                workspace_id: scoped_workspace,
+            } => scoped_workspace == &workspace_id,
+            ContextScope::Execution {
+                execution_id: scoped_execution,
+            } => scoped_execution == execution_id,
+            ContextScope::Objective { objective_id } => self
+                .execution_objectives(execution_id)?
+                .is_some_and(|assignment| {
+                    assignment.primary == *objective_id
+                        || assignment.supporting.contains(objective_id)
+                }),
+            ContextScope::Path { .. } => true,
+            ContextScope::Configuration { revision } => revision == &config_revision,
+        };
+        if allowed {
+            Ok(())
+        } else {
+            Err(ConductorError::InvalidExecutionData {
+                execution_id: execution_id.clone(),
+                message: format!("context resource scope does not apply to execution: {scope:?}"),
+            })
+        }
+    }
+
     pub fn load_context_for_execution(
         &mut self,
         execution_id: &ExecutionId,
@@ -181,6 +226,7 @@ impl ConductorRuntime {
                 message: error.to_string(),
             })?
             .clone();
+        self.ensure_context_scope_for_execution(execution_id, &resource.descriptor.scope)?;
         if requested_by != ContextInjectionRequester::User
             && resource.descriptor.kind == ContextResourceKind::Skill
         {
@@ -222,7 +268,8 @@ mod tests {
     use super::*;
     use crate::{CompiledConfiguration, ContextRegistry, SkillRegistry};
     use phenix_core::{
-        BackendId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
+        BackendId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ObjectiveId,
+        ProviderId, WorkspaceId,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -249,6 +296,82 @@ mod tests {
             model: ModelId::parse("mock").unwrap(),
             inference: InferenceOptions::default(),
         })
+    }
+
+    #[test]
+    fn context_scope_uses_execution_owned_identities() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed_target()).unwrap();
+        let execution = runtime
+            .submit(&session.id, "validate context scope")
+            .unwrap();
+        let objective = runtime
+            .execution_objectives(&execution.id)
+            .unwrap()
+            .expect("root execution must have an objective")
+            .primary;
+        let config_revision = runtime.execution_config_revision(&execution.id).unwrap();
+
+        runtime
+            .ensure_context_scope_for_execution(
+                &execution.id,
+                &ContextScope::Workspace {
+                    workspace_id: session.workspace_id.clone(),
+                },
+            )
+            .unwrap();
+        runtime
+            .ensure_context_scope_for_execution(
+                &execution.id,
+                &ContextScope::Execution {
+                    execution_id: execution.id.clone(),
+                },
+            )
+            .unwrap();
+        runtime
+            .ensure_context_scope_for_execution(
+                &execution.id,
+                &ContextScope::Objective {
+                    objective_id: objective,
+                },
+            )
+            .unwrap();
+        runtime
+            .ensure_context_scope_for_execution(
+                &execution.id,
+                &ContextScope::Configuration {
+                    revision: config_revision,
+                },
+            )
+            .unwrap();
+        runtime
+            .ensure_context_scope_for_execution(
+                &execution.id,
+                &ContextScope::Path {
+                    path: PathBuf::from("CONTRIBUTING.md"),
+                },
+            )
+            .unwrap();
+
+        for scope in [
+            ContextScope::Workspace {
+                workspace_id: WorkspaceId::parse("workspace:other").unwrap(),
+            },
+            ContextScope::Execution {
+                execution_id: ExecutionId::parse("execution-other").unwrap(),
+            },
+            ContextScope::Objective {
+                objective_id: ObjectiveId::parse("objective-other").unwrap(),
+            },
+            ContextScope::Configuration {
+                revision: ConfigRevisionId::parse("config-other").unwrap(),
+            },
+        ] {
+            assert!(matches!(
+                runtime.ensure_context_scope_for_execution(&execution.id, &scope),
+                Err(ConductorError::InvalidExecutionData { .. })
+            ));
+        }
     }
 
     #[test]
