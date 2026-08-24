@@ -2,14 +2,14 @@ use crate::{
     ConfigRevisionFingerprint, ConfigRevisionSlot, ExecutionPayload, ExecutionRecord, SessionRecord,
 };
 use phenix_core::{
-    AttemptGroup, AttemptGroupId, ConfigRevisionId, DiagnosticWritePatch, ExecutionAuthority,
-    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionObjectiveAssignment,
-    ExecutionPlanAssignment, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
-    FailureAttemptSummary, FileObservation, FileVersion, FilesystemAuthority, LanguageObservation,
-    ModelTarget, ObjectiveCriterionEvidence, ObjectiveId, ObjectiveRecord, ObjectiveTransition,
-    OrchestrationFailureDecision, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
-    PlanRecord, PlanStepTransition, PlanTransition, SessionId, SessionState, SessionSummary,
-    ToolCallId, WorkspaceId,
+    AttemptGroup, AttemptGroupId, ConfigRevisionId, ContextInjection, DiagnosticWritePatch,
+    ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
+    ExecutionObjectiveAssignment, ExecutionPlanAssignment, ExecutionReadSet, ExecutionState,
+    ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation, FileVersion,
+    FilesystemAuthority, LanguageObservation, ModelTarget, ObjectiveCriterionEvidence, ObjectiveId,
+    ObjectiveRecord, ObjectiveTransition, OrchestrationFailureDecision,
+    OrchestrationFailureDecisionRecord, OrchestrationNodeId, PlanRecord, PlanStepTransition,
+    PlanTransition, SessionId, SessionState, SessionSummary, ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -165,6 +165,9 @@ pub enum DomainEvent {
     },
     LanguageObservationRecorded {
         observation: LanguageObservation,
+    },
+    ContextInjectionRecorded {
+        injection: ContextInjection,
     },
     ObjectiveSemanticsActivated,
     ObjectiveCreated {
@@ -1227,6 +1230,14 @@ pub(crate) fn apply_domain_event(
                 return Err(JournalError::InvalidEvent(format!(
                     "language observation for {} uses workspace {} instead of {}",
                     observation.execution, observation.workspace, session.summary.workspace_id
+                )));
+            }
+        }
+        DomainEvent::ContextInjectionRecorded { injection } => {
+            if !state.executions.contains_key(&injection.execution_id) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "context injection references unknown execution {}",
+                    injection.execution_id
                 )));
             }
         }
