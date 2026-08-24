@@ -1,4 +1,6 @@
-use phenix_conductor::{CompiledConfiguration, ConductorRuntime, ContextRegistry, SkillRegistry};
+use phenix_conductor::{
+    CompiledConfiguration, ConductorRuntime, ContextRegistry, ResolvedExactReference, SkillRegistry,
+};
 use phenix_core::{
     BackendId, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId,
     ExactReference, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId, ModelTarget,
@@ -313,4 +315,41 @@ fn executions_load_context_from_their_pinned_configuration_revision() {
     );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn exact_durable_references_resolve_without_aliases() {
+    let mut runtime = ConductorRuntime::new();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let execution = runtime.submit(&session.id, "resolve exact references").unwrap();
+    let assignment = runtime
+        .execution_objectives(&execution.id)
+        .unwrap()
+        .expect("root execution must have a primary objective");
+
+    match runtime
+        .resolve_exact_reference(&ExactReference::Objective(assignment.primary.clone()))
+        .unwrap()
+    {
+        ResolvedExactReference::Objective(objective) => {
+            assert_eq!(objective.id, assignment.primary);
+        }
+        other => panic!("expected objective reference, found {other:?}"),
+    }
+
+    match runtime
+        .resolve_exact_reference(&ExactReference::Execution(execution.id.clone()))
+        .unwrap()
+    {
+        ResolvedExactReference::Execution(resolved) => assert_eq!(resolved, execution),
+        other => panic!("expected execution reference, found {other:?}"),
+    }
+
+    match runtime
+        .resolve_exact_reference(&ExactReference::Event(1))
+        .unwrap()
+    {
+        ResolvedExactReference::Event(event) => assert_eq!(event.sequence, 1),
+        other => panic!("expected event reference, found {other:?}"),
+    }
 }
