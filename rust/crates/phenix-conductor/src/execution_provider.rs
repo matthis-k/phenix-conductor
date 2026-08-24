@@ -168,7 +168,9 @@ impl ConductorRuntime {
         if lifetime == ContextInjectionLifetime::Objective
             && self.execution_objectives(execution_id)?.is_none()
         {
-            return Err(crate::ObjectiveError::MissingExecutionObjective(execution_id.clone()).into());
+            return Err(
+                crate::ObjectiveError::MissingExecutionObjective(execution_id.clone()).into(),
+            );
         }
         let resource = self
             .configuration_for_execution(execution_id)?
