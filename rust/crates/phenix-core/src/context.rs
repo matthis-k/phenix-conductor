@@ -193,7 +193,10 @@ impl Display for ContextCatalogError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::ConflictingRevision { id, revision } => {
-                write!(f, "context resource {id} revision {revision} changed after registration")
+                write!(
+                    f,
+                    "context resource {id} revision {revision} changed after registration"
+                )
             }
             Self::UnknownResource(id) => write!(f, "unknown context resource: {id}"),
             Self::UnknownRevision { id, revision } => {
@@ -349,9 +352,18 @@ mod tests {
         catalog.register_revision(first.clone()).unwrap();
         catalog.register_revision(second.clone()).unwrap();
 
-        assert_eq!(catalog.current_descriptor(&id).unwrap().revision, second_revision);
-        assert_eq!(catalog.resolve_revision(&id, &first_revision).unwrap(), &first);
-        assert_eq!(catalog.resolve_revision(&id, &second_revision).unwrap(), &second);
+        assert_eq!(
+            catalog.current_descriptor(&id).unwrap().revision,
+            second_revision
+        );
+        assert_eq!(
+            catalog.resolve_revision(&id, &first_revision).unwrap(),
+            &first
+        );
+        assert_eq!(
+            catalog.resolve_revision(&id, &second_revision).unwrap(),
+            &second
+        );
     }
 
     #[test]
