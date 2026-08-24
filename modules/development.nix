@@ -35,9 +35,6 @@
           CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
         };
       };
-      rustCiLeaf = {
-        enable = false;
-      };
       productCi = {
         enable = true;
         stage = "product";
@@ -145,7 +142,7 @@
             name = target.id;
             value = {
               description = target.label;
-              ci = rustCiLeaf;
+              ci = false;
               runtimeInputs = pkgs: [
                 pkgs.cargo
                 pkgs.git
@@ -162,9 +159,11 @@
       mkRustCiRuns =
         boundary: targets:
         builtins.concatStringsSep "\n" (
-          builtins.map (target: ''
-            run_check '${boundary}: ${target.label}' "$0" test ${boundary} ${target.id}
-          '') targets
+          builtins.map (
+            target: ''
+              run_check '${boundary}: ${target.label}' "$0" test ${boundary} ${target.id}
+            ''
+          ) targets
         );
 
       expectedCargoTargetLines = builtins.concatStringsSep "\n" (
@@ -363,7 +362,7 @@
 
               rust = {
                 description = "Rust static analysis with Clippy";
-                ci = rustCiLeaf;
+                ci = false;
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.clippy
@@ -376,33 +375,6 @@
                 '';
               };
             };
-          };
-
-          fix = {
-            description = "Apply deterministic Nix and Rust normalization";
-            runtimeInputs = pkgs: [
-              pkgs.cargo
-              pkgs.findutils
-              pkgs.git
-              pkgs.nixfmt
-              pkgs.rustfmt
-              pkgs.statix
-            ];
-            exec = ''
-              ${repositoryRoot}
-
-              statix fix
-
-              find . -type f -name '*.nix' \
-                -not -path './.git/*' \
-                -print0 |
-                xargs -0 -r nixfmt
-
-              (
-                cd rust
-                cargo fmt --all
-              )
-            '';
           };
 
           rust-ci = {
@@ -463,7 +435,7 @@
             commands = {
               unit = {
                 description = "In-crate library and binary tests";
-                ci = rustCiLeaf;
+                ci = false;
                 runtimeInputs = pkgs: [
                   pkgs.bash
                   pkgs.bubblewrap
@@ -496,7 +468,7 @@
 
               doc = {
                 description = "Rust documentation tests";
-                ci = rustCiLeaf;
+                ci = false;
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.git
@@ -546,6 +518,33 @@
                 };
               };
             };
+          };
+
+          fix = {
+            description = "Apply deterministic Nix and Rust normalization";
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.findutils
+              pkgs.git
+              pkgs.nixfmt
+              pkgs.rustfmt
+              pkgs.statix
+            ];
+            exec = ''
+              ${repositoryRoot}
+
+              statix fix
+
+              find . -type f -name '*.nix' \
+                -not -path './.git/*' \
+                -print0 |
+                xargs -0 -r nixfmt
+
+              (
+                cd rust
+                cargo fmt --all
+              )
+            '';
           };
         };
       };
