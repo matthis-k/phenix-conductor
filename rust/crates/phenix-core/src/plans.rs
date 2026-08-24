@@ -1,3 +1,7 @@
+#[path = "context.rs"]
+mod context;
+pub use context::*;
+
 use crate::{ExecutionId, InvalidId, ObjectiveId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
