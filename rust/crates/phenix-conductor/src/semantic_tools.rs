@@ -4,8 +4,9 @@ use crate::{
 use phenix_backend::{BackendError, ToolInvocation, ToolResult};
 use phenix_core::{
     CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionKind, ExecutionSummary, FileVersion, FilesystemAuthority, SkillId,
-    WorkspaceId,
+    ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionSummary, FileVersion,
+    FilesystemAuthority, ObjectiveCriterion, ObjectiveCriterionEvidence, ObjectiveCriterionId,
+    ObjectiveId, ObjectiveOrigin, ObjectiveState, ObjectiveTransitionCause, SkillId, WorkspaceId,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,6 +19,7 @@ pub(super) const ORCHESTRATION_DECIDE_FAILURE_ID: &str = "phenix_orchestration_d
 pub(super) const WORKSPACE_CHECKPOINT_ID: &str = "phenix_workspace_checkpoint";
 pub(super) const SKILL_LOAD_ID: &str = "phenix_skill_load";
 pub(super) const SKILL_RESOURCE_READ_ID: &str = "phenix_skill_resource_read";
+pub(super) const OBJECTIVE_ID: &str = "phenix_objective";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,6 +48,52 @@ struct SkillLoadInput {
 struct SkillResourceReadInput {
     skill: String,
     path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObjectiveCriterionInput {
+    id: String,
+    description: String,
+    required: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+enum ObjectiveActionInput {
+    GetAssignment,
+    CreateDerived {
+        parent: String,
+        statement: String,
+        #[serde(default)]
+        criteria: Vec<ObjectiveCriterionInput>,
+    },
+    ReviseDraft {
+        objective: String,
+        statement: String,
+        #[serde(default)]
+        criteria: Vec<ObjectiveCriterionInput>,
+    },
+    Activate {
+        objective: String,
+    },
+    RecordEvidence {
+        objective: String,
+        criterion: String,
+        evidence_ref: String,
+    },
+    Complete {
+        objective: String,
+    },
+    Fail {
+        objective: String,
+    },
+    Invalidate {
+        objective: String,
+    },
+    Abandon {
+        objective: String,
+    },
 }
 
 pub(super) fn extend_semantic_tools(
@@ -81,6 +129,13 @@ pub(super) fn extend_semantic_tools(
             .callables
             .push(skill_resource_read_descriptor());
     }
+    if !is_root
+        && runtime
+            .execution_objectives(&resolved.execution_id)?
+            .is_some()
+    {
+        resolved.tools.callables.push(objective_descriptor());
+    }
     if workspace_checkpoints_available
         && runtime
             .execution_authority(&resolved.execution_id)?
@@ -104,6 +159,7 @@ pub(super) fn is_semantic_tool(id: &CallableId) -> bool {
             | WORKSPACE_CHECKPOINT_ID
             | SKILL_LOAD_ID
             | SKILL_RESOURCE_READ_ID
+            | OBJECTIVE_ID
     )
 }
 
@@ -167,6 +223,7 @@ pub(super) fn invoke(
                     .map_err(|error| error.to_string())
             })
         }
+        OBJECTIVE_ID => invoke_objective(runtime, execution_id, &invocation.arguments_json),
         ORCHESTRATION_START_ID => {
             parse_start(&invocation.arguments_json).and_then(|(orchestration, objective)| {
                 runtime
@@ -218,6 +275,238 @@ pub(super) fn invoke(
         )
         .map_err(conductor_protocol_error)?;
     Ok(result)
+}
+
+fn invoke_objective(
+    runtime: &mut ConductorRuntime,
+    execution_id: &ExecutionId,
+    arguments_json: &str,
+) -> Result<String, String> {
+    let action: ObjectiveActionInput = serde_json::from_str(arguments_json)
+        .map_err(|error| format!("invalid objective arguments: {error}"))?;
+    let cause = || ObjectiveTransitionCause::AgentAction {
+        execution_id: execution_id.clone(),
+    };
+    match action {
+        ObjectiveActionInput::GetAssignment => {
+            let assignment = runtime
+                .execution_objectives(execution_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("execution {execution_id} has no primary objective"))?;
+            let primary = runtime
+                .objective(&assignment.primary)
+                .map_err(|error| error.to_string())?;
+            let supporting = assignment
+                .supporting
+                .iter()
+                .map(|id| runtime.objective(id).map_err(|error| error.to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            serde_json::to_string(&json!({
+                "assignment": assignment,
+                "primary": primary,
+                "supporting": supporting,
+            }))
+            .map_err(|error| error.to_string())
+        }
+        ObjectiveActionInput::CreateDerived {
+            parent,
+            statement,
+            criteria,
+        } => {
+            let parent = parse_objective_id(parent)?;
+            ensure_objective_scope(runtime, execution_id, &parent)?;
+            let objective = runtime
+                .create_derived_objective(&parent, statement, parse_objective_criteria(criteria)?)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_string(&objective).map_err(|error| error.to_string())
+        }
+        ObjectiveActionInput::ReviseDraft {
+            objective,
+            statement,
+            criteria,
+        } => {
+            let objective = parse_objective_id(objective)?;
+            ensure_objective_scope(runtime, execution_id, &objective)?;
+            let objective = runtime
+                .revise_objective_draft(&objective, statement, parse_objective_criteria(criteria)?)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_string(&objective).map_err(|error| error.to_string())
+        }
+        ObjectiveActionInput::Activate { objective } => {
+            let objective = parse_objective_id(objective)?;
+            ensure_derived_objective_scope(runtime, execution_id, &objective)?;
+            let objective = runtime
+                .activate_objective(&objective, cause())
+                .map_err(|error| error.to_string())?;
+            serde_json::to_string(&objective).map_err(|error| error.to_string())
+        }
+        ObjectiveActionInput::RecordEvidence {
+            objective,
+            criterion,
+            evidence_ref,
+        } => {
+            let objective = parse_objective_id(objective)?;
+            ensure_derived_objective_scope(runtime, execution_id, &objective)?;
+            let criterion_id = ObjectiveCriterionId::parse(criterion)
+                .map_err(|error| format!("invalid objective criterion id: {error}"))?;
+            runtime
+                .record_objective_evidence(
+                    &objective,
+                    ObjectiveCriterionEvidence {
+                        criterion_id,
+                        evidence_ref,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(json!({"recorded": true}).to_string())
+        }
+        ObjectiveActionInput::Complete { objective } => {
+            transition_agent_objective(runtime, execution_id, objective, ObjectiveState::Completed)
+        }
+        ObjectiveActionInput::Fail { objective } => {
+            transition_agent_objective(runtime, execution_id, objective, ObjectiveState::Failed)
+        }
+        ObjectiveActionInput::Invalidate { objective } => transition_agent_objective(
+            runtime,
+            execution_id,
+            objective,
+            ObjectiveState::Invalidated,
+        ),
+        ObjectiveActionInput::Abandon { objective } => {
+            transition_agent_objective(runtime, execution_id, objective, ObjectiveState::Abandoned)
+        }
+    }
+}
+
+fn transition_agent_objective(
+    runtime: &mut ConductorRuntime,
+    execution_id: &ExecutionId,
+    objective: String,
+    state: ObjectiveState,
+) -> Result<String, String> {
+    let objective = parse_objective_id(objective)?;
+    ensure_derived_objective_scope(runtime, execution_id, &objective)?;
+    let cause = ObjectiveTransitionCause::AgentAction {
+        execution_id: execution_id.clone(),
+    };
+    let objective = if state == ObjectiveState::Completed {
+        runtime.complete_objective(&objective, cause)
+    } else {
+        runtime.transition_objective(&objective, state, cause)
+    }
+    .map_err(|error| error.to_string())?;
+    serde_json::to_string(&objective).map_err(|error| error.to_string())
+}
+
+fn parse_objective_id(value: String) -> Result<ObjectiveId, String> {
+    ObjectiveId::parse(value).map_err(|error| format!("invalid objective id: {error}"))
+}
+
+fn parse_objective_criteria(
+    criteria: Vec<ObjectiveCriterionInput>,
+) -> Result<Vec<ObjectiveCriterion>, String> {
+    criteria
+        .into_iter()
+        .map(|criterion| {
+            if criterion.description.trim().is_empty() {
+                return Err("objective criterion description must not be empty".to_owned());
+            }
+            Ok(ObjectiveCriterion {
+                id: ObjectiveCriterionId::parse(criterion.id)
+                    .map_err(|error| format!("invalid objective criterion id: {error}"))?,
+                description: criterion.description,
+                required: criterion.required,
+            })
+        })
+        .collect()
+}
+
+fn ensure_derived_objective_scope(
+    runtime: &ConductorRuntime,
+    execution_id: &ExecutionId,
+    objective_id: &ObjectiveId,
+) -> Result<(), String> {
+    ensure_objective_scope(runtime, execution_id, objective_id)?;
+    let objective = runtime
+        .objective(objective_id)
+        .map_err(|error| error.to_string())?;
+    if matches!(objective.origin, ObjectiveOrigin::Root) {
+        return Err("agents cannot mutate root objectives".to_owned());
+    }
+    Ok(())
+}
+
+fn ensure_objective_scope(
+    runtime: &ConductorRuntime,
+    execution_id: &ExecutionId,
+    objective_id: &ObjectiveId,
+) -> Result<(), String> {
+    let assignment = runtime
+        .execution_objectives(execution_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("execution {execution_id} has no primary objective"))?;
+    let execution_root = objective_root(runtime, &assignment.primary)?;
+    let target_root = objective_root(runtime, objective_id)?;
+    if execution_root != target_root {
+        return Err(format!(
+            "objective {objective_id} is outside execution {execution_id} root scope"
+        ));
+    }
+    Ok(())
+}
+
+fn objective_root(
+    runtime: &ConductorRuntime,
+    objective_id: &ObjectiveId,
+) -> Result<ObjectiveId, String> {
+    let mut current = objective_id.clone();
+    loop {
+        let objective = runtime
+            .objective(&current)
+            .map_err(|error| error.to_string())?;
+        match objective.origin {
+            ObjectiveOrigin::Root => return Ok(current),
+            ObjectiveOrigin::Derived { parent } => current = parent,
+        }
+    }
+}
+
+fn objective_descriptor() -> CallableDescriptor {
+    CallableDescriptor {
+        id: CallableId::parse(OBJECTIVE_ID).expect("static objective id"),
+        kind: CallableKind::Tool,
+        description: "Inspect this execution's objective assignment or create and evolve derived objectives inside the same root objective. Root objectives are user-owned and cannot be changed through this tool.".to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "required": ["action"],
+            "properties": {
+                "action": {
+                    "enum": [
+                        "get_assignment",
+                        "create_derived",
+                        "revise_draft",
+                        "activate",
+                        "record_evidence",
+                        "complete",
+                        "fail",
+                        "invalidate",
+                        "abandon"
+                    ]
+                },
+                "parent": {"type": "string", "minLength": 1},
+                "objective": {"type": "string", "minLength": 1},
+                "statement": {"type": "string", "minLength": 1},
+                "criteria": {"type": "array"},
+                "criterion": {"type": "string", "minLength": 1},
+                "evidence_ref": {"type": "string", "minLength": 1}
+            }
+        }),
+        output_schema: json!({"type": "object"}),
+        capabilities: CapabilitySet::default(),
+        policy: CallablePolicy {
+            requires_permission: false,
+        },
+    }
 }
 
 fn workspace_checkpoint_descriptor() -> CallableDescriptor {
@@ -513,5 +802,111 @@ fn orchestration_start_descriptor() -> CallableDescriptor {
         policy: CallablePolicy {
             requires_permission: false,
         },
+    }
+}
+
+#[cfg(test)]
+mod objective_tests {
+    use super::*;
+    use phenix_core::{
+        BackendId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
+    };
+
+    fn target() -> ExecutionTarget {
+        ExecutionTarget::Fixed(ModelTarget {
+            backend: BackendId::parse("backend").unwrap(),
+            provider: ProviderId::parse("provider").unwrap(),
+            model: ModelId::parse("model").unwrap(),
+            inference: InferenceOptions::default(),
+        })
+    }
+
+    #[test]
+    fn objective_tool_creates_only_derived_objectives_in_execution_root_scope() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, target()).unwrap();
+        let execution = runtime.submit(&session.id, "root one").unwrap();
+        let assignment = runtime
+            .execution_objectives(&execution.id)
+            .unwrap()
+            .unwrap();
+        let other_root = runtime
+            .create_root_objective_from_user_intent("root two", Vec::new(), None)
+            .unwrap();
+        let allowed =
+            BTreeSet::from([CallableId::parse(OBJECTIVE_ID).expect("objective callable id")]);
+
+        let result = invoke(
+            &mut runtime,
+            &execution.id,
+            &allowed,
+            ToolInvocation {
+                callable: CallableId::parse(OBJECTIVE_ID).unwrap(),
+                arguments_json: json!({
+                    "action": "create_derived",
+                    "parent": assignment.primary,
+                    "statement": "child work",
+                    "criteria": []
+                })
+                .to_string(),
+            },
+            None,
+        )
+        .unwrap();
+        assert!(result.success, "{}", result.output);
+        assert!(runtime.objectives().unwrap().iter().any(|objective| {
+            matches!(objective.origin, ObjectiveOrigin::Derived { .. })
+                && objective.statement == "child work"
+        }));
+
+        let denied = invoke(
+            &mut runtime,
+            &execution.id,
+            &allowed,
+            ToolInvocation {
+                callable: CallableId::parse(OBJECTIVE_ID).unwrap(),
+                arguments_json: json!({
+                    "action": "create_derived",
+                    "parent": other_root.id,
+                    "statement": "cross root",
+                    "criteria": []
+                })
+                .to_string(),
+            },
+            None,
+        )
+        .unwrap();
+        assert!(!denied.success);
+        assert!(denied.output.contains("outside execution"));
+    }
+
+    #[test]
+    fn objective_tool_cannot_mutate_root_objectives() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, target()).unwrap();
+        let execution = runtime.submit(&session.id, "root").unwrap();
+        let assignment = runtime
+            .execution_objectives(&execution.id)
+            .unwrap()
+            .unwrap();
+        let allowed =
+            BTreeSet::from([CallableId::parse(OBJECTIVE_ID).expect("objective callable id")]);
+        let result = invoke(
+            &mut runtime,
+            &execution.id,
+            &allowed,
+            ToolInvocation {
+                callable: CallableId::parse(OBJECTIVE_ID).unwrap(),
+                arguments_json: json!({
+                    "action": "abandon",
+                    "objective": assignment.primary
+                })
+                .to_string(),
+            },
+            None,
+        )
+        .unwrap();
+        assert!(!result.success);
+        assert!(result.output.contains("cannot mutate root objectives"));
     }
 }

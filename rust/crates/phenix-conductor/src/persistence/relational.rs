@@ -5,10 +5,12 @@ use crate::{
 };
 use phenix_core::{
     AttemptGroup, AttemptGroupId, BackendId, CallableId, DiagnosticWritePatch, ExecutionAuthority,
-    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState,
-    ExecutionSummary, ExecutionTarget, ExecutionTerminationCause, FailureAttemptSummary, FileKind,
-    FileObservation, FileVersion, FilesystemAuthority, InferenceEffort, InferenceOptions, ModelId,
-    ModelTarget, NetworkAuthority, OrchestrationFailureDecision,
+    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionObjectiveAssignment,
+    ExecutionState, ExecutionSummary, ExecutionTarget, ExecutionTerminationCause,
+    FailureAttemptSummary, FileKind, FileObservation, FileVersion, FilesystemAuthority,
+    InferenceEffort, InferenceOptions, ModelId, ModelTarget, NetworkAuthority, ObjectiveCriterion,
+    ObjectiveCriterionEvidence, ObjectiveId, ObjectiveOrigin, ObjectiveRecord, ObjectiveState,
+    ObjectiveTransition, ObjectiveTransitionCause, OrchestrationFailureDecision,
     OrchestrationFailureDecisionRecord, OrchestrationNodeId, ProviderId, RepositoryAuthority,
     RoutingProfileId, SessionId, SessionState, SessionSummary, ToolCallId, WorkspaceId,
 };
@@ -19,7 +21,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 4;
+const DATABASE_SCHEMA_VERSION: i64 = 5;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -194,6 +196,7 @@ fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
             4,
             include_str!("../../migrations/0004_language_observations.sql"),
         ),
+        (5, include_str!("../../migrations/0005_objectives.sql")),
     ] {
         if version < target {
             apply_migration(connection, target, sql)?;
@@ -306,6 +309,12 @@ fn event_type(event: &DomainEvent) -> &'static str {
         DomainEvent::ExecutionOutputRecorded { .. } => "execution_output_recorded",
         DomainEvent::DiagnosticWritePatchCaptured { .. } => "diagnostic_write_patch_captured",
         DomainEvent::LanguageObservationRecorded { .. } => "language_observation_recorded",
+        DomainEvent::ObjectiveSemanticsActivated => "objective_semantics_activated",
+        DomainEvent::ObjectiveCreated { .. } => "objective_created",
+        DomainEvent::ObjectiveDraftRevised { .. } => "objective_draft_revised",
+        DomainEvent::ObjectiveEvidenceRecorded { .. } => "objective_evidence_recorded",
+        DomainEvent::ObjectiveStateChanged { .. } => "objective_state_changed",
+        DomainEvent::ExecutionObjectivesAssigned { .. } => "execution_objectives_assigned",
         DomainEvent::InvocationResolved { .. } => "invocation_resolved",
         DomainEvent::WorkspaceCheckpointCaptured { .. } => "workspace_checkpoint_captured",
         DomainEvent::WorkspaceFileObserved { .. } => "workspace_file_observed",
@@ -606,6 +615,99 @@ fn insert_event(
                     result,
                 ],
             )?;
+        }
+        DomainEvent::ObjectiveSemanticsActivated => {}
+        DomainEvent::ObjectiveCreated { objective } => {
+            let (origin, parent) = objective_origin_columns(&objective.origin);
+            transaction.execute(
+                "INSERT INTO objective_creations(
+                     created_sequence, objective_id, workspace_id, origin_kind, parent_objective_id,
+                     statement, state, supersedes_objective_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    sequence,
+                    objective.id.to_string(),
+                    objective.workspace.to_string(),
+                    origin,
+                    parent,
+                    objective.statement,
+                    objective_state_token(&objective.state),
+                    objective.supersedes.as_ref().map(ToString::to_string),
+                ],
+            )?;
+            insert_objective_criteria(
+                transaction,
+                "objective_creation_criteria",
+                "created_sequence",
+                sequence,
+                &objective.criteria,
+            )?;
+        }
+        DomainEvent::ObjectiveDraftRevised { objective } => {
+            transaction.execute(
+                "INSERT INTO objective_draft_revisions(sequence, objective_id, statement)
+                 VALUES (?1, ?2, ?3)",
+                params![sequence, objective.id.to_string(), objective.statement],
+            )?;
+            insert_objective_criteria(
+                transaction,
+                "objective_draft_revision_criteria",
+                "sequence",
+                sequence,
+                &objective.criteria,
+            )?;
+        }
+        DomainEvent::ObjectiveEvidenceRecorded {
+            objective_id,
+            evidence,
+        } => {
+            transaction.execute(
+                "INSERT INTO objective_evidence(sequence, objective_id, criterion_id, evidence_ref)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    sequence,
+                    objective_id.to_string(),
+                    evidence.criterion_id.to_string(),
+                    evidence.evidence_ref,
+                ],
+            )?;
+        }
+        DomainEvent::ObjectiveStateChanged { transition } => {
+            let (kind, execution, detail) = objective_cause_columns(&transition.cause);
+            transaction.execute(
+                "INSERT INTO objective_state_changes(
+                     sequence, objective_id, from_state, to_state, cause_kind,
+                     cause_execution_id, cause_detail
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    sequence,
+                    transition.objective_id.to_string(),
+                    objective_state_token(&transition.from),
+                    objective_state_token(&transition.to),
+                    kind,
+                    execution,
+                    detail,
+                ],
+            )?;
+        }
+        DomainEvent::ExecutionObjectivesAssigned { assignment } => {
+            transaction.execute(
+                "INSERT INTO execution_objective_assignments(
+                     sequence, execution_id, primary_objective_id
+                 ) VALUES (?1, ?2, ?3)",
+                params![
+                    sequence,
+                    assignment.execution_id.to_string(),
+                    assignment.primary.to_string(),
+                ],
+            )?;
+            for objective in &assignment.supporting {
+                transaction.execute(
+                    "INSERT INTO execution_supporting_objectives(sequence, objective_id)
+                     VALUES (?1, ?2)",
+                    params![sequence, objective.to_string()],
+                )?;
+            }
         }
         DomainEvent::InvocationResolved {
             execution_id,
@@ -1328,6 +1430,44 @@ fn load_event(
                 },
             })
         }
+        "objective_semantics_activated" => Ok(DomainEvent::ObjectiveSemanticsActivated),
+        "objective_created" => Ok(DomainEvent::ObjectiveCreated {
+            objective: load_objective_creation(connection, sequence)?,
+        }),
+        "objective_draft_revised" => Ok(DomainEvent::ObjectiveDraftRevised {
+            objective: load_objective_draft_revision(connection, sequence)?,
+        }),
+        "objective_evidence_recorded" => {
+            let (objective, criterion, evidence_ref) = connection.query_row(
+                "SELECT objective_id, criterion_id, evidence_ref FROM objective_evidence
+                 WHERE sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?;
+            Ok(DomainEvent::ObjectiveEvidenceRecorded {
+                objective_id: parse_id(objective, "objective", ObjectiveId::parse)?,
+                evidence: ObjectiveCriterionEvidence {
+                    criterion_id: parse_id(
+                        criterion,
+                        "objective criterion",
+                        phenix_core::ObjectiveCriterionId::parse,
+                    )?,
+                    evidence_ref,
+                },
+            })
+        }
+        "objective_state_changed" => Ok(DomainEvent::ObjectiveStateChanged {
+            transition: load_objective_transition(connection, sequence)?,
+        }),
+        "execution_objectives_assigned" => Ok(DomainEvent::ExecutionObjectivesAssigned {
+            assignment: load_execution_objective_assignment(connection, sequence)?,
+        }),
         "invocation_resolved" => load_invocation_resolved(connection, sequence),
         "workspace_checkpoint_captured" => load_checkpoint(connection, sequence),
         "workspace_file_observed" => load_observation(connection, sequence),
@@ -2359,6 +2499,269 @@ impl ConductorRuntime {
     }
 }
 
+fn insert_objective_criteria(
+    transaction: &Transaction<'_>,
+    table: &str,
+    sequence_column: &str,
+    sequence: i64,
+    criteria: &[ObjectiveCriterion],
+) -> Result<(), PersistenceError> {
+    let sql = format!(
+        "INSERT INTO {table}({sequence_column}, criterion_order, criterion_id, description, required) \
+         VALUES (?1, ?2, ?3, ?4, ?5)"
+    );
+    for (index, criterion) in criteria.iter().enumerate() {
+        transaction.execute(
+            &sql,
+            params![
+                sequence,
+                sql_usize(index, "objective criterion order")?,
+                criterion.id.to_string(),
+                criterion.description,
+                i64::from(criterion.required),
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn objective_origin_columns(origin: &ObjectiveOrigin) -> (&'static str, Option<String>) {
+    match origin {
+        ObjectiveOrigin::Root => ("root", None),
+        ObjectiveOrigin::Derived { parent } => ("derived", Some(parent.to_string())),
+    }
+}
+
+fn objective_cause_columns(
+    cause: &ObjectiveTransitionCause,
+) -> (&'static str, Option<String>, Option<String>) {
+    match cause {
+        ObjectiveTransitionCause::UserIntent => ("user_intent", None, None),
+        ObjectiveTransitionCause::AgentAction { execution_id } => {
+            ("agent_action", Some(execution_id.to_string()), None)
+        }
+        ObjectiveTransitionCause::ExecutionOutcome { execution_id } => {
+            ("execution_outcome", Some(execution_id.to_string()), None)
+        }
+        ObjectiveTransitionCause::EvidenceAssessment { evidence_ref } => {
+            ("evidence_assessment", None, Some(evidence_ref.clone()))
+        }
+        ObjectiveTransitionCause::Policy { description } => {
+            ("policy", None, Some(description.clone()))
+        }
+    }
+}
+
+fn objective_state_token(state: &ObjectiveState) -> &'static str {
+    match state {
+        ObjectiveState::Draft => "draft",
+        ObjectiveState::Active => "active",
+        ObjectiveState::Completed => "completed",
+        ObjectiveState::Failed => "failed",
+        ObjectiveState::Invalidated => "invalidated",
+        ObjectiveState::Abandoned => "abandoned",
+        ObjectiveState::Superseded => "superseded",
+    }
+}
+
+fn parse_objective_state(value: &str) -> Result<ObjectiveState, PersistenceError> {
+    match value {
+        "draft" => Ok(ObjectiveState::Draft),
+        "active" => Ok(ObjectiveState::Active),
+        "completed" => Ok(ObjectiveState::Completed),
+        "failed" => Ok(ObjectiveState::Failed),
+        "invalidated" => Ok(ObjectiveState::Invalidated),
+        "abandoned" => Ok(ObjectiveState::Abandoned),
+        "superseded" => Ok(ObjectiveState::Superseded),
+        other => Err(invalid(format!("unknown objective state: {other}"))),
+    }
+}
+
+fn load_objective_criteria(
+    connection: &Connection,
+    table: &str,
+    sequence_column: &str,
+    sequence: i64,
+) -> Result<Vec<ObjectiveCriterion>, PersistenceError> {
+    let sql = format!(
+        "SELECT criterion_id, description, required FROM {table} \
+         WHERE {sequence_column} = ?1 ORDER BY criterion_order"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params![sequence], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (id, description, required) = row?;
+        Ok(ObjectiveCriterion {
+            id: parse_id(
+                id,
+                "objective criterion",
+                phenix_core::ObjectiveCriterionId::parse,
+            )?,
+            description,
+            required: required != 0,
+        })
+    })
+    .collect()
+}
+
+fn load_objective_creation(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<ObjectiveRecord, PersistenceError> {
+    let row = connection.query_row(
+        "SELECT objective_id, workspace_id, origin_kind, parent_objective_id, statement, state,\n                supersedes_objective_id\n         FROM objective_creations WHERE created_sequence = ?1",
+        params![sequence],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        },
+    )?;
+    let origin = match row.2.as_str() {
+        "root" if row.3.is_none() => ObjectiveOrigin::Root,
+        "derived" => ObjectiveOrigin::Derived {
+            parent: parse_id(
+                row.3
+                    .ok_or_else(|| invalid("derived objective has no parent"))?,
+                "objective parent",
+                ObjectiveId::parse,
+            )?,
+        },
+        other => return Err(invalid(format!("invalid objective origin: {other}"))),
+    };
+    Ok(ObjectiveRecord {
+        id: parse_id(row.0, "objective", ObjectiveId::parse)?,
+        workspace: parse_id(row.1, "workspace", WorkspaceId::parse)?,
+        origin,
+        statement: row.4,
+        criteria: load_objective_criteria(
+            connection,
+            "objective_creation_criteria",
+            "created_sequence",
+            sequence,
+        )?,
+        state: parse_objective_state(&row.5)?,
+        supersedes: row
+            .6
+            .map(|id| parse_id(id, "superseded objective", ObjectiveId::parse))
+            .transpose()?,
+    })
+}
+
+fn load_objective_draft_revision(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<ObjectiveRecord, PersistenceError> {
+    let (objective_id, statement) = connection.query_row(
+        "SELECT objective_id, statement FROM objective_draft_revisions WHERE sequence = ?1",
+        params![sequence],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    let objective_id = parse_id(objective_id, "objective", ObjectiveId::parse)?;
+    let creation_sequence = connection.query_row(
+        "SELECT created_sequence FROM objective_creations WHERE objective_id = ?1",
+        params![objective_id.to_string()],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let mut objective = load_objective_creation(connection, creation_sequence)?;
+    objective.statement = statement;
+    objective.criteria = load_objective_criteria(
+        connection,
+        "objective_draft_revision_criteria",
+        "sequence",
+        sequence,
+    )?;
+    objective.state = ObjectiveState::Draft;
+    Ok(objective)
+}
+
+fn load_objective_transition(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<ObjectiveTransition, PersistenceError> {
+    let row = connection.query_row(
+        "SELECT objective_id, from_state, to_state, cause_kind, cause_execution_id, cause_detail\n         FROM objective_state_changes WHERE sequence = ?1",
+        params![sequence],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        },
+    )?;
+    let execution = row
+        .4
+        .map(|id| parse_id(id, "execution", ExecutionId::parse))
+        .transpose()?;
+    let cause = match row.3.as_str() {
+        "user_intent" => ObjectiveTransitionCause::UserIntent,
+        "agent_action" => ObjectiveTransitionCause::AgentAction {
+            execution_id: execution
+                .ok_or_else(|| invalid("agent objective cause has no execution"))?,
+        },
+        "execution_outcome" => ObjectiveTransitionCause::ExecutionOutcome {
+            execution_id: execution
+                .ok_or_else(|| invalid("execution outcome objective cause has no execution"))?,
+        },
+        "evidence_assessment" => ObjectiveTransitionCause::EvidenceAssessment {
+            evidence_ref: row
+                .5
+                .ok_or_else(|| invalid("evidence objective cause has no reference"))?,
+        },
+        "policy" => ObjectiveTransitionCause::Policy {
+            description: row
+                .5
+                .ok_or_else(|| invalid("policy objective cause has no description"))?,
+        },
+        other => return Err(invalid(format!("unknown objective cause: {other}"))),
+    };
+    Ok(ObjectiveTransition {
+        objective_id: parse_id(row.0, "objective", ObjectiveId::parse)?,
+        from: parse_objective_state(&row.1)?,
+        to: parse_objective_state(&row.2)?,
+        cause,
+    })
+}
+
+fn load_execution_objective_assignment(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<ExecutionObjectiveAssignment, PersistenceError> {
+    let (execution, primary) = connection.query_row(
+        "SELECT execution_id, primary_objective_id FROM execution_objective_assignments\n         WHERE sequence = ?1",
+        params![sequence],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    let mut statement = connection.prepare(
+        "SELECT objective_id FROM execution_supporting_objectives\n         WHERE sequence = ?1 ORDER BY objective_id",
+    )?;
+    let supporting = statement
+        .query_map(params![sequence], |row| row.get::<_, String>(0))?
+        .map(|row| parse_id(row?, "supporting objective", ObjectiveId::parse))
+        .collect::<Result<BTreeSet<_>, PersistenceError>>()?;
+    Ok(ExecutionObjectiveAssignment {
+        execution_id: parse_id(execution, "execution", ExecutionId::parse)?,
+        primary: parse_id(primary, "primary objective", ObjectiveId::parse)?,
+        supporting,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2503,7 +2906,8 @@ mod tests {
         let error = apply_migration(
             &mut connection,
             1,
-            "CREATE TABLE migration_probe(value INTEGER);\n             INSERT INTO missing_table(value) VALUES (1);",
+            "CREATE TABLE migration_probe(value INTEGER);
+             INSERT INTO missing_table(value) VALUES (1);",
         )
         .unwrap_err();
         assert!(matches!(error, PersistenceError::Sql(_)));

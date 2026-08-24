@@ -240,3 +240,13 @@ The runtime migration follows these dependency boundaries:
 5. SQLite persistence, durable multi-client ingress, configuration rebasing, and debug export.
 
 Each slice must leave one canonical contract. Transitional duplicate APIs must not become public compatibility layers.
+
+## Durable objectives
+
+The conductor owns workspace objective semantics. Root objectives originate only at the explicit user-input boundary. Derived objectives may be created by conductor-mediated agent work. A derived objective is mutable only while it is a draft; activation freezes its statement and criteria. Later semantic changes create new objectives and explicit supersession rather than rewriting enacted history.
+
+Objective creation, draft revision, criterion evidence, lifecycle transitions, and execution assignments are immutable domain events. Objective replay is validated before the aggregate runtime is restored. Completion is valid only when every required criterion has durable evidence. Lifecycle cause provenance is validated at write and replay time: execution-backed causes name recorded executions, and evidence or policy causes carry non-empty material.
+
+Every execution created after objective semantics activate has exactly one primary objective and may have supporting objectives. Child executions inherit their parent's assignment unless an explicit conductor operation creates and assigns a more specific derived objective. On the first objective-capable operation against a pre-objective workspace journal, the conductor records the activation boundary and durably derives missing assignments from the recorded root user input and parent execution lineage. No backend conversation state is used for recovery.
+
+SQLite schema migrations store objective facts relationally. The journal remains the ordered semantic history; the workspace database remains the authoritative durable representation and reconstructs the same typed events without JSON event replay.
