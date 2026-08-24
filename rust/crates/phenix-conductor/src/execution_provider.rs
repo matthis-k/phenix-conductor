@@ -1,8 +1,8 @@
 use crate::{CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload};
 use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
-    ContextInjectionRequester, ContextResourceId, ContextResourceRevision, ContextRevision,
-    ExecutionId, ExecutionState, SessionId,
+    ContextInjectionRequester, ContextResourceId, ContextResourceKind, ContextResourceRevision,
+    ContextRevision, ExecutionId, ExecutionState, SessionId, SkillInvocationPolicy,
 };
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
@@ -172,8 +172,8 @@ impl ConductorRuntime {
                 crate::ObjectiveError::MissingExecutionObjective(execution_id.clone()).into(),
             );
         }
-        let resource = self
-            .configuration_for_execution(execution_id)?
+        let configuration = self.configuration_for_execution(execution_id)?;
+        let resource = configuration
             .context_catalog()
             .resolve_revision(resource_id, requested_revision)
             .map_err(|error| ConductorError::InvalidExecutionData {
@@ -181,6 +181,26 @@ impl ConductorRuntime {
                 message: error.to_string(),
             })?
             .clone();
+        if requested_by == ContextInjectionRequester::Agent
+            && resource.descriptor.kind == ContextResourceKind::Skill
+        {
+            let skill = configuration
+                .skill_descriptors()
+                .into_iter()
+                .find(|skill| {
+                    resource.descriptor.id.as_str() == format!("skill:{}", skill.id.as_str())
+                })
+                .ok_or_else(|| ConductorError::InvalidExecutionData {
+                    execution_id: execution_id.clone(),
+                    message: format!(
+                        "skill context resource {} has no configured skill descriptor",
+                        resource.descriptor.id
+                    ),
+                })?;
+            if skill.invocation == SkillInvocationPolicy::ManualOnly {
+                return Err(crate::ContextError::ManualOnlySkill(skill.id).into());
+            }
+        }
         let injection = ContextInjection {
             execution_id: execution_id.clone(),
             source_ref: resource.source_ref.clone(),
