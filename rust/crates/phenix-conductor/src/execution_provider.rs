@@ -1,5 +1,9 @@
 use crate::{CallableOperation, ConductorError, ConductorRuntime, ExecutionPayload};
-use phenix_core::{CallableId, ConfigRevisionId, ExecutionId, ExecutionState, SessionId};
+use phenix_core::{
+    CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
+    ContextInjectionRequester, ContextResourceId, ContextResourceRevision, ContextRevision,
+    ExecutionId, ExecutionState, SessionId,
+};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
 
@@ -150,5 +154,35 @@ impl ConductorRuntime {
             objective: input,
         };
         Ok((provider, request))
+    }
+
+    pub fn load_context_for_execution(
+        &mut self,
+        execution_id: &ExecutionId,
+        resource_id: &ContextResourceId,
+        requested_revision: &ContextRevision,
+        requested_by: ContextInjectionRequester,
+        lifetime: ContextInjectionLifetime,
+        reason: impl Into<String>,
+    ) -> Result<(ContextResourceRevision, ContextInjection), ConductorError> {
+        let resource = self
+            .configuration_for_execution(execution_id)?
+            .context_catalog()
+            .resolve_revision(resource_id, requested_revision)
+            .map_err(|error| ConductorError::InvalidExecutionData {
+                execution_id: execution_id.clone(),
+                message: error.to_string(),
+            })?
+            .clone();
+        let injection = ContextInjection {
+            execution_id: execution_id.clone(),
+            source_ref: resource.source_ref.clone(),
+            source_revision: resource.descriptor.revision.clone(),
+            requested_by,
+            reason: reason.into(),
+            lifetime,
+            content_identity: resource.content_identity.clone(),
+        };
+        Ok((resource, injection))
     }
 }
