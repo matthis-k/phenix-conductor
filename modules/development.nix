@@ -24,10 +24,9 @@
         name = "Source";
         timeoutMinutes = 20;
       };
-      rustCi = {
+      mkRustCi = stage: name: {
         enable = true;
-        stage = "rust";
-        name = "Rust";
+        inherit stage name;
         timeoutMinutes = 60;
         needs = [ "source" ];
         env = {
@@ -142,7 +141,6 @@
             name = target.id;
             value = {
               description = target.label;
-              ci = false;
               runtimeInputs = pkgs: [
                 pkgs.cargo
                 pkgs.git
@@ -163,6 +161,55 @@
             run_check '${boundary}: ${target.label}' "$0" test ${boundary} ${target.id}
           '') targets
         );
+
+      mkRustGroupCommand =
+        {
+          stage,
+          name,
+          boundary,
+          targets,
+        }:
+        {
+          description = "Run all ${boundary} Rust tests before reporting failures";
+          ci = (mkRustCi stage name) // {
+            stepName = name;
+          };
+          runtimeInputs = pkgs: [
+            pkgs.coreutils
+            pkgs.git
+          ];
+          exec = ''
+            ${repositoryRoot}
+            failures=()
+
+            run_check() {
+              local label="$1"
+              shift
+              local status
+
+              printf '::group::%s\n' "$label"
+              if "$@"; then
+                status=0
+              else
+                status=$?
+              fi
+              printf '::endgroup::\n'
+
+              if (( status != 0 )); then
+                printf '::error title=Rust CI failure::%s failed with exit code %s\n' "$label" "$status"
+                failures+=("$label (exit $status)")
+              fi
+            }
+
+            ${mkRustCiRuns boundary targets}
+
+            if (( ''${#failures[@]} > 0 )); then
+              printf '\nRust CI failures:\n' >&2
+              printf '  - %s\n' "''${failures[@]}" >&2
+              exit 1
+            fi
+          '';
+        };
 
       expectedCargoTargetLines = builtins.concatStringsSep "\n" (
         builtins.map (target: "printf '%s\\t%s\\n' '${target.package}' '${target.test}'") cargoTestTargets
@@ -360,7 +407,6 @@
 
               rust = {
                 description = "Rust static analysis with Clippy";
-                ci = false;
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.clippy
@@ -376,49 +422,65 @@
           };
 
           rust-ci = {
-            description = "Run every Rust CI check before reporting failures";
-            ci = rustCi // {
-              stepName = "Rust validation";
-            };
-            runtimeInputs = pkgs: [
-              pkgs.coreutils
-              pkgs.git
+            description = "Run Rust CI by independent failure boundary";
+            order = [
+              "clippy"
+              "unit"
+              "doc"
+              "integration"
+              "system"
             ];
-            exec = ''
-              ${repositoryRoot}
-              failures=()
+            commands = {
+              clippy = {
+                description = "Rust static analysis with Clippy";
+                ci = (mkRustCi "rust-clippy" "Rust / Clippy") // {
+                  stepName = "Clippy";
+                };
+                runtimeInputs = pkgs: [ pkgs.git ];
+                exec = ''
+                  ${repositoryRoot}
+                  "$0" check rust
+                '';
+              };
 
-              run_check() {
-                local label="$1"
-                shift
-                local status
+              unit = {
+                description = "In-crate library and binary tests";
+                ci = (mkRustCi "rust-unit" "Rust / Unit") // {
+                  stepName = "Unit tests";
+                };
+                runtimeInputs = pkgs: [ pkgs.git ];
+                exec = ''
+                  ${repositoryRoot}
+                  "$0" test unit
+                '';
+              };
 
-                printf '::group::%s\n' "$label"
-                if "$@"; then
-                  status=0
-                else
-                  status=$?
-                fi
-                printf '::endgroup::\n'
+              doc = {
+                description = "Rust documentation tests";
+                ci = (mkRustCi "rust-doc" "Rust / Docs") // {
+                  stepName = "Doc tests";
+                };
+                runtimeInputs = pkgs: [ pkgs.git ];
+                exec = ''
+                  ${repositoryRoot}
+                  "$0" test doc
+                '';
+              };
 
-                if (( status != 0 )); then
-                  printf '::error title=Rust CI failure::%s failed with exit code %s\n' "$label" "$status"
-                  failures+=("$label (exit $status)")
-                fi
-              }
+              integration = mkRustGroupCommand {
+                stage = "rust-integration";
+                name = "Rust / Integration";
+                boundary = "integration";
+                targets = integrationTargets;
+              };
 
-              run_check 'Clippy' "$0" check rust
-              run_check 'Unit tests' "$0" test unit
-              run_check 'Doc tests' "$0" test doc
-              ${mkRustCiRuns "integration" integrationTargets}
-              ${mkRustCiRuns "system" systemTargets}
-
-              if (( ''${#failures[@]} > 0 )); then
-                printf '\nRust CI failures:\n' >&2
-                printf '  - %s\n' "''${failures[@]}" >&2
-                exit 1
-              fi
-            '';
+              system = mkRustGroupCommand {
+                stage = "rust-system";
+                name = "Rust / System";
+                boundary = "system";
+                targets = systemTargets;
+              };
+            };
           };
 
           test = {
@@ -433,7 +495,6 @@
             commands = {
               unit = {
                 description = "In-crate library and binary tests";
-                ci = false;
                 runtimeInputs = pkgs: [
                   pkgs.bash
                   pkgs.bubblewrap
@@ -466,7 +527,6 @@
 
               doc = {
                 description = "Rust documentation tests";
-                ci = false;
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.git
