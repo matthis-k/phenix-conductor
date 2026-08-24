@@ -1,4 +1,7 @@
-use phenix_conductor::{CompiledConfiguration, ConductorRuntime, ContextRegistry, SkillRegistry};
+use phenix_conductor::{
+    CompiledConfiguration, ConductorError, ConductorRuntime, ContextRegistry, ObjectiveError,
+    SkillRegistry,
+};
 use phenix_core::{
     BackendId, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId,
     ExactReference, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
@@ -104,18 +107,22 @@ fn objective_lifetime_requires_an_objective_bound_to_the_execution() {
         .find(|descriptor| descriptor.id == id)
         .unwrap();
 
-    let result = runtime.load_context_for_execution(
-        &execution.id,
-        &id,
-        &descriptor.revision,
-        ContextInjectionRequester::Agent,
-        ContextInjectionLifetime::Objective,
-        "agent requested objective-lifetime context without an objective",
-    );
+    let error = runtime
+        .load_context_for_execution(
+            &execution.id,
+            &id,
+            &descriptor.revision,
+            ContextInjectionRequester::Agent,
+            ContextInjectionLifetime::Objective,
+            "agent requested objective-lifetime context without an objective",
+        )
+        .expect_err("objective-lifetime context must require a primary objective");
 
-    assert!(
-        result.is_err(),
-        "objective-lifetime context must be rejected when the execution has no objective"
+    assert_eq!(
+        error,
+        ConductorError::Objective(ObjectiveError::MissingExecutionObjective(
+            execution.id.clone()
+        ))
     );
 
     fs::remove_dir_all(root).unwrap();
