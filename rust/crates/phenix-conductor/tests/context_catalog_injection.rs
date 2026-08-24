@@ -1,7 +1,4 @@
-use phenix_conductor::{
-    CompiledConfiguration, ConductorError, ConductorRuntime, ContextRegistry, ObjectiveError,
-    SkillRegistry,
-};
+use phenix_conductor::{CompiledConfiguration, ConductorRuntime, ContextRegistry, SkillRegistry};
 use phenix_core::{
     BackendId, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId,
     ExactReference, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
@@ -85,7 +82,7 @@ fn execution_loads_exact_project_context_and_records_the_injection() {
 }
 
 #[test]
-fn objective_lifetime_requires_an_objective_bound_to_the_execution() {
+fn objective_lifetime_uses_the_execution_primary_objective() {
     let root = fixture_root();
     fs::create_dir_all(root.join(".git")).unwrap();
     write(root.join("CONTRIBUTING.md"), "objective-scoped context");
@@ -98,6 +95,10 @@ fn objective_lifetime_requires_an_objective_bound_to_the_execution() {
     let execution = runtime
         .submit(&session.id, "load objective-scoped context")
         .unwrap();
+    let objective_assignment = runtime
+        .execution_objectives(&execution.id)
+        .unwrap()
+        .expect("root execution must have a primary objective");
 
     let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
     let descriptor = runtime
@@ -107,22 +108,23 @@ fn objective_lifetime_requires_an_objective_bound_to_the_execution() {
         .find(|descriptor| descriptor.id == id)
         .unwrap();
 
-    let error = runtime
+    let (resource, injection) = runtime
         .load_context_for_execution(
             &execution.id,
             &id,
             &descriptor.revision,
             ContextInjectionRequester::Agent,
             ContextInjectionLifetime::Objective,
-            "agent requested objective-lifetime context without an objective",
+            "agent requested objective-lifetime context",
         )
-        .expect_err("objective-lifetime context must require a primary objective");
+        .unwrap();
 
+    assert_eq!(resource.descriptor, descriptor);
+    assert_eq!(injection.execution_id, execution.id);
+    assert_eq!(injection.lifetime, ContextInjectionLifetime::Objective);
     assert_eq!(
-        error,
-        ConductorError::Objective(ObjectiveError::MissingExecutionObjective(
-            execution.id.clone()
-        ))
+        runtime.execution_objectives(&execution.id).unwrap(),
+        Some(objective_assignment)
     );
 
     fs::remove_dir_all(root).unwrap();
