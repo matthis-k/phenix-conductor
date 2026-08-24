@@ -35,6 +35,9 @@
           CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
         };
       };
+      rustCiLeaf = {
+        enable = false;
+      };
       productCi = {
         enable = true;
         stage = "product";
@@ -142,9 +145,7 @@
             name = target.id;
             value = {
               description = target.label;
-              ci = rustCi // {
-                stepName = target.label;
-              };
+              ci = rustCiLeaf;
               runtimeInputs = pkgs: [
                 pkgs.cargo
                 pkgs.git
@@ -156,6 +157,16 @@
               '';
             };
           }) targets
+        );
+
+      mkRustCiRuns =
+        boundary: targets:
+        builtins.concatStringsSep "\n" (
+          builtins.map (
+            target: ''
+              run_check '${boundary}: ${target.label}' "$0" test ${boundary} ${target.id}
+            ''
+          ) targets
         );
 
       expectedCargoTargetLines = builtins.concatStringsSep "\n" (
@@ -354,9 +365,7 @@
 
               rust = {
                 description = "Rust static analysis with Clippy";
-                ci = rustCi // {
-                  stepName = "Clippy";
-                };
+                ci = rustCiLeaf;
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.clippy
@@ -371,6 +380,79 @@
             };
           };
 
+          fix = {
+            description = "Apply deterministic Nix and Rust normalization";
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.findutils
+              pkgs.git
+              pkgs.nixfmt
+              pkgs.rustfmt
+              pkgs.statix
+            ];
+            exec = ''
+              ${repositoryRoot}
+
+              statix fix
+
+              find . -type f -name '*.nix' \
+                -not -path './.git/*' \
+                -print0 |
+                xargs -0 -r nixfmt
+
+              (
+                cd rust
+                cargo fmt --all
+              )
+            '';
+          };
+
+          rust-ci = {
+            description = "Run every Rust CI check before reporting failures";
+            ci = rustCi // {
+              stepName = "Rust validation";
+            };
+            runtimeInputs = pkgs: [
+              pkgs.coreutils
+              pkgs.git
+            ];
+            exec = ''
+              ${repositoryRoot}
+              failures=()
+
+              run_check() {
+                local label="$1"
+                shift
+                local status
+
+                printf '::group::%s\n' "$label"
+                if "$@"; then
+                  status=0
+                else
+                  status=$?
+                fi
+                printf '::endgroup::\n'
+
+                if (( status != 0 )); then
+                  printf '::error title=Rust CI failure::%s failed with exit code %s\n' "$label" "$status"
+                  failures+=("$label (exit $status)")
+                fi
+              }
+
+              run_check 'Clippy' "$0" check rust
+              run_check 'Unit tests' "$0" test unit
+              run_check 'Doc tests' "$0" test doc
+              ${mkRustCiRuns "integration" integrationTargets}
+              ${mkRustCiRuns "system" systemTargets}
+
+              if (( ''${#failures[@]} > 0 )); then
+                printf '\nRust CI failures:\n' >&2
+                printf '  - %s\n' "''${failures[@]}" >&2
+                exit 1
+              fi
+            '';
+          };
+
           test = {
             description = "Run tests by architectural boundary";
             order = [
@@ -383,9 +465,7 @@
             commands = {
               unit = {
                 description = "In-crate library and binary tests";
-                ci = rustCi // {
-                  stepName = "Unit tests";
-                };
+                ci = rustCiLeaf;
                 runtimeInputs = pkgs: [
                   pkgs.bash
                   pkgs.bubblewrap
@@ -418,9 +498,7 @@
 
               doc = {
                 description = "Rust documentation tests";
-                ci = rustCi // {
-                  stepName = "Doc tests";
-                };
+                ci = rustCiLeaf;
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.git
@@ -470,33 +548,6 @@
                 };
               };
             };
-          };
-
-          fix = {
-            description = "Apply deterministic Nix and Rust normalization";
-            runtimeInputs = pkgs: [
-              pkgs.cargo
-              pkgs.findutils
-              pkgs.git
-              pkgs.nixfmt
-              pkgs.rustfmt
-              pkgs.statix
-            ];
-            exec = ''
-              ${repositoryRoot}
-
-              statix fix
-
-              find . -type f -name '*.nix' \
-                -not -path './.git/*' \
-                -print0 |
-                xargs -0 -r nixfmt
-
-              (
-                cd rust
-                cargo fmt --all
-              )
-            '';
           };
         };
       };
