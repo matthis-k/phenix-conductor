@@ -86,7 +86,7 @@ fn skills_are_exact_revisioned_context_catalog_resources() {
 }
 
 #[test]
-fn agent_requester_cannot_load_manual_only_skill() {
+fn manual_only_skill_requires_user_requester() {
     let root = fixture_root();
     fs::create_dir_all(root.join(".git")).unwrap();
     write(
@@ -109,16 +109,37 @@ fn agent_requester_cannot_load_manual_only_skill() {
         .submit(&session.id, "inspect review guidance")
         .unwrap();
 
-    assert!(runtime
+    for requester in [
+        ContextInjectionRequester::Agent,
+        ContextInjectionRequester::Orchestration,
+        ContextInjectionRequester::ContextPolicy,
+        ContextInjectionRequester::Hook,
+        ContextInjectionRequester::Frontend,
+    ] {
+        assert!(runtime
+            .load_context_for_execution(
+                &execution.id,
+                &id,
+                &revision,
+                requester,
+                ContextInjectionLifetime::SingleRequest,
+                "non-user requested manual-only skill",
+            )
+            .is_err());
+    }
+
+    let (resource, injection) = runtime
         .load_context_for_execution(
             &execution.id,
             &id,
             &revision,
-            ContextInjectionRequester::Agent,
+            ContextInjectionRequester::User,
             ContextInjectionLifetime::SingleRequest,
-            "agent requested manual-only skill",
+            "user explicitly requested manual-only skill",
         )
-        .is_err());
+        .unwrap();
+    assert_eq!(resource.descriptor.id, id);
+    assert_eq!(injection.requested_by, ContextInjectionRequester::User);
 
     fs::remove_dir_all(root).unwrap();
 }
