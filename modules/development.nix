@@ -24,18 +24,16 @@
         name = "Source";
         timeoutMinutes = 20;
       };
-      mkRustCi =
-        stage: name:
-        {
-          enable = true;
-          inherit stage name;
-          timeoutMinutes = 60;
-          needs = [ "source" ];
-          env = {
-            CARGO_HOME = "\${{ runner.temp }}/phenix-cargo-home";
-            CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
-          };
+      mkRustCi = stage: name: {
+        enable = true;
+        inherit stage name;
+        timeoutMinutes = 60;
+        needs = [ "source" ];
+        env = {
+          CARGO_HOME = "\${{ runner.temp }}/phenix-cargo-home";
+          CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
         };
+      };
       productCi = {
         enable = true;
         stage = "product";
