@@ -181,7 +181,7 @@ impl ConductorRuntime {
                 message: error.to_string(),
             })?
             .clone();
-        if requested_by == ContextInjectionRequester::Agent
+        if requested_by != ContextInjectionRequester::User
             && resource.descriptor.kind == ContextResourceKind::Skill
         {
             let skill = configuration
