@@ -1,7 +1,8 @@
 use phenix_conductor::{CompiledConfiguration, ConductorRuntime, ContextRegistry, SkillRegistry};
 use phenix_core::{
     BackendId, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId,
-    ExactReference, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
+    ExactReference, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId, ModelTarget,
+    ProviderId, RepositoryAuthority,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -77,6 +78,52 @@ fn execution_loads_exact_project_context_and_records_the_injection() {
     assert_eq!(injection.content_identity, resource.content_identity);
     assert_eq!(injection.requested_by, ContextInjectionRequester::Agent);
     assert_eq!(injection.lifetime, ContextInjectionLifetime::SingleRequest);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn path_context_load_preserves_execution_authority() {
+    let root = fixture_root();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    write(root.join("CONTRIBUTING.md"), "read-scoped project context");
+
+    let mut runtime = ConductorRuntime::new();
+    runtime
+        .reload_configuration(configuration_for(&root))
+        .unwrap();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let execution = runtime
+        .submit(&session.id, "load context without authority escalation")
+        .unwrap();
+    let authority_before = runtime.execution_authority(&execution.id).unwrap();
+    assert_eq!(authority_before.filesystem, FilesystemAuthority::ReadOnly);
+    assert_eq!(authority_before.repository, RepositoryAuthority::Read);
+
+    let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
+    let descriptor = runtime
+        .context_descriptors_for_execution(&execution.id)
+        .unwrap()
+        .into_iter()
+        .find(|descriptor| descriptor.id == id)
+        .unwrap();
+
+    runtime
+        .load_context_for_execution(
+            &execution.id,
+            &id,
+            &descriptor.revision,
+            ContextInjectionRequester::Agent,
+            ContextInjectionLifetime::SingleRequest,
+            "load configured path context under existing read authority",
+        )
+        .unwrap();
+
+    assert_eq!(
+        runtime.execution_authority(&execution.id).unwrap(),
+        authority_before,
+        "loading configured context must not expand filesystem, repository, or callable authority"
+    );
 
     fs::remove_dir_all(root).unwrap();
 }
