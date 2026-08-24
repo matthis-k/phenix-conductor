@@ -1,3 +1,6 @@
+#[path = "plan_relational.rs"]
+mod plan_relational;
+
 use crate::{
     journal::{apply_domain_event, DurableProjection},
     ConductorRuntime, ConfigRevisionFingerprint, ConfigRevisionSlot, DomainEvent,
@@ -21,7 +24,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 5;
+const DATABASE_SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -197,6 +200,7 @@ fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
             include_str!("../../migrations/0004_language_observations.sql"),
         ),
         (5, include_str!("../../migrations/0005_objectives.sql")),
+        (6, include_str!("../../migrations/0006_plans.sql")),
     ] {
         if version < target {
             apply_migration(connection, target, sql)?;
@@ -315,6 +319,11 @@ fn event_type(event: &DomainEvent) -> &'static str {
         DomainEvent::ObjectiveEvidenceRecorded { .. } => "objective_evidence_recorded",
         DomainEvent::ObjectiveStateChanged { .. } => "objective_state_changed",
         DomainEvent::ExecutionObjectivesAssigned { .. } => "execution_objectives_assigned",
+        DomainEvent::PlanCreated { .. } => "plan_created",
+        DomainEvent::PlanDraftRevised { .. } => "plan_draft_revised",
+        DomainEvent::PlanStateChanged { .. } => "plan_state_changed",
+        DomainEvent::PlanStepStateChanged { .. } => "plan_step_state_changed",
+        DomainEvent::ExecutionPlanAssigned { .. } => "execution_plan_assigned",
         DomainEvent::InvocationResolved { .. } => "invocation_resolved",
         DomainEvent::WorkspaceCheckpointCaptured { .. } => "workspace_checkpoint_captured",
         DomainEvent::WorkspaceFileObserved { .. } => "workspace_file_observed",
@@ -708,6 +717,13 @@ fn insert_event(
                     params![sequence, objective.to_string()],
                 )?;
             }
+        }
+        event @ (DomainEvent::PlanCreated { .. }
+        | DomainEvent::PlanDraftRevised { .. }
+        | DomainEvent::PlanStateChanged { .. }
+        | DomainEvent::PlanStepStateChanged { .. }
+        | DomainEvent::ExecutionPlanAssigned { .. }) => {
+            plan_relational::insert_event(transaction, sequence, event)?;
         }
         DomainEvent::InvocationResolved {
             execution_id,
@@ -1468,6 +1484,13 @@ fn load_event(
         "execution_objectives_assigned" => Ok(DomainEvent::ExecutionObjectivesAssigned {
             assignment: load_execution_objective_assignment(connection, sequence)?,
         }),
+        "plan_created"
+        | "plan_draft_revised"
+        | "plan_state_changed"
+        | "plan_step_state_changed"
+        | "execution_plan_assigned" => {
+            plan_relational::load_event(connection, sequence, event_type)
+        }
         "invocation_resolved" => load_invocation_resolved(connection, sequence),
         "workspace_checkpoint_captured" => load_checkpoint(connection, sequence),
         "workspace_file_observed" => load_observation(connection, sequence),
