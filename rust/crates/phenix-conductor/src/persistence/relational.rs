@@ -7,15 +7,18 @@ use crate::{
     JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
 use phenix_core::{
-    AttemptGroup, AttemptGroupId, BackendId, CallableId, DiagnosticWritePatch, ExecutionAuthority,
-    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionObjectiveAssignment,
-    ExecutionState, ExecutionSummary, ExecutionTarget, ExecutionTerminationCause,
-    FailureAttemptSummary, FileKind, FileObservation, FileVersion, FilesystemAuthority,
-    InferenceEffort, InferenceOptions, ModelId, ModelTarget, NetworkAuthority, ObjectiveCriterion,
+    AttemptGroup, AttemptGroupId, BackendId, CallableId, ContextInjection,
+    ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId, ContextRevision,
+    DiagnosticWritePatch, ExactReference, ExecutionAuthority, ExecutionEvent, ExecutionEventKind,
+    ExecutionId, ExecutionKind, ExecutionObjectiveAssignment, ExecutionState, ExecutionSummary,
+    ExecutionTarget, ExecutionTerminationCause, FailureAttemptSummary, FileKind, FileObservation,
+    FileObservationId, FileVersion, FilesystemAuthority, InferenceEffort, InferenceOptions,
+    LanguageObservationId, ModelId, ModelTarget, NetworkAuthority, ObjectiveCriterion,
     ObjectiveCriterionEvidence, ObjectiveId, ObjectiveOrigin, ObjectiveRecord, ObjectiveState,
     ObjectiveTransition, ObjectiveTransitionCause, OrchestrationFailureDecision,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, ProviderId, RepositoryAuthority,
-    RoutingProfileId, SessionId, SessionState, SessionSummary, ToolCallId, WorkspaceId,
+    OrchestrationFailureDecisionRecord, OrchestrationNodeId, PlanId, ProviderId,
+    RepositoryAuthority, RoutingProfileId, SessionId, SessionState, SessionSummary, ToolCallId,
+    WorkspaceId,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{Map, Number, Value};
@@ -24,7 +27,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 6;
+const DATABASE_SCHEMA_VERSION: i64 = 7;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -201,6 +204,10 @@ fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
         ),
         (5, include_str!("../../migrations/0005_objectives.sql")),
         (6, include_str!("../../migrations/0006_plans.sql")),
+        (
+            7,
+            include_str!("../../migrations/0007_context_injections.sql"),
+        ),
     ] {
         if version < target {
             apply_migration(connection, target, sql)?;
@@ -313,6 +320,7 @@ fn event_type(event: &DomainEvent) -> &'static str {
         DomainEvent::ExecutionOutputRecorded { .. } => "execution_output_recorded",
         DomainEvent::DiagnosticWritePatchCaptured { .. } => "diagnostic_write_patch_captured",
         DomainEvent::LanguageObservationRecorded { .. } => "language_observation_recorded",
+        DomainEvent::ContextInjectionRecorded { .. } => "context_injection_recorded",
         DomainEvent::ObjectiveSemanticsActivated => "objective_semantics_activated",
         DomainEvent::ObjectiveCreated { .. } => "objective_created",
         DomainEvent::ObjectiveDraftRevised { .. } => "objective_draft_revised",
@@ -622,6 +630,28 @@ fn insert_event(
                     sql_u64(observation.provider_epoch, "language provider epoch")?,
                     operation,
                     result,
+                ],
+            )?;
+        }
+        DomainEvent::ContextInjectionRecorded { injection } => {
+            let (source_kind, source_id, source_event_sequence) =
+                context_source_columns(&injection.source_ref)?;
+            transaction.execute(
+                "INSERT INTO context_injections(
+                     recorded_sequence, execution_id, source_kind, source_id, source_event_sequence,
+                     source_revision, requester, reason, lifetime, content_identity
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    sequence,
+                    injection.execution_id.to_string(),
+                    source_kind,
+                    source_id,
+                    source_event_sequence,
+                    injection.source_revision.to_string(),
+                    context_requester_token(&injection.requested_by),
+                    injection.reason.as_str(),
+                    context_lifetime_token(&injection.lifetime),
+                    injection.content_identity.to_string(),
                 ],
             )?;
         }
@@ -1160,6 +1190,133 @@ fn termination_columns(cause: &ExecutionTerminationCause) -> (&'static str, &Exe
     }
 }
 
+fn context_source_columns(
+    source: &ExactReference,
+) -> Result<(&'static str, Option<String>, Option<i64>), PersistenceError> {
+    match source {
+        ExactReference::Objective(id) => Ok(("objective", Some(id.to_string()), None)),
+        ExactReference::Plan(id) => Ok(("plan", Some(id.to_string()), None)),
+        ExactReference::Execution(id) => Ok(("execution", Some(id.to_string()), None)),
+        ExactReference::Event(sequence) => Ok((
+            "event",
+            None,
+            Some(sql_u64(*sequence, "context source event sequence")?),
+        )),
+        ExactReference::FileObservation(id) => Ok(("file_observation", Some(id.to_string()), None)),
+        ExactReference::LanguageObservation(id) => {
+            Ok(("language_observation", Some(id.to_string()), None))
+        }
+        ExactReference::Context(id) => Ok(("context", Some(id.to_string()), None)),
+    }
+}
+
+fn context_source_id(
+    id: Option<String>,
+    event_sequence: Option<i64>,
+    kind: &str,
+) -> Result<String, PersistenceError> {
+    if event_sequence.is_some() {
+        return Err(invalid(format!(
+            "context {kind} source must not contain an event sequence"
+        )));
+    }
+    required_column(id, "context source id")
+}
+
+fn parse_context_source(
+    kind: &str,
+    id: Option<String>,
+    event_sequence: Option<i64>,
+) -> Result<ExactReference, PersistenceError> {
+    match kind {
+        "objective" => Ok(ExactReference::Objective(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context objective source",
+            ObjectiveId::parse,
+        )?)),
+        "plan" => Ok(ExactReference::Plan(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context plan source",
+            PlanId::parse,
+        )?)),
+        "execution" => Ok(ExactReference::Execution(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context execution source",
+            ExecutionId::parse,
+        )?)),
+        "event" => {
+            if id.is_some() {
+                return Err(invalid("context event source must not contain a source id"));
+            }
+            Ok(ExactReference::Event(runtime_u64(
+                event_sequence
+                    .ok_or_else(|| invalid("context event source is missing its sequence"))?,
+                "context source event sequence",
+            )?))
+        }
+        "file_observation" => Ok(ExactReference::FileObservation(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context file observation source",
+            FileObservationId::parse,
+        )?)),
+        "language_observation" => Ok(ExactReference::LanguageObservation(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context language observation source",
+            LanguageObservationId::parse,
+        )?)),
+        "context" => Ok(ExactReference::Context(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context resource source",
+            ContextResourceId::parse,
+        )?)),
+        other => Err(invalid(format!("unknown context source kind: {other}"))),
+    }
+}
+
+fn context_requester_token(requester: &ContextInjectionRequester) -> &'static str {
+    match requester {
+        ContextInjectionRequester::Agent => "agent",
+        ContextInjectionRequester::User => "user",
+        ContextInjectionRequester::Orchestration => "orchestration",
+        ContextInjectionRequester::ContextPolicy => "context_policy",
+        ContextInjectionRequester::Hook => "hook",
+        ContextInjectionRequester::Frontend => "frontend",
+    }
+}
+
+fn parse_context_requester(value: &str) -> Result<ContextInjectionRequester, PersistenceError> {
+    match value {
+        "agent" => Ok(ContextInjectionRequester::Agent),
+        "user" => Ok(ContextInjectionRequester::User),
+        "orchestration" => Ok(ContextInjectionRequester::Orchestration),
+        "context_policy" => Ok(ContextInjectionRequester::ContextPolicy),
+        "hook" => Ok(ContextInjectionRequester::Hook),
+        "frontend" => Ok(ContextInjectionRequester::Frontend),
+        other => Err(invalid(format!(
+            "unknown context injection requester: {other}"
+        ))),
+    }
+}
+
+fn context_lifetime_token(lifetime: &ContextInjectionLifetime) -> &'static str {
+    match lifetime {
+        ContextInjectionLifetime::SingleRequest => "single_request",
+        ContextInjectionLifetime::Execution => "execution",
+        ContextInjectionLifetime::Objective => "objective",
+    }
+}
+
+fn parse_context_lifetime(value: &str) -> Result<ContextInjectionLifetime, PersistenceError> {
+    match value {
+        "single_request" => Ok(ContextInjectionLifetime::SingleRequest),
+        "execution" => Ok(ContextInjectionLifetime::Execution),
+        "objective" => Ok(ContextInjectionLifetime::Objective),
+        other => Err(invalid(format!(
+            "unknown context injection lifetime: {other}"
+        ))),
+    }
+}
+
 fn load_entries(connection: &Connection) -> Result<Vec<crate::JournalEntry>, PersistenceError> {
     let mut statement =
         connection.prepare("SELECT sequence, event_type FROM domain_events ORDER BY sequence")?;
@@ -1443,6 +1600,46 @@ fn load_event(
                     provider_epoch: runtime_u64(row.4, "language provider epoch")?,
                     operation,
                     result,
+                },
+            })
+        }
+        "context_injection_recorded" => {
+            let row = connection.query_row(
+                "SELECT execution_id, source_kind, source_id, source_event_sequence,
+                        source_revision, requester, reason, lifetime, content_identity
+                 FROM context_injections WHERE recorded_sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                    ))
+                },
+            )?;
+            Ok(DomainEvent::ContextInjectionRecorded {
+                injection: ContextInjection {
+                    execution_id: parse_id(row.0, "execution", ExecutionId::parse)?,
+                    source_ref: parse_context_source(&row.1, row.2, row.3)?,
+                    source_revision: parse_id(
+                        row.4,
+                        "context source revision",
+                        ContextRevision::parse,
+                    )?,
+                    requested_by: parse_context_requester(&row.5)?,
+                    reason: row.6,
+                    lifetime: parse_context_lifetime(&row.7)?,
+                    content_identity: parse_id(
+                        row.8,
+                        "context content identity",
+                        ContextRevision::parse,
+                    )?,
                 },
             })
         }
@@ -2912,6 +3109,114 @@ mod tests {
             .unwrap();
         runtime.close_session(&session.id).unwrap();
         runtime.journal().clone()
+    }
+
+    #[test]
+    fn context_injections_roundtrip_all_typed_relational_variants() {
+        let (directory, store) = temporary_store("context-injections");
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime
+            .create_session(None, None, fixed_target("context"))
+            .unwrap();
+        let execution = runtime.submit(&session.id, "context persistence").unwrap();
+        let sources = vec![
+            ExactReference::Objective(ObjectiveId::parse("objective-source").unwrap()),
+            ExactReference::Plan(PlanId::parse("plan-source").unwrap()),
+            ExactReference::Execution(execution.id.clone()),
+            ExactReference::Event(7),
+            ExactReference::FileObservation(FileObservationId::parse("file-source").unwrap()),
+            ExactReference::LanguageObservation(
+                LanguageObservationId::parse("language-source").unwrap(),
+            ),
+            ExactReference::Context(ContextResourceId::parse("context-source").unwrap()),
+        ];
+        let requesters = [
+            ContextInjectionRequester::Agent,
+            ContextInjectionRequester::User,
+            ContextInjectionRequester::Orchestration,
+            ContextInjectionRequester::ContextPolicy,
+            ContextInjectionRequester::Hook,
+            ContextInjectionRequester::Frontend,
+        ];
+        let lifetimes = [
+            ContextInjectionLifetime::SingleRequest,
+            ContextInjectionLifetime::Execution,
+            ContextInjectionLifetime::Objective,
+        ];
+
+        for (index, source_ref) in sources.into_iter().enumerate() {
+            runtime
+                .record_domain_event(DomainEvent::ContextInjectionRecorded {
+                    injection: ContextInjection {
+                        execution_id: execution.id.clone(),
+                        source_ref,
+                        source_revision: ContextRevision::parse(format!("revision-{index}"))
+                            .unwrap(),
+                        requested_by: requesters[index % requesters.len()].clone(),
+                        reason: format!("reason-{index}"),
+                        lifetime: lifetimes[index % lifetimes.len()].clone(),
+                        content_identity: ContextRevision::parse(format!("content-{index}"))
+                            .unwrap(),
+                    },
+                })
+                .unwrap();
+        }
+
+        let journal = runtime.journal().clone();
+        store.save(&journal).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded, journal);
+        ConductorRuntime::restore(loaded).unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn relational_context_injection_rejects_unknown_tokens_and_negative_event_sequences() {
+        let (directory, store) = temporary_store("context-invalid");
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime
+            .create_session(None, None, fixed_target("context-invalid"))
+            .unwrap();
+        let execution = runtime
+            .submit(&session.id, "invalid context persistence")
+            .unwrap();
+        runtime
+            .record_domain_event(DomainEvent::ContextInjectionRecorded {
+                injection: ContextInjection {
+                    execution_id: execution.id.clone(),
+                    source_ref: ExactReference::Context(
+                        ContextResourceId::parse("context-source").unwrap(),
+                    ),
+                    source_revision: ContextRevision::parse("revision").unwrap(),
+                    requested_by: ContextInjectionRequester::Agent,
+                    reason: "reason".to_owned(),
+                    lifetime: ContextInjectionLifetime::Execution,
+                    content_identity: ContextRevision::parse("content").unwrap(),
+                },
+            })
+            .unwrap();
+        store.save(runtime.journal()).unwrap();
+
+        let connection = Connection::open(store.path()).unwrap();
+        connection
+            .execute("UPDATE context_injections SET source_kind = 'unknown'", [])
+            .unwrap();
+        drop(connection);
+        assert!(store.load().is_err());
+
+        std::fs::remove_file(store.path()).unwrap();
+        store.save(runtime.journal()).unwrap();
+        let connection = Connection::open(store.path()).unwrap();
+        connection
+            .execute(
+                "UPDATE context_injections
+                 SET source_kind = 'event', source_id = NULL, source_event_sequence = -1",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        assert!(store.load().is_err());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
