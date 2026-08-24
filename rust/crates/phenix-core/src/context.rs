@@ -1,4 +1,4 @@
-use super::{ConfigRevisionId, ExecutionId, ObjectiveId, PlanId, WorkspaceId};
+use crate::{ConfigRevisionId, ExecutionId, ObjectiveId, PlanId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
