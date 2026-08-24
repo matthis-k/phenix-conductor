@@ -105,7 +105,9 @@ fn agent_requester_cannot_load_manual_only_skill() {
     let mut runtime = ConductorRuntime::new();
     runtime.reload_configuration(configuration).unwrap();
     let session = runtime.create_session(None, None, fixed_target()).unwrap();
-    let execution = runtime.submit(&session.id, "inspect review guidance").unwrap();
+    let execution = runtime
+        .submit(&session.id, "inspect review guidance")
+        .unwrap();
 
     assert!(runtime
         .load_context_for_execution(
