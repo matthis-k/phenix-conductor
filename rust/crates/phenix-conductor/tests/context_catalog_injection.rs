@@ -129,3 +129,68 @@ fn objective_lifetime_uses_the_execution_primary_objective() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn stale_revision_never_substitutes_current_content() {
+    let root = fixture_root();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    write(root.join("CONTRIBUTING.md"), "first project context");
+
+    let mut runtime = ConductorRuntime::new();
+    runtime
+        .reload_configuration(configuration_for(&root))
+        .unwrap();
+    let first_session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let first_execution = runtime
+        .submit(&first_session.id, "observe first context revision")
+        .unwrap();
+
+    let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
+    let first_descriptor = runtime
+        .context_descriptors_for_execution(&first_execution.id)
+        .unwrap()
+        .into_iter()
+        .find(|descriptor| descriptor.id == id)
+        .unwrap();
+
+    write(root.join("CONTRIBUTING.md"), "second project context");
+    runtime
+        .reload_configuration(configuration_for(&root))
+        .unwrap();
+    let second_session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let second_execution = runtime
+        .submit(&second_session.id, "observe second context revision")
+        .unwrap();
+    let second_descriptor = runtime
+        .context_descriptors_for_execution(&second_execution.id)
+        .unwrap()
+        .into_iter()
+        .find(|descriptor| descriptor.id == id)
+        .unwrap();
+
+    assert_ne!(first_descriptor.revision, second_descriptor.revision);
+    assert!(runtime
+        .load_context_for_execution(
+            &second_execution.id,
+            &id,
+            &first_descriptor.revision,
+            ContextInjectionRequester::Agent,
+            ContextInjectionLifetime::SingleRequest,
+            "agent requested a stale descriptor revision",
+        )
+        .is_err());
+
+    let (resource, _) = runtime
+        .load_context_for_execution(
+            &second_execution.id,
+            &id,
+            &second_descriptor.revision,
+            ContextInjectionRequester::Agent,
+            ContextInjectionLifetime::SingleRequest,
+            "agent requested the current exact descriptor revision",
+        )
+        .unwrap();
+    assert_eq!(resource.content.as_deref(), Some("second project context"));
+
+    fs::remove_dir_all(root).unwrap();
+}
