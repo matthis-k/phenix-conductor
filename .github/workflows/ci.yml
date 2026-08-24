@@ -80,6 +80,7 @@ jobs:
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
         run: nix run .#phenix-maintenance -- rust-ci clippy
 
       - name: Repository remains clean
@@ -112,6 +113,7 @@ jobs:
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
         run: nix run .#phenix-maintenance -- rust-ci unit
 
       - name: Repository remains clean
@@ -144,6 +146,7 @@ jobs:
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
         run: nix run .#phenix-maintenance -- rust-ci doc
 
       - name: Repository remains clean
@@ -176,6 +179,7 @@ jobs:
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
         run: nix run .#phenix-maintenance -- rust-ci integration
 
       - name: Repository remains clean
@@ -208,6 +212,7 @@ jobs:
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
         run: nix run .#phenix-maintenance -- rust-ci system
 
       - name: Repository remains clean
