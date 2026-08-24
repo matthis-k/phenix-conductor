@@ -321,7 +321,9 @@ fn executions_load_context_from_their_pinned_configuration_revision() {
 fn exact_durable_references_resolve_without_aliases() {
     let mut runtime = ConductorRuntime::new();
     let session = runtime.create_session(None, None, fixed_target()).unwrap();
-    let execution = runtime.submit(&session.id, "resolve exact references").unwrap();
+    let execution = runtime
+        .submit(&session.id, "resolve exact references")
+        .unwrap();
     let assignment = runtime
         .execution_objectives(&execution.id)
         .unwrap()
