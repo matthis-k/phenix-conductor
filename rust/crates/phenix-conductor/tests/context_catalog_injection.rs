@@ -80,3 +80,43 @@ fn execution_loads_exact_project_context_and_records_the_injection() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn objective_lifetime_requires_an_objective_bound_to_the_execution() {
+    let root = fixture_root();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    write(root.join("CONTRIBUTING.md"), "objective-scoped context");
+
+    let mut runtime = ConductorRuntime::new();
+    runtime
+        .reload_configuration(configuration_for(&root))
+        .unwrap();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let execution = runtime
+        .submit(&session.id, "load objective-scoped context")
+        .unwrap();
+
+    let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
+    let descriptor = runtime
+        .context_descriptors_for_execution(&execution.id)
+        .unwrap()
+        .into_iter()
+        .find(|descriptor| descriptor.id == id)
+        .unwrap();
+
+    let result = runtime.load_context_for_execution(
+        &execution.id,
+        &id,
+        &descriptor.revision,
+        ContextInjectionRequester::Agent,
+        ContextInjectionLifetime::Objective,
+        "agent requested objective-lifetime context without an objective",
+    );
+
+    assert!(
+        result.is_err(),
+        "objective-lifetime context must be rejected when the execution has no objective"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
