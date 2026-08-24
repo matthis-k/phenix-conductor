@@ -1,4 +1,4 @@
-use crate::{CallableOperation, ConductorError, ConductorRuntime, ExecutionPayload};
+use crate::{CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload};
 use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
     ContextInjectionRequester, ContextResourceId, ContextResourceRevision, ContextRevision,
@@ -183,6 +183,9 @@ impl ConductorRuntime {
             lifetime,
             content_identity: resource.content_identity.clone(),
         };
+        self.record_domain_event(DomainEvent::ContextInjectionRecorded {
+            injection: injection.clone(),
+        })?;
         Ok((resource, injection))
     }
 }
