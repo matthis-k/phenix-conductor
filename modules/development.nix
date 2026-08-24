@@ -78,6 +78,12 @@
           label = "conductor / black_box_workflow_callables";
         }
         {
+          id = "conductor-durable-objectives";
+          package = "phenix-conductor";
+          test = "durable_objectives";
+          label = "conductor / durable_objectives";
+        }
+        {
           id = "conductor-durable-retries";
           package = "phenix-conductor";
           test = "durable_retries";

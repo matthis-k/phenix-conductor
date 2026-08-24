@@ -116,7 +116,7 @@ impl BackendSession for OrchestrationSession {
 
             vec![listed.output, started.output]
         } else {
-            assert_eq!(self.tools, vec!["probe"]);
+            assert_eq!(self.tools, vec!["probe", "phenix_objective"]);
             let result = host.invoke_tool(ToolInvocation {
                 callable: CallableId::parse("probe").unwrap(),
                 arguments_json: json!({ "model": self.model }).to_string(),
@@ -312,13 +312,13 @@ fn root_model_discovers_and_starts_orchestration_then_worker_runs_mock_agents() 
     assert_eq!(turns[1].model, "scout");
     assert!(turns[1].prompt.contains("inspect the repository"));
     assert!(turns[1].prompt.contains(ORCHESTRATION_OBJECTIVE));
-    assert_eq!(turns[1].tools, vec!["probe"]);
+    assert_eq!(turns[1].tools, vec!["probe", "phenix_objective"]);
     assert_eq!(turns[1].tool_outputs, vec![r#"{"model":"scout"}"#]);
 
     assert_eq!(turns[2].model, "verifier");
     assert!(turns[2].prompt.contains("verify the change"));
     assert!(turns[2].prompt.contains(ORCHESTRATION_OBJECTIVE));
-    assert_eq!(turns[2].tools, vec!["probe"]);
+    assert_eq!(turns[2].tools, vec!["probe", "phenix_objective"]);
     assert_eq!(turns[2].tool_outputs, vec![r#"{"model":"verifier"}"#]);
 
     let runtime = server.runtime();

@@ -3,9 +3,10 @@ use crate::{
 };
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, DiagnosticWritePatch, ExecutionAuthority,
-    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
-    ExecutionState, ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation,
-    FileVersion, FilesystemAuthority, LanguageObservation, ModelTarget,
+    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionObjectiveAssignment,
+    ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget, FailureAttemptSummary,
+    FileObservation, FileVersion, FilesystemAuthority, LanguageObservation, ModelTarget,
+    ObjectiveCriterionEvidence, ObjectiveId, ObjectiveRecord, ObjectiveTransition,
     OrchestrationFailureDecision, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
     SessionId, SessionState, SessionSummary, ToolCallId, WorkspaceId,
 };
@@ -164,6 +165,23 @@ pub enum DomainEvent {
     LanguageObservationRecorded {
         observation: LanguageObservation,
     },
+    ObjectiveSemanticsActivated,
+    ObjectiveCreated {
+        objective: ObjectiveRecord,
+    },
+    ObjectiveDraftRevised {
+        objective: ObjectiveRecord,
+    },
+    ObjectiveEvidenceRecorded {
+        objective_id: ObjectiveId,
+        evidence: ObjectiveCriterionEvidence,
+    },
+    ObjectiveStateChanged {
+        transition: ObjectiveTransition,
+    },
+    ExecutionObjectivesAssigned {
+        assignment: ExecutionObjectiveAssignment,
+    },
     InvocationResolved {
         execution_id: ExecutionId,
         route: ResolvedRoute,
@@ -229,6 +247,7 @@ impl RuntimeJournal {
                 });
             }
         }
+        crate::objectives::validate_journal_objectives(self)?;
         Ok(())
     }
 }
@@ -1193,6 +1212,12 @@ pub(crate) fn apply_domain_event(
                 )));
             }
         }
+        DomainEvent::ObjectiveSemanticsActivated
+        | DomainEvent::ObjectiveCreated { .. }
+        | DomainEvent::ObjectiveDraftRevised { .. }
+        | DomainEvent::ObjectiveEvidenceRecorded { .. }
+        | DomainEvent::ObjectiveStateChanged { .. }
+        | DomainEvent::ExecutionObjectivesAssigned { .. } => {}
         DomainEvent::InvocationResolved {
             execution_id,
             route,

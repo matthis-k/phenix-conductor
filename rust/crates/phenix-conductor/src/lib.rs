@@ -7,6 +7,7 @@ mod context;
 mod execution_provider;
 mod failure_decisions;
 mod journal;
+mod objectives;
 mod persistence;
 mod policy;
 mod routing;
@@ -23,6 +24,7 @@ pub use failure_decisions::OrchestrationFailureDecisionRequest;
 pub use journal::{
     DomainEvent, JournalEntry, JournalError, JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
+pub use objectives::ObjectiveError;
 pub use persistence::{PersistenceError, SqliteStore};
 pub use policy::{
     CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
@@ -118,6 +120,7 @@ pub enum ConductorError {
     Journal(JournalError),
     Routing(RoutingRegistryError),
     Context(ContextError),
+    Objective(ObjectiveError),
     Backend(BackendError),
 }
 
@@ -192,6 +195,7 @@ impl Display for ConductorError {
             Self::Journal(error) => Display::fmt(error, f),
             Self::Routing(error) => Display::fmt(error, f),
             Self::Context(error) => Display::fmt(error, f),
+            Self::Objective(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
         }
     }
@@ -232,6 +236,12 @@ impl From<RoutingRegistryError> for ConductorError {
 impl From<ContextError> for ConductorError {
     fn from(value: ContextError) -> Self {
         Self::Context(value)
+    }
+}
+
+impl From<ObjectiveError> for ConductorError {
+    fn from(value: ObjectiveError) -> Self {
+        Self::Objective(value)
     }
 }
 
@@ -594,6 +604,19 @@ impl ConductorRuntime {
         mut payload: JournalExecutionPayload,
         restrictions: Option<&ExecutionAuthority>,
     ) -> Result<(), ConductorError> {
+        let root_statement = if execution.parent_execution.is_none() {
+            match &payload {
+                JournalExecutionPayload::Invocation { input, .. } => Some(input.clone()),
+                JournalExecutionPayload::Orchestration { input, .. } => Some(
+                    serde_json::to_string(input).expect("orchestration input is JSON serializable"),
+                ),
+            }
+        } else {
+            None
+        };
+        let parent_execution = execution.parent_execution.clone();
+
+        self.ensure_objective_semantics_active()?;
         let configured = self.effective_authority_for_execution(&execution)?;
         let effective = restrictions.map_or(configured.clone(), |requested| {
             configured.attenuate(requested)
@@ -601,7 +624,27 @@ impl ConductorRuntime {
         let (secret_names, secret_values) = secret_material(&effective);
         redact_execution_payload(&mut payload, &secret_names, &secret_values);
         payload.set_authority(effective);
-        self.record_domain_event(DomainEvent::ExecutionCreated { execution, payload })
+        self.record_domain_event(DomainEvent::ExecutionCreated {
+            execution: execution.clone(),
+            payload,
+        })?;
+
+        if let Some(parent_execution) = parent_execution {
+            let parent = self
+                .execution_objectives(&parent_execution)?
+                .ok_or_else(|| {
+                    ObjectiveError::MissingExecutionObjective(parent_execution.clone())
+                })?;
+            self.assign_execution_objectives(&execution.id, parent.primary, parent.supporting)?;
+        } else {
+            let objective = self.create_root_objective_from_user_intent(
+                root_statement.expect("root invocation has user intent"),
+                Vec::new(),
+                None,
+            )?;
+            self.assign_execution_objectives(&execution.id, objective.id, BTreeSet::new())?;
+        }
+        Ok(())
     }
 
     pub fn register_invocation_guard<G>(&mut self, guard: G)

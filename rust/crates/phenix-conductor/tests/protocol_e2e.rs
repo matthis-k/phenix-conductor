@@ -447,6 +447,7 @@ fn active_native_provider_cancellation_is_deterministic_and_never_uses_model_bac
 #[test]
 fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
     let run = ProtocolHarness::model(MockModelScript::reply("{}"))
+        .with_tool_presentations([ToolPresentation::Native])
         .configure_runtime(|runtime| {
             runtime
                 .register_agent(phenix_core::AgentDefinition::new(
@@ -503,6 +504,10 @@ fn typed_workflow_command_schedules_all_model_steps_without_wrapper_root() {
     assert!(run.response_ok(3));
     assert_eq!(run.backend.opened(), 2);
     assert_eq!(run.backend.executed(), 2);
+    assert!(run.backend.opens().iter().all(|open| {
+        open.tool_presentation == Some(ToolPresentation::Native)
+            && open.tool_ids == [CallableId::parse("phenix_objective").unwrap()]
+    }));
     assert_eq!(
         run.backend.prompts(),
         vec![
