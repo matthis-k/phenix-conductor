@@ -61,6 +61,12 @@
           test = "repeated_prompts";
           label = "phenix-acp / repeated_prompts";
         }
+        {
+          id = "phenix-core-context-serialization";
+          package = "phenix-core";
+          test = "context_serialization";
+          label = "phenix-core / context_serialization";
+        }
       ];
 
       systemTargets = [
@@ -75,6 +81,42 @@
           package = "phenix-conductor";
           test = "black_box_workflow_callables";
           label = "conductor / black_box_workflow_callables";
+        }
+        {
+          id = "conductor-context-catalog-configuration-identity";
+          package = "phenix-conductor";
+          test = "context_catalog_configuration_identity";
+          label = "conductor / context_catalog_configuration_identity";
+        }
+        {
+          id = "conductor-context-catalog-injection";
+          package = "phenix-conductor";
+          test = "context_catalog_injection";
+          label = "conductor / context_catalog_injection";
+        }
+        {
+          id = "conductor-context-catalog-project-documents";
+          package = "phenix-conductor";
+          test = "context_catalog_project_documents";
+          label = "conductor / context_catalog_project_documents";
+        }
+        {
+          id = "conductor-context-catalog-skills";
+          package = "phenix-conductor";
+          test = "context_catalog_skills";
+          label = "conductor / context_catalog_skills";
+        }
+        {
+          id = "conductor-durable-objectives";
+          package = "phenix-conductor";
+          test = "durable_objectives";
+          label = "conductor / durable_objectives";
+        }
+        {
+          id = "conductor-durable-plans";
+          package = "phenix-conductor";
+          test = "durable_plans";
+          label = "conductor / durable_plans";
         }
         {
           id = "conductor-durable-retries";

@@ -3,11 +3,13 @@ use crate::{
 };
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, DiagnosticWritePatch, ExecutionAuthority,
-    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
-    ExecutionState, ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation,
-    FileVersion, FilesystemAuthority, ModelTarget, OrchestrationFailureDecision,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, SessionId, SessionState,
-    SessionSummary, ToolCallId, WorkspaceId,
+    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionObjectiveAssignment,
+    ExecutionPlanAssignment, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
+    FailureAttemptSummary, FileObservation, FileVersion, FilesystemAuthority, LanguageObservation,
+    ModelTarget, ObjectiveCriterionEvidence, ObjectiveId, ObjectiveRecord, ObjectiveTransition,
+    OrchestrationFailureDecision, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
+    PlanRecord, PlanStepTransition, PlanTransition, SessionId, SessionState, SessionSummary,
+    ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -161,6 +163,42 @@ pub enum DomainEvent {
     DiagnosticWritePatchCaptured {
         patch: DiagnosticWritePatch,
     },
+    LanguageObservationRecorded {
+        observation: LanguageObservation,
+    },
+    ObjectiveSemanticsActivated,
+    ObjectiveCreated {
+        objective: ObjectiveRecord,
+    },
+    ObjectiveDraftRevised {
+        objective: ObjectiveRecord,
+    },
+    ObjectiveEvidenceRecorded {
+        objective_id: ObjectiveId,
+        evidence: ObjectiveCriterionEvidence,
+    },
+    ObjectiveStateChanged {
+        transition: ObjectiveTransition,
+    },
+    ExecutionObjectivesAssigned {
+        assignment: ExecutionObjectiveAssignment,
+    },
+    PlanCreated {
+        plan: PlanRecord,
+    },
+    PlanDraftRevised {
+        plan: PlanRecord,
+        expected_revision: u64,
+    },
+    PlanStateChanged {
+        transition: PlanTransition,
+    },
+    PlanStepStateChanged {
+        transition: PlanStepTransition,
+    },
+    ExecutionPlanAssigned {
+        assignment: ExecutionPlanAssignment,
+    },
     InvocationResolved {
         execution_id: ExecutionId,
         route: ResolvedRoute,
@@ -226,6 +264,8 @@ impl RuntimeJournal {
                 });
             }
         }
+        crate::objectives::validate_journal_objectives(self)?;
+        crate::plans::validate_journal_plans(self)?;
         Ok(())
     }
 }
@@ -1164,6 +1204,38 @@ pub(crate) fn apply_domain_event(
             }
             state.diagnostic_write_patches.push(patch.clone());
         }
+        DomainEvent::LanguageObservationRecorded { observation } => {
+            let execution = state
+                .executions
+                .get(&observation.execution)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "language observation references unknown execution {}",
+                        observation.execution
+                    ))
+                })?;
+            let session = state
+                .sessions
+                .get(&execution.summary.session_id)
+                .ok_or_else(|| {
+                    JournalError::InvalidEvent(format!(
+                        "language observation execution {} references unknown session {}",
+                        observation.execution, execution.summary.session_id
+                    ))
+                })?;
+            if session.summary.workspace_id != observation.workspace {
+                return Err(JournalError::InvalidEvent(format!(
+                    "language observation for {} uses workspace {} instead of {}",
+                    observation.execution, observation.workspace, session.summary.workspace_id
+                )));
+            }
+        }
+        DomainEvent::ObjectiveSemanticsActivated
+        | DomainEvent::ObjectiveCreated { .. }
+        | DomainEvent::ObjectiveDraftRevised { .. }
+        | DomainEvent::ObjectiveEvidenceRecorded { .. }
+        | DomainEvent::ObjectiveStateChanged { .. }
+        | DomainEvent::ExecutionObjectivesAssigned { .. } => {}
         DomainEvent::InvocationResolved {
             execution_id,
             route,
@@ -1266,6 +1338,11 @@ pub(crate) fn apply_domain_event(
                 .or_insert_with(|| ExecutionReadSet::new(execution_id.clone()))
                 .observe(observation.clone());
         }
+        DomainEvent::PlanCreated { .. }
+        | DomainEvent::PlanDraftRevised { .. }
+        | DomainEvent::PlanStateChanged { .. }
+        | DomainEvent::PlanStepStateChanged { .. }
+        | DomainEvent::ExecutionPlanAssigned { .. } => {}
         DomainEvent::FrontendEvent { event } => {
             let expected = *state.next_event + 1;
             if event.sequence != expected {

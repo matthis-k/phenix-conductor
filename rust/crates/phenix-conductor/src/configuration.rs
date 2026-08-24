@@ -1,5 +1,8 @@
 use phenix_conductor::{CompiledConfiguration, ConductorError};
-use phenix_core::{AgentDefinition, OrchestrationDefinition, RoutingProfile};
+use phenix_core::{
+    AgentDefinition, LanguageServiceRequirement, ManagedLanguageProviderDefinition,
+    OrchestrationDefinition, RoutingProfile,
+};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -9,10 +12,10 @@ use std::path::{Path, PathBuf};
 /// Process-owned executable configuration for one conductor deployment.
 ///
 /// The conductor owns validation and execution semantics, while applications
-/// own the concrete agent, orchestration, and routing-profile instances supplied in
-/// this file. The durable store keeps revision fingerprints and runtime state.
-/// Process startup recompiles every supplied historical file and binds revisions by
-/// semantic fingerprint.
+/// own the concrete agent, orchestration, routing, and managed language-service
+/// definitions supplied in this file. The durable store keeps revision
+/// fingerprints and runtime state. Process startup recompiles every supplied
+/// historical file and binds revisions by semantic fingerprint.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfiguration {
@@ -22,6 +25,10 @@ pub struct RuntimeConfiguration {
     pub orchestrations: Vec<OrchestrationDefinition>,
     #[serde(default)]
     pub routing_profiles: Vec<RoutingProfile>,
+    #[serde(default)]
+    pub managed_language_providers: Vec<ManagedLanguageProviderDefinition>,
+    #[serde(default)]
+    pub language_services: Vec<LanguageServiceRequirement>,
 }
 
 impl RuntimeConfiguration {
@@ -50,6 +57,12 @@ impl RuntimeConfiguration {
         for profile in self.routing_profiles {
             configuration.register_routing_profile(profile)?;
         }
+        for provider in self.managed_language_providers {
+            configuration.register_managed_language_provider(provider)?;
+        }
+        for requirement in self.language_services {
+            configuration.set_language_service_requirement(requirement);
+        }
         Ok(configuration)
     }
 }
@@ -65,6 +78,7 @@ pub enum ConfigurationError {
         source: serde_json::Error,
     },
     Runtime(ConductorError),
+    Language(phenix_core::LanguageServiceError),
 }
 
 impl Display for ConfigurationError {
@@ -85,6 +99,9 @@ impl Display for ConfigurationError {
                 )
             }
             Self::Runtime(source) => write!(f, "invalid conductor configuration: {source}"),
+            Self::Language(source) => {
+                write!(f, "invalid language-service configuration: {source}")
+            }
         }
     }
 }
@@ -95,6 +112,7 @@ impl Error for ConfigurationError {
             Self::Read { source, .. } => Some(source),
             Self::Parse { source, .. } => Some(source),
             Self::Runtime(source) => Some(source),
+            Self::Language(source) => Some(source),
         }
     }
 }
@@ -105,13 +123,20 @@ impl From<ConductorError> for ConfigurationError {
     }
 }
 
+impl From<phenix_core::LanguageServiceError> for ConfigurationError {
+    fn from(value: phenix_core::LanguageServiceError) -> Self {
+        Self::Language(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use phenix_conductor::ConductorRuntime;
     use phenix_core::{
         BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-        ExecutionAuthority, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId,
+        ExecutionAuthority, ExecutionTarget, FilesystemAuthority, InferenceOptions,
+        LanguageProviderCapabilities, LanguageProviderId, LanguageServiceKind, ModelId,
         ModelTarget, NetworkAuthority, OrchestrationNode, OrchestrationNodeId,
         OrchestrationValueBinding, ProviderId, RepositoryAuthority, RoutingProfileId,
     };
@@ -163,6 +188,14 @@ mod tests {
         }
     }
 
+    fn language_kind() -> LanguageServiceKind {
+        LanguageServiceKind::parse("rust").unwrap()
+    }
+
+    fn language_provider() -> LanguageProviderId {
+        LanguageProviderId::parse("rust-analyzer").unwrap()
+    }
+
     #[test]
     fn application_configuration_rebinds_agents_workflows_and_routes() {
         let agent = descriptor("agent.fixture", CallableKind::Agent);
@@ -188,6 +221,7 @@ mod tests {
             )],
             orchestrations: vec![orchestration],
             routing_profiles: vec![route],
+            ..RuntimeConfiguration::default()
         })
         .unwrap();
         let configuration: RuntimeConfiguration = serde_json::from_str(&encoded).unwrap();
@@ -313,5 +347,52 @@ mod tests {
             install_configuration(&mut ConductorRuntime::new(), configuration),
             Err(ConfigurationError::Runtime(_))
         ));
+    }
+
+    #[test]
+    fn language_service_configuration_roundtrips_and_is_revision_bound() {
+        let capabilities = LanguageProviderCapabilities {
+            requests: true,
+            notifications: true,
+            shared_diagnostics: true,
+            background_documents: true,
+            dirty_buffers: false,
+        };
+        let configuration = RuntimeConfiguration {
+            managed_language_providers: vec![ManagedLanguageProviderDefinition {
+                service: language_kind(),
+                provider: language_provider(),
+                command: PathBuf::from("rust-analyzer"),
+                args: vec!["--stdio".to_owned()],
+                capabilities: capabilities.clone(),
+            }],
+            language_services: vec![LanguageServiceRequirement {
+                service: language_kind(),
+                required_capabilities: capabilities,
+                preferred_provider: Some(language_provider()),
+            }],
+            ..RuntimeConfiguration::default()
+        };
+        let encoded = serde_json::to_string(&configuration).unwrap();
+        let decoded: RuntimeConfiguration = serde_json::from_str(&encoded).unwrap();
+        let mut runtime = ConductorRuntime::new();
+        let before = runtime.current_config_revision().clone();
+        install_configuration(&mut runtime, decoded).unwrap();
+        assert_ne!(runtime.current_config_revision(), &before);
+        let compiled = runtime.current_compiled_configuration().unwrap();
+        assert_eq!(
+            compiled
+                .language_service_configuration()
+                .managed_for(&language_kind())
+                .len(),
+            1
+        );
+        assert_eq!(
+            compiled
+                .language_service_configuration()
+                .requirement_for(&language_kind())
+                .preferred_provider,
+            Some(language_provider())
+        );
     }
 }

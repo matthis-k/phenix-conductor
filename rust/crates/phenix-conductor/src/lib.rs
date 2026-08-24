@@ -7,7 +7,9 @@ mod context;
 mod execution_provider;
 mod failure_decisions;
 mod journal;
+mod objectives;
 mod persistence;
+mod plans;
 mod policy;
 mod routing;
 mod sandbox;
@@ -23,7 +25,9 @@ pub use failure_decisions::OrchestrationFailureDecisionRequest;
 pub use journal::{
     DomainEvent, JournalEntry, JournalError, JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
+pub use objectives::ObjectiveError;
 pub use persistence::{PersistenceError, SqliteStore};
+pub use plans::PlanError;
 pub use policy::{
     CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
     InvocationPolicyContext, InvocationSubject, PolicyDenial,
@@ -38,14 +42,16 @@ use phenix_backend::{
 };
 use phenix_core::{
     AgentDefinition, AttemptGroup, AttemptGroupId, CallableDescriptor, CallableId, CallableKind,
-    ConfigRevisionId, DebugConversationMessage, DebugConversationRole, DebugOrchestration,
+    ConfigRevisionId, ContextDescriptor, ContextResourceId, ContextResourceKind, ContextRevision,
+    ContextScope, DebugConversationMessage, DebugConversationRole, DebugOrchestration,
     DebugResolvedRoute, DebugWorkspaceCheckpoint, DiagnosticWritePatch, ExecutionAuthority,
     ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionReadSet,
     ExecutionState, ExecutionSummary, ExecutionTarget, ExecutionTerminationCause,
-    ExecutionWorkspaceValidity, FileObservation, FileVersion, ModelTarget, OrchestrationDefinition,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, RoutingProfile,
-    RoutingProfileDescriptor, SessionDebugBundle, SessionId, SessionState, SessionSummary,
-    SkillDescriptor, SkillId, ToolCallId, WorkspaceDescriptor, WorkspaceId, WorkspaceLeaseRequest,
+    ExecutionWorkspaceValidity, FileObservation, FileVersion, LanguageObservation,
+    LanguageOperation, ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord,
+    OrchestrationNodeId, RoutingProfile, RoutingProfileDescriptor, SessionDebugBundle, SessionId,
+    SessionState, SessionSummary, SkillDescriptor, SkillId, ToolCallId, WorkspaceDescriptor,
+    WorkspaceId, WorkspaceLeaseRequest,
 };
 use phenix_protocol::RuntimeSnapshot;
 use serde::{Deserialize, Serialize};
@@ -117,6 +123,8 @@ pub enum ConductorError {
     Journal(JournalError),
     Routing(RoutingRegistryError),
     Context(ContextError),
+    Objective(ObjectiveError),
+    Plan(PlanError),
     Backend(BackendError),
 }
 
@@ -191,6 +199,8 @@ impl Display for ConductorError {
             Self::Journal(error) => Display::fmt(error, f),
             Self::Routing(error) => Display::fmt(error, f),
             Self::Context(error) => Display::fmt(error, f),
+            Self::Objective(error) => Display::fmt(error, f),
+            Self::Plan(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
         }
     }
@@ -231,6 +241,18 @@ impl From<RoutingRegistryError> for ConductorError {
 impl From<ContextError> for ConductorError {
     fn from(value: ContextError) -> Self {
         Self::Context(value)
+    }
+}
+
+impl From<ObjectiveError> for ConductorError {
+    fn from(value: ObjectiveError) -> Self {
+        Self::Objective(value)
+    }
+}
+
+impl From<PlanError> for ConductorError {
+    fn from(value: PlanError) -> Self {
+        Self::Plan(value)
     }
 }
 
@@ -277,6 +299,27 @@ impl CompiledConfiguration {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         ConfigRevisionFingerprint(encoded)
+    }
+
+    fn context_catalog(&self) -> phenix_core::ContextCatalog {
+        let mut catalog = self
+            .context
+            .project_context_catalog()
+            .expect("project context catalog construction must preserve immutable revisions");
+        let skill_catalog = self
+            .skills
+            .skill_context_catalog()
+            .expect("skill context catalog construction must preserve immutable revisions");
+        for descriptor in skill_catalog.descriptors() {
+            let revision = skill_catalog
+                .resolve_revision(&descriptor.id, &descriptor.revision)
+                .expect("catalog descriptor must resolve to its exact revision")
+                .clone();
+            catalog
+                .register_revision(revision)
+                .expect("project and skill context identities must not conflict");
+        }
+        catalog
     }
 
     pub fn register_tool<F, O>(
@@ -593,6 +636,19 @@ impl ConductorRuntime {
         mut payload: JournalExecutionPayload,
         restrictions: Option<&ExecutionAuthority>,
     ) -> Result<(), ConductorError> {
+        let root_statement = if execution.parent_execution.is_none() {
+            match &payload {
+                JournalExecutionPayload::Invocation { input, .. } => Some(input.clone()),
+                JournalExecutionPayload::Orchestration { input, .. } => Some(
+                    serde_json::to_string(input).expect("orchestration input is JSON serializable"),
+                ),
+            }
+        } else {
+            None
+        };
+        let parent_execution = execution.parent_execution.clone();
+
+        self.ensure_objective_semantics_active()?;
         let configured = self.effective_authority_for_execution(&execution)?;
         let effective = restrictions.map_or(configured.clone(), |requested| {
             configured.attenuate(requested)
@@ -600,7 +656,27 @@ impl ConductorRuntime {
         let (secret_names, secret_values) = secret_material(&effective);
         redact_execution_payload(&mut payload, &secret_names, &secret_values);
         payload.set_authority(effective);
-        self.record_domain_event(DomainEvent::ExecutionCreated { execution, payload })
+        self.record_domain_event(DomainEvent::ExecutionCreated {
+            execution: execution.clone(),
+            payload,
+        })?;
+
+        if let Some(parent_execution) = parent_execution {
+            let parent = self
+                .execution_objectives(&parent_execution)?
+                .ok_or_else(|| {
+                    ObjectiveError::MissingExecutionObjective(parent_execution.clone())
+                })?;
+            self.assign_execution_objectives(&execution.id, parent.primary, parent.supporting)?;
+        } else {
+            let objective = self.create_root_objective_from_user_intent(
+                root_statement.expect("root invocation has user intent"),
+                Vec::new(),
+                None,
+            )?;
+            self.assign_execution_objectives(&execution.id, objective.id, BTreeSet::new())?;
+        }
+        Ok(())
     }
 
     pub fn register_invocation_guard<G>(&mut self, guard: G)
@@ -653,6 +729,70 @@ impl ConductorRuntime {
             .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))?
             .config_revision;
         self.configuration_revision(revision)
+    }
+
+    pub fn context_descriptors_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<ContextDescriptor>, ConductorError> {
+        let catalog = self
+            .configuration_for_execution(execution_id)?
+            .context_catalog();
+        let mut descriptors = catalog.descriptors().cloned().collect::<Vec<_>>();
+
+        if let Some(assignment) = self.execution_objectives(execution_id)? {
+            let objective = self.objective(&assignment.primary)?;
+            let encoded =
+                serde_json::to_vec(&objective).expect("objective record is JSON serializable");
+            let revision = ContextRevision::parse(format!(
+                "sha256:{}",
+                Sha256::digest(&encoded)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ))
+            .expect("generated objective context revision");
+            descriptors.push(ContextDescriptor {
+                id: ContextResourceId::parse(format!("objective:{}", objective.id))
+                    .expect("generated objective context resource id"),
+                kind: ContextResourceKind::Objective,
+                title: objective.statement.clone(),
+                description: format!("Durable objective {}", objective.id),
+                scope: ContextScope::Workspace {
+                    workspace_id: objective.workspace.clone(),
+                },
+                revision,
+                estimated_cost: encoded.len() as u64,
+            });
+        }
+
+        if let Some(assignment) = self.execution_plan(execution_id)? {
+            let plan = self.plan(&assignment.plan_id)?;
+            let encoded = serde_json::to_vec(&plan).expect("plan record is JSON serializable");
+            let revision = ContextRevision::parse(format!(
+                "sha256:{}",
+                Sha256::digest(&encoded)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ))
+            .expect("generated plan context revision");
+            descriptors.push(ContextDescriptor {
+                id: ContextResourceId::parse(format!("plan:{}", plan.id))
+                    .expect("generated plan context resource id"),
+                kind: ContextResourceKind::Plan,
+                title: format!("Plan {}", plan.id),
+                description: format!("Durable plan {}", plan.id),
+                scope: ContextScope::Workspace {
+                    workspace_id: plan.workspace.clone(),
+                },
+                revision,
+                estimated_cost: encoded.len() as u64,
+            });
+        }
+
+        descriptors.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(descriptors)
     }
 
     #[must_use]
@@ -1034,6 +1174,13 @@ impl ConductorRuntime {
             execution_id: execution_id.clone(),
             observation,
         })
+    }
+
+    pub fn record_language_observation(
+        &mut self,
+        observation: LanguageObservation,
+    ) -> Result<(), ConductorError> {
+        self.record_domain_event(DomainEvent::LanguageObservationRecorded { observation })
     }
 
     pub fn execution_authority(
@@ -2406,11 +2553,19 @@ impl ConductorRuntime {
                     let authority = self
                         .execution_authority(execution_id)
                         .map_err(conductor_protocol_error)?;
+                    let workspace_id = self.workspace_id.clone();
+                    let language_configuration = self
+                        .configuration_for_execution(execution_id)
+                        .map_err(conductor_protocol_error)?
+                        .language_service_configuration()
+                        .clone();
                     let sandbox_state = self
                         .execution_sandbox_state(execution_id)
                         .map_err(|error| BackendError::Protocol(error.to_string()))?;
                     let context = callables::ToolExecutionContext {
                         execution_id: execution_id.clone(),
+                        workspace_id,
+                        language_configuration,
                         authority,
                         sandbox_state,
                     };
@@ -2430,6 +2585,10 @@ impl ConductorRuntime {
                             patch,
                         })
                         .map_err(conductor_protocol_error)?;
+                    }
+                    for observation in outcome.language_observations.iter().cloned() {
+                        self.record_language_observation(observation)
+                            .map_err(conductor_protocol_error)?;
                     }
                     outcome.into_backend_result()
                 }
@@ -2568,6 +2727,13 @@ fn redact_domain_event(
         DomainEvent::DiagnosticWritePatchCaptured { patch } => {
             let (_, values) = material_for(&patch.execution_id);
             redact_text(&mut patch.patch, &values);
+        }
+        DomainEvent::LanguageObservationRecorded { observation } => {
+            let (names, values) = material_for(&observation.execution);
+            redact_value(&mut observation.result.value, &names, &values);
+            if let LanguageOperation::WorkspaceSymbols { query } = &mut observation.operation {
+                redact_text(query, &values);
+            }
         }
         _ => {}
     }

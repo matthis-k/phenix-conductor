@@ -34,6 +34,20 @@ A frontend may replace its advertised provider set while connected. Disconnect r
 
 Frontend services are adapters for capabilities that live in a frontend process. They do not add durable configuration, callable ownership, session ownership, or ambient IPC authority. Executions do not receive arbitrary frontend IPC; conductor-owned code decides when and how a provider is used.
 
+## Workspace language services
+
+The conductor owns one active language-service provider for each workspace and language-service kind. A provider may be frontend-linked or conductor-managed. The conductor selects one provider that satisfies the complete required capability set and never combines state from multiple providers.
+
+Managed provider definitions, capability requirements, and configured preferences are immutable configuration semantics. They contribute to the compiled configuration fingerprint. Live frontend registrations, selected connection identity, managed process handles, and provider epochs are process-local workspace state.
+
+A provider lifetime has a monotonically increasing epoch. Disconnect, replacement, capability loss, or managed process restart ends the old epoch. Work dispatched under an ended epoch fails instead of being replayed against the replacement provider.
+
+Frontend-linked providers use the generic frontend-service catalog. Their advertised capabilities do not grant execution authority or callable delegation. Executions borrow typed conductor-owned language tools through the normal callable policy and filesystem-read authority checks; they never receive the frontend connection or raw language-server transport.
+
+Managed language-server processes live at workspace scope and survive individual executions. A consumed language result becomes a durable observation bound to the consuming execution, provider epoch, typed operation, and exact document provenance. Diagnostics notifications update process-local current state; they become durable only when an execution consumes a diagnostic result. An ended provider epoch invalidates in-flight work instead of replaying it against a replacement provider.
+
+`spec/language-service.md` defines provider identity, capability negotiation, selection, epochs, and failover. `spec/language-intelligence.md` defines execution operations, document synchronization, diagnostics, and consumed observations.
+
 ## Session and conversation identity
 
 A `Session` is the long-lived Phenix conversation. Model and backend conversations are implementation details.
@@ -203,7 +217,11 @@ Reload creates a new revision. Existing sessions do not silently change meaning.
 
 ## Persistence and debug export
 
-The target durable store is SQLite in WAL mode. Durable state includes sessions, lineage, configuration revisions, accepted submission order, execution metadata, canonical events, attempt groups, and other conductor-owned state required for recovery.
+Each discovered workspace or worktree uses one canonical SQLite database in WAL mode. The default path is `$XDG_STATE_HOME/phenix/workspaces/<workspace-key>/workspace.db`, with the XDG user-state fallback when `XDG_STATE_HOME` is unset. The workspace key derives from the canonical `WorkspaceId`. An explicit state path changes storage location only.
+
+The database records the canonical `WorkspaceId` and canonical root. Startup validates both before configuration binding, backend registration, or frontend service. Schema migrations are ordered and transactional. A failed migration prevents the conductor from serving the workspace. `spec/workspace-persistence.md` defines this contract.
+
+Durable state includes sessions, lineage, configuration revisions, accepted submission order, execution metadata, canonical events, attempt groups, and other conductor-owned state required for recovery.
 
 Live backend handles, cancellation handles, streams, sandboxes, frontend connections, and frontend service providers are process-local.
 
@@ -222,3 +240,25 @@ The runtime migration follows these dependency boundaries:
 5. SQLite persistence, durable multi-client ingress, configuration rebasing, and debug export.
 
 Each slice must leave one canonical contract. Transitional duplicate APIs must not become public compatibility layers.
+
+## Durable objectives
+
+The conductor owns workspace objective semantics. Root objectives originate only at the explicit user-input boundary. Derived objectives may be created by conductor-mediated agent work. A derived objective is mutable only while it is a draft; activation freezes its statement and criteria. Later semantic changes create new objectives and explicit supersession rather than rewriting enacted history.
+
+Objective creation, draft revision, criterion evidence, lifecycle transitions, and execution assignments are immutable domain events. Objective replay is validated before the aggregate runtime is restored. Completion is valid only when every required criterion has durable evidence. Lifecycle cause provenance is validated at write and replay time: execution-backed causes name recorded executions, and evidence or policy causes carry non-empty material.
+
+Every execution created after objective semantics activate has exactly one primary objective and may have supporting objectives. Child executions inherit their parent's assignment unless an explicit conductor operation creates and assigns a more specific derived objective. On the first objective-capable operation against a pre-objective workspace journal, the conductor records the activation boundary and durably derives missing assignments from the recorded root user input and parent execution lineage. No backend conversation state is used for recovery.
+
+SQLite schema migrations store objective facts relationally. The journal remains the ordered semantic history; the workspace database remains the authoritative durable representation and reconstructs the same typed events without JSON event replay.
+
+## Durable plans
+
+The conductor owns workspace plan semantics. A plan describes intended strategy and never carries model targets, callable bindings, authority, retries, timeouts, or scheduling policy. Those remain execution and orchestration concerns.
+
+Plan drafts are prospective and revisioned. Draft updates use optimistic concurrency. The first execution-to-step assignment enacts the plan and freezes that revision. Later strategy changes create a successor plan instead of rewriting enacted steps.
+
+Plan steps form an acyclic dependency graph and may reference objectives. Plan failure means the strategy was attempted and did not succeed. Plan invalidation means later evidence disproved an assumption. Backtracking records the old plan outcome, its typed cause, and a successor plan; it does not restore workspace files.
+
+Plan creation, draft revision, enactment, lifecycle transitions, and execution-step assignments are durable domain events. Replay must reject stale draft revisions, dependency cycles, mutation after enactment, invalid step links, execution reassignment, invalid successor state, and invalid transition causes. Live mutations enforce the same invariants before recording an event. SQLite stores the same facts relationally so restart reconstructs the same plan history without backend conversation state.
+
+`spec/plans.md` is the normative plan lifecycle contract.

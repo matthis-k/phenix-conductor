@@ -1,7 +1,7 @@
 use crate::{
     CompiledConfiguration, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
     ExecutionProvider, ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost,
-    ExecutionProviderKind, PersistenceError, SqliteStore,
+    ExecutionProviderKind, ObjectiveError, PersistenceError, PlanError, SqliteStore,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
@@ -2164,6 +2164,50 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         ConductorError::Context(error) => {
             protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }
+        ConductorError::Objective(error) => match error {
+            ObjectiveError::UnknownObjective(_)
+            | ObjectiveError::UnknownCriterion { .. }
+            | ObjectiveError::UnknownExecution(_) => {
+                protocol_error(ErrorCode::UnknownId, error.to_string())
+            }
+            ObjectiveError::MissingExecutionObjective(_)
+            | ObjectiveError::InvalidStatement
+            | ObjectiveError::DuplicateCriterion(_)
+            | ObjectiveError::InvalidParent(_)
+            | ObjectiveError::WrongWorkspace(_)
+            | ObjectiveError::RootIsImmutable(_)
+            | ObjectiveError::EnactedObjectiveIsImmutable(_)
+            | ObjectiveError::InvalidTransition { .. }
+            | ObjectiveError::MissingRequiredEvidence { .. }
+            | ObjectiveError::InvalidEvidence => {
+                protocol_error(ErrorCode::InvalidRequest, error.to_string())
+            }
+        },
+        ConductorError::Plan(error) => match error {
+            PlanError::UnknownPlan(_)
+            | PlanError::UnknownStep { .. }
+            | PlanError::UnknownExecution(_)
+            | PlanError::UnknownObjective(_) => {
+                protocol_error(ErrorCode::UnknownId, error.to_string())
+            }
+            PlanError::WrongWorkspace(_)
+            | PlanError::EmptyPlan
+            | PlanError::InvalidStep(_)
+            | PlanError::DuplicateStep(_)
+            | PlanError::InvalidDependency { .. }
+            | PlanError::DependencyCycle
+            | PlanError::WrongObjectiveWorkspace(_)
+            | PlanError::EnactedPlanIsImmutable(_)
+            | PlanError::DraftRevisionConflict { .. }
+            | PlanError::InvalidTransition { .. }
+            | PlanError::InvalidStepTransition { .. }
+            | PlanError::IncompleteDependencies { .. }
+            | PlanError::ExecutionAlreadyAssigned(_)
+            | PlanError::InvalidCause
+            | PlanError::InvalidSuccessor(_) => {
+                protocol_error(ErrorCode::InvalidRequest, error.to_string())
+            }
+        },
         ConductorError::Backend(error) => map_backend_error(error),
     }
 }
@@ -2171,7 +2215,7 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_backend::{BackendExecutionRequest, BackendSessionRequest};
+    use phenix_backend::{BackendExecutionRequest, BackendSessionRequest, ToolPresentation};
     use phenix_core::{
         AgentDefinition, AuthenticationState, CallableDescriptor, CallableKind, CallablePolicy,
         CapabilitySet, ExecutionAuthority, FilesystemAuthority, InferenceOptions, ModelDescriptor,
@@ -2186,6 +2230,21 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{mpsc, Condvar};
     use std::time::Duration;
+
+    #[test]
+    fn objective_errors_have_stable_protocol_classes() {
+        let unknown =
+            map_conductor_error(ConductorError::Objective(ObjectiveError::UnknownObjective(
+                phenix_core::ObjectiveId::parse("objective-missing").unwrap(),
+            )));
+        assert_eq!(unknown.code, ErrorCode::UnknownId);
+
+        let immutable =
+            map_conductor_error(ConductorError::Objective(ObjectiveError::RootIsImmutable(
+                phenix_core::ObjectiveId::parse("objective-1").unwrap(),
+            )));
+        assert_eq!(immutable.code, ErrorCode::InvalidRequest);
+    }
 
     struct CancelOnlySession {
         calls: Arc<AtomicUsize>,
@@ -2706,7 +2765,7 @@ mod tests {
     impl Backend for ConcurrentBackend {
         fn capabilities(&self) -> phenix_backend::BackendCapabilities {
             phenix_backend::BackendCapabilities {
-                tool_presentations: BTreeSet::new(),
+                tool_presentations: BTreeSet::from([ToolPresentation::Native]),
                 images: false,
                 persistent_sessions: false,
             }
@@ -2733,7 +2792,7 @@ mod tests {
             *active += 1;
             ready.notify_all();
             let (active, _) = ready
-                .wait_timeout_while(active, Duration::from_secs(2), |active| *active < 2)
+                .wait_timeout_while(active, Duration::from_secs(10), |active| *active < 2)
                 .unwrap();
             if *active < 2 {
                 return Err(BackendError::Transport(
