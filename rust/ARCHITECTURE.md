@@ -250,3 +250,15 @@ Objective creation, draft revision, criterion evidence, lifecycle transitions, a
 Every execution created after objective semantics activate has exactly one primary objective and may have supporting objectives. Child executions inherit their parent's assignment unless an explicit conductor operation creates and assigns a more specific derived objective. On the first objective-capable operation against a pre-objective workspace journal, the conductor records the activation boundary and durably derives missing assignments from the recorded root user input and parent execution lineage. No backend conversation state is used for recovery.
 
 SQLite schema migrations store objective facts relationally. The journal remains the ordered semantic history; the workspace database remains the authoritative durable representation and reconstructs the same typed events without JSON event replay.
+
+## Durable plans
+
+The conductor owns workspace plan semantics. A plan describes intended strategy and never carries model targets, callable bindings, authority, retries, timeouts, or scheduling policy. Those remain execution and orchestration concerns.
+
+Plan drafts are prospective and revisioned. Draft updates use optimistic concurrency. The first execution-to-step assignment enacts the plan and freezes that revision. Later strategy changes create a successor plan instead of rewriting enacted steps.
+
+Plan steps form an acyclic dependency graph and may reference objectives. Plan failure means the strategy was attempted and did not succeed. Plan invalidation means later evidence disproved an assumption. Backtracking records the old plan outcome, its typed cause, and a successor plan; it does not restore workspace files.
+
+Plan creation, draft revision, enactment, lifecycle transitions, and execution-step assignments are durable domain events. Replay must reject stale draft revisions, dependency cycles, mutation after enactment, invalid step links, execution reassignment, invalid successor state, and invalid transition causes. Live mutations enforce the same invariants before recording an event. SQLite stores the same facts relationally so restart reconstructs the same plan history without backend conversation state.
+
+`spec/plans.md` is the normative plan lifecycle contract.

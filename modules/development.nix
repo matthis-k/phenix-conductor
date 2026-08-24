@@ -84,6 +84,12 @@
           label = "conductor / durable_objectives";
         }
         {
+          id = "conductor-durable-plans";
+          package = "phenix-conductor";
+          test = "durable_plans";
+          label = "conductor / durable_plans";
+        }
+        {
           id = "conductor-durable-retries";
           package = "phenix-conductor";
           test = "durable_retries";

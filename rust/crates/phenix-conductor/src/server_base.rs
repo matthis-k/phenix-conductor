@@ -1,7 +1,7 @@
 use crate::{
     CompiledConfiguration, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
     ExecutionProvider, ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost,
-    ExecutionProviderKind, ObjectiveError, PersistenceError, SqliteStore,
+    ExecutionProviderKind, ObjectiveError, PersistenceError, PlanError, SqliteStore,
 };
 use phenix_backend::{
     Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
@@ -2180,6 +2180,31 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             | ObjectiveError::InvalidTransition { .. }
             | ObjectiveError::MissingRequiredEvidence { .. }
             | ObjectiveError::InvalidEvidence => {
+                protocol_error(ErrorCode::InvalidRequest, error.to_string())
+            }
+        },
+        ConductorError::Plan(error) => match error {
+            PlanError::UnknownPlan(_)
+            | PlanError::UnknownStep { .. }
+            | PlanError::UnknownExecution(_)
+            | PlanError::UnknownObjective(_) => {
+                protocol_error(ErrorCode::UnknownId, error.to_string())
+            }
+            PlanError::WrongWorkspace(_)
+            | PlanError::EmptyPlan
+            | PlanError::InvalidStep(_)
+            | PlanError::DuplicateStep(_)
+            | PlanError::InvalidDependency { .. }
+            | PlanError::DependencyCycle
+            | PlanError::WrongObjectiveWorkspace(_)
+            | PlanError::EnactedPlanIsImmutable(_)
+            | PlanError::DraftRevisionConflict { .. }
+            | PlanError::InvalidTransition { .. }
+            | PlanError::InvalidStepTransition { .. }
+            | PlanError::IncompleteDependencies { .. }
+            | PlanError::ExecutionAlreadyAssigned(_)
+            | PlanError::InvalidCause
+            | PlanError::InvalidSuccessor(_) => {
                 protocol_error(ErrorCode::InvalidRequest, error.to_string())
             }
         },

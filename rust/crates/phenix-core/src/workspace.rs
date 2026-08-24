@@ -7,6 +7,9 @@ pub use language_operations::*;
 #[path = "objectives.rs"]
 mod objectives;
 pub use objectives::*;
+#[path = "plans.rs"]
+mod plans;
+pub use plans::*;
 
 use crate::{CallableId, CapabilitySet, ExecutionId, InvalidId, WorkspaceId};
 use serde::{Deserialize, Serialize};

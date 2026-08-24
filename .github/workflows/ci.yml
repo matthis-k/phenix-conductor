@@ -130,6 +130,12 @@ jobs:
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
         run: nix run .#phenix-maintenance -- test system conductor-durable-objectives
 
+      - name: "conductor / durable_plans"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+        run: nix run .#phenix-maintenance -- test system conductor-durable-plans
+
       - name: "conductor / durable_retries"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"

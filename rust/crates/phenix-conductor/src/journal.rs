@@ -4,11 +4,12 @@ use crate::{
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, DiagnosticWritePatch, ExecutionAuthority,
     ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionObjectiveAssignment,
-    ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget, FailureAttemptSummary,
-    FileObservation, FileVersion, FilesystemAuthority, LanguageObservation, ModelTarget,
-    ObjectiveCriterionEvidence, ObjectiveId, ObjectiveRecord, ObjectiveTransition,
+    ExecutionPlanAssignment, ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget,
+    FailureAttemptSummary, FileObservation, FileVersion, FilesystemAuthority, LanguageObservation,
+    ModelTarget, ObjectiveCriterionEvidence, ObjectiveId, ObjectiveRecord, ObjectiveTransition,
     OrchestrationFailureDecision, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
-    SessionId, SessionState, SessionSummary, ToolCallId, WorkspaceId,
+    PlanRecord, PlanStepTransition, PlanTransition, SessionId, SessionState, SessionSummary,
+    ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -182,6 +183,22 @@ pub enum DomainEvent {
     ExecutionObjectivesAssigned {
         assignment: ExecutionObjectiveAssignment,
     },
+    PlanCreated {
+        plan: PlanRecord,
+    },
+    PlanDraftRevised {
+        plan: PlanRecord,
+        expected_revision: u64,
+    },
+    PlanStateChanged {
+        transition: PlanTransition,
+    },
+    PlanStepStateChanged {
+        transition: PlanStepTransition,
+    },
+    ExecutionPlanAssigned {
+        assignment: ExecutionPlanAssignment,
+    },
     InvocationResolved {
         execution_id: ExecutionId,
         route: ResolvedRoute,
@@ -248,6 +265,7 @@ impl RuntimeJournal {
             }
         }
         crate::objectives::validate_journal_objectives(self)?;
+        crate::plans::validate_journal_plans(self)?;
         Ok(())
     }
 }
@@ -1320,6 +1338,11 @@ pub(crate) fn apply_domain_event(
                 .or_insert_with(|| ExecutionReadSet::new(execution_id.clone()))
                 .observe(observation.clone());
         }
+        DomainEvent::PlanCreated { .. }
+        | DomainEvent::PlanDraftRevised { .. }
+        | DomainEvent::PlanStateChanged { .. }
+        | DomainEvent::PlanStepStateChanged { .. }
+        | DomainEvent::ExecutionPlanAssigned { .. } => {}
         DomainEvent::FrontendEvent { event } => {
             let expected = *state.next_event + 1;
             if event.sequence != expected {

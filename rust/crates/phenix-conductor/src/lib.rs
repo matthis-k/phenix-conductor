@@ -9,6 +9,7 @@ mod failure_decisions;
 mod journal;
 mod objectives;
 mod persistence;
+mod plans;
 mod policy;
 mod routing;
 mod sandbox;
@@ -26,6 +27,7 @@ pub use journal::{
 };
 pub use objectives::ObjectiveError;
 pub use persistence::{PersistenceError, SqliteStore};
+pub use plans::PlanError;
 pub use policy::{
     CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
     InvocationPolicyContext, InvocationSubject, PolicyDenial,
@@ -121,6 +123,7 @@ pub enum ConductorError {
     Routing(RoutingRegistryError),
     Context(ContextError),
     Objective(ObjectiveError),
+    Plan(PlanError),
     Backend(BackendError),
 }
 
@@ -196,6 +199,7 @@ impl Display for ConductorError {
             Self::Routing(error) => Display::fmt(error, f),
             Self::Context(error) => Display::fmt(error, f),
             Self::Objective(error) => Display::fmt(error, f),
+            Self::Plan(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
         }
     }
@@ -242,6 +246,12 @@ impl From<ContextError> for ConductorError {
 impl From<ObjectiveError> for ConductorError {
     fn from(value: ObjectiveError) -> Self {
         Self::Objective(value)
+    }
+}
+
+impl From<PlanError> for ConductorError {
+    fn from(value: PlanError) -> Self {
+        Self::Plan(value)
     }
 }
 
