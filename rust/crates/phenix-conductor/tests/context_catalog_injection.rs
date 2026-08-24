@@ -194,3 +194,76 @@ fn stale_revision_never_substitutes_current_content() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn executions_load_context_from_their_pinned_configuration_revision() {
+    let root = fixture_root();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    write(root.join("CONTRIBUTING.md"), "first pinned context");
+
+    let mut runtime = ConductorRuntime::new();
+    runtime
+        .reload_configuration(configuration_for(&root))
+        .unwrap();
+    let first_session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let first_execution = runtime
+        .submit(&first_session.id, "load first pinned context")
+        .unwrap();
+
+    let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
+    let first_descriptor = runtime
+        .context_descriptors_for_execution(&first_execution.id)
+        .unwrap()
+        .into_iter()
+        .find(|descriptor| descriptor.id == id)
+        .unwrap();
+
+    write(root.join("CONTRIBUTING.md"), "second pinned context");
+    runtime
+        .reload_configuration(configuration_for(&root))
+        .unwrap();
+    let second_session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let second_execution = runtime
+        .submit(&second_session.id, "load second pinned context")
+        .unwrap();
+    let second_descriptor = runtime
+        .context_descriptors_for_execution(&second_execution.id)
+        .unwrap()
+        .into_iter()
+        .find(|descriptor| descriptor.id == id)
+        .unwrap();
+
+    assert_ne!(first_descriptor.revision, second_descriptor.revision);
+
+    let (first_resource, _) = runtime
+        .load_context_for_execution(
+            &first_execution.id,
+            &id,
+            &first_descriptor.revision,
+            ContextInjectionRequester::Agent,
+            ContextInjectionLifetime::SingleRequest,
+            "load the first execution's pinned context",
+        )
+        .unwrap();
+    let (second_resource, _) = runtime
+        .load_context_for_execution(
+            &second_execution.id,
+            &id,
+            &second_descriptor.revision,
+            ContextInjectionRequester::Agent,
+            ContextInjectionLifetime::SingleRequest,
+            "load the second execution's pinned context",
+        )
+        .unwrap();
+
+    assert_eq!(
+        first_resource.content.as_deref(),
+        Some("first pinned context")
+    );
+    assert_eq!(
+        second_resource.content.as_deref(),
+        Some("second pinned context")
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
