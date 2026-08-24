@@ -76,107 +76,11 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: "Clippy"
+      - name: "Rust validation"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- check rust
-
-      - name: "Unit tests"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test unit
-
-      - name: "Doc tests"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test doc
-
-      - name: "phenix-backend-acp / persistent_continuity"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration backend-acp-persistent-continuity
-
-      - name: "phenix-backend-acp / tool_bridge"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration backend-acp-tool-bridge
-
-      - name: "phenix-acp / repeated_prompts"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test integration phenix-acp-repeated-prompts
-
-      - name: "conductor / black_box_model_tool_loop"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-model-tool-loop
-
-      - name: "conductor / black_box_workflow_callables"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-workflow-callables
-
-      - name: "conductor / durable_retries"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-durable-retries
-
-      - name: "conductor / execution_provider_runtime"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-execution-providers
-
-      - name: "conductor / fixed_target_continuity"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-fixed-target-continuity
-
-      - name: "conductor / routed_context_continuity"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-routed-context-continuity
-
-      - name: "conductor / stdio_roundtrip"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-stdio-roundtrip
-
-      - name: "conductor / protocol_e2e"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-protocol-e2e
-
-      - name: "conductor / runtime_edge_cases"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-runtime-edge-cases
-
-      - name: "conductor / termination_causes"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-termination-causes
-
-      - name: "conductor / workspace_execution_leases"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-        run: nix run .#phenix-maintenance -- test system conductor-workspace-execution-leases
+        run: nix run .#phenix-maintenance -- rust-ci
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
