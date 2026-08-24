@@ -159,11 +159,9 @@
       mkRustCiRuns =
         boundary: targets:
         builtins.concatStringsSep "\n" (
-          builtins.map (
-            target: ''
-              run_check '${boundary}: ${target.label}' "$0" test ${boundary} ${target.id}
-            ''
-          ) targets
+          builtins.map (target: ''
+            run_check '${boundary}: ${target.label}' "$0" test ${boundary} ${target.id}
+          '') targets
         );
 
       expectedCargoTargetLines = builtins.concatStringsSep "\n" (
