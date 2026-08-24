@@ -1,5 +1,9 @@
-use phenix_conductor::SkillRegistry;
-use phenix_core::{ContextResourceId, ContextResourceKind, ContextTier};
+use phenix_conductor::{CompiledConfiguration, ConductorRuntime, SkillRegistry};
+use phenix_core::{
+    BackendId, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId,
+    ContextResourceKind, ContextTier, ExecutionTarget, InferenceOptions, ModelId, ModelTarget,
+    ProviderId,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,6 +24,21 @@ fn write(path: impl AsRef<Path>, content: &str) {
 
 fn skill_source(instructions: &str) -> String {
     format!("---\nname: review\ndescription: Review changes\n---\n{instructions}\n")
+}
+
+fn manual_skill_source(instructions: &str) -> String {
+    format!(
+        "---\nname: review\ndescription: Review changes\ndisable-model-invocation: true\n---\n{instructions}\n"
+    )
+}
+
+fn fixed_target() -> ExecutionTarget {
+    ExecutionTarget::Fixed(ModelTarget {
+        backend: BackendId::parse("mock").unwrap(),
+        provider: ProviderId::parse("mock").unwrap(),
+        model: ModelId::parse("mock").unwrap(),
+        inference: InferenceOptions::default(),
+    })
 }
 
 #[test]
@@ -62,6 +81,42 @@ fn skills_are_exact_revisioned_context_catalog_resources() {
         .as_deref()
         .unwrap()
         .contains("second revision"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn agent_requester_cannot_load_manual_only_skill() {
+    let root = fixture_root();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    write(
+        root.join(".phenix/skills/review/SKILL.md"),
+        &manual_skill_source("manual-only review instructions"),
+    );
+
+    let skills = SkillRegistry::discover(&root).unwrap();
+    let catalog = skills.skill_context_catalog().unwrap();
+    let id = ContextResourceId::parse("skill:review").unwrap();
+    let revision = catalog.current_descriptor(&id).unwrap().revision.clone();
+
+    let mut configuration = CompiledConfiguration::default();
+    configuration.install_skill_registry(skills);
+
+    let mut runtime = ConductorRuntime::new();
+    runtime.reload_configuration(configuration).unwrap();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let execution = runtime.submit(&session.id, "inspect review guidance").unwrap();
+
+    assert!(runtime
+        .load_context_for_execution(
+            &execution.id,
+            &id,
+            &revision,
+            ContextInjectionRequester::Agent,
+            ContextInjectionLifetime::SingleRequest,
+            "agent requested manual-only skill",
+        )
+        .is_err());
 
     fs::remove_dir_all(root).unwrap();
 }
