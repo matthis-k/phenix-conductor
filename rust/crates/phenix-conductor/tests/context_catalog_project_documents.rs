@@ -85,7 +85,8 @@ fn project_documents_are_public_exact_catalog_resources() {
     assert_eq!(descriptors.len(), 2);
     for path in ["CONTRIBUTING.md", "DEVELOPMENT.md"] {
         let id = ContextResourceId::parse(format!("project-document:{path}")).unwrap();
-        let descriptor = catalog.current_descriptor(&id).unwrap();
+        let resource = catalog.current_revision(&id).unwrap();
+        let descriptor = &resource.descriptor;
         assert_eq!(descriptor.kind, ContextResourceKind::ProjectDocument);
         assert_eq!(
             descriptor.scope,
@@ -93,10 +94,8 @@ fn project_documents_are_public_exact_catalog_resources() {
                 path: PathBuf::from(path)
             }
         );
-        let revision = catalog.resolve_revision(&id, &descriptor.revision).unwrap();
-        assert_eq!(revision.tier, ContextTier::DiscoverableContent);
-        assert_eq!(revision.descriptor, *descriptor);
-        assert!(revision.content.is_some());
+        assert_eq!(resource.tier, ContextTier::DiscoverableContent);
+        assert!(resource.content.is_some());
     }
 
     fs::remove_dir_all(root).unwrap();
