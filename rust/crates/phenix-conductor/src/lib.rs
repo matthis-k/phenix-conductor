@@ -19,7 +19,7 @@ pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
 pub use context::{ContextError, ContextRegistry, SkillRegistry};
 pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
-    ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest,
+    ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest, ResolvedExactReference,
 };
 pub use failure_decisions::OrchestrationFailureDecisionRequest;
 pub use journal::{

@@ -238,7 +238,6 @@ impl ConductorRuntime {
         }
     }
 
-    #[allow(private_interfaces)]
     pub fn resolve_exact_reference(
         &self,
         reference: &ExactReference,
