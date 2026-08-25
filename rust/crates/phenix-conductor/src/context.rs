@@ -462,7 +462,10 @@ fn project_document_revision(
             estimated_cost: document.content.len() as u64,
         },
         tier: ContextTier::DiscoverableContent,
-        source_ref: ExactReference::Context(id),
+        source_ref: ExactReference::Context {
+            resource_id: id,
+            revision: revision.clone(),
+        },
         content_identity: revision,
         content: Some(document.content.clone()),
     }
@@ -503,7 +506,10 @@ fn skill_revision(skill: &SkillDefinition) -> ContextResourceRevision {
             estimated_cost: content.len() as u64,
         },
         tier: ContextTier::DiscoverableContent,
-        source_ref: ExactReference::Context(id),
+        source_ref: ExactReference::Context {
+            resource_id: id,
+            revision: revision.clone(),
+        },
         content_identity: revision,
         content: Some(content),
     }
@@ -1023,7 +1029,11 @@ mod tests {
         let first_registry = ContextRegistry::discover(&root).unwrap();
         let first_catalog = first_registry.project_context_catalog().unwrap();
         let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
-        let first_descriptor = first_catalog.current_descriptor(&id).unwrap().clone();
+        let first_descriptor = first_catalog
+            .current_revision(&id)
+            .unwrap()
+            .descriptor
+            .clone();
         let first_revision = first_catalog
             .resolve_revision(&id, &first_descriptor.revision)
             .unwrap()
@@ -1044,7 +1054,11 @@ mod tests {
         write(root.join("CONTRIBUTING.md"), "second contribution rules");
         let second_registry = ContextRegistry::discover(&root).unwrap();
         let second_catalog = second_registry.project_context_catalog().unwrap();
-        let second_descriptor = second_catalog.current_descriptor(&id).unwrap().clone();
+        let second_descriptor = second_catalog
+            .current_revision(&id)
+            .unwrap()
+            .descriptor
+            .clone();
         let second_revision = second_catalog
             .resolve_revision(&id, &second_descriptor.revision)
             .unwrap()

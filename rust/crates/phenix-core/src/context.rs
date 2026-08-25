@@ -251,6 +251,9 @@ pub enum ContextInjectionRequester {
     Agent,
     User,
     Orchestration,
+    ContextPolicy,
+    Hook,
+    Frontend,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

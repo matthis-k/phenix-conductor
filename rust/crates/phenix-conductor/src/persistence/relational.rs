@@ -634,6 +634,13 @@ fn insert_event(
             )?;
         }
         DomainEvent::ContextInjectionRecorded { injection } => {
+            if let ExactReference::Context { revision, .. } = &injection.source_ref {
+                if revision != &injection.source_revision {
+                    return Err(invalid(
+                        "context source reference revision does not match injection source revision",
+                    ));
+                }
+            }
             let (source_kind, source_id, source_event_sequence) =
                 context_source_columns(&injection.source_ref)?;
             transaction.execute(
@@ -1206,7 +1213,9 @@ fn context_source_columns(
         ExactReference::LanguageObservation(id) => {
             Ok(("language_observation", Some(id.to_string()), None))
         }
-        ExactReference::Context(id) => Ok(("context", Some(id.to_string()), None)),
+        ExactReference::Context { resource_id, .. } => {
+            Ok(("context", Some(resource_id.to_string()), None))
+        }
     }
 }
 
@@ -1227,6 +1236,7 @@ fn parse_context_source(
     kind: &str,
     id: Option<String>,
     event_sequence: Option<i64>,
+    source_revision: &ContextRevision,
 ) -> Result<ExactReference, PersistenceError> {
     match kind {
         "objective" => Ok(ExactReference::Objective(parse_id(
@@ -1264,11 +1274,14 @@ fn parse_context_source(
             "context language observation source",
             LanguageObservationId::parse,
         )?)),
-        "context" => Ok(ExactReference::Context(parse_id(
-            context_source_id(id, event_sequence, kind)?,
-            "context resource source",
-            ContextResourceId::parse,
-        )?)),
+        "context" => Ok(ExactReference::Context {
+            resource_id: parse_id(
+                context_source_id(id, event_sequence, kind)?,
+                "context resource source",
+                ContextResourceId::parse,
+            )?,
+            revision: source_revision.clone(),
+        }),
         other => Err(invalid(format!("unknown context source kind: {other}"))),
     }
 }
@@ -1623,15 +1636,13 @@ fn load_event(
                     ))
                 },
             )?;
+            let source_revision =
+                parse_id(row.4, "context source revision", ContextRevision::parse)?;
             Ok(DomainEvent::ContextInjectionRecorded {
                 injection: ContextInjection {
                     execution_id: parse_id(row.0, "execution", ExecutionId::parse)?,
-                    source_ref: parse_context_source(&row.1, row.2, row.3)?,
-                    source_revision: parse_id(
-                        row.4,
-                        "context source revision",
-                        ContextRevision::parse,
-                    )?,
+                    source_ref: parse_context_source(&row.1, row.2, row.3, &source_revision)?,
+                    source_revision,
                     requested_by: parse_context_requester(&row.5)?,
                     reason: row.6,
                     lifetime: parse_context_lifetime(&row.7)?,
@@ -3128,7 +3139,10 @@ mod tests {
             ExactReference::LanguageObservation(
                 LanguageObservationId::parse("language-source").unwrap(),
             ),
-            ExactReference::Context(ContextResourceId::parse("context-source").unwrap()),
+            ExactReference::Context {
+                resource_id: ContextResourceId::parse("context-source").unwrap(),
+                revision: ContextRevision::parse("revision-6").unwrap(),
+            },
         ];
         let requesters = [
             ContextInjectionRequester::Agent,
@@ -3184,9 +3198,10 @@ mod tests {
             .record_domain_event(DomainEvent::ContextInjectionRecorded {
                 injection: ContextInjection {
                     execution_id: execution.id.clone(),
-                    source_ref: ExactReference::Context(
-                        ContextResourceId::parse("context-source").unwrap(),
-                    ),
+                    source_ref: ExactReference::Context {
+                        resource_id: ContextResourceId::parse("context-source").unwrap(),
+                        revision: ContextRevision::parse("revision").unwrap(),
+                    },
                     source_revision: ContextRevision::parse("revision").unwrap(),
                     requested_by: ContextInjectionRequester::Agent,
                     reason: "reason".to_owned(),
