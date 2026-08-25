@@ -276,7 +276,7 @@ impl ConductorRuntime {
                 }),
             ExactReference::FileObservation(_)
             | ExactReference::LanguageObservation(_)
-            | ExactReference::Context(_) => Err(crate::JournalError::InvalidEvent(format!(
+            | ExactReference::Context { .. } => Err(crate::JournalError::InvalidEvent(format!(
                 "exact reference kind is not resolved yet: {reference}"
             ))
             .into()),
