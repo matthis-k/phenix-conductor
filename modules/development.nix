@@ -32,6 +32,7 @@
         env = {
           CARGO_HOME = "\${{ runner.temp }}/phenix-cargo-home";
           CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
+          CARGO_TERM_QUIET = "true";
         };
       };
       productCi = {
