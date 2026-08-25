@@ -119,6 +119,16 @@ impl ConductorRuntime {
         Ok(self.configuration_for_execution(execution_id)?.has_skills())
     }
 
+    pub fn execution_worker_profile(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Option<WorkerProfileId>, ConductorError> {
+        self.executions
+            .get(execution_id)
+            .map(|execution| execution.worker_profile.clone())
+            .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone()))
+    }
+
     pub fn execution_authority(
         &self,
         execution_id: &ExecutionId,

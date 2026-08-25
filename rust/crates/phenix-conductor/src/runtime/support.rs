@@ -4,6 +4,17 @@ impl ConductorRuntime {
         Ok(())
     }
 
+    pub fn register_worker_profile(
+        &mut self,
+        profile: WorkerProfileDefinition,
+    ) -> Result<(), ConductorError> {
+        self.revise_configuration(move |configuration| {
+            configuration.register_worker_profile(profile)?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     pub fn register_routing_profile(
         &mut self,
         profile: RoutingProfile,
@@ -186,6 +197,63 @@ impl ConductorRuntime {
         restrictions: &ExecutionAuthority,
     ) -> Result<ExecutionSummary, ConductorError> {
         self.start_agent_with_node(parent_id, callable, objective, None, Some(restrictions))
+    }
+
+    pub fn start_worker_profile(
+        &mut self,
+        parent_id: &ExecutionId,
+        profile_id: &WorkerProfileId,
+        objective: impl Into<String>,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        self.start_worker_profile_inner(parent_id, profile_id, objective.into(), None)
+    }
+
+    pub fn start_worker_profile_with_restrictions(
+        &mut self,
+        parent_id: &ExecutionId,
+        profile_id: &WorkerProfileId,
+        objective: impl Into<String>,
+        restrictions: &ExecutionAuthority,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        self.start_worker_profile_inner(
+            parent_id,
+            profile_id,
+            objective.into(),
+            Some(restrictions),
+        )
+    }
+
+    fn start_worker_profile_inner(
+        &mut self,
+        parent_id: &ExecutionId,
+        profile_id: &WorkerProfileId,
+        objective: String,
+        restrictions: Option<&ExecutionAuthority>,
+    ) -> Result<ExecutionSummary, ConductorError> {
+        let (callable, profile_maximum) = {
+            let resolved = self
+                .configuration_for_execution(parent_id)?
+                .resolve_worker_profile(profile_id)?;
+            (
+                resolved.profile.agent.clone(),
+                resolved.profile.authority_maximum.clone(),
+            )
+        };
+        let effective_restrictions = restrictions.map_or(profile_maximum.clone(), |requested| {
+            profile_maximum.attenuate(requested)
+        });
+        let child = self.start_agent_with_node(
+            parent_id,
+            &callable,
+            objective,
+            None,
+            Some(&effective_restrictions),
+        )?;
+        self.record_domain_event(DomainEvent::WorkerProfileBound {
+            execution_id: child.id.clone(),
+            profile_id: profile_id.clone(),
+        })?;
+        Ok(child)
     }
 }
 

@@ -1,9 +1,19 @@
+mod worker_profiles {
+    include!("../worker_profiles.rs");
+}
+
+pub use worker_profiles::{
+    ResolvedWorkerProfile, WorkerProfileDefinition, WorkerProfileError, WorkerProfileId,
+};
+use worker_profiles::WorkerProfileRegistry;
+
 #[derive(Clone, Debug, Default)]
 pub struct CompiledConfiguration {
     callables: CallableRegistry,
     routing: RoutingRegistry,
     context: ContextRegistry,
     skills: SkillRegistry,
+    worker_profiles: WorkerProfileRegistry,
 }
 
 impl CompiledConfiguration {
@@ -13,6 +23,7 @@ impl CompiledConfiguration {
             "routing": self.routing.semantic_manifest(),
             "context": self.context.semantic_manifest(),
             "skills": self.skills.semantic_manifest(),
+            "worker_profiles": self.worker_profiles.semantic_manifest(),
         });
         let encoded = serde_json::to_vec(&manifest)
             .expect("compiled configuration manifest is JSON serializable");
@@ -104,6 +115,41 @@ impl CompiledConfiguration {
     ) -> Result<(), ConductorError> {
         self.routing.register(profile)?;
         Ok(())
+    }
+
+    pub fn register_worker_profile(
+        &mut self,
+        profile: WorkerProfileDefinition,
+    ) -> Result<(), WorkerProfileError> {
+        if self.callables.agent_definition(&profile.agent).is_err() {
+            return Err(WorkerProfileError::InvalidAgent {
+                profile: profile.id,
+                agent: profile.agent,
+            });
+        }
+        self.worker_profiles.register(profile)
+    }
+
+    pub fn worker_profile(
+        &self,
+        id: &WorkerProfileId,
+    ) -> Result<&WorkerProfileDefinition, WorkerProfileError> {
+        self.worker_profiles.get(id)
+    }
+
+    pub fn resolve_worker_profile(
+        &self,
+        id: &WorkerProfileId,
+    ) -> Result<ResolvedWorkerProfile<'_>, WorkerProfileError> {
+        let profile = self.worker_profiles.get(id)?;
+        let agent = self
+            .callables
+            .agent_definition(&profile.agent)
+            .map_err(|_| WorkerProfileError::InvalidAgent {
+                profile: profile.id.clone(),
+                agent: profile.agent.clone(),
+            })?;
+        Ok(ResolvedWorkerProfile { profile, agent })
     }
 
     pub fn install_context_registry(&mut self, context: ContextRegistry) {

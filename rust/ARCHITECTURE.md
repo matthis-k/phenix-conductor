@@ -84,6 +84,8 @@ child authority
 
 Runtime approval may authorize an operation within that bound. It does not increase the bound.
 
+Worker profiles are immutable configuration metadata in `CompiledConfiguration`. A profile names one canonical agent by `CallableId` and adds an authority maximum; it does not copy the agent or create another agent registry. Worker creation resolves the profile from the parent execution's pinned configuration, uses the normal child-execution path for attenuation, and records the selected profile ID as a durable execution binding. Journal replay and SQLite persistence preserve that binding independently of the canonical agent definition.
+
 Provider credentials are not ambient shell credentials. Execution environments contain only declared non-secret environment, execution-local temporary state, and explicitly granted secrets. Host IPC is denied unless explicitly granted.
 
 Working-tree write authority and Git metadata write authority are separate. A normal implementer may edit files while `.git` remains read-only. Remote Git operations additionally require network and credential authority.

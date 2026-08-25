@@ -1,3 +1,5 @@
+use crate::WorkerProfileError;
+
 fn protocol_error(code: ErrorCode, message: impl Into<String>) -> ProtocolError {
     ProtocolError {
         code,
@@ -166,6 +168,16 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             error.execution_id = Some(execution_id);
             error
         }
+        ConductorError::WorkerProfile(error) => match error {
+            WorkerProfileError::Unknown(_) => {
+                protocol_error(ErrorCode::UnknownId, error.to_string())
+            }
+            WorkerProfileError::InvalidId
+            | WorkerProfileError::Duplicate(_)
+            | WorkerProfileError::InvalidAgent { .. } => {
+                protocol_error(ErrorCode::InvalidRequest, error.to_string())
+            }
+        },
         ConductorError::CallableRegistry(error) => {
             protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }

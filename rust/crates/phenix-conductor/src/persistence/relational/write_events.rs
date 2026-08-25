@@ -7,6 +7,7 @@ fn event_type(event: &DomainEvent) -> &'static str {
         DomainEvent::SessionTargetChanged { .. } => "session_target_changed",
         DomainEvent::SessionClosed { .. } => "session_closed",
         DomainEvent::ExecutionCreated { .. } => "execution_created",
+        DomainEvent::WorkerProfileBound { .. } => "worker_profile_bound",
         DomainEvent::RootSubmissionAccepted { .. } => "root_submission_accepted",
         DomainEvent::ExecutionStateChanged { .. } => "execution_state_changed",
         DomainEvent::AttemptGroupCreated { .. } => "attempt_group_created",
