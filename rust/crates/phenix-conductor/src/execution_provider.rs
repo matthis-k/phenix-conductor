@@ -180,10 +180,6 @@ impl ResolvedExactReference {
 }
 
 impl ConductorRuntime {
-    /// Resolve the immutable provider dispatch inputs while the caller holds
-    /// the runtime lock. The returned provider/request pair is then safe to
-    /// execute after releasing that lock, which keeps frontend cancellation
-    /// and event delivery responsive during a blocking provider call.
     pub(crate) fn prepare_provider_execution(
         &self,
         execution_id: &ExecutionId,
@@ -464,7 +460,9 @@ impl ConductorRuntime {
                     serde_json::to_string(&plan).expect("plan context resource must serialize"),
                 )
             }
-            ContextResourceKind::Skill | ContextResourceKind::ProjectDocument => return Ok(None),
+            ContextResourceKind::Skill
+            | ContextResourceKind::ProjectDocument
+            | ContextResourceKind::Artifact => return Ok(None),
         };
 
         Ok(Some(ContextResourceRevision {

@@ -4,6 +4,7 @@ fn context_resource_kind_token(kind: &ContextResourceKind) -> &'static str {
         ContextResourceKind::ProjectDocument => "project_document",
         ContextResourceKind::Objective => "objective",
         ContextResourceKind::Plan => "plan",
+        ContextResourceKind::Artifact => "artifact",
     }
 }
 

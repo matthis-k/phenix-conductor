@@ -223,6 +223,8 @@ Each execution has one conductor-owned `ExecutionContextProjection`. `ContextMan
 
 Exact injected content is materialized from its durable resource revision, never from whatever bytes happen to be current on disk. Projection accounting is observational: it reports deterministic catalog cost, injected-content bytes, and rendered-prompt bytes without pruning, mutating durable state, or granting authority.
 
+Durable artifacts use the same exact context-resource registry and persistence path. Promotion records immutable content under the producing execution. The execution projection exposes a compact artifact descriptor instead of copying the artifact body into model context. Deterministic pruning may remove repeated injected bytes or artifact bodies from the projection, but each omission records a typed reason, original byte count, content identity, and exact recovery reference. Pruning never mutates the journal, artifact record, or referenced content. Small tool output stays inline unless a caller explicitly promotes it.
+
 Scoped `AGENTS.md` and `AGENTS.override.md` remain mandatory instructions. `CONTRIBUTING.md`, `DEVELOPMENT.md`, skills, objectives, and plans are discoverable resources. Loading a discoverable resource uses the canonical conductor injection operation and records the requester, exact source revision, reason, lifetime, and content identity.
 
 Executions resolve configuration-backed resources through the immutable configuration revision they started with. Historical context requests name an exact resource revision and never fall through to current content. Discoverable document and skill bytes therefore belong to catalog revisions, not the compiled configuration fingerprint.

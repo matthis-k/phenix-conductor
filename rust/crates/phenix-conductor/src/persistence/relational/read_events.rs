@@ -4,6 +4,7 @@ fn parse_context_resource_kind(value: &str) -> Result<ContextResourceKind, Persi
         "project_document" => Ok(ContextResourceKind::ProjectDocument),
         "objective" => Ok(ContextResourceKind::Objective),
         "plan" => Ok(ContextResourceKind::Plan),
+        "artifact" => Ok(ContextResourceKind::Artifact),
         other => Err(invalid(format!("unknown context resource kind: {other}"))),
     }
 }

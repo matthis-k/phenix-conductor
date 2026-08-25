@@ -72,6 +72,58 @@ impl ConductorRuntime {
             .skill_resource_payload(id, path)?)
     }
 
+    pub fn promote_text_artifact(
+        &mut self,
+        execution_id: &ExecutionId,
+        title: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Result<phenix_core::ContextResourceRevision, ConductorError> {
+        self.execution_authority(execution_id)?;
+        let content = content.into();
+        let digest = format!("{:x}", Sha256::digest(content.as_bytes()));
+        let revision = ContextRevision::parse(format!("sha256:{digest}"))
+            .expect("sha256 artifact revision must be a valid context revision");
+        let id = ContextResourceId::parse(format!("artifact:{execution_id}:{digest}"))
+            .expect("generated artifact id must be a valid context resource id");
+        let source_ref = phenix_core::ExactReference::Context {
+            resource_id: id.clone(),
+            revision: revision.clone(),
+        };
+
+        if let Some(existing) = self.journal.entries.iter().find_map(|entry| match &entry.event {
+            DomainEvent::ContextResourceRevisionRegistered { resource }
+                if resource.source_ref == source_ref =>
+            {
+                Some(resource.clone())
+            }
+            _ => None,
+        }) {
+            return Ok(existing);
+        }
+
+        let resource = phenix_core::ContextResourceRevision {
+            descriptor: ContextDescriptor {
+                id,
+                kind: ContextResourceKind::Artifact,
+                title: title.into(),
+                description: "Immutable execution artifact".to_owned(),
+                scope: ContextScope::Execution {
+                    execution_id: execution_id.clone(),
+                },
+                revision: revision.clone(),
+                estimated_cost: source_ref.to_string().len() as u64,
+            },
+            tier: phenix_core::ContextTier::DiscoverableContent,
+            source_ref,
+            content_identity: revision,
+            content: Some(content),
+        };
+        self.record_domain_event(DomainEvent::ContextResourceRevisionRegistered {
+            resource: resource.clone(),
+        })?;
+        Ok(resource)
+    }
+
     fn next_language_observation_id(&self) -> LanguageObservationId {
         let mut ordinal = self
             .journal
@@ -134,5 +186,58 @@ impl ConductorRuntime {
         restrictions: &ExecutionAuthority,
     ) -> Result<ExecutionSummary, ConductorError> {
         self.start_agent_with_node(parent_id, callable, objective, None, Some(restrictions))
+    }
+}
+
+#[cfg(test)]
+mod artifact_tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn fixed_target() -> ExecutionTarget {
+        ExecutionTarget::Fixed(ModelTarget {
+            backend: phenix_core::BackendId::parse("mock").unwrap(),
+            provider: phenix_core::ProviderId::parse("mock").unwrap(),
+            model: phenix_core::ModelId::parse("mock").unwrap(),
+            inference: phenix_core::InferenceOptions::default(),
+        })
+    }
+
+    #[test]
+    fn promoted_artifact_is_immutable_and_survives_relational_restore() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("phenix-durable-artifacts-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed_target()).unwrap();
+        let execution = runtime.submit(&session.id, "produce artifact").unwrap();
+        let artifact = runtime
+            .promote_text_artifact(&execution.id, "build log", "exact build output")
+            .unwrap();
+
+        let duplicate = runtime
+            .promote_text_artifact(
+                &execution.id,
+                "ignored replacement title",
+                "exact build output",
+            )
+            .unwrap();
+        assert_eq!(duplicate, artifact);
+
+        let store = SqliteStore::new(root.join("state.sqlite"));
+        store.save(runtime.journal()).unwrap();
+        let restored = ConductorRuntime::restore(store.load().unwrap()).unwrap();
+        let resolved = restored
+            .resolve_exact_reference(&artifact.source_ref)
+            .unwrap();
+        assert_eq!(resolved, ResolvedExactReference::Context(artifact.clone()));
+        assert_eq!(artifact.content.as_deref(), Some("exact build output"));
+
+        fs::remove_dir_all(root).unwrap();
     }
 }
