@@ -77,13 +77,7 @@ fn execution_loads_exact_project_context_and_records_the_injection() {
     assert_eq!(resource.descriptor, descriptor);
     assert_eq!(resource.content.as_deref(), Some("exact project context"));
     assert_eq!(injection.execution_id, execution.id);
-    assert_eq!(
-        injection.source_ref,
-        ExactReference::Context {
-            resource_id: id,
-            revision: resource.descriptor.revision.clone(),
-        }
-    );
+    assert_eq!(injection.source_ref, resource.source_ref);
     assert_eq!(injection.source_revision, resource.descriptor.revision);
     assert_eq!(injection.content_identity, resource.content_identity);
     assert_eq!(injection.requested_by, ContextInjectionRequester::Agent);
