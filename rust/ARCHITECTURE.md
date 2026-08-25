@@ -215,6 +215,18 @@ Configuration compiles to immutable revisions. Sessions pin a revision.
 
 Reload creates a new revision. Existing sessions do not silently change meaning. New sessions use the current revision. An explicit rebase operation may move an existing session to a newer compatible revision. Existing executions keep the revision they started with.
 
+## Context catalog
+
+The conductor owns context resource identity, revision history, discovery, loading, and injection history. Skills, discoverable project documents, objectives, and plans use one catalog. Backends receive projected context bytes; backend conversation state never becomes the authoritative context store.
+
+Scoped `AGENTS.md` and `AGENTS.override.md` remain mandatory instructions. `CONTRIBUTING.md`, `DEVELOPMENT.md`, skills, objectives, and plans are discoverable resources. Loading a discoverable resource uses the canonical conductor injection operation and records the requester, exact source revision, reason, lifetime, and content identity.
+
+Executions resolve configuration-backed resources through the immutable configuration revision they started with. Historical context requests name an exact resource revision and never fall through to current content. Discoverable document and skill bytes therefore belong to catalog revisions, not the compiled configuration fingerprint.
+
+Context loading applies the execution's existing scope and authority. It cannot create filesystem, repository, network, IPC, secret, or callable authority. Context policy is not a second permission system.
+
+Durable exact references identify immutable facts. A context reference must name the logical resource and immutable revision. File and language observations receive durable identity only when the conductor records them; workspace and language-service adapters supply observation data but do not mint durable IDs.
+
 ## Persistence and debug export
 
 Each discovered workspace or worktree uses one canonical SQLite database in WAL mode. The default path is `$XDG_STATE_HOME/phenix/workspaces/<workspace-key>/workspace.db`, with the XDG user-state fallback when `XDG_STATE_HOME` is unset. The workspace key derives from the canonical `WorkspaceId`. An explicit state path changes storage location only.
