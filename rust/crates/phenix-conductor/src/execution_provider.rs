@@ -1,6 +1,6 @@
 use crate::{
-    CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
-    JournalEntry,
+    CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionContextProjection,
+    ExecutionPayload, JournalEntry,
 };
 use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
@@ -28,6 +28,7 @@ pub struct ExecutionProviderRequest {
     pub callable: CallableId,
     pub config_revision: ConfigRevisionId,
     pub objective: String,
+    pub context: ExecutionContextProjection,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -226,6 +227,7 @@ impl ConductorRuntime {
             callable,
             config_revision,
             objective: input,
+            context: self.project_execution_context(execution_id)?,
         };
         Ok((provider, request))
     }

@@ -219,6 +219,10 @@ Reload creates a new revision. Existing sessions do not silently change meaning.
 
 The conductor owns context resource identity, revision history, discovery, loading, and injection history. Skills, discoverable project documents, objectives, and plans use one catalog. Backends receive projected context bytes; backend conversation state never becomes the authoritative context store.
 
+Each execution has one conductor-owned `ExecutionContextProjection`. `ContextManager` is the canonical projection, model-prompt rendering, inspection, and accounting boundary. `ContextRegistry` and `SkillRegistry` are immutable configuration inputs to that projection; model and provider dispatch must not independently reconstruct semantic context or maintain a parallel prompt registry.
+
+Exact injected content is materialized from its durable resource revision, never from whatever bytes happen to be current on disk. Projection accounting is observational: it reports deterministic catalog cost, injected-content bytes, and rendered-prompt bytes without pruning, mutating durable state, or granting authority.
+
 Scoped `AGENTS.md` and `AGENTS.override.md` remain mandatory instructions. `CONTRIBUTING.md`, `DEVELOPMENT.md`, skills, objectives, and plans are discoverable resources. Loading a discoverable resource uses the canonical conductor injection operation and records the requester, exact source revision, reason, lifetime, and content identity.
 
 Executions resolve configuration-backed resources through the immutable configuration revision they started with. Historical context requests name an exact resource revision and never fall through to current content. Discoverable document and skill bytes therefore belong to catalog revisions, not the compiled configuration fingerprint.

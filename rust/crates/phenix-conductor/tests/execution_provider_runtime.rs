@@ -177,6 +177,10 @@ fn mock_provider_executes_an_ordinary_child_and_emits_canonical_events() {
     assert_eq!(requests[0].callable, callable);
     assert_eq!(requests[0].objective, "native objective");
     assert_eq!(requests[0].config_revision, revision);
+    assert_eq!(
+        requests[0].context,
+        runtime.project_execution_context(&child.id).unwrap()
+    );
     drop(requests);
 
     let snapshot = runtime.snapshot();
