@@ -6,7 +6,7 @@ use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
     ContextInjectionRequester, ContextResourceId, ContextResourceKind, ContextResourceRevision,
     ContextRevision, ContextScope, ExactReference, ExecutionId, ExecutionState, ExecutionSummary,
-    ObjectiveRecord, SessionId, SkillInvocationPolicy,
+    ObjectiveRecord, PlanRecord, SessionId, SkillInvocationPolicy,
 };
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
@@ -111,6 +111,7 @@ impl Debug for ExecutionProviderBinding {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ResolvedExactReference {
     Objective(ObjectiveRecord),
+    Plan(PlanRecord),
     Execution(ExecutionSummary),
     Event(JournalEntry),
 }
@@ -120,6 +121,14 @@ impl ResolvedExactReference {
     pub fn objective(&self) -> Option<&ObjectiveRecord> {
         match self {
             Self::Objective(objective) => Some(objective),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn plan(&self) -> Option<&PlanRecord> {
+        match self {
+            Self::Plan(plan) => Some(plan),
             _ => None,
         }
     }
@@ -246,6 +255,7 @@ impl ConductorRuntime {
             ExactReference::Objective(objective_id) => Ok(ResolvedExactReference::Objective(
                 self.objective(objective_id)?,
             )),
+            ExactReference::Plan(plan_id) => Ok(ResolvedExactReference::Plan(self.plan(plan_id)?)),
             ExactReference::Execution(execution_id) => self
                 .executions
                 .get(execution_id)
@@ -264,8 +274,7 @@ impl ConductorRuntime {
                     ))
                     .into()
                 }),
-            ExactReference::Plan(_)
-            | ExactReference::FileObservation(_)
+            ExactReference::FileObservation(_)
             | ExactReference::LanguageObservation(_)
             | ExactReference::Context(_) => Err(crate::JournalError::InvalidEvent(format!(
                 "exact reference kind is not resolved yet: {reference}"
@@ -341,9 +350,10 @@ mod tests {
     use super::*;
     use crate::{CompiledConfiguration, ContextRegistry, SkillRegistry};
     use phenix_core::{
-        BackendId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ObjectiveId,
-        ProviderId, WorkspaceId,
+        BackendId, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ObjectiveId, PlanId,
+        PlanStep, PlanStepId, PlanStepRevisability, PlanStepState, ProviderId, WorkspaceId,
     };
+    use std::collections::BTreeSet;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -445,6 +455,43 @@ mod tests {
                 Err(ConductorError::InvalidExecutionData { .. })
             ));
         }
+    }
+
+    #[test]
+    fn exact_plan_reference_resolves_authoritative_plan() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed_target()).unwrap();
+        let execution = runtime
+            .submit(&session.id, "resolve plan reference")
+            .unwrap();
+        let objective = runtime
+            .execution_objectives(&execution.id)
+            .unwrap()
+            .expect("root execution must have an objective")
+            .primary;
+        let plan = runtime
+            .create_plan(
+                BTreeSet::from([objective.clone()]),
+                vec![PlanStep {
+                    id: PlanStepId::parse("step-1").unwrap(),
+                    description: "Resolve the durable plan by exact identity".to_owned(),
+                    state: PlanStepState::Proposed,
+                    revisability: PlanStepRevisability::Revisable,
+                    depends_on: BTreeSet::new(),
+                    objective_refs: BTreeSet::from([objective]),
+                }],
+            )
+            .unwrap();
+
+        let resolved = runtime
+            .resolve_exact_reference(&ExactReference::Plan(plan.id.clone()))
+            .unwrap();
+        assert_eq!(resolved.plan(), Some(&plan));
+        assert!(runtime
+            .resolve_exact_reference(&ExactReference::Plan(
+                PlanId::parse("plan-missing").unwrap()
+            ))
+            .is_err());
     }
 
     #[test]
