@@ -2,14 +2,15 @@ use crate::{
     ConfigRevisionFingerprint, ConfigRevisionSlot, ExecutionPayload, ExecutionRecord, SessionRecord,
 };
 use phenix_core::{
-    AttemptGroup, AttemptGroupId, ConfigRevisionId, ContextInjection, DiagnosticWritePatch,
-    ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind,
-    ExecutionObjectiveAssignment, ExecutionPlanAssignment, ExecutionReadSet, ExecutionState,
-    ExecutionSummary, ExecutionTarget, FailureAttemptSummary, FileObservation, FileVersion,
-    FilesystemAuthority, LanguageObservation, ModelTarget, ObjectiveCriterionEvidence, ObjectiveId,
-    ObjectiveRecord, ObjectiveTransition, OrchestrationFailureDecision,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, PlanRecord, PlanStepTransition,
-    PlanTransition, SessionId, SessionState, SessionSummary, ToolCallId, WorkspaceId,
+    AttemptGroup, AttemptGroupId, ConfigRevisionId, ContextInjection, ContextResourceRevision,
+    DiagnosticWritePatch, ExactReference, ExecutionAuthority, ExecutionEvent, ExecutionEventKind,
+    ExecutionId, ExecutionKind, ExecutionObjectiveAssignment, ExecutionPlanAssignment,
+    ExecutionReadSet, ExecutionState, ExecutionSummary, ExecutionTarget, FailureAttemptSummary,
+    FileObservation, FileVersion, FilesystemAuthority, LanguageObservation, ModelTarget,
+    ObjectiveCriterionEvidence, ObjectiveId, ObjectiveRecord, ObjectiveTransition,
+    OrchestrationFailureDecision, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
+    PlanRecord, PlanStepTransition, PlanTransition, SessionId, SessionState, SessionSummary,
+    ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -166,6 +167,9 @@ pub enum DomainEvent {
     LanguageObservationRecorded {
         observation: LanguageObservation,
     },
+    ContextResourceRevisionRegistered {
+        resource: ContextResourceRevision,
+    },
     ContextInjectionRecorded {
         injection: ContextInjection,
     },
@@ -267,8 +271,43 @@ impl RuntimeJournal {
                 });
             }
         }
+        self.validate_context_resource_revisions()?;
         crate::objectives::validate_journal_objectives(self)?;
         crate::plans::validate_journal_plans(self)?;
+        Ok(())
+    }
+
+    fn validate_context_resource_revisions(&self) -> Result<(), JournalError> {
+        let mut revisions = BTreeMap::new();
+        for entry in &self.entries {
+            let DomainEvent::ContextResourceRevisionRegistered { resource } = &entry.event else {
+                continue;
+            };
+            let key = (
+                resource.descriptor.id.clone(),
+                resource.descriptor.revision.clone(),
+            );
+            if let ExactReference::Context {
+                resource_id,
+                revision,
+            } = &resource.source_ref
+            {
+                if resource_id != &resource.descriptor.id
+                    || revision != &resource.descriptor.revision
+                {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "context resource {}@{} carries mismatched exact source reference {}",
+                        resource.descriptor.id, resource.descriptor.revision, resource.source_ref
+                    )));
+                }
+            }
+            if revisions.insert(key, resource).is_some() {
+                return Err(JournalError::InvalidEvent(format!(
+                    "context resource revision registered more than once: {}@{}",
+                    resource.descriptor.id, resource.descriptor.revision
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -1233,6 +1272,7 @@ pub(crate) fn apply_domain_event(
                 )));
             }
         }
+        DomainEvent::ContextResourceRevisionRegistered { .. } => {}
         DomainEvent::ContextInjectionRecorded { injection } => {
             if !state.executions.contains_key(&injection.execution_id) {
                 return Err(JournalError::InvalidEvent(format!(

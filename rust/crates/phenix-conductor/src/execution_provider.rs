@@ -256,6 +256,52 @@ impl ConductorRuntime {
         }
     }
 
+    fn registered_context_resource(
+        &self,
+        resource_id: &ContextResourceId,
+        revision: &ContextRevision,
+    ) -> Option<&ContextResourceRevision> {
+        self.journal
+            .entries
+            .iter()
+            .rev()
+            .find_map(|entry| match &entry.event {
+                DomainEvent::ContextResourceRevisionRegistered { resource }
+                    if resource.descriptor.id == *resource_id
+                        && resource.descriptor.revision == *revision =>
+                {
+                    Some(resource)
+                }
+                _ => None,
+            })
+    }
+
+    fn register_context_resource_revision(
+        &mut self,
+        resource: ContextResourceRevision,
+    ) -> Result<(), ConductorError> {
+        if let Some(existing) =
+            self.registered_context_resource(&resource.descriptor.id, &resource.descriptor.revision)
+        {
+            let same_identity = existing.descriptor == resource.descriptor
+                && existing.tier == resource.tier
+                && existing.source_ref == resource.source_ref
+                && existing.content_identity == resource.content_identity;
+            let compatible_content = existing.content == resource.content
+                || existing.content.is_none()
+                || resource.content.is_none();
+            if !same_identity || !compatible_content {
+                return Err(crate::JournalError::InvalidEvent(format!(
+                    "context resource revision changed after durable registration: {}@{}",
+                    resource.descriptor.id, resource.descriptor.revision
+                ))
+                .into());
+            }
+            return Ok(());
+        }
+        self.record_domain_event(DomainEvent::ContextResourceRevisionRegistered { resource })
+    }
+
     pub fn resolve_exact_reference(
         &self,
         reference: &ExactReference,
@@ -287,15 +333,19 @@ impl ConductorRuntime {
                 resource_id,
                 revision,
             } => self
-                .config_revisions
-                .values()
-                .filter_map(|slot| slot.configuration.as_ref())
-                .find_map(|configuration| {
-                    configuration
-                        .context_catalog()
-                        .resolve_revision(resource_id, revision)
-                        .ok()
-                        .cloned()
+                .registered_context_resource(resource_id, revision)
+                .cloned()
+                .or_else(|| {
+                    self.config_revisions
+                        .values()
+                        .filter_map(|slot| slot.configuration.as_ref())
+                        .find_map(|configuration| {
+                            configuration
+                                .context_catalog()
+                                .resolve_revision(resource_id, revision)
+                                .ok()
+                                .cloned()
+                        })
                 })
                 .map(ResolvedExactReference::Context)
                 .ok_or_else(|| {
@@ -359,6 +409,17 @@ impl ConductorRuntime {
                 return Err(crate::ContextError::ManualOnlySkill(skill.id).into());
             }
         }
+        let mut durable_resource = resource.clone();
+        let (_, secret_values) = crate::secret_material(&self.execution_authority(execution_id)?);
+        if durable_resource.content.as_ref().is_some_and(|content| {
+            secret_values
+                .iter()
+                .any(|secret| !secret.is_empty() && content.contains(secret))
+        }) {
+            durable_resource.content = None;
+        }
+        self.register_context_resource_revision(durable_resource)?;
+
         let injection = ContextInjection {
             execution_id: execution_id.clone(),
             source_ref: resource.source_ref.clone(),

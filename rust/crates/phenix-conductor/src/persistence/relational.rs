@@ -7,18 +7,18 @@ use crate::{
     JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
 use phenix_core::{
-    AttemptGroup, AttemptGroupId, BackendId, CallableId, ContextInjection,
-    ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId, ContextRevision,
-    DiagnosticWritePatch, ExactReference, ExecutionAuthority, ExecutionEvent, ExecutionEventKind,
-    ExecutionId, ExecutionKind, ExecutionObjectiveAssignment, ExecutionState, ExecutionSummary,
-    ExecutionTarget, ExecutionTerminationCause, FailureAttemptSummary, FileKind, FileObservation,
-    FileObservationId, FileVersion, FilesystemAuthority, InferenceEffort, InferenceOptions,
-    LanguageObservationId, ModelId, ModelTarget, NetworkAuthority, ObjectiveCriterion,
-    ObjectiveCriterionEvidence, ObjectiveId, ObjectiveOrigin, ObjectiveRecord, ObjectiveState,
-    ObjectiveTransition, ObjectiveTransitionCause, OrchestrationFailureDecision,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, PlanId, ProviderId,
-    RepositoryAuthority, RoutingProfileId, SessionId, SessionState, SessionSummary, ToolCallId,
-    WorkspaceId,
+    AttemptGroup, AttemptGroupId, BackendId, CallableId, ContextDescriptor, ContextInjection,
+    ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId, ContextResourceKind,
+    ContextResourceRevision, ContextRevision, ContextScope, ContextTier, DiagnosticWritePatch,
+    ExactReference, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
+    ExecutionKind, ExecutionObjectiveAssignment, ExecutionState, ExecutionSummary, ExecutionTarget,
+    ExecutionTerminationCause, FailureAttemptSummary, FileKind, FileObservation, FileObservationId,
+    FileVersion, FilesystemAuthority, InferenceEffort, InferenceOptions, LanguageObservationId,
+    ModelId, ModelTarget, NetworkAuthority, ObjectiveCriterion, ObjectiveCriterionEvidence,
+    ObjectiveId, ObjectiveOrigin, ObjectiveRecord, ObjectiveState, ObjectiveTransition,
+    ObjectiveTransitionCause, OrchestrationFailureDecision, OrchestrationFailureDecisionRecord,
+    OrchestrationNodeId, PlanId, ProviderId, RepositoryAuthority, RoutingProfileId, SessionId,
+    SessionState, SessionSummary, ToolCallId, WorkspaceId,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{Map, Number, Value};
@@ -27,7 +27,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 7;
+const DATABASE_SCHEMA_VERSION: i64 = 8;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -208,6 +208,10 @@ fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
             7,
             include_str!("../../migrations/0007_context_injections.sql"),
         ),
+        (
+            8,
+            include_str!("../../migrations/0008_context_resource_revisions.sql"),
+        ),
     ] {
         if version < target {
             apply_migration(connection, target, sql)?;
@@ -320,6 +324,9 @@ fn event_type(event: &DomainEvent) -> &'static str {
         DomainEvent::ExecutionOutputRecorded { .. } => "execution_output_recorded",
         DomainEvent::DiagnosticWritePatchCaptured { .. } => "diagnostic_write_patch_captured",
         DomainEvent::LanguageObservationRecorded { .. } => "language_observation_recorded",
+        DomainEvent::ContextResourceRevisionRegistered { .. } => {
+            "context_resource_revision_registered"
+        }
         DomainEvent::ContextInjectionRecorded { .. } => "context_injection_recorded",
         DomainEvent::ObjectiveSemanticsActivated => "objective_semantics_activated",
         DomainEvent::ObjectiveCreated { .. } => "objective_created",
@@ -630,6 +637,42 @@ fn insert_event(
                     sql_u64(observation.provider_epoch, "language provider epoch")?,
                     operation,
                     result,
+                ],
+            )?;
+        }
+        DomainEvent::ContextResourceRevisionRegistered { resource } => {
+            let (scope_kind, scope_id, scope_path) =
+                context_scope_columns(&resource.descriptor.scope);
+            let (source_kind, source_id, source_event_sequence) =
+                context_source_columns(&resource.source_ref)?;
+            let source_revision = match &resource.source_ref {
+                ExactReference::Context { revision, .. } => revision,
+                _ => &resource.descriptor.revision,
+            };
+            transaction.execute(
+                "INSERT INTO context_resource_revisions(
+                     recorded_sequence, resource_id, revision, resource_kind, title, description,
+                     scope_kind, scope_id, scope_path, estimated_cost, tier, source_kind, source_id,
+                     source_event_sequence, source_revision, content_identity, content
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                params![
+                    sequence,
+                    resource.descriptor.id.to_string(),
+                    resource.descriptor.revision.to_string(),
+                    context_resource_kind_token(&resource.descriptor.kind),
+                    resource.descriptor.title.as_str(),
+                    resource.descriptor.description.as_str(),
+                    scope_kind,
+                    scope_id,
+                    scope_path,
+                    sql_u64(resource.descriptor.estimated_cost, "context estimated cost")?,
+                    context_tier_token(&resource.tier),
+                    source_kind,
+                    source_id,
+                    source_event_sequence,
+                    source_revision.to_string(),
+                    resource.content_identity.to_string(),
+                    resource.content.as_deref(),
                 ],
             )?;
         }
@@ -1197,6 +1240,121 @@ fn termination_columns(cause: &ExecutionTerminationCause) -> (&'static str, &Exe
     }
 }
 
+fn context_resource_kind_token(kind: &ContextResourceKind) -> &'static str {
+    match kind {
+        ContextResourceKind::Skill => "skill",
+        ContextResourceKind::ProjectDocument => "project_document",
+        ContextResourceKind::Objective => "objective",
+        ContextResourceKind::Plan => "plan",
+    }
+}
+
+fn parse_context_resource_kind(value: &str) -> Result<ContextResourceKind, PersistenceError> {
+    match value {
+        "skill" => Ok(ContextResourceKind::Skill),
+        "project_document" => Ok(ContextResourceKind::ProjectDocument),
+        "objective" => Ok(ContextResourceKind::Objective),
+        "plan" => Ok(ContextResourceKind::Plan),
+        other => Err(invalid(format!("unknown context resource kind: {other}"))),
+    }
+}
+
+fn context_tier_token(tier: &ContextTier) -> &'static str {
+    match tier {
+        ContextTier::MandatoryContent => "mandatory_content",
+        ContextTier::MandatoryMetadata => "mandatory_metadata",
+        ContextTier::DiscoverableContent => "discoverable_content",
+    }
+}
+
+fn parse_context_tier(value: &str) -> Result<ContextTier, PersistenceError> {
+    match value {
+        "mandatory_content" => Ok(ContextTier::MandatoryContent),
+        "mandatory_metadata" => Ok(ContextTier::MandatoryMetadata),
+        "discoverable_content" => Ok(ContextTier::DiscoverableContent),
+        other => Err(invalid(format!("unknown context tier: {other}"))),
+    }
+}
+
+fn context_scope_columns(scope: &ContextScope) -> (&'static str, Option<String>, Option<String>) {
+    match scope {
+        ContextScope::Workspace { workspace_id } => {
+            ("workspace", Some(workspace_id.to_string()), None)
+        }
+        ContextScope::Execution { execution_id } => {
+            ("execution", Some(execution_id.to_string()), None)
+        }
+        ContextScope::Objective { objective_id } => {
+            ("objective", Some(objective_id.to_string()), None)
+        }
+        ContextScope::Path { path } => ("path", None, Some(path.to_string_lossy().into_owned())),
+        ContextScope::Configuration { revision } => {
+            ("configuration", Some(revision.to_string()), None)
+        }
+    }
+}
+
+fn parse_context_scope(
+    kind: &str,
+    id: Option<String>,
+    path: Option<String>,
+) -> Result<ContextScope, PersistenceError> {
+    match kind {
+        "workspace" => Ok(ContextScope::Workspace {
+            workspace_id: parse_id(
+                context_scope_id(id, path, kind)?,
+                "context workspace scope",
+                WorkspaceId::parse,
+            )?,
+        }),
+        "execution" => Ok(ContextScope::Execution {
+            execution_id: parse_id(
+                context_scope_id(id, path, kind)?,
+                "context execution scope",
+                ExecutionId::parse,
+            )?,
+        }),
+        "objective" => Ok(ContextScope::Objective {
+            objective_id: parse_id(
+                context_scope_id(id, path, kind)?,
+                "context objective scope",
+                ObjectiveId::parse,
+            )?,
+        }),
+        "configuration" => Ok(ContextScope::Configuration {
+            revision: parse_id(
+                context_scope_id(id, path, kind)?,
+                "context configuration scope",
+                phenix_core::ConfigRevisionId::parse,
+            )?,
+        }),
+        "path" => {
+            if id.is_some() {
+                return Err(invalid("context path scope must not contain a scope id"));
+            }
+            Ok(ContextScope::Path {
+                path: PathBuf::from(
+                    path.ok_or_else(|| invalid("context path scope is missing its path"))?,
+                ),
+            })
+        }
+        other => Err(invalid(format!("unknown context scope kind: {other}"))),
+    }
+}
+
+fn context_scope_id(
+    id: Option<String>,
+    path: Option<String>,
+    kind: &str,
+) -> Result<String, PersistenceError> {
+    if path.is_some() {
+        return Err(invalid(format!(
+            "context {kind} scope must not contain a path"
+        )));
+    }
+    required_column(id, "context scope id")
+}
+
 fn context_source_columns(
     source: &ExactReference,
 ) -> Result<(&'static str, Option<String>, Option<i64>), PersistenceError> {
@@ -1613,6 +1771,59 @@ fn load_event(
                     provider_epoch: runtime_u64(row.4, "language provider epoch")?,
                     operation,
                     result,
+                },
+            })
+        }
+        "context_resource_revision_registered" => {
+            let row = connection.query_row(
+                "SELECT resource_id, revision, resource_kind, title, description, scope_kind,
+                        scope_id, scope_path, estimated_cost, tier, source_kind, source_id,
+                        source_event_sequence, source_revision, content_identity, content
+                 FROM context_resource_revisions WHERE recorded_sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<i64>>(12)?,
+                        row.get::<_, String>(13)?,
+                        row.get::<_, String>(14)?,
+                        row.get::<_, Option<String>>(15)?,
+                    ))
+                },
+            )?;
+            let revision = parse_id(row.1, "context resource revision", ContextRevision::parse)?;
+            let source_revision =
+                parse_id(row.13, "context source revision", ContextRevision::parse)?;
+            Ok(DomainEvent::ContextResourceRevisionRegistered {
+                resource: ContextResourceRevision {
+                    descriptor: ContextDescriptor {
+                        id: parse_id(row.0, "context resource", ContextResourceId::parse)?,
+                        kind: parse_context_resource_kind(&row.2)?,
+                        title: row.3,
+                        description: row.4,
+                        scope: parse_context_scope(&row.5, row.6, row.7)?,
+                        revision,
+                        estimated_cost: runtime_u64(row.8, "context estimated cost")?,
+                    },
+                    tier: parse_context_tier(&row.9)?,
+                    source_ref: parse_context_source(&row.10, row.11, row.12, &source_revision)?,
+                    content_identity: parse_id(
+                        row.14,
+                        "context content identity",
+                        ContextRevision::parse,
+                    )?,
+                    content: row.15,
                 },
             })
         }
