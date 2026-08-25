@@ -1,6 +1,4 @@
-use phenix_conductor::{
-    CompiledConfiguration, ConductorRuntime, ContextRegistry, ResolvedExactReference, SkillRegistry,
-};
+use phenix_conductor::{CompiledConfiguration, ConductorRuntime, ContextRegistry, SkillRegistry};
 use phenix_core::{
     BackendId, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId,
     ExactReference, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId, ModelTarget,
@@ -329,29 +327,29 @@ fn exact_durable_references_resolve_without_aliases() {
         .unwrap()
         .expect("root execution must have a primary objective");
 
-    match runtime
+    let objective = runtime
         .resolve_exact_reference(&ExactReference::Objective(assignment.primary.clone()))
-        .unwrap()
-    {
-        ResolvedExactReference::Objective(objective) => {
-            assert_eq!(objective.id, assignment.primary);
-        }
-        other => panic!("expected objective reference, found {other:?}"),
-    }
+        .unwrap();
+    assert_eq!(
+        objective
+            .objective()
+            .expect("expected objective reference")
+            .id,
+        assignment.primary
+    );
 
-    match runtime
+    let resolved_execution = runtime
         .resolve_exact_reference(&ExactReference::Execution(execution.id.clone()))
-        .unwrap()
-    {
-        ResolvedExactReference::Execution(resolved) => assert_eq!(resolved, execution),
-        other => panic!("expected execution reference, found {other:?}"),
-    }
+        .unwrap();
+    assert_eq!(
+        resolved_execution
+            .execution()
+            .expect("expected execution reference"),
+        &execution
+    );
 
-    match runtime
+    let event = runtime
         .resolve_exact_reference(&ExactReference::Event(1))
-        .unwrap()
-    {
-        ResolvedExactReference::Event(event) => assert_eq!(event.sequence, 1),
-        other => panic!("expected event reference, found {other:?}"),
-    }
+        .unwrap();
+    assert_eq!(event.event().expect("expected event reference").sequence, 1);
 }
