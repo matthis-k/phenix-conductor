@@ -1,4 +1,6 @@
-use phenix_core::{FileKind, FileObservation, FileVersion, WorkspaceConflict, WorkspaceDescriptor};
+use phenix_core::{
+    FileKind, FileObservationInput, FileVersion, WorkspaceConflict, WorkspaceDescriptor,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -13,7 +15,7 @@ const DIRECTORY_FINGERPRINT_SOURCE: &[u8] = b"directory";
 pub struct WorkspaceRead {
     pub path: PathBuf,
     pub content: String,
-    pub observation: Option<FileObservation>,
+    pub observation: Option<FileObservationInput>,
 }
 
 #[derive(Clone, Debug)]
@@ -180,7 +182,7 @@ impl WorkspaceConsistency {
             String::from_utf8(bytes.clone()).map_err(|_| WorkspaceConsistencyError::NotUtf8 {
                 path: relative.clone(),
             })?;
-        let observation = (!scratch).then(|| FileObservation {
+        let observation = (!scratch).then(|| FileObservationInput {
             path: relative.clone(),
             version: FileVersion::Present {
                 content_hash: fingerprint(&bytes),
@@ -199,7 +201,7 @@ impl WorkspaceConsistency {
         path: impl AsRef<Path>,
         expected: Option<&FileVersion>,
         content: &str,
-    ) -> Result<Option<FileObservation>, WorkspaceConsistencyError> {
+    ) -> Result<Option<FileObservationInput>, WorkspaceConsistencyError> {
         let relative = normalize_relative(path.as_ref())?;
         let target = self.root.join(&relative);
         self.ensure_ancestor_inside(&target)?;
@@ -239,7 +241,7 @@ impl WorkspaceConsistency {
             path: target,
             source,
         })?;
-        let observation = FileObservation {
+        let observation = FileObservationInput {
             path: relative,
             version: FileVersion::Present {
                 content_hash: fingerprint(content.as_bytes()),

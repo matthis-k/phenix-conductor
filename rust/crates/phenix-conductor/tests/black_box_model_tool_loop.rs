@@ -5,9 +5,10 @@ use phenix_backend::{
 use phenix_conductor::{ConductorError, ConductorRuntime, ToolOutcome};
 use phenix_core::{
     BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, FileKind, FileObservation,
-    FileVersion, InferenceOptions, ModelId, ModelTarget, OrchestrationDefinition,
-    OrchestrationNode, OrchestrationNodeId, ProviderId, RoutingProfile, RoutingProfileId,
+    ExecutionEventKind, ExecutionKind, ExecutionState, ExecutionTarget, FileKind,
+    FileObservationInput, FileVersion, InferenceOptions, ModelId, ModelTarget,
+    OrchestrationDefinition, OrchestrationNode, OrchestrationNodeId, ProviderId, RoutingProfile,
+    RoutingProfileId,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -305,7 +306,7 @@ fn tool_file_observations_are_durable_execution_read_sets() {
     runtime
         .register_tool(descriptor("observe", CallableKind::Tool), |_| {
             Ok(
-                ToolOutcome::success("observed").with_file_observation(FileObservation {
+                ToolOutcome::success("observed").with_file_observation(FileObservationInput {
                     path: PathBuf::from("src/lib.rs"),
                     version: FileVersion::Present {
                         content_hash: "v1".to_owned(),

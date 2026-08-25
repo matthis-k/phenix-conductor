@@ -186,7 +186,14 @@ fn future_event_cursor_returns_snapshot_without_replaying_old_events() {
     let before = ProtocolHarness::model(MockModelScript::reply("done"))
         .input("seed")
         .run();
-    let restored = ConductorRuntime::restore(before.journal.clone()).unwrap();
+    let revision = before.journal.config_revision.clone();
+    let mut restored = ConductorRuntime::restore(before.journal.clone()).unwrap();
+    restored
+        .bind_configuration_revision(
+            &revision,
+            phenix_conductor::CompiledConfiguration::default(),
+        )
+        .unwrap();
 
     let after = ProtocolHarness::model(MockModelScript::reply("unused"))
         .runtime(restored)

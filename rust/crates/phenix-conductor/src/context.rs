@@ -1,5 +1,10 @@
-use phenix_core::{SkillDescriptor, SkillId, SkillInvocationPolicy};
+use phenix_core::{
+    ContextCatalog, ContextCatalogError, ContextDescriptor, ContextResourceId, ContextResourceKind,
+    ContextResourceRevision, ContextRevision, ContextScope, ContextTier, ExactReference,
+    SkillDescriptor, SkillId, SkillInvocationPolicy,
+};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
@@ -9,7 +14,7 @@ use std::path::{Component, Path, PathBuf};
 
 const MAX_TEXT_RESOURCE_BYTES: u64 = 1024 * 1024;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ContextDocumentKind {
     AgentInstructions,
     ProjectInstructions,
@@ -48,6 +53,7 @@ struct SkillFrontmatter {
 
 #[derive(Clone, Debug, Default)]
 pub struct ContextRegistry {
+    project_root: PathBuf,
     base_documents: Vec<ContextDocument>,
 }
 
@@ -102,19 +108,30 @@ impl ContextRegistry {
         let project_root = project_root(cwd);
         Ok(Self {
             base_documents: discover_base_documents(&project_root, cwd)?,
+            project_root,
         })
     }
+
+    pub fn project_context_catalog(&self) -> Result<ContextCatalog, ContextCatalogError> {
+        let mut catalog = ContextCatalog::default();
+        for document in self
+            .base_documents
+            .iter()
+            .filter(|document| document.kind == ContextDocumentKind::ProjectInstructions)
+        {
+            catalog.register_revision(project_document_revision(&self.project_root, document))?;
+        }
+        Ok(catalog)
+    }
+
     pub(crate) fn semantic_manifest(&self) -> Value {
         Value::Array(
             self.base_documents
                 .iter()
+                .filter(|document| document.kind == ContextDocumentKind::AgentInstructions)
                 .map(|document| {
-                    let kind = match document.kind {
-                        ContextDocumentKind::AgentInstructions => "agent_instructions",
-                        ContextDocumentKind::ProjectInstructions => "project_instructions",
-                    };
                     json!({
-                        "kind": kind,
+                        "kind": "agent_instructions",
                         "path": document.path.display().to_string(),
                         "scope_root": document.scope_root.display().to_string(),
                         "content": document.content,
@@ -145,21 +162,22 @@ impl ContextRegistry {
             .filter(|skill| skill.descriptor.invocation == SkillInvocationPolicy::ModelEligible)
             .collect::<Vec<_>>();
         let active_skill = explicit_skill.as_ref().and_then(|id| skills.skills.get(id));
+        let mandatory_documents = self
+            .base_documents
+            .iter()
+            .filter(|document| document.kind == ContextDocumentKind::AgentInstructions)
+            .collect::<Vec<_>>();
 
-        if self.base_documents.is_empty() && model_skills.is_empty() && active_skill.is_none() {
+        if mandatory_documents.is_empty() && model_skills.is_empty() && active_skill.is_none() {
             return Ok((user_prompt.to_owned(), BTreeSet::new()));
         }
 
         let mut output = String::from("<phenix_context>\n");
-        if !self.base_documents.is_empty() {
+        if !mandatory_documents.is_empty() {
             output.push_str("<base_context>\n");
-            for document in &self.base_documents {
-                let kind = match document.kind {
-                    ContextDocumentKind::AgentInstructions => "agent_instructions",
-                    ContextDocumentKind::ProjectInstructions => "project_instructions",
-                };
+            for document in mandatory_documents {
                 output.push_str(&format!(
-                    "<document kind=\"{kind}\" path=\"{}\" scope=\"{}\">\n{}\n</document>\n",
+                    "<document kind=\"agent_instructions\" path=\"{}\" scope=\"{}\">\n{}\n</document>\n",
                     escape_xml(&document.path.display().to_string()),
                     escape_xml(&document.scope_root.display().to_string()),
                     escape_xml(document.content.trim())
@@ -242,16 +260,15 @@ impl SkillRegistry {
                         .resources
                         .iter()
                         .map(|(path, content)| {
-                            let content = match content {
-                                SkillResourceContent::Text(content) => json!({"text": content}),
-                                SkillResourceContent::Unavailable => json!({"unavailable": true}),
+                            let availability = match content {
+                                SkillResourceContent::Text(_) => "text",
+                                SkillResourceContent::Unavailable => "unavailable",
                             };
-                            (path.display().to_string(), content)
+                            (path.display().to_string(), availability)
                         })
                         .collect::<BTreeMap<_, _>>();
                     json!({
                         "descriptor": skill.descriptor,
-                        "instructions": skill.instructions,
                         "root": skill.root.display().to_string(),
                         "resources": resources,
                         "allowed_tools": skill.allowed_tools,
@@ -259,6 +276,14 @@ impl SkillRegistry {
                 })
                 .collect(),
         )
+    }
+
+    pub fn skill_context_catalog(&self) -> Result<ContextCatalog, ContextCatalogError> {
+        let mut catalog = ContextCatalog::default();
+        for skill in self.skills.values() {
+            catalog.register_revision(skill_revision(skill))?;
+        }
+        Ok(catalog)
     }
 
     pub fn skill_descriptors(&self) -> Vec<SkillDescriptor> {
@@ -404,6 +429,90 @@ fn discover_base_documents(
         }
     }
     Ok(documents)
+}
+
+fn project_document_revision(
+    project_root: &Path,
+    document: &ContextDocument,
+) -> ContextResourceRevision {
+    let relative = document
+        .path
+        .strip_prefix(project_root)
+        .unwrap_or(document.path.as_path())
+        .to_path_buf();
+    let logical_path = relative.to_string_lossy().replace('\\', "/");
+    let id = ContextResourceId::parse(format!("project-document:{logical_path}"))
+        .expect("project document path must produce a non-empty context resource id");
+    let digest = Sha256::digest(document.content.as_bytes());
+    let revision = ContextRevision::parse(format!("sha256:{digest:x}"))
+        .expect("sha256 digest must produce a non-empty context revision");
+    let title = relative
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(logical_path.as_str())
+        .to_owned();
+    ContextResourceRevision {
+        descriptor: ContextDescriptor {
+            id: id.clone(),
+            kind: ContextResourceKind::ProjectDocument,
+            title,
+            description: format!("Project context document {logical_path}"),
+            scope: ContextScope::Path { path: relative },
+            revision: revision.clone(),
+            estimated_cost: document.content.len() as u64,
+        },
+        tier: ContextTier::DiscoverableContent,
+        source_ref: ExactReference::Context {
+            resource_id: id,
+            revision: revision.clone(),
+        },
+        content_identity: revision,
+        content: Some(document.content.clone()),
+    }
+}
+
+fn skill_revision(skill: &SkillDefinition) -> ContextResourceRevision {
+    let resources = skill
+        .resources
+        .iter()
+        .map(|(path, content)| {
+            let content = match content {
+                SkillResourceContent::Text(content) => json!({ "text": content }),
+                SkillResourceContent::Unavailable => json!({ "unavailable": true }),
+            };
+            (path.display().to_string(), content)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let content = serde_json::to_string(&json!({
+        "instructions": skill.instructions,
+        "resources": resources,
+    }))
+    .expect("skill context content must serialize");
+    let id = ContextResourceId::parse(format!("skill:{}", skill.descriptor.id.as_str()))
+        .expect("skill id must produce a non-empty context resource id");
+    let digest = Sha256::digest(content.as_bytes());
+    let revision = ContextRevision::parse(format!("sha256:{digest:x}"))
+        .expect("sha256 digest must produce a non-empty context revision");
+    ContextResourceRevision {
+        descriptor: ContextDescriptor {
+            id: id.clone(),
+            kind: ContextResourceKind::Skill,
+            title: skill.descriptor.name.clone(),
+            description: skill.descriptor.description.clone(),
+            scope: ContextScope::Path {
+                path: skill.root.clone(),
+            },
+            revision: revision.clone(),
+            estimated_cost: content.len() as u64,
+        },
+        tier: ContextTier::DiscoverableContent,
+        source_ref: ExactReference::Context {
+            resource_id: id,
+            revision: revision.clone(),
+        },
+        content_identity: revision,
+        content: Some(content),
+    }
 }
 
 fn load_agent_document(
@@ -877,7 +986,7 @@ mod tests {
             .compose_prompt(&skills, "Rewrite this text")
             .unwrap();
         assert!(automatic.contains("root agent rules"));
-        assert!(automatic.contains("contribution rules"));
+        assert!(!automatic.contains("contribution rules"));
         assert!(automatic.contains("crate override rules"));
         assert!(automatic.contains("unslop: Cut AI tells"));
         assert!(!automatic.contains("Write a failing regression first"));
@@ -906,6 +1015,85 @@ mod tests {
             skills.model_skill_payload(&SkillId::parse("tdd").unwrap()),
             Err(ContextError::ManualOnlySkill(_))
         ));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn project_documents_keep_logical_identity_across_exact_content_revisions() {
+        let root = fixture_root();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        write(root.join("CONTRIBUTING.md"), "first contribution rules");
+        write(root.join("DEVELOPMENT.md"), "development rules");
+
+        let first_registry = ContextRegistry::discover(&root).unwrap();
+        let first_catalog = first_registry.project_context_catalog().unwrap();
+        let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
+        let first_descriptor = first_catalog
+            .current_revision(&id)
+            .unwrap()
+            .descriptor
+            .clone();
+        let first_revision = first_catalog
+            .resolve_revision(&id, &first_descriptor.revision)
+            .unwrap()
+            .clone();
+        assert_eq!(first_descriptor.kind, ContextResourceKind::ProjectDocument);
+        assert_eq!(first_revision.tier, ContextTier::DiscoverableContent);
+        assert_eq!(
+            first_descriptor.scope,
+            ContextScope::Path {
+                path: PathBuf::from("CONTRIBUTING.md")
+            }
+        );
+        assert_eq!(
+            first_revision.content.as_deref(),
+            Some("first contribution rules")
+        );
+
+        write(root.join("CONTRIBUTING.md"), "second contribution rules");
+        let second_registry = ContextRegistry::discover(&root).unwrap();
+        let second_catalog = second_registry.project_context_catalog().unwrap();
+        let second_descriptor = second_catalog
+            .current_revision(&id)
+            .unwrap()
+            .descriptor
+            .clone();
+        let second_revision = second_catalog
+            .resolve_revision(&id, &second_descriptor.revision)
+            .unwrap()
+            .clone();
+
+        assert_eq!(first_descriptor.id, second_descriptor.id);
+        assert_ne!(first_descriptor.revision, second_descriptor.revision);
+        assert_ne!(
+            first_revision.content_identity,
+            second_revision.content_identity
+        );
+        assert_eq!(
+            second_revision.content.as_deref(),
+            Some("second contribution rules")
+        );
+
+        let mut history = ContextCatalog::default();
+        history.register_revision(first_revision.clone()).unwrap();
+        history.register_revision(second_revision.clone()).unwrap();
+        assert_eq!(
+            history
+                .resolve_revision(&id, &first_descriptor.revision)
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("first contribution rules")
+        );
+        assert_eq!(
+            history
+                .resolve_revision(&id, &second_descriptor.revision)
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("second contribution rules")
+        );
 
         fs::remove_dir_all(root).unwrap();
     }

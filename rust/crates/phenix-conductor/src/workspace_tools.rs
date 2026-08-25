@@ -688,6 +688,7 @@ fn execute_grep(
         success: true,
         file_observations: observations,
         diagnostic_write_patches: Vec::new(),
+        language_observations: Vec::new(),
     })
 }
 

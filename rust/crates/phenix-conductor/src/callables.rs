@@ -7,8 +7,9 @@ use phenix_backend::ToolResult;
 use phenix_core::{
     AgentDefinition, CallableDescriptor, CallableId, CallableKind, ExecutionAuthority,
     ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState, ExecutionSummary,
-    FileObservation, OrchestrationDefinition, OrchestrationNodeId, OrchestrationValueBinding,
-    SessionId,
+    FileObservationInput, LanguageObservationInput, LanguageServiceConfiguration,
+    OrchestrationDefinition, OrchestrationNodeId, OrchestrationValueBinding, SessionId,
+    WorkspaceId,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,18 +20,21 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub(crate) struct ToolExecutionContext {
     pub execution_id: ExecutionId,
+    pub workspace_id: WorkspaceId,
+    pub language_configuration: LanguageServiceConfiguration,
     pub authority: ExecutionAuthority,
     pub sandbox_state: Arc<crate::sandbox::ExecutionSandboxState>,
 }
 
 type ToolHandler = dyn Fn(&ToolExecutionContext, &str) -> Result<ToolOutcome, String> + Send + Sync;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ToolOutcome {
     pub output: String,
     pub success: bool,
-    pub file_observations: Vec<FileObservation>,
+    pub file_observations: Vec<FileObservationInput>,
     pub diagnostic_write_patches: Vec<phenix_core::DiagnosticWritePatch>,
+    pub language_observations: Vec<LanguageObservationInput>,
 }
 
 impl ToolOutcome {
@@ -41,12 +45,19 @@ impl ToolOutcome {
             success: true,
             file_observations: Vec::new(),
             diagnostic_write_patches: Vec::new(),
+            language_observations: Vec::new(),
         }
     }
 
     #[must_use]
-    pub fn with_file_observation(mut self, observation: FileObservation) -> Self {
+    pub fn with_file_observation(mut self, observation: FileObservationInput) -> Self {
         self.file_observations.push(observation);
+        self
+    }
+
+    #[must_use]
+    pub fn with_language_observation(mut self, observation: LanguageObservationInput) -> Self {
+        self.language_observations.push(observation);
         self
     }
 
@@ -73,6 +84,7 @@ impl ToolOutcome {
             success: false,
             file_observations: Vec::new(),
             diagnostic_write_patches: Vec::new(),
+            language_observations: Vec::new(),
         }
     }
 }
@@ -1091,6 +1103,8 @@ mod tests {
             .unwrap();
         let context = ToolExecutionContext {
             execution_id: ExecutionId::parse("execution-tool-test").unwrap(),
+            workspace_id: WorkspaceId::parse("workspace-tool-test").unwrap(),
+            language_configuration: LanguageServiceConfiguration::default(),
             authority: ExecutionAuthority::read_only(),
             sandbox_state: crate::sandbox::ExecutionSandboxState::create().unwrap(),
         };
