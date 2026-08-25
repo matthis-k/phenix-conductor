@@ -1,5 +1,5 @@
 use super::PlanId;
-use crate::{ConfigRevisionId, ExecutionId, ObjectiveId, WorkspaceId};
+use crate::{ConfigRevisionId, DecisionId, ExecutionId, ObjectiveId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
@@ -93,6 +93,7 @@ impl Display for LanguageObservationId {
 pub enum ExactReference {
     Objective(ObjectiveId),
     Plan(PlanId),
+    Decision(DecisionId),
     Execution(ExecutionId),
     Event(u64),
     FileObservation(FileObservationId),
@@ -107,6 +108,7 @@ impl Display for ExactReference {
         match self {
             Self::Objective(id) => write!(f, "objective:{id}"),
             Self::Plan(id) => write!(f, "plan:{id}"),
+            Self::Decision(id) => write!(f, "decision:{id}"),
             Self::Execution(id) => write!(f, "execution:{id}"),
             Self::Event(sequence) => write!(f, "event:{sequence}"),
             Self::FileObservation(id) => write!(f, "file-observation:{id}"),
@@ -126,6 +128,7 @@ pub enum ContextResourceKind {
     ProjectDocument,
     Objective,
     Plan,
+    Decision,
     Artifact,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

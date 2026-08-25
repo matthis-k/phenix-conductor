@@ -7,6 +7,9 @@ mod context;
 mod context_budget;
 mod context_compaction;
 mod context_projection;
+#[cfg(test)]
+mod decision_tests;
+mod decisions;
 mod execution_provider;
 mod failure_decisions;
 mod journal;
@@ -33,6 +36,7 @@ pub use context_projection::{
     ContextArtifactView, ContextManager, ContextProjectionAccounting, ContextProjectionInspection,
     ContextPruneInspection, ContextPruneReason, ExecutionContextProjection,
 };
+pub use decisions::DecisionError;
 pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
     ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest, ResolvedExactReference,

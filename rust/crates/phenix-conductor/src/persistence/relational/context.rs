@@ -4,6 +4,7 @@ fn context_resource_kind_token(kind: &ContextResourceKind) -> &'static str {
         ContextResourceKind::ProjectDocument => "project_document",
         ContextResourceKind::Objective => "objective",
         ContextResourceKind::Plan => "plan",
+        ContextResourceKind::Decision => "decision",
         ContextResourceKind::Artifact => "artifact",
     }
 }
@@ -53,6 +54,7 @@ fn context_source_columns(
     match source {
         ExactReference::Objective(id) => Ok(("objective", Some(id.to_string()), None)),
         ExactReference::Plan(id) => Ok(("plan", Some(id.to_string()), None)),
+        ExactReference::Decision(id) => Ok(("decision", Some(id.to_string()), None)),
         ExactReference::Execution(id) => Ok(("execution", Some(id.to_string()), None)),
         ExactReference::Event(sequence) => Ok((
             "event",

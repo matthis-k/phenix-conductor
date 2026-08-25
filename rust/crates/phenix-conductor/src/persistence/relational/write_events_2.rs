@@ -525,6 +525,12 @@ fn insert_event(
         | DomainEvent::ExecutionPlanAssigned { .. }) => {
             plan_relational::insert_event(transaction, sequence, event)?;
         }
+        event @ (DomainEvent::DecisionDraftCreated { .. }
+        | DomainEvent::DecisionDraftRevised { .. }
+        | DomainEvent::DecisionRecorded { .. }
+        | DomainEvent::DecisionApplicabilityAssessed { .. }) => {
+            decision_relational::insert_event(transaction, sequence, event)?;
+        }
         DomainEvent::InvocationResolved {
             execution_id,
             route,

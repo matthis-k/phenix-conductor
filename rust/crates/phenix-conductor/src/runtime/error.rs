@@ -60,6 +60,7 @@ pub enum ConductorError {
     Journal(JournalError),
     Routing(RoutingRegistryError),
     Context(ContextError),
+    Decision(DecisionError),
     Objective(ObjectiveError),
     Plan(PlanError),
     Backend(BackendError),
@@ -137,6 +138,7 @@ impl Display for ConductorError {
             Self::Journal(error) => Display::fmt(error, f),
             Self::Routing(error) => Display::fmt(error, f),
             Self::Context(error) => Display::fmt(error, f),
+            Self::Decision(error) => Display::fmt(error, f),
             Self::Objective(error) => Display::fmt(error, f),
             Self::Plan(error) => Display::fmt(error, f),
             Self::Backend(error) => Display::fmt(error, f),
@@ -185,6 +187,12 @@ impl From<RoutingRegistryError> for ConductorError {
 impl From<ContextError> for ConductorError {
     fn from(value: ContextError) -> Self {
         Self::Context(value)
+    }
+}
+
+impl From<DecisionError> for ConductorError {
+    fn from(value: DecisionError) -> Self {
+        Self::Decision(value)
     }
 }
 

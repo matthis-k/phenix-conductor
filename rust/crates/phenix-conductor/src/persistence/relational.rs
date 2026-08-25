@@ -1,3 +1,5 @@
+#[path = "decision_relational.rs"]
+mod decision_relational;
 #[path = "plan_relational.rs"]
 mod plan_relational;
 
@@ -28,7 +30,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 12;
+const DATABASE_SCHEMA_VERSION: i64 = 13;
 
 #[derive(Debug)]
 pub enum PersistenceError {

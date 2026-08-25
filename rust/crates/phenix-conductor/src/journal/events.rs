@@ -1,10 +1,11 @@
 use crate::{ConfigRevisionFingerprint, ContextCheckpoint, ExecutionPayload, WorkerProfileId};
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, ContextInjection, ContextResourceRevision,
-    DiagnosticWritePatch, ExactReference, ExecutionAuthority, ExecutionEvent, ExecutionId,
-    ExecutionObjectiveAssignment, ExecutionPlanAssignment, ExecutionState, ExecutionSummary,
-    ExecutionTarget, FailureAttemptSummary, FileObservation, FileVersion, LanguageObservation,
-    ModelTarget, ObjectiveCriterionEvidence, ObjectiveId, ObjectiveRecord, ObjectiveTransition,
+    DecisionApplicability, DecisionId, DecisionRecord, DiagnosticWritePatch, ExactReference,
+    ExecutionAuthority, ExecutionEvent, ExecutionId, ExecutionObjectiveAssignment,
+    ExecutionPlanAssignment, ExecutionState, ExecutionSummary, ExecutionTarget,
+    FailureAttemptSummary, FileObservation, FileVersion, LanguageObservation, ModelTarget,
+    ObjectiveCriterionEvidence, ObjectiveId, ObjectiveRecord, ObjectiveTransition,
     OrchestrationFailureDecisionRecord, OrchestrationNodeId, PlanRecord, PlanStepTransition,
     PlanTransition, SessionId, SessionSummary, WorkspaceId,
 };
@@ -209,6 +210,20 @@ pub enum DomainEvent {
     ExecutionPlanAssigned {
         assignment: ExecutionPlanAssignment,
     },
+    DecisionDraftCreated {
+        decision: DecisionRecord,
+    },
+    DecisionDraftRevised {
+        decision: DecisionRecord,
+        expected_revision: u64,
+    },
+    DecisionRecorded {
+        decision_id: DecisionId,
+    },
+    DecisionApplicabilityAssessed {
+        decision_id: DecisionId,
+        applicability: DecisionApplicability,
+    },
     InvocationResolved {
         execution_id: ExecutionId,
         route: ResolvedRoute,
@@ -278,6 +293,7 @@ impl RuntimeJournal {
         self.validate_context_resource_revisions()?;
         crate::objectives::validate_journal_objectives(self)?;
         crate::plans::validate_journal_plans(self)?;
+        crate::decisions::validate_journal_decisions(self)?;
         Ok(())
     }
 

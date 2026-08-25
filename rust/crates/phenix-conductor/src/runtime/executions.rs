@@ -108,6 +108,22 @@ impl ConductorRuntime {
             });
         }
 
+        if let Some(assignment) = self.execution_objectives(execution_id)? {
+            for decision in self.decisions_for_objective_lineage(&assignment.primary)? {
+                let encoded = serde_json::to_vec(&decision).expect("decision record is JSON serializable");
+                let revision = ContextRevision::parse(format!("sha256:{}", Sha256::digest(&encoded).iter().map(|byte| format!("{byte:02x}")).collect::<String>())).expect("generated decision context revision");
+                descriptors.push(ContextDescriptor {
+                    id: ContextResourceId::parse(format!("decision:{}", decision.id)).expect("generated decision context resource id"),
+                    kind: ContextResourceKind::Decision,
+                    title: decision.question.clone(),
+                    description: format!("Durable decision {}", decision.id),
+                    scope: ContextScope::Workspace { workspace_id: decision.workspace.clone() },
+                    revision,
+                    estimated_cost: encoded.len() as u64,
+                });
+            }
+        }
+
         descriptors.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(descriptors)
     }
