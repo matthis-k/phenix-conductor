@@ -1,8 +1,11 @@
-use crate::{CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload};
+use crate::{
+    CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload, JournalEntry,
+};
 use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
     ContextInjectionRequester, ContextResourceId, ContextResourceKind, ContextResourceRevision,
-    ContextRevision, ContextScope, ExecutionId, ExecutionState, SessionId, SkillInvocationPolicy,
+    ContextRevision, ContextScope, ExactReference, ExecutionId, ExecutionState, ExecutionSummary,
+    ObjectiveRecord, SessionId, SkillInvocationPolicy,
 };
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
@@ -104,6 +107,39 @@ impl Debug for ExecutionProviderBinding {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResolvedExactReference {
+    Objective(ObjectiveRecord),
+    Execution(ExecutionSummary),
+    Event(JournalEntry),
+}
+
+impl ResolvedExactReference {
+    #[must_use]
+    pub fn objective(&self) -> Option<&ObjectiveRecord> {
+        match self {
+            Self::Objective(objective) => Some(objective),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn execution(&self) -> Option<&ExecutionSummary> {
+        match self {
+            Self::Execution(execution) => Some(execution),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn event(&self) -> Option<&JournalEntry> {
+        match self {
+            Self::Event(event) => Some(event),
+            _ => None,
+        }
+    }
+}
+
 impl ConductorRuntime {
     /// Resolve the immutable provider dispatch inputs while the caller holds
     /// the runtime lock. The returned provider/request pair is then safe to
@@ -198,6 +234,43 @@ impl ConductorRuntime {
                 execution_id: execution_id.clone(),
                 message: format!("context resource scope does not apply to execution: {scope:?}"),
             })
+        }
+    }
+
+    #[allow(private_interfaces)]
+    pub fn resolve_exact_reference(
+        &self,
+        reference: &ExactReference,
+    ) -> Result<ResolvedExactReference, ConductorError> {
+        match reference {
+            ExactReference::Objective(objective_id) => {
+                Ok(ResolvedExactReference::Objective(self.objective(objective_id)?))
+            }
+            ExactReference::Execution(execution_id) => self
+                .executions
+                .get(execution_id)
+                .map(|record| ResolvedExactReference::Execution(record.summary.clone()))
+                .ok_or_else(|| ConductorError::UnknownExecution(execution_id.clone())),
+            ExactReference::Event(sequence) => self
+                .journal
+                .entries
+                .iter()
+                .find(|entry| entry.sequence == *sequence)
+                .cloned()
+                .map(ResolvedExactReference::Event)
+                .ok_or_else(|| {
+                    crate::JournalError::InvalidEvent(format!(
+                        "unknown exact event reference: {sequence}"
+                    ))
+                    .into()
+                }),
+            ExactReference::Plan(_)
+            | ExactReference::FileObservation(_)
+            | ExactReference::LanguageObservation(_)
+            | ExactReference::Context(_) => Err(crate::JournalError::InvalidEvent(format!(
+                "exact reference kind is not resolved yet: {reference}"
+            ))
+            .into()),
         }
     }
 
