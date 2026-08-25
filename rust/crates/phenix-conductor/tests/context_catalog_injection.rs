@@ -399,7 +399,9 @@ fn exact_context_reference_resolves_the_requested_revision() {
             revision: descriptor.revision,
         }
     );
-    assert!(runtime.resolve_exact_reference(&resource.source_ref).is_ok());
+    assert!(runtime
+        .resolve_exact_reference(&resource.source_ref)
+        .is_ok());
 
     fs::remove_dir_all(root).unwrap();
 }

@@ -114,6 +114,7 @@ pub enum ResolvedExactReference {
     Plan(PlanRecord),
     Execution(ExecutionSummary),
     Event(JournalEntry),
+    Context(ContextResourceRevision),
 }
 
 impl ResolvedExactReference {
@@ -145,6 +146,14 @@ impl ResolvedExactReference {
     pub fn event(&self) -> Option<&JournalEntry> {
         match self {
             Self::Event(event) => Some(event),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn context_resource(&self) -> Option<&ContextResourceRevision> {
+        match self {
+            Self::Context(resource) => Some(resource),
             _ => None,
         }
     }
@@ -274,12 +283,33 @@ impl ConductorRuntime {
                     ))
                     .into()
                 }),
-            ExactReference::FileObservation(_)
-            | ExactReference::LanguageObservation(_)
-            | ExactReference::Context { .. } => Err(crate::JournalError::InvalidEvent(format!(
-                "exact reference kind is not resolved yet: {reference}"
-            ))
-            .into()),
+            ExactReference::Context {
+                resource_id,
+                revision,
+            } => self
+                .config_revisions
+                .values()
+                .filter_map(|slot| slot.configuration.as_ref())
+                .find_map(|configuration| {
+                    configuration
+                        .context_catalog()
+                        .resolve_revision(resource_id, revision)
+                        .ok()
+                        .cloned()
+                })
+                .map(ResolvedExactReference::Context)
+                .ok_or_else(|| {
+                    crate::JournalError::InvalidEvent(format!(
+                        "unknown exact context reference: {reference}"
+                    ))
+                    .into()
+                }),
+            ExactReference::FileObservation(_) | ExactReference::LanguageObservation(_) => {
+                Err(crate::JournalError::InvalidEvent(format!(
+                    "exact reference kind is not resolved yet: {reference}"
+                ))
+                .into())
+            }
         }
     }
 
