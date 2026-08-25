@@ -1,4 +1,4 @@
-use crate::{ConfigRevisionFingerprint, ExecutionPayload, WorkerProfileId};
+use crate::{ConfigRevisionFingerprint, ContextCheckpoint, ExecutionPayload, WorkerProfileId};
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, ContextInjection, ContextResourceRevision,
     DiagnosticWritePatch, ExactReference, ExecutionAuthority, ExecutionEvent, ExecutionId,
@@ -172,6 +172,9 @@ pub enum DomainEvent {
     },
     ContextInjectionRecorded {
         injection: ContextInjection,
+    },
+    ContextCheckpointRecorded {
+        checkpoint: ContextCheckpoint,
     },
     ObjectiveSemanticsActivated,
     ObjectiveCreated {

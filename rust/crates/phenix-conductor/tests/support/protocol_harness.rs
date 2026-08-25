@@ -284,6 +284,7 @@ impl Backend for MockBackend {
                 target: model_target("mock-model"),
                 name: "Mock Model".to_owned(),
                 selectable: true,
+                context_capacity: None,
             }],
             authentication_state: AuthenticationState::NotRequired,
             authentication_methods: Vec::new(),

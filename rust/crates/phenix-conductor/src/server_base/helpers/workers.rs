@@ -286,6 +286,23 @@ fn execute_model_execution(
         return Ok(());
     };
 
+    let (resolved, compacted) = match apply_context_management(execution_id, resolved, context, &backend) {
+        Ok(managed) => managed,
+        Err(error) => {
+            fail_shared_execution(
+                runtime,
+                execution_id,
+                map_conductor_error(error),
+                store,
+                persist_lock,
+            )?;
+            return Ok(());
+        }
+    };
+    if compacted {
+        persist_shared(runtime, store, persist_lock)?;
+    }
+
     let capabilities = backend
         .lock()
         .map_err(|_| ServerError::StatePoisoned("backend"))?
@@ -366,8 +383,239 @@ fn execute_model_execution(
         store: store.cloned(),
         persist_lock: persist_lock.clone(),
     };
-    let result = backend_session.execute(prepared.backend_execution_request(), &mut host);
+    let initial_request = prepared.backend_execution_request();
+    let result = execute_with_one_context_overflow_retry(
+        |retry| {
+            let request = if retry {
+                let mut refreshed = prepared.resolved.clone();
+                runtime
+                    .lock()
+                    .map_err(|_| BackendError::Protocol("conductor runtime lock poisoned".to_owned()))?
+                    .refresh_resolved_invocation_context(&mut refreshed)
+                    .map_err(|error| BackendError::Protocol(error.to_string()))?;
+                BackendExecutionRequest {
+                    execution_id: execution_id.clone(),
+                    prompt: refreshed.prompt,
+                }
+            } else {
+                initial_request.clone()
+            };
+            backend_session.execute(request, &mut host)
+        },
+        || {
+            run_context_compactor(execution_id, context)
+                .map_err(|error| BackendError::Protocol(error.to_string()))?;
+            persist_shared(runtime, store, persist_lock)
+                .map_err(|error| BackendError::Protocol(error.to_string()))
+        },
+    );
     finish_model_execution(runtime, execution_id, result, store, persist_lock)
+}
+
+fn execute_with_one_context_overflow_retry(
+    mut execute: impl FnMut(bool) -> Result<(), BackendError>,
+    mut recover: impl FnMut() -> Result<(), BackendError>,
+) -> Result<(), BackendError> {
+    match execute(false) {
+        Err(BackendError::ContextOverflow(_)) => {
+            recover()?;
+            execute(true)
+        }
+        result => result,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn provider_overflow_runs_recovery_once_then_retries_once() {
+    let mut executions = 0;
+    let mut recoveries = 0;
+    let result = execute_with_one_context_overflow_retry(
+        |retry| {
+            executions += 1;
+            if retry {
+                Ok(())
+            } else {
+                Err(BackendError::ContextOverflow("fixture".to_owned()))
+            }
+        },
+        || {
+            recoveries += 1;
+            Ok(())
+        },
+    );
+    assert_eq!(result, Ok(()));
+    assert_eq!(executions, 2);
+    assert_eq!(recoveries, 1);
+}
+
+#[cfg(test)]
+#[test]
+fn repeated_provider_overflow_is_not_retried_unboundedly() {
+    let mut executions = 0;
+    let mut recoveries = 0;
+    let result = execute_with_one_context_overflow_retry(
+        |_| {
+            executions += 1;
+            Err(BackendError::ContextOverflow("fixture".to_owned()))
+        },
+        || {
+            recoveries += 1;
+            Ok(())
+        },
+    );
+    assert!(matches!(result, Err(BackendError::ContextOverflow(_))));
+    assert_eq!(executions, 2);
+    assert_eq!(recoveries, 1);
+}
+
+fn apply_context_management(
+    execution_id: &ExecutionId,
+    mut resolved: ResolvedInvocation,
+    context: &ExecutionWorkerContext,
+    backend: &SharedBackend,
+) -> Result<(ResolvedInvocation, bool), ConductorError> {
+    let configuration = context
+        .runtime
+        .lock()
+        .map_err(|_| {
+            ConductorError::Backend(BackendError::Protocol(
+                "conductor runtime lock poisoned".to_owned(),
+            ))
+        })?
+        .context_compaction_configuration_for_execution(execution_id)?;
+    let Some(configuration) = configuration else {
+        return Ok((resolved, false));
+    };
+
+    let catalog = backend
+        .lock()
+        .map_err(|_| {
+            ConductorError::Backend(BackendError::Protocol("backend lock poisoned".to_owned()))
+        })?
+        .catalog()
+        .map_err(ConductorError::Backend)?;
+    let budget = ContextBudgetManager::budget_resolved_invocation(
+        &resolved,
+        &catalog,
+        configuration.budget_policy,
+    )
+    .map_err(|error| ConductorError::InvalidExecutionData {
+        execution_id: execution_id.clone(),
+        message: error.to_string(),
+    })?;
+    let decision = ContextBudgetManager::management_decision(&budget);
+    if !matches!(
+        decision.trigger,
+        ContextManagementTrigger::ModelCompaction | ContextManagementTrigger::OverflowRecovery
+    ) {
+        return Ok((resolved, false));
+    }
+
+    run_context_compactor(execution_id, context)?;
+    context
+        .runtime
+        .lock()
+        .map_err(|_| {
+            ConductorError::Backend(BackendError::Protocol(
+                "conductor runtime lock poisoned".to_owned(),
+            ))
+        })?
+        .refresh_resolved_invocation_context(&mut resolved)?;
+
+    let budget = ContextBudgetManager::budget_resolved_invocation(
+        &resolved,
+        &catalog,
+        configuration.budget_policy,
+    )
+    .map_err(|error| ConductorError::InvalidExecutionData {
+        execution_id: execution_id.clone(),
+        message: error.to_string(),
+    })?;
+    if budget.pressure == crate::ContextPressure::Overflow {
+        return Err(ConductorError::InvalidExecutionData {
+            execution_id: execution_id.clone(),
+            message: "context remains over resolved model capacity after compaction".to_owned(),
+        });
+    }
+    Ok((resolved, true))
+}
+
+fn run_context_compactor(
+    execution_id: &ExecutionId,
+    context: &ExecutionWorkerContext,
+) -> Result<(), ConductorError> {
+    let (configuration, request) = {
+        let runtime = context.runtime.lock().map_err(|_| {
+            ConductorError::Backend(BackendError::Protocol(
+                "conductor runtime lock poisoned".to_owned(),
+            ))
+        })?;
+        let configuration = runtime
+            .context_compaction_configuration_for_execution(execution_id)?
+            .ok_or_else(|| ConductorError::InvalidExecutionData {
+                execution_id: execution_id.clone(),
+                message: "context compaction is not configured".to_owned(),
+            })?;
+        let request = runtime.prepare_context_compaction(execution_id)?;
+        (configuration, request)
+    };
+
+    let backend_id = configuration.compactor_target.backend.clone();
+    let backend = context.backends.get(&backend_id).cloned().ok_or_else(|| {
+        ConductorError::Backend(BackendError::Unsupported(format!(
+            "context compactor backend is not registered: {backend_id}"
+        )))
+    })?;
+    let session = {
+        let mut backend = backend.lock().map_err(|_| {
+            ConductorError::Backend(BackendError::Protocol("backend lock poisoned".to_owned()))
+        })?;
+        let capabilities = backend.capabilities();
+        let tools = ToolProvision::default()
+            .prepare(&capabilities)
+            .map_err(ConductorError::Backend)?;
+        backend
+            .open_session(BackendSessionRequest {
+                model: configuration.compactor_target.clone(),
+                tools,
+            })
+            .map_err(ConductorError::Backend)?
+    };
+
+    let encoded = serde_json::to_string(&request).map_err(|error| {
+        ConductorError::Backend(BackendError::Protocol(format!(
+            "failed to encode context compaction request: {error}"
+        )))
+    })?;
+    let prompt = format!(
+        "Summarize the supplied durable execution history for future model context. Preserve facts and exact references. Return exactly one JSON object matching {{\"summary\":\"...\"}} and no other text.\n\n{encoded}"
+    );
+    let mut host = ContextCompactorHost::default();
+    session
+        .execute(
+            BackendExecutionRequest {
+                execution_id: execution_id.clone(),
+                prompt,
+            },
+            &mut host,
+        )
+        .map_err(ConductorError::Backend)?;
+    let output: ContextCompactionOutput = serde_json::from_str(host.output.trim()).map_err(|error| {
+        ConductorError::Backend(BackendError::Protocol(format!(
+            "context compactor returned invalid typed output: {error}"
+        )))
+    })?;
+    context
+        .runtime
+        .lock()
+        .map_err(|_| {
+            ConductorError::Backend(BackendError::Protocol(
+                "conductor runtime lock poisoned".to_owned(),
+            ))
+        })?
+        .record_context_checkpoint(&request, output)?;
+    Ok(())
 }
 
 fn execute_provider_execution(

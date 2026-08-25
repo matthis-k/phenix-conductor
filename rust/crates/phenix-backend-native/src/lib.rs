@@ -22,6 +22,7 @@ use phenix_core::{
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -78,6 +79,26 @@ fn provider_reasoning_effort(effort: &InferenceEffort) -> ReasoningEffort {
         InferenceEffort::High => ReasoningEffort::High,
         InferenceEffort::ExtraHigh => ReasoningEffort::XHigh,
         InferenceEffort::Max => ReasoningEffort::Max,
+    }
+}
+
+fn provider_execution_error(context: &str, error: impl Display) -> BackendError {
+    let message = error.to_string();
+    let normalized = message.to_ascii_lowercase();
+    let overflow = [
+        "context_length_exceeded",
+        "maximum context length",
+        "context window",
+        "too many tokens",
+        "input is too long",
+        "prompt is too long",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle));
+    if overflow {
+        BackendError::ContextOverflow(format!("{context}: {message}"))
+    } else {
+        BackendError::Transport(format!("{context}: {message}"))
     }
 }
 
@@ -469,17 +490,15 @@ impl PhenixSession {
             let mut stream = provider
                 .exec_chat_stream(provider_target.clone(), request, Some(&options))
                 .await
-                .map_err(|error| {
-                    BackendError::Transport(format!("provider request failed: {error}"))
-                })?;
+                .map_err(|error| provider_execution_error("provider request failed", error))?;
             let mut captured = None;
             while let Some(event) = stream.stream.next().await {
                 if self.cancelled.load(Ordering::Acquire) {
                     return Ok(history);
                 }
-                match event.map_err(|error| {
-                    BackendError::Transport(format!("provider stream failed: {error}"))
-                })? {
+                match event
+                    .map_err(|error| provider_execution_error("provider stream failed", error))?
+                {
                     ChatStreamEvent::Chunk(chunk) => {
                         host.emit(BackendEvent::ContentDelta(chunk.content))?;
                     }
@@ -585,6 +604,7 @@ fn model_descriptor(
         target: target.clone(),
         name: model_wire_value(target),
         selectable: provider_has_valid_auth(credentials, &target.provider)?,
+        context_capacity: None,
     })
 }
 
@@ -641,6 +661,21 @@ mod tests {
         CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
     };
     use serde_json::json;
+
+    #[test]
+    fn provider_context_overflow_is_typed() {
+        assert!(matches!(
+            provider_execution_error(
+                "provider request failed",
+                "context_length_exceeded: maximum context length reached"
+            ),
+            BackendError::ContextOverflow(_)
+        ));
+        assert!(matches!(
+            provider_execution_error("provider request failed", "connection reset"),
+            BackendError::Transport(_)
+        ));
+    }
 
     #[test]
     fn model_catalog_marks_provider_auth_selectability() {

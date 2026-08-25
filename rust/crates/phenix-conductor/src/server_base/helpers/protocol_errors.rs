@@ -16,6 +16,10 @@ fn map_backend_error(error: BackendError) -> ProtocolError {
         }
         BackendError::Transport(message) => protocol_error(ErrorCode::BackendTransport, message),
         BackendError::Protocol(message) => protocol_error(ErrorCode::BackendProtocol, message),
+        BackendError::ContextOverflow(message) => protocol_error(
+            ErrorCode::BackendProtocol,
+            format!("context overflow after bounded recovery: {message}"),
+        ),
     }
 }
 

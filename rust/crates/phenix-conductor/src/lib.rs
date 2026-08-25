@@ -4,6 +4,8 @@ mod callables;
 #[cfg(test)]
 mod config_revision_tests;
 mod context;
+mod context_budget;
+mod context_compaction;
 mod context_projection;
 mod execution_provider;
 mod failure_decisions;
@@ -18,6 +20,15 @@ mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
 pub use context::{ContextError, ContextRegistry, SkillRegistry};
+pub use context_budget::{
+    ContextBudgetCategory, ContextBudgetError, ContextBudgetManager, ContextBudgetPolicy,
+    ContextManagementDecision, ContextManagementTrigger, ContextPressure, ExecutionContextBudget,
+    ResolvedModelContextCapacity,
+};
+pub use context_compaction::{
+    ContextCheckpoint, ContextCheckpointGeneration, ContextCompactionConfiguration,
+    ContextCompactionOutput, ContextCompactionRequest, ContextHistoryRange,
+};
 pub use context_projection::{
     ContextArtifactView, ContextManager, ContextProjectionAccounting, ContextProjectionInspection,
     ContextPruneInspection, ContextPruneReason, ExecutionContextProjection,

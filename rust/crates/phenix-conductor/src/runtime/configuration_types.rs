@@ -14,6 +14,7 @@ pub struct CompiledConfiguration {
     context: ContextRegistry,
     skills: SkillRegistry,
     worker_profiles: WorkerProfileRegistry,
+    pub(crate) context_compaction: Option<ContextCompactionConfiguration>,
 }
 
 impl CompiledConfiguration {
@@ -24,6 +25,11 @@ impl CompiledConfiguration {
             "context": self.context.semantic_manifest(),
             "skills": self.skills.semantic_manifest(),
             "worker_profiles": self.worker_profiles.semantic_manifest(),
+            "context_compaction": self.context_compaction.as_ref().map(|configuration| json!({
+                "compactor_target": configuration.compactor_target,
+                "output_reserve_tokens": configuration.budget_policy.output_reserve_tokens,
+                "safety_margin_tokens": configuration.budget_policy.safety_margin_tokens,
+            })),
         });
         let encoded = serde_json::to_vec(&manifest)
             .expect("compiled configuration manifest is JSON serializable");
@@ -54,6 +60,17 @@ impl CompiledConfiguration {
                 .expect("project and skill context identities must not conflict");
         }
         catalog
+    }
+
+    pub fn configure_context_compaction(
+        &mut self,
+        configuration: ContextCompactionConfiguration,
+    ) {
+        self.context_compaction = Some(configuration);
+    }
+
+    pub fn clear_context_compaction(&mut self) {
+        self.context_compaction = None;
     }
 
     pub fn register_tool<F, O>(

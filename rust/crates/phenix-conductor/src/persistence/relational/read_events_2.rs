@@ -372,6 +372,79 @@ fn load_event(
                 },
             })
         }
+        "context_checkpoint_recorded" => {
+            let (execution, summary, target, previous) = connection.query_row(
+                "SELECT execution_id, summary, compactor_target_id, previous_checkpoint_sequence
+                 FROM context_checkpoints WHERE recorded_sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                },
+            )?;
+            let model = match load_target(connection, target)? {
+                ExecutionTarget::Fixed(model) => model,
+                ExecutionTarget::Routed(_) => {
+                    return Err(invalid("context checkpoint compactor target must be fixed"));
+                }
+            };
+            let mut range_statement = connection.prepare(
+                "SELECT start_sequence, end_sequence FROM context_checkpoint_ranges
+                 WHERE checkpoint_sequence = ?1 ORDER BY range_index",
+            )?;
+            let range_rows = range_statement.query_map(params![sequence], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            })?;
+            let mut covered_history = Vec::new();
+            for row in range_rows {
+                let (start, end) = row?;
+                covered_history.push(ContextHistoryRange {
+                    start_sequence: runtime_u64(start, "context checkpoint range start")?,
+                    end_sequence: runtime_u64(end, "context checkpoint range end")?,
+                });
+            }
+            let mut ref_statement = connection.prepare(
+                "SELECT source_kind, source_id, source_event_sequence, source_revision
+                 FROM context_checkpoint_retained_refs
+                 WHERE checkpoint_sequence = ?1 ORDER BY ref_index",
+            )?;
+            let ref_rows = ref_statement.query_map(params![sequence], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?;
+            let mut retained_refs = Vec::new();
+            for row in ref_rows {
+                let (kind, id, event_sequence, revision) = row?;
+                retained_refs.push(parse_checkpoint_reference(
+                    &kind,
+                    id,
+                    event_sequence,
+                    revision,
+                )?);
+            }
+            Ok(DomainEvent::ContextCheckpointRecorded {
+                checkpoint: ContextCheckpoint {
+                    execution_id: parse_id(execution, "execution", ExecutionId::parse)?,
+                    summary,
+                    covered_history,
+                    retained_refs,
+                    generation: ContextCheckpointGeneration {
+                        model,
+                        previous_checkpoint_sequence: previous
+                            .map(|value| runtime_u64(value, "previous context checkpoint sequence"))
+                            .transpose()?,
+                    },
+                },
+            })
+        }
         "objective_semantics_activated" => Ok(DomainEvent::ObjectiveSemanticsActivated),
         "objective_created" => Ok(DomainEvent::ObjectiveCreated {
             objective: load_objective_creation(connection, sequence)?,

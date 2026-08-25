@@ -158,11 +158,13 @@ impl Backend for AuthBackend {
                     target: auth_model("alpha"),
                     name: "Alpha".to_owned(),
                     selectable: true,
+                    context_capacity: None,
                 },
                 ModelDescriptor {
                     target: auth_model("beta"),
                     name: "Beta".to_owned(),
                     selectable: true,
+                    context_capacity: None,
                 },
             ],
             authentication_state: if self.state.authenticated.load(Ordering::SeqCst) {

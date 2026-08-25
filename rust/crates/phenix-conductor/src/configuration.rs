@@ -1,4 +1,6 @@
-use phenix_conductor::{CompiledConfiguration, ConductorError};
+#[cfg(test)]
+use phenix_conductor::ContextBudgetPolicy;
+use phenix_conductor::{CompiledConfiguration, ConductorError, ContextCompactionConfiguration};
 use phenix_core::{
     AgentDefinition, LanguageServiceRequirement, ManagedLanguageProviderDefinition,
     OrchestrationDefinition, RoutingProfile,
@@ -29,6 +31,8 @@ pub struct RuntimeConfiguration {
     pub managed_language_providers: Vec<ManagedLanguageProviderDefinition>,
     #[serde(default)]
     pub language_services: Vec<LanguageServiceRequirement>,
+    #[serde(default)]
+    pub context_compaction: Option<ContextCompactionConfiguration>,
 }
 
 impl RuntimeConfiguration {
@@ -62,6 +66,9 @@ impl RuntimeConfiguration {
         }
         for requirement in self.language_services {
             configuration.set_language_service_requirement(requirement);
+        }
+        if let Some(context_compaction) = self.context_compaction {
+            configuration.configure_context_compaction(context_compaction);
         }
         Ok(configuration)
     }
@@ -331,6 +338,39 @@ mod tests {
         assert_eq!(
             runtime.resolve_invocation(&child.id).unwrap().prompt,
             "Implement the bounded change.\n\nTyped orchestration input:\n{\"objective\":\"Fix routing selection\"}"
+        );
+    }
+
+    #[test]
+    fn context_compaction_configuration_roundtrips_and_is_revision_bound() {
+        let expected = ContextCompactionConfiguration {
+            compactor_target: target("compactor"),
+            budget_policy: ContextBudgetPolicy {
+                output_reserve_tokens: 1_024,
+                safety_margin_tokens: 512,
+            },
+        };
+        let encoded = serde_json::to_string(&RuntimeConfiguration {
+            context_compaction: Some(expected.clone()),
+            ..RuntimeConfiguration::default()
+        })
+        .unwrap();
+        let decoded: RuntimeConfiguration = serde_json::from_str(&encoded).unwrap();
+        let mut runtime = ConductorRuntime::new();
+        let before = runtime.current_config_revision().clone();
+        install_configuration(&mut runtime, decoded).unwrap();
+        assert_ne!(runtime.current_config_revision(), &before);
+        let session = runtime
+            .create_session(None, None, ExecutionTarget::Fixed(target("worker")))
+            .unwrap();
+        let execution = runtime
+            .submit(&session.id, "configured compaction")
+            .unwrap();
+        assert_eq!(
+            runtime
+                .context_compaction_configuration_for_execution(&execution.id)
+                .unwrap(),
+            Some(expected)
         );
     }
 

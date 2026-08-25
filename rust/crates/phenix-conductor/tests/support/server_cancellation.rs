@@ -70,6 +70,7 @@ impl Backend for BlockingBackend {
                 target: target(),
                 name: "Fixture Model".to_owned(),
                 selectable: true,
+                context_capacity: None,
             }],
             authentication_state: AuthenticationState::NotRequired,
             authentication_methods: Vec::new(),

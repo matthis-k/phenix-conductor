@@ -56,6 +56,32 @@ pub(super) fn apply(
                 )));
             }
         }
+        DomainEvent::ContextCheckpointRecorded { checkpoint } => {
+            if !state.executions.contains_key(&checkpoint.execution_id) {
+                return Err(JournalError::InvalidEvent(format!(
+                    "context checkpoint references unknown execution {}",
+                    checkpoint.execution_id
+                )));
+            }
+            if checkpoint.summary.trim().is_empty() {
+                return Err(JournalError::InvalidEvent(format!(
+                    "context checkpoint for {} has an empty summary",
+                    checkpoint.execution_id
+                )));
+            }
+            let mut previous_end = None;
+            for range in &checkpoint.covered_history {
+                if range.start_sequence > range.end_sequence
+                    || previous_end.is_some_and(|end| range.start_sequence <= end)
+                {
+                    return Err(JournalError::InvalidEvent(format!(
+                        "context checkpoint for {} has invalid history ranges",
+                        checkpoint.execution_id
+                    )));
+                }
+                previous_end = Some(range.end_sequence);
+            }
+        }
         DomainEvent::WorkspaceCheckpointCaptured {
             execution_id,
             workspace_id,

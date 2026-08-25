@@ -986,6 +986,7 @@ fn model_descriptors(
                 },
                 name,
                 selectable: true,
+                context_capacity: None,
             })
         })
         .collect()

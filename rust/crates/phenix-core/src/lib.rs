@@ -107,11 +107,18 @@ pub struct ModelTarget {
     pub inference: InferenceOptions,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelContextCapacity {
+    pub context_window_tokens: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelDescriptor {
     pub target: ModelTarget,
     pub name: String,
     pub selectable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_capacity: Option<ModelContextCapacity>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -165,6 +172,17 @@ pub struct BackendCatalog {
     pub models: Vec<ModelDescriptor>,
     pub authentication_state: AuthenticationState,
     pub authentication_methods: Vec<AuthenticationMethodDescriptor>,
+}
+
+impl BackendCatalog {
+    #[must_use]
+    pub fn model_descriptor(&self, target: &ModelTarget) -> Option<&ModelDescriptor> {
+        self.models.iter().find(|descriptor| {
+            descriptor.target.backend == target.backend
+                && descriptor.target.provider == target.provider
+                && descriptor.target.model == target.model
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -214,6 +214,7 @@ pub enum BackendError {
     Unsupported(String),
     Transport(String),
     Protocol(String),
+    ContextOverflow(String),
 }
 
 impl Display for BackendError {
@@ -222,6 +223,7 @@ impl Display for BackendError {
             Self::Unsupported(v) => write!(f, "unsupported backend capability: {v}"),
             Self::Transport(v) => write!(f, "backend transport error: {v}"),
             Self::Protocol(v) => write!(f, "backend protocol error: {v}"),
+            Self::ContextOverflow(v) => write!(f, "backend context overflow: {v}"),
         }
     }
 }

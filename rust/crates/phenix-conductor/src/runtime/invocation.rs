@@ -103,6 +103,7 @@ impl ConductorRuntime {
                 .or_default()
                 .extend(explicit_skills);
         }
+        let context_accounting = self.account_execution_context(execution_id, &input)?;
 
         Ok(ResolvedInvocation {
             execution_id: execution_id.clone(),
@@ -112,10 +113,28 @@ impl ConductorRuntime {
             requested_target: route.requested_target,
             model: route.model,
             prompt,
+            context_accounting,
             tools: ToolProvision {
                 callables: self.permitted_tool_descriptors(execution_id)?,
             },
         })
+    }
+
+    pub(crate) fn refresh_resolved_invocation_context(
+        &self,
+        resolved: &mut ResolvedInvocation,
+    ) -> Result<(), ConductorError> {
+        let execution = self
+            .executions
+            .get(&resolved.execution_id)
+            .ok_or_else(|| ConductorError::UnknownExecution(resolved.execution_id.clone()))?;
+        let ExecutionPayload::Invocation { input } = &execution.payload else {
+            return Err(ConductorError::NonModelExecution(resolved.execution_id.clone()));
+        };
+        let (prompt, _) = self.render_model_prompt(&resolved.execution_id, input)?;
+        resolved.context_accounting = self.account_execution_context(&resolved.execution_id, input)?;
+        resolved.prompt = prompt;
+        Ok(())
     }
 
     pub fn prepare_invocation(

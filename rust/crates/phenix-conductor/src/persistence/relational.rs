@@ -3,8 +3,9 @@ mod plan_relational;
 
 use crate::{
     journal::{apply_domain_event, DurableProjection},
-    ConductorRuntime, ConfigRevisionFingerprint, ConfigRevisionSlot, DomainEvent,
-    JournalExecutionPayload, ResolvedRoute, RuntimeJournal, WorkerProfileId,
+    ConductorRuntime, ConfigRevisionFingerprint, ConfigRevisionSlot, ContextCheckpoint,
+    ContextCheckpointGeneration, ContextHistoryRange, DomainEvent, JournalExecutionPayload,
+    ResolvedRoute, RuntimeJournal, WorkerProfileId,
 };
 use phenix_core::{
     AttemptGroup, AttemptGroupId, BackendId, CallableId, ContextDescriptor, ContextInjection,
@@ -27,7 +28,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 11;
+const DATABASE_SCHEMA_VERSION: i64 = 12;
 
 #[derive(Debug)]
 pub enum PersistenceError {

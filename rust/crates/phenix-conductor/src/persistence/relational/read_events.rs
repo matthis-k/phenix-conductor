@@ -120,6 +120,23 @@ fn parse_context_source(
     }
 }
 
+fn parse_checkpoint_reference(
+    kind: &str,
+    id: Option<String>,
+    event_sequence: Option<i64>,
+    revision: Option<String>,
+) -> Result<ExactReference, PersistenceError> {
+    let fallback = ContextRevision::parse("checkpoint:none")
+        .expect("static context revision is valid");
+    let revision = revision
+        .map(|value| parse_id(value, "checkpoint context revision", ContextRevision::parse))
+        .transpose()?;
+    if kind == "context" && revision.is_none() {
+        return Err(invalid("checkpoint context reference is missing its revision"));
+    }
+    parse_context_source(kind, id, event_sequence, revision.as_ref().unwrap_or(&fallback))
+}
+
 fn parse_context_requester(value: &str) -> Result<ContextInjectionRequester, PersistenceError> {
     match value {
         "agent" => Ok(ContextInjectionRequester::Agent),

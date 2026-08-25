@@ -27,6 +27,7 @@ fn event_type(event: &DomainEvent) -> &'static str {
             "context_resource_revision_registered"
         }
         DomainEvent::ContextInjectionRecorded { .. } => "context_injection_recorded",
+        DomainEvent::ContextCheckpointRecorded { .. } => "context_checkpoint_recorded",
         DomainEvent::ObjectiveSemanticsActivated => "objective_semantics_activated",
         DomainEvent::ObjectiveCreated { .. } => "objective_created",
         DomainEvent::ObjectiveDraftRevised { .. } => "objective_draft_revised",
