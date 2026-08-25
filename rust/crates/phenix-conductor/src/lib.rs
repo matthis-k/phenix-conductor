@@ -19,7 +19,8 @@ mod server;
 pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
 pub use context::{ContextError, ContextRegistry, SkillRegistry};
 pub use context_projection::{
-    ContextManager, ContextProjectionInspection, ExecutionContextProjection,
+    ContextArtifactView, ContextManager, ContextProjectionAccounting, ContextProjectionInspection,
+    ContextPruneInspection, ContextPruneReason, ExecutionContextProjection,
 };
 pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,

@@ -43,6 +43,10 @@ fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
             9,
             include_str!("../../../migrations/0009_observation_identities.sql"),
         ),
+        (
+            10,
+            include_str!("../../../migrations/0010_artifact_context_resources.sql"),
+        ),
     ] {
         if version < target {
             apply_migration(connection, target, sql)?;

@@ -1,7 +1,8 @@
 use crate::{ConductorError, ConductorRuntime, DomainEvent, ResolvedExactReference};
 use phenix_core::{
     ConfigRevisionId, ContextDescriptor, ContextInjectionLifetime, ContextInjectionRequester,
-    ContextRevision, ExactReference, ExecutionAuthority, ExecutionId, SkillId,
+    ContextResourceKind, ContextRevision, ContextScope, ExactReference, ExecutionAuthority,
+    ExecutionId, SkillId,
 };
 use std::collections::BTreeSet;
 
@@ -17,12 +18,36 @@ pub struct ContextProjectionInspection {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextArtifactView {
+    pub recovery_ref: ExactReference,
+    pub revision: ContextRevision,
+    pub title: String,
+    pub estimated_cost: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ContextPruneReason {
+    ArtifactBodyCompacted,
+    RepeatedExactInjection,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextPruneInspection {
+    pub reason: ContextPruneReason,
+    pub recovery_ref: ExactReference,
+    pub content_identity: ContextRevision,
+    pub original_bytes: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutionContextProjection {
     pub execution_id: ExecutionId,
     pub config_revision: ConfigRevisionId,
     pub authority: ExecutionAuthority,
     pub catalog: Vec<ContextDescriptor>,
     pub injections: Vec<ContextProjectionInspection>,
+    pub artifacts: Vec<ContextArtifactView>,
+    pub pruned: Vec<ContextPruneInspection>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,23 +92,87 @@ impl ContextManager {
                 .cmp(&right.id)
                 .then_with(|| left.revision.cmp(&right.revision))
         });
+
         let mut injections = Vec::new();
+        let mut artifacts = Vec::new();
+        let mut pruned = Vec::new();
         for entry in &runtime.journal.entries {
-            let DomainEvent::ContextInjectionRecorded { injection } = &entry.event else {
-                continue;
-            };
-            if injection.execution_id != *execution_id {
-                continue;
+            match &entry.event {
+                DomainEvent::ContextInjectionRecorded { injection }
+                    if injection.execution_id == *execution_id =>
+                {
+                    injections.push(ContextProjectionInspection {
+                        source_ref: injection.source_ref.clone(),
+                        source_revision: injection.source_revision.clone(),
+                        requested_by: injection.requested_by.clone(),
+                        reason: injection.reason.clone(),
+                        lifetime: injection.lifetime.clone(),
+                        content_identity: injection.content_identity.clone(),
+                        content: exact_context_content(runtime, &injection.source_ref)?,
+                    });
+                }
+                DomainEvent::ContextResourceRevisionRegistered { resource }
+                    if resource.descriptor.kind == ContextResourceKind::Artifact
+                        && matches!(
+                            &resource.descriptor.scope,
+                            ContextScope::Execution { execution_id: owner } if owner == execution_id
+                        ) =>
+                {
+                    artifacts.push(ContextArtifactView {
+                        recovery_ref: resource.source_ref.clone(),
+                        revision: resource.descriptor.revision.clone(),
+                        title: resource.descriptor.title.clone(),
+                        estimated_cost: resource.descriptor.estimated_cost,
+                    });
+                    pruned.push(ContextPruneInspection {
+                        reason: ContextPruneReason::ArtifactBodyCompacted,
+                        recovery_ref: resource.source_ref.clone(),
+                        content_identity: resource.content_identity.clone(),
+                        original_bytes: resource
+                            .content
+                            .as_ref()
+                            .map_or(0, |content| content.len() as u64),
+                    });
+                }
+                _ => {}
             }
-            injections.push(ContextProjectionInspection {
-                source_ref: injection.source_ref.clone(),
-                source_revision: injection.source_revision.clone(),
-                requested_by: injection.requested_by.clone(),
-                reason: injection.reason.clone(),
-                lifetime: injection.lifetime.clone(),
-                content_identity: injection.content_identity.clone(),
-                content: exact_context_content(runtime, &injection.source_ref)?,
-            });
+        }
+        artifacts.sort_by(|left, right| {
+            left.recovery_ref
+                .to_string()
+                .cmp(&right.recovery_ref.to_string())
+                .then_with(|| left.revision.as_str().cmp(right.revision.as_str()))
+        });
+        pruned.sort_by(|left, right| {
+            left.recovery_ref
+                .to_string()
+                .cmp(&right.recovery_ref.to_string())
+                .then_with(|| {
+                    left.content_identity
+                        .as_str()
+                        .cmp(right.content_identity.as_str())
+                })
+        });
+
+        for index in 0..injections.len() {
+            let repeated = injections[index].content.is_some()
+                && injections[index + 1..].iter().any(|later| {
+                    later.source_ref == injections[index].source_ref
+                        && later.content_identity == injections[index].content_identity
+                });
+            if repeated {
+                let original_bytes = injections[index]
+                    .content
+                    .as_ref()
+                    .map_or(0, |content| content.len() as u64);
+                pruned.push(ContextPruneInspection {
+                    reason: ContextPruneReason::RepeatedExactInjection,
+                    recovery_ref: injections[index].source_ref.clone(),
+                    content_identity: injections[index].content_identity.clone(),
+                    original_bytes,
+                });
+                injections[index].content = None;
+            }
         }
 
         Ok(ExecutionContextProjection {
@@ -92,6 +181,8 @@ impl ContextManager {
             authority,
             catalog,
             injections,
+            artifacts,
+            pruned,
         })
     }
 
@@ -185,19 +276,40 @@ fn render_projection_prompt(
             })
         })
         .collect::<String>();
-    if injected.is_empty() {
+    let artifact_views = projection
+        .artifacts
+        .iter()
+        .map(|artifact| {
+            format!(
+                "<artifact source=\"{}\" revision=\"{}\" title=\"{}\" />\n",
+                escape_xml(&artifact.recovery_ref.to_string()),
+                escape_xml(artifact.revision.as_str()),
+                escape_xml(&artifact.title)
+            )
+        })
+        .collect::<String>();
+
+    let mut projection_block = String::new();
+    if !injected.is_empty() {
+        projection_block.push_str(&format!(
+            "<injected_context>\n{injected}</injected_context>\n"
+        ));
+    }
+    if !artifact_views.is_empty() {
+        projection_block.push_str(&format!("<artifacts>\n{artifact_views}</artifacts>\n"));
+    }
+    if projection_block.is_empty() {
         return base_prompt;
     }
 
-    let injection_block = format!("<injected_context>\n{injected}</injected_context>\n");
     if let Some(index) = base_prompt.find("</phenix_context>") {
         let mut output = base_prompt;
-        output.insert_str(index, &injection_block);
+        output.insert_str(index, &projection_block);
         return output;
     }
 
     format!(
-        "<phenix_context>\n{injection_block}</phenix_context>\n\n<user_request>\n{}\n</user_request>",
+        "<phenix_context>\n{projection_block}</phenix_context>\n\n<user_request>\n{}\n</user_request>",
         escape_xml(base_prompt.trim_start())
     )
 }
@@ -223,7 +335,8 @@ mod tests {
     use crate::{CompiledConfiguration, ContextRegistry, SkillRegistry, SqliteStore};
     use phenix_core::{
         BackendId, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId,
-        ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
+        ExecutionEventKind, ExecutionTarget, InferenceOptions, ModelId, ModelTarget, ProviderId,
+        ToolCallId,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -310,6 +423,8 @@ mod tests {
             "projection context".len() as u64
         );
         assert!(first.catalog.iter().any(|item| item.id == resource_id));
+        assert!(first.artifacts.is_empty());
+        assert!(first.pruned.is_empty());
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -458,6 +573,127 @@ mod tests {
         );
         assert_eq!(accounting.rendered_prompt_bytes, prompt.len() as u64);
         assert!(accounting.catalog_estimated_cost >= accounting.injected_content_bytes);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn promoted_build_artifact_is_pruned_to_a_recoverable_compact_view() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed_target()).unwrap();
+        let execution = runtime.submit(&session.id, "artifact projection").unwrap();
+        let artifact = runtime
+            .promote_text_artifact(&execution.id, "build log", "large exact build output")
+            .unwrap();
+        let journal_len = runtime.journal.entries.len();
+
+        let projection = runtime.project_execution_context(&execution.id).unwrap();
+        assert_eq!(projection.artifacts.len(), 1);
+        assert_eq!(projection.artifacts[0].recovery_ref, artifact.source_ref);
+        assert_eq!(
+            projection.artifacts[0].revision,
+            artifact.descriptor.revision
+        );
+        assert_eq!(projection.pruned.len(), 1);
+        assert_eq!(
+            projection.pruned[0].reason,
+            ContextPruneReason::ArtifactBodyCompacted
+        );
+        assert_eq!(projection.pruned[0].recovery_ref, artifact.source_ref);
+        assert_eq!(
+            projection.pruned[0].original_bytes,
+            "large exact build output".len() as u64
+        );
+        assert_eq!(runtime.journal.entries.len(), journal_len);
+
+        let resolved = runtime
+            .resolve_exact_reference(&projection.pruned[0].recovery_ref)
+            .unwrap();
+        assert_eq!(resolved, ResolvedExactReference::Context(artifact));
+
+        let (prompt, _) = runtime
+            .render_model_prompt(&execution.id, "artifact projection")
+            .unwrap();
+        assert!(prompt.contains("<artifacts>"));
+        assert!(prompt.contains("build log"));
+        assert!(!prompt.contains("large exact build output"));
+    }
+
+    #[test]
+    fn small_tool_output_is_not_promoted_implicitly() {
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed_target()).unwrap();
+        let execution = runtime.submit(&session.id, "small output").unwrap();
+        runtime
+            .push_event(
+                &execution.id,
+                ExecutionEventKind::ToolCallFinished {
+                    tool_call_id: ToolCallId::parse("tool-call-small").unwrap(),
+                    output: "ok".to_owned(),
+                    success: true,
+                },
+            )
+            .unwrap();
+
+        let projection = runtime.project_execution_context(&execution.id).unwrap();
+        assert!(projection.artifacts.is_empty());
+        assert!(projection.pruned.is_empty());
+    }
+
+    #[test]
+    fn repeated_exact_injection_prunes_old_bytes_without_mutating_durable_state() {
+        let root = fixture_root();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        write(root.join("CONTRIBUTING.md"), "repeatable exact content");
+
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .reload_configuration(configuration_for(&root))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed_target()).unwrap();
+        let execution = runtime.submit(&session.id, "repeat context").unwrap();
+        let resource_id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
+        let descriptor = runtime
+            .context_descriptors_for_execution(&execution.id)
+            .unwrap()
+            .into_iter()
+            .find(|descriptor| descriptor.id == resource_id)
+            .unwrap();
+        for reason in ["first read", "second read"] {
+            runtime
+                .load_context_for_execution(
+                    &execution.id,
+                    &resource_id,
+                    &descriptor.revision,
+                    ContextInjectionRequester::Agent,
+                    ContextInjectionLifetime::Execution,
+                    reason,
+                )
+                .unwrap();
+        }
+        let journal_len = runtime.journal.entries.len();
+
+        let projection = runtime.project_execution_context(&execution.id).unwrap();
+        assert_eq!(projection.injections.len(), 2);
+        assert!(projection.injections[0].content.is_none());
+        assert_eq!(
+            projection.injections[1].content.as_deref(),
+            Some("repeatable exact content")
+        );
+        assert_eq!(projection.pruned.len(), 1);
+        assert_eq!(
+            projection.pruned[0].reason,
+            ContextPruneReason::RepeatedExactInjection
+        );
+        assert_eq!(runtime.journal.entries.len(), journal_len);
+
+        let recovered = runtime
+            .resolve_exact_reference(&projection.pruned[0].recovery_ref)
+            .unwrap();
+        assert_eq!(
+            recovered.context_resource().unwrap().content.as_deref(),
+            Some("repeatable exact content")
+        );
 
         fs::remove_dir_all(root).unwrap();
     }
