@@ -70,6 +70,18 @@ fn load_event(
             })
         }
         "execution_created" => load_execution_created(connection, sequence),
+        "worker_profile_bound" => {
+            let (execution, profile) = connection.query_row(
+                "SELECT execution_id, profile_id FROM execution_worker_profiles WHERE bound_sequence = ?1",
+                params![sequence],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            Ok(DomainEvent::WorkerProfileBound {
+                execution_id: parse_id(execution, "execution", ExecutionId::parse)?,
+                profile_id: WorkerProfileId::parse(profile)
+                    .map_err(|_| invalid("database contains an invalid worker profile"))?,
+            })
+        }
         "root_submission_accepted" => {
             let (session, execution, ingress) = connection.query_row(
                 "SELECT session_id, execution_id, ingress_order

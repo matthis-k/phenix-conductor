@@ -64,6 +64,7 @@ pub(super) fn apply(
                         payload: materialized_payload,
                         authority: payload.authority().clone(),
                         config_revision,
+                        worker_profile: None,
                     });
                 }
                 Entry::Occupied(_) => {
@@ -74,6 +75,22 @@ pub(super) fn apply(
                 }
             }
             *state.next_execution += 1;
+        }
+        DomainEvent::WorkerProfileBound {
+            execution_id,
+            profile_id,
+        } => {
+            let execution = state.executions.get_mut(execution_id).ok_or_else(|| {
+                JournalError::InvalidEvent(format!(
+                    "worker profile binding references unknown execution {execution_id}"
+                ))
+            })?;
+            if execution.worker_profile.is_some() {
+                return Err(JournalError::InvalidEvent(format!(
+                    "execution {execution_id} has more than one worker profile binding"
+                )));
+            }
+            execution.worker_profile = Some(profile_id.clone());
         }
         DomainEvent::RootSubmissionAccepted {
             session_id,

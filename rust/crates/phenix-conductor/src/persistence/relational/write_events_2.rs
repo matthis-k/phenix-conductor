@@ -71,6 +71,15 @@ fn insert_event(
         DomainEvent::ExecutionCreated { execution, payload } => {
             insert_execution(transaction, sequence, execution, payload)?;
         }
+        DomainEvent::WorkerProfileBound {
+            execution_id,
+            profile_id,
+        } => {
+            transaction.execute(
+                "INSERT INTO execution_worker_profiles(execution_id, profile_id, bound_sequence)\n                 VALUES (?1, ?2, ?3)",
+                params![execution_id.to_string(), profile_id.to_string(), sequence],
+            )?;
+        }
         DomainEvent::RootSubmissionAccepted {
             session_id,
             execution_id,

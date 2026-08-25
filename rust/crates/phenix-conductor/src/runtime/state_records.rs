@@ -15,4 +15,5 @@ struct ExecutionRecord {
     payload: ExecutionPayload,
     authority: ExecutionAuthority,
     config_revision: ConfigRevisionId,
+    worker_profile: Option<WorkerProfileId>,
 }

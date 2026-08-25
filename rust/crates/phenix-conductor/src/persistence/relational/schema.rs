@@ -47,6 +47,10 @@ fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
             10,
             include_str!("../../../migrations/0010_artifact_context_resources.sql"),
         ),
+        (
+            11,
+            include_str!("../../../migrations/0011_worker_profile_bindings.sql"),
+        ),
     ] {
         if version < target {
             apply_migration(connection, target, sql)?;

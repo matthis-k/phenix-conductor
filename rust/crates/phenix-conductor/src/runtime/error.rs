@@ -54,6 +54,7 @@ pub enum ConductorError {
         execution_id: ExecutionId,
         denial: PolicyDenial,
     },
+    WorkerProfile(WorkerProfileError),
     CallableRegistry(CallableRegistryError),
     ExecutionProvider(ExecutionProviderError),
     Journal(JournalError),
@@ -130,6 +131,7 @@ impl Display for ConductorError {
                 write!(f, "execution is not non-model-provider backed: {id}")
             }
             Self::PolicyDenied { denial, .. } => Display::fmt(denial, f),
+            Self::WorkerProfile(error) => Display::fmt(error, f),
             Self::CallableRegistry(error) => Display::fmt(error, f),
             Self::ExecutionProvider(error) => Display::fmt(error, f),
             Self::Journal(error) => Display::fmt(error, f),
@@ -147,6 +149,12 @@ impl Error for ConductorError {}
 impl From<BackendError> for ConductorError {
     fn from(value: BackendError) -> Self {
         Self::Backend(value)
+    }
+}
+
+impl From<WorkerProfileError> for ConductorError {
+    fn from(value: WorkerProfileError) -> Self {
+        Self::WorkerProfile(value)
     }
 }
 

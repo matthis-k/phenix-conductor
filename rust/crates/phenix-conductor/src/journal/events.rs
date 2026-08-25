@@ -1,4 +1,4 @@
-use crate::{ConfigRevisionFingerprint, ExecutionPayload};
+use crate::{ConfigRevisionFingerprint, ExecutionPayload, WorkerProfileId};
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, ContextInjection, ContextResourceRevision,
     DiagnosticWritePatch, ExactReference, ExecutionAuthority, ExecutionEvent, ExecutionId,
@@ -110,6 +110,10 @@ pub enum DomainEvent {
     ExecutionCreated {
         execution: ExecutionSummary,
         payload: JournalExecutionPayload,
+    },
+    WorkerProfileBound {
+        execution_id: ExecutionId,
+        profile_id: WorkerProfileId,
     },
     RootSubmissionAccepted {
         session_id: SessionId,

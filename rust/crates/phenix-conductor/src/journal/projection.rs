@@ -22,6 +22,7 @@ pub(crate) fn apply_domain_event(
         | DomainEvent::SessionClosed { .. } => sessions::apply(state, event),
 
         DomainEvent::ExecutionCreated { .. }
+        | DomainEvent::WorkerProfileBound { .. }
         | DomainEvent::RootSubmissionAccepted { .. }
         | DomainEvent::ExecutionStateChanged { .. }
         | DomainEvent::InvocationResolved { .. }
