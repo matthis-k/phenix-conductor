@@ -1,5 +1,6 @@
 use crate::{
-    CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload, JournalEntry,
+    CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
+    JournalEntry,
 };
 use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
@@ -243,9 +244,9 @@ impl ConductorRuntime {
         reference: &ExactReference,
     ) -> Result<ResolvedExactReference, ConductorError> {
         match reference {
-            ExactReference::Objective(objective_id) => {
-                Ok(ResolvedExactReference::Objective(self.objective(objective_id)?))
-            }
+            ExactReference::Objective(objective_id) => Ok(ResolvedExactReference::Objective(
+                self.objective(objective_id)?,
+            )),
             ExactReference::Execution(execution_id) => self
                 .executions
                 .get(execution_id)
