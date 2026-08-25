@@ -358,3 +358,48 @@ fn exact_durable_references_resolve_without_aliases() {
         .unwrap();
     assert_eq!(event.event().expect("expected event reference").sequence, 1);
 }
+
+#[test]
+fn exact_context_reference_resolves_the_requested_revision() {
+    let root = fixture_root();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    write(root.join("CONTRIBUTING.md"), "exact resolvable context");
+
+    let mut runtime = ConductorRuntime::new();
+    runtime
+        .reload_configuration(configuration_for(&root))
+        .unwrap();
+    let session = runtime.create_session(None, None, fixed_target()).unwrap();
+    let execution = runtime
+        .submit(&session.id, "resolve exact context resource")
+        .unwrap();
+
+    let id = ContextResourceId::parse("project-document:CONTRIBUTING.md").unwrap();
+    let descriptor = runtime
+        .context_descriptors_for_execution(&execution.id)
+        .unwrap()
+        .into_iter()
+        .find(|descriptor| descriptor.id == id)
+        .unwrap();
+    let (resource, _) = runtime
+        .load_context_for_execution(
+            &execution.id,
+            &id,
+            &descriptor.revision,
+            ContextInjectionRequester::Agent,
+            ContextInjectionLifetime::SingleRequest,
+            "resolve the loaded exact context resource",
+        )
+        .unwrap();
+
+    assert_eq!(
+        resource.source_ref,
+        ExactReference::Context {
+            resource_id: id,
+            revision: descriptor.revision,
+        }
+    );
+    assert!(runtime.resolve_exact_reference(&resource.source_ref).is_ok());
+
+    fs::remove_dir_all(root).unwrap();
+}
