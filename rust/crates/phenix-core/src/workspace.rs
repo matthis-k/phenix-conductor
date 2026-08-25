@@ -1,7 +1,53 @@
-use crate::{CallableId, CapabilitySet, ExecutionId, WorkspaceId};
+#[path = "language.rs"]
+mod language;
+pub use language::*;
+#[path = "language_operations.rs"]
+mod language_operations;
+pub use language_operations::*;
+#[path = "objectives.rs"]
+mod objectives;
+pub use objectives::*;
+#[path = "plans.rs"]
+mod plans;
+pub use plans::*;
+
+use crate::{CallableId, CapabilitySet, ExecutionId, InvalidId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
+
+macro_rules! workspace_id_type {
+    ($name:ident) => {
+        #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn parse(value: impl Into<String>) -> Result<Self, InvalidId> {
+                let value = value.into();
+                if value.trim().is_empty() {
+                    Err(InvalidId)
+                } else {
+                    Ok(Self(value))
+                }
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl Display for $name {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+    };
+}
+
+workspace_id_type!(ObjectiveId);
+workspace_id_type!(ObjectiveCriterionId);
 
 pub const CAPABILITY_FILESYSTEM_READ: &str = "filesystem.read";
 pub const CAPABILITY_FILESYSTEM_WRITE: &str = "filesystem.write";
@@ -142,9 +188,34 @@ pub enum FileVersion {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct FileObservation {
+pub struct FileObservationInput {
     pub path: PathBuf,
     pub version: FileVersion,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FileObservation {
+    pub id: FileObservationId,
+    pub path: PathBuf,
+    pub version: FileVersion,
+}
+
+impl From<FileObservation> for FileObservationInput {
+    fn from(observation: FileObservation) -> Self {
+        Self {
+            path: observation.path,
+            version: observation.version,
+        }
+    }
+}
+
+impl From<&FileObservation> for FileObservationInput {
+    fn from(observation: &FileObservation) -> Self {
+        Self {
+            path: observation.path.clone(),
+            version: observation.version.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -163,7 +234,8 @@ impl ExecutionReadSet {
         }
     }
 
-    pub fn observe(&mut self, observation: FileObservation) {
+    pub fn observe(&mut self, observation: impl Into<FileObservationInput>) {
+        let observation = observation.into();
         self.files
             .entry(observation.path)
             .or_insert(observation.version);
@@ -287,14 +359,14 @@ mod tests {
     #[test]
     fn read_set_keeps_the_first_observed_version() {
         let mut reads = ExecutionReadSet::new(ExecutionId::parse("execution-1").unwrap());
-        reads.observe(FileObservation {
+        reads.observe(FileObservationInput {
             path: PathBuf::from("src/lib.rs"),
             version: FileVersion::Present {
                 content_hash: "v1".to_owned(),
                 kind: FileKind::Regular,
             },
         });
-        reads.observe(FileObservation {
+        reads.observe(FileObservationInput {
             path: PathBuf::from("src/lib.rs"),
             version: FileVersion::Present {
                 content_hash: "v2".to_owned(),
@@ -318,7 +390,7 @@ mod tests {
             content_hash: "v1".to_owned(),
             kind: FileKind::Regular,
         };
-        reads.observe(FileObservation {
+        reads.observe(FileObservationInput {
             path: PathBuf::from("src/lib.rs"),
             version: original.clone(),
         });
@@ -345,14 +417,14 @@ mod tests {
     #[test]
     fn invalidation_is_file_scoped() {
         let mut reads = ExecutionReadSet::new(ExecutionId::parse("execution-1").unwrap());
-        reads.observe(FileObservation {
+        reads.observe(FileObservationInput {
             path: PathBuf::from("src/a.rs"),
             version: FileVersion::Present {
                 content_hash: "a1".to_owned(),
                 kind: FileKind::Regular,
             },
         });
-        reads.observe(FileObservation {
+        reads.observe(FileObservationInput {
             path: PathBuf::from("src/b.rs"),
             version: FileVersion::Present {
                 content_hash: "b1".to_owned(),

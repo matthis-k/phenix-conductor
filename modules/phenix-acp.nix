@@ -91,6 +91,7 @@ _: {
 
             export PHENIX_CREDENTIAL_FILE="$TMPDIR/credentials.json"
             export PHENIX_MODEL="openai-codex/product-smoke-model"
+            export XDG_STATE_HOME="$TMPDIR/state"
             response="$TMPDIR/conductor.jsonl"
             {
               printf '%s\n' '{"id":1,"command":{"type":"initialize","after_sequence":null}}'

@@ -1,16 +1,24 @@
+#[path = "plan_relational.rs"]
+mod plan_relational;
+
 use crate::{
     journal::{apply_domain_event, DurableProjection},
     ConductorRuntime, ConfigRevisionFingerprint, ConfigRevisionSlot, DomainEvent,
     JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
 };
 use phenix_core::{
-    AttemptGroup, AttemptGroupId, BackendId, CallableId, DiagnosticWritePatch, ExecutionAuthority,
-    ExecutionEvent, ExecutionEventKind, ExecutionId, ExecutionKind, ExecutionState,
-    ExecutionSummary, ExecutionTarget, ExecutionTerminationCause, FailureAttemptSummary, FileKind,
-    FileObservation, FileVersion, FilesystemAuthority, InferenceEffort, InferenceOptions, ModelId,
-    ModelTarget, NetworkAuthority, OrchestrationFailureDecision,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, ProviderId, RepositoryAuthority,
-    RoutingProfileId, SessionId, SessionState, SessionSummary, ToolCallId, WorkspaceId,
+    AttemptGroup, AttemptGroupId, BackendId, CallableId, ContextDescriptor, ContextInjection,
+    ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId, ContextResourceKind,
+    ContextResourceRevision, ContextRevision, ContextScope, ContextTier, DiagnosticWritePatch,
+    ExactReference, ExecutionAuthority, ExecutionEvent, ExecutionEventKind, ExecutionId,
+    ExecutionKind, ExecutionObjectiveAssignment, ExecutionState, ExecutionSummary, ExecutionTarget,
+    ExecutionTerminationCause, FailureAttemptSummary, FileKind, FileObservation, FileObservationId,
+    FileVersion, FilesystemAuthority, InferenceEffort, InferenceOptions, LanguageObservationId,
+    ModelId, ModelTarget, NetworkAuthority, ObjectiveCriterion, ObjectiveCriterionEvidence,
+    ObjectiveId, ObjectiveOrigin, ObjectiveRecord, ObjectiveState, ObjectiveTransition,
+    ObjectiveTransitionCause, OrchestrationFailureDecision, OrchestrationFailureDecisionRecord,
+    OrchestrationNodeId, PlanId, ProviderId, RepositoryAuthority, RoutingProfileId, SessionId,
+    SessionState, SessionSummary, ToolCallId, WorkspaceId,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{Map, Number, Value};
@@ -19,7 +27,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 3;
+const DATABASE_SCHEMA_VERSION: i64 = 9;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -84,11 +92,11 @@ impl SqliteStore {
         {
             std::fs::create_dir_all(parent)?;
         }
-        let connection = Connection::open(&self.path)?;
+        let mut connection = Connection::open(&self.path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
-        migrate(&connection)?;
+        migrate(&mut connection)?;
         Ok(connection)
     }
 
@@ -163,7 +171,7 @@ impl SqliteStore {
     }
 }
 
-fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
+fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
              version INTEGER PRIMARY KEY,
@@ -180,18 +188,54 @@ fn migrate(connection: &Connection) -> Result<(), PersistenceError> {
             "database schema version {version} is newer than supported version {DATABASE_SCHEMA_VERSION}"
         )));
     }
-    if version == 0 {
-        connection.execute_batch(include_str!("../../migrations/0001_runtime.sql"))?;
-        connection.execute("INSERT INTO schema_migrations(version) VALUES (1)", [])?;
+    for (target, sql) in [
+        (1, include_str!("../../migrations/0001_runtime.sql")),
+        (
+            2,
+            include_str!("../../migrations/0002_orchestration_data.sql"),
+        ),
+        (
+            3,
+            include_str!("../../migrations/0003_diagnostic_patches.sql"),
+        ),
+        (
+            4,
+            include_str!("../../migrations/0004_language_observations.sql"),
+        ),
+        (5, include_str!("../../migrations/0005_objectives.sql")),
+        (6, include_str!("../../migrations/0006_plans.sql")),
+        (
+            7,
+            include_str!("../../migrations/0007_context_injections.sql"),
+        ),
+        (
+            8,
+            include_str!("../../migrations/0008_context_resource_revisions.sql"),
+        ),
+        (
+            9,
+            include_str!("../../migrations/0009_observation_identities.sql"),
+        ),
+    ] {
+        if version < target {
+            apply_migration(connection, target, sql)?;
+        }
     }
-    if version < 2 {
-        connection.execute_batch(include_str!("../../migrations/0002_orchestration_data.sql"))?;
-        connection.execute("INSERT INTO schema_migrations(version) VALUES (2)", [])?;
-    }
-    if version < 3 {
-        connection.execute_batch(include_str!("../../migrations/0003_diagnostic_patches.sql"))?;
-        connection.execute("INSERT INTO schema_migrations(version) VALUES (3)", [])?;
-    }
+    Ok(())
+}
+
+fn apply_migration(
+    connection: &mut Connection,
+    version: i64,
+    sql: &str,
+) -> Result<(), PersistenceError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transaction.execute_batch(sql)?;
+    transaction.execute(
+        "INSERT INTO schema_migrations(version) VALUES (?1)",
+        params![version],
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -283,6 +327,22 @@ fn event_type(event: &DomainEvent) -> &'static str {
         DomainEvent::OrchestrationSynthesisStarted { .. } => "orchestration_synthesis_started",
         DomainEvent::ExecutionOutputRecorded { .. } => "execution_output_recorded",
         DomainEvent::DiagnosticWritePatchCaptured { .. } => "diagnostic_write_patch_captured",
+        DomainEvent::LanguageObservationRecorded { .. } => "language_observation_recorded",
+        DomainEvent::ContextResourceRevisionRegistered { .. } => {
+            "context_resource_revision_registered"
+        }
+        DomainEvent::ContextInjectionRecorded { .. } => "context_injection_recorded",
+        DomainEvent::ObjectiveSemanticsActivated => "objective_semantics_activated",
+        DomainEvent::ObjectiveCreated { .. } => "objective_created",
+        DomainEvent::ObjectiveDraftRevised { .. } => "objective_draft_revised",
+        DomainEvent::ObjectiveEvidenceRecorded { .. } => "objective_evidence_recorded",
+        DomainEvent::ObjectiveStateChanged { .. } => "objective_state_changed",
+        DomainEvent::ExecutionObjectivesAssigned { .. } => "execution_objectives_assigned",
+        DomainEvent::PlanCreated { .. } => "plan_created",
+        DomainEvent::PlanDraftRevised { .. } => "plan_draft_revised",
+        DomainEvent::PlanStateChanged { .. } => "plan_state_changed",
+        DomainEvent::PlanStepStateChanged { .. } => "plan_step_state_changed",
+        DomainEvent::ExecutionPlanAssigned { .. } => "execution_plan_assigned",
         DomainEvent::InvocationResolved { .. } => "invocation_resolved",
         DomainEvent::WorkspaceCheckpointCaptured { .. } => "workspace_checkpoint_captured",
         DomainEvent::WorkspaceFileObserved { .. } => "workspace_file_observed",
@@ -560,6 +620,196 @@ fn insert_event(
                 ],
             )?;
         }
+        DomainEvent::LanguageObservationRecorded { observation } => {
+            let operation_value = serde_json::to_value(&observation.operation)
+                .map_err(|error| invalid(format!("cannot encode language operation: {error}")))?;
+            let result_value = serde_json::to_value(&observation.result)
+                .map_err(|error| invalid(format!("cannot encode language result: {error}")))?;
+            let operation = insert_value(transaction, &operation_value)?;
+            let result = insert_value(transaction, &result_value)?;
+            transaction.execute(
+                "INSERT INTO language_observations(
+                     recorded_sequence, observation_id, execution_id, workspace_id, service_kind,
+                     provider_id, provider_epoch, operation_value_id, result_value_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    sequence,
+                    observation.id.to_string(),
+                    observation.execution.to_string(),
+                    observation.workspace.to_string(),
+                    observation.service.to_string(),
+                    observation.provider.to_string(),
+                    sql_u64(observation.provider_epoch, "language provider epoch")?,
+                    operation,
+                    result,
+                ],
+            )?;
+        }
+        DomainEvent::ContextResourceRevisionRegistered { resource } => {
+            let (scope_kind, scope_id, scope_path) =
+                context_scope_columns(&resource.descriptor.scope);
+            let (source_kind, source_id, source_event_sequence) =
+                context_source_columns(&resource.source_ref)?;
+            let source_revision = match &resource.source_ref {
+                ExactReference::Context { revision, .. } => revision,
+                _ => &resource.descriptor.revision,
+            };
+            transaction.execute(
+                "INSERT INTO context_resource_revisions(
+                     recorded_sequence, resource_id, revision, resource_kind, title, description,
+                     scope_kind, scope_id, scope_path, estimated_cost, tier, source_kind, source_id,
+                     source_event_sequence, source_revision, content_identity, content
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                params![
+                    sequence,
+                    resource.descriptor.id.to_string(),
+                    resource.descriptor.revision.to_string(),
+                    context_resource_kind_token(&resource.descriptor.kind),
+                    resource.descriptor.title.as_str(),
+                    resource.descriptor.description.as_str(),
+                    scope_kind,
+                    scope_id,
+                    scope_path,
+                    sql_u64(resource.descriptor.estimated_cost, "context estimated cost")?,
+                    context_tier_token(&resource.tier),
+                    source_kind,
+                    source_id,
+                    source_event_sequence,
+                    source_revision.to_string(),
+                    resource.content_identity.to_string(),
+                    resource.content.as_deref(),
+                ],
+            )?;
+        }
+        DomainEvent::ContextInjectionRecorded { injection } => {
+            if let ExactReference::Context { revision, .. } = &injection.source_ref {
+                if revision != &injection.source_revision {
+                    return Err(invalid(
+                        "context source reference revision does not match injection source revision",
+                    ));
+                }
+            }
+            let (source_kind, source_id, source_event_sequence) =
+                context_source_columns(&injection.source_ref)?;
+            transaction.execute(
+                "INSERT INTO context_injections(
+                     recorded_sequence, execution_id, source_kind, source_id, source_event_sequence,
+                     source_revision, requester, reason, lifetime, content_identity
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    sequence,
+                    injection.execution_id.to_string(),
+                    source_kind,
+                    source_id,
+                    source_event_sequence,
+                    injection.source_revision.to_string(),
+                    context_requester_token(&injection.requested_by),
+                    injection.reason.as_str(),
+                    context_lifetime_token(&injection.lifetime),
+                    injection.content_identity.to_string(),
+                ],
+            )?;
+        }
+        DomainEvent::ObjectiveSemanticsActivated => {}
+        DomainEvent::ObjectiveCreated { objective } => {
+            let (origin, parent) = objective_origin_columns(&objective.origin);
+            transaction.execute(
+                "INSERT INTO objective_creations(
+                     created_sequence, objective_id, workspace_id, origin_kind, parent_objective_id,
+                     statement, state, supersedes_objective_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    sequence,
+                    objective.id.to_string(),
+                    objective.workspace.to_string(),
+                    origin,
+                    parent,
+                    objective.statement,
+                    objective_state_token(&objective.state),
+                    objective.supersedes.as_ref().map(ToString::to_string),
+                ],
+            )?;
+            insert_objective_criteria(
+                transaction,
+                "objective_creation_criteria",
+                "created_sequence",
+                sequence,
+                &objective.criteria,
+            )?;
+        }
+        DomainEvent::ObjectiveDraftRevised { objective } => {
+            transaction.execute(
+                "INSERT INTO objective_draft_revisions(sequence, objective_id, statement)
+                 VALUES (?1, ?2, ?3)",
+                params![sequence, objective.id.to_string(), objective.statement],
+            )?;
+            insert_objective_criteria(
+                transaction,
+                "objective_draft_revision_criteria",
+                "sequence",
+                sequence,
+                &objective.criteria,
+            )?;
+        }
+        DomainEvent::ObjectiveEvidenceRecorded {
+            objective_id,
+            evidence,
+        } => {
+            transaction.execute(
+                "INSERT INTO objective_evidence(sequence, objective_id, criterion_id, evidence_ref)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    sequence,
+                    objective_id.to_string(),
+                    evidence.criterion_id.to_string(),
+                    evidence.evidence_ref,
+                ],
+            )?;
+        }
+        DomainEvent::ObjectiveStateChanged { transition } => {
+            let (kind, execution, detail) = objective_cause_columns(&transition.cause);
+            transaction.execute(
+                "INSERT INTO objective_state_changes(
+                     sequence, objective_id, from_state, to_state, cause_kind,
+                     cause_execution_id, cause_detail
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    sequence,
+                    transition.objective_id.to_string(),
+                    objective_state_token(&transition.from),
+                    objective_state_token(&transition.to),
+                    kind,
+                    execution,
+                    detail,
+                ],
+            )?;
+        }
+        DomainEvent::ExecutionObjectivesAssigned { assignment } => {
+            transaction.execute(
+                "INSERT INTO execution_objective_assignments(
+                     sequence, execution_id, primary_objective_id
+                 ) VALUES (?1, ?2, ?3)",
+                params![
+                    sequence,
+                    assignment.execution_id.to_string(),
+                    assignment.primary.to_string(),
+                ],
+            )?;
+            for objective in &assignment.supporting {
+                transaction.execute(
+                    "INSERT INTO execution_supporting_objectives(sequence, objective_id)
+                     VALUES (?1, ?2)",
+                    params![sequence, objective.to_string()],
+                )?;
+            }
+        }
+        event @ (DomainEvent::PlanCreated { .. }
+        | DomainEvent::PlanDraftRevised { .. }
+        | DomainEvent::PlanStateChanged { .. }
+        | DomainEvent::PlanStepStateChanged { .. }
+        | DomainEvent::ExecutionPlanAssigned { .. }) => {
+            plan_relational::insert_event(transaction, sequence, event)?;
+        }
         DomainEvent::InvocationResolved {
             execution_id,
             route,
@@ -608,10 +858,11 @@ fn insert_event(
             let (state, hash, kind) = file_version_columns(&observation.version);
             transaction.execute(
                 "INSERT INTO workspace_observation_events(
-                     execution_id, path, version_state, content_hash, file_kind,
+                     observation_id, execution_id, path, version_state, content_hash, file_kind,
                      observed_sequence
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
+                    observation.id.to_string(),
                     execution_id.to_string(),
                     observation.path.to_string_lossy(),
                     state,
@@ -995,6 +1246,254 @@ fn termination_columns(cause: &ExecutionTerminationCause) -> (&'static str, &Exe
     }
 }
 
+fn context_resource_kind_token(kind: &ContextResourceKind) -> &'static str {
+    match kind {
+        ContextResourceKind::Skill => "skill",
+        ContextResourceKind::ProjectDocument => "project_document",
+        ContextResourceKind::Objective => "objective",
+        ContextResourceKind::Plan => "plan",
+    }
+}
+
+fn parse_context_resource_kind(value: &str) -> Result<ContextResourceKind, PersistenceError> {
+    match value {
+        "skill" => Ok(ContextResourceKind::Skill),
+        "project_document" => Ok(ContextResourceKind::ProjectDocument),
+        "objective" => Ok(ContextResourceKind::Objective),
+        "plan" => Ok(ContextResourceKind::Plan),
+        other => Err(invalid(format!("unknown context resource kind: {other}"))),
+    }
+}
+
+fn context_tier_token(tier: &ContextTier) -> &'static str {
+    match tier {
+        ContextTier::MandatoryContent => "mandatory_content",
+        ContextTier::MandatoryMetadata => "mandatory_metadata",
+        ContextTier::DiscoverableContent => "discoverable_content",
+    }
+}
+
+fn parse_context_tier(value: &str) -> Result<ContextTier, PersistenceError> {
+    match value {
+        "mandatory_content" => Ok(ContextTier::MandatoryContent),
+        "mandatory_metadata" => Ok(ContextTier::MandatoryMetadata),
+        "discoverable_content" => Ok(ContextTier::DiscoverableContent),
+        other => Err(invalid(format!("unknown context tier: {other}"))),
+    }
+}
+
+fn context_scope_columns(scope: &ContextScope) -> (&'static str, Option<String>, Option<String>) {
+    match scope {
+        ContextScope::Workspace { workspace_id } => {
+            ("workspace", Some(workspace_id.to_string()), None)
+        }
+        ContextScope::Execution { execution_id } => {
+            ("execution", Some(execution_id.to_string()), None)
+        }
+        ContextScope::Objective { objective_id } => {
+            ("objective", Some(objective_id.to_string()), None)
+        }
+        ContextScope::Path { path } => ("path", None, Some(path.to_string_lossy().into_owned())),
+        ContextScope::Configuration { revision } => {
+            ("configuration", Some(revision.to_string()), None)
+        }
+    }
+}
+
+fn parse_context_scope(
+    kind: &str,
+    id: Option<String>,
+    path: Option<String>,
+) -> Result<ContextScope, PersistenceError> {
+    match kind {
+        "workspace" => Ok(ContextScope::Workspace {
+            workspace_id: parse_id(
+                context_scope_id(id, path, kind)?,
+                "context workspace scope",
+                WorkspaceId::parse,
+            )?,
+        }),
+        "execution" => Ok(ContextScope::Execution {
+            execution_id: parse_id(
+                context_scope_id(id, path, kind)?,
+                "context execution scope",
+                ExecutionId::parse,
+            )?,
+        }),
+        "objective" => Ok(ContextScope::Objective {
+            objective_id: parse_id(
+                context_scope_id(id, path, kind)?,
+                "context objective scope",
+                ObjectiveId::parse,
+            )?,
+        }),
+        "configuration" => Ok(ContextScope::Configuration {
+            revision: parse_id(
+                context_scope_id(id, path, kind)?,
+                "context configuration scope",
+                phenix_core::ConfigRevisionId::parse,
+            )?,
+        }),
+        "path" => {
+            if id.is_some() {
+                return Err(invalid("context path scope must not contain a scope id"));
+            }
+            Ok(ContextScope::Path {
+                path: PathBuf::from(
+                    path.ok_or_else(|| invalid("context path scope is missing its path"))?,
+                ),
+            })
+        }
+        other => Err(invalid(format!("unknown context scope kind: {other}"))),
+    }
+}
+
+fn context_scope_id(
+    id: Option<String>,
+    path: Option<String>,
+    kind: &str,
+) -> Result<String, PersistenceError> {
+    if path.is_some() {
+        return Err(invalid(format!(
+            "context {kind} scope must not contain a path"
+        )));
+    }
+    required_column(id, "context scope id")
+}
+
+fn context_source_columns(
+    source: &ExactReference,
+) -> Result<(&'static str, Option<String>, Option<i64>), PersistenceError> {
+    match source {
+        ExactReference::Objective(id) => Ok(("objective", Some(id.to_string()), None)),
+        ExactReference::Plan(id) => Ok(("plan", Some(id.to_string()), None)),
+        ExactReference::Execution(id) => Ok(("execution", Some(id.to_string()), None)),
+        ExactReference::Event(sequence) => Ok((
+            "event",
+            None,
+            Some(sql_u64(*sequence, "context source event sequence")?),
+        )),
+        ExactReference::FileObservation(id) => Ok(("file_observation", Some(id.to_string()), None)),
+        ExactReference::LanguageObservation(id) => {
+            Ok(("language_observation", Some(id.to_string()), None))
+        }
+        ExactReference::Context { resource_id, .. } => {
+            Ok(("context", Some(resource_id.to_string()), None))
+        }
+    }
+}
+
+fn context_source_id(
+    id: Option<String>,
+    event_sequence: Option<i64>,
+    kind: &str,
+) -> Result<String, PersistenceError> {
+    if event_sequence.is_some() {
+        return Err(invalid(format!(
+            "context {kind} source must not contain an event sequence"
+        )));
+    }
+    required_column(id, "context source id")
+}
+
+fn parse_context_source(
+    kind: &str,
+    id: Option<String>,
+    event_sequence: Option<i64>,
+    source_revision: &ContextRevision,
+) -> Result<ExactReference, PersistenceError> {
+    match kind {
+        "objective" => Ok(ExactReference::Objective(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context objective source",
+            ObjectiveId::parse,
+        )?)),
+        "plan" => Ok(ExactReference::Plan(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context plan source",
+            PlanId::parse,
+        )?)),
+        "execution" => Ok(ExactReference::Execution(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context execution source",
+            ExecutionId::parse,
+        )?)),
+        "event" => {
+            if id.is_some() {
+                return Err(invalid("context event source must not contain a source id"));
+            }
+            Ok(ExactReference::Event(runtime_u64(
+                event_sequence
+                    .ok_or_else(|| invalid("context event source is missing its sequence"))?,
+                "context source event sequence",
+            )?))
+        }
+        "file_observation" => Ok(ExactReference::FileObservation(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context file observation source",
+            FileObservationId::parse,
+        )?)),
+        "language_observation" => Ok(ExactReference::LanguageObservation(parse_id(
+            context_source_id(id, event_sequence, kind)?,
+            "context language observation source",
+            LanguageObservationId::parse,
+        )?)),
+        "context" => Ok(ExactReference::Context {
+            resource_id: parse_id(
+                context_source_id(id, event_sequence, kind)?,
+                "context resource source",
+                ContextResourceId::parse,
+            )?,
+            revision: source_revision.clone(),
+        }),
+        other => Err(invalid(format!("unknown context source kind: {other}"))),
+    }
+}
+
+fn context_requester_token(requester: &ContextInjectionRequester) -> &'static str {
+    match requester {
+        ContextInjectionRequester::Agent => "agent",
+        ContextInjectionRequester::User => "user",
+        ContextInjectionRequester::Orchestration => "orchestration",
+        ContextInjectionRequester::ContextPolicy => "context_policy",
+        ContextInjectionRequester::Hook => "hook",
+        ContextInjectionRequester::Frontend => "frontend",
+    }
+}
+
+fn parse_context_requester(value: &str) -> Result<ContextInjectionRequester, PersistenceError> {
+    match value {
+        "agent" => Ok(ContextInjectionRequester::Agent),
+        "user" => Ok(ContextInjectionRequester::User),
+        "orchestration" => Ok(ContextInjectionRequester::Orchestration),
+        "context_policy" => Ok(ContextInjectionRequester::ContextPolicy),
+        "hook" => Ok(ContextInjectionRequester::Hook),
+        "frontend" => Ok(ContextInjectionRequester::Frontend),
+        other => Err(invalid(format!(
+            "unknown context injection requester: {other}"
+        ))),
+    }
+}
+
+fn context_lifetime_token(lifetime: &ContextInjectionLifetime) -> &'static str {
+    match lifetime {
+        ContextInjectionLifetime::SingleRequest => "single_request",
+        ContextInjectionLifetime::Execution => "execution",
+        ContextInjectionLifetime::Objective => "objective",
+    }
+}
+
+fn parse_context_lifetime(value: &str) -> Result<ContextInjectionLifetime, PersistenceError> {
+    match value {
+        "single_request" => Ok(ContextInjectionLifetime::SingleRequest),
+        "execution" => Ok(ContextInjectionLifetime::Execution),
+        "objective" => Ok(ContextInjectionLifetime::Objective),
+        other => Err(invalid(format!(
+            "unknown context injection lifetime: {other}"
+        ))),
+    }
+}
+
 fn load_entries(connection: &Connection) -> Result<Vec<crate::JournalEntry>, PersistenceError> {
     let mut statement =
         connection.prepare("SELECT sequence, event_type FROM domain_events ORDER BY sequence")?;
@@ -1238,6 +1737,186 @@ fn load_event(
                     patch,
                 },
             })
+        }
+        "language_observation_recorded" => {
+            let row = connection.query_row(
+                "SELECT observation_id, execution_id, workspace_id, service_kind, provider_id,
+                    provider_epoch, operation_value_id, result_value_id
+             FROM language_observations WHERE recorded_sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                    ))
+                },
+            )?;
+            let operation = serde_json::from_value(load_value(connection, row.6)?)
+                .map_err(|error| invalid(format!("invalid stored language operation: {error}")))?;
+            let result = serde_json::from_value(load_value(connection, row.7)?)
+                .map_err(|error| invalid(format!("invalid stored language result: {error}")))?;
+            Ok(DomainEvent::LanguageObservationRecorded {
+                observation: phenix_core::LanguageObservation {
+                    id: parse_id(row.0, "language observation", LanguageObservationId::parse)?,
+                    execution: parse_id(row.1, "execution", ExecutionId::parse)?,
+                    workspace: parse_id(row.2, "workspace", WorkspaceId::parse)?,
+                    service: parse_id(
+                        row.3,
+                        "language service",
+                        phenix_core::LanguageServiceKind::parse,
+                    )?,
+                    provider: parse_id(
+                        row.4,
+                        "language provider",
+                        phenix_core::LanguageProviderId::parse,
+                    )?,
+                    provider_epoch: runtime_u64(row.5, "language provider epoch")?,
+                    operation,
+                    result,
+                },
+            })
+        }
+        "context_resource_revision_registered" => {
+            let row = connection.query_row(
+                "SELECT resource_id, revision, resource_kind, title, description, scope_kind,
+                        scope_id, scope_path, estimated_cost, tier, source_kind, source_id,
+                        source_event_sequence, source_revision, content_identity, content
+                 FROM context_resource_revisions WHERE recorded_sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<i64>>(12)?,
+                        row.get::<_, String>(13)?,
+                        row.get::<_, String>(14)?,
+                        row.get::<_, Option<String>>(15)?,
+                    ))
+                },
+            )?;
+            let revision = parse_id(row.1, "context resource revision", ContextRevision::parse)?;
+            let source_revision =
+                parse_id(row.13, "context source revision", ContextRevision::parse)?;
+            Ok(DomainEvent::ContextResourceRevisionRegistered {
+                resource: ContextResourceRevision {
+                    descriptor: ContextDescriptor {
+                        id: parse_id(row.0, "context resource", ContextResourceId::parse)?,
+                        kind: parse_context_resource_kind(&row.2)?,
+                        title: row.3,
+                        description: row.4,
+                        scope: parse_context_scope(&row.5, row.6, row.7)?,
+                        revision,
+                        estimated_cost: runtime_u64(row.8, "context estimated cost")?,
+                    },
+                    tier: parse_context_tier(&row.9)?,
+                    source_ref: parse_context_source(&row.10, row.11, row.12, &source_revision)?,
+                    content_identity: parse_id(
+                        row.14,
+                        "context content identity",
+                        ContextRevision::parse,
+                    )?,
+                    content: row.15,
+                },
+            })
+        }
+        "context_injection_recorded" => {
+            let row = connection.query_row(
+                "SELECT execution_id, source_kind, source_id, source_event_sequence,
+                        source_revision, requester, reason, lifetime, content_identity
+                 FROM context_injections WHERE recorded_sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                    ))
+                },
+            )?;
+            let source_revision =
+                parse_id(row.4, "context source revision", ContextRevision::parse)?;
+            Ok(DomainEvent::ContextInjectionRecorded {
+                injection: ContextInjection {
+                    execution_id: parse_id(row.0, "execution", ExecutionId::parse)?,
+                    source_ref: parse_context_source(&row.1, row.2, row.3, &source_revision)?,
+                    source_revision,
+                    requested_by: parse_context_requester(&row.5)?,
+                    reason: row.6,
+                    lifetime: parse_context_lifetime(&row.7)?,
+                    content_identity: parse_id(
+                        row.8,
+                        "context content identity",
+                        ContextRevision::parse,
+                    )?,
+                },
+            })
+        }
+        "objective_semantics_activated" => Ok(DomainEvent::ObjectiveSemanticsActivated),
+        "objective_created" => Ok(DomainEvent::ObjectiveCreated {
+            objective: load_objective_creation(connection, sequence)?,
+        }),
+        "objective_draft_revised" => Ok(DomainEvent::ObjectiveDraftRevised {
+            objective: load_objective_draft_revision(connection, sequence)?,
+        }),
+        "objective_evidence_recorded" => {
+            let (objective, criterion, evidence_ref) = connection.query_row(
+                "SELECT objective_id, criterion_id, evidence_ref FROM objective_evidence
+                 WHERE sequence = ?1",
+                params![sequence],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?;
+            Ok(DomainEvent::ObjectiveEvidenceRecorded {
+                objective_id: parse_id(objective, "objective", ObjectiveId::parse)?,
+                evidence: ObjectiveCriterionEvidence {
+                    criterion_id: parse_id(
+                        criterion,
+                        "objective criterion",
+                        phenix_core::ObjectiveCriterionId::parse,
+                    )?,
+                    evidence_ref,
+                },
+            })
+        }
+        "objective_state_changed" => Ok(DomainEvent::ObjectiveStateChanged {
+            transition: load_objective_transition(connection, sequence)?,
+        }),
+        "execution_objectives_assigned" => Ok(DomainEvent::ExecutionObjectivesAssigned {
+            assignment: load_execution_objective_assignment(connection, sequence)?,
+        }),
+        "plan_created"
+        | "plan_draft_revised"
+        | "plan_state_changed"
+        | "plan_step_state_changed"
+        | "execution_plan_assigned" => {
+            plan_relational::load_event(connection, sequence, event_type)
         }
         "invocation_resolved" => load_invocation_resolved(connection, sequence),
         "workspace_checkpoint_captured" => load_checkpoint(connection, sequence),
@@ -1584,8 +2263,8 @@ fn load_observation(
     connection: &Connection,
     sequence: i64,
 ) -> Result<DomainEvent, PersistenceError> {
-    let (execution, path, state, hash, kind) = connection.query_row(
-        "SELECT execution_id, path, version_state, content_hash, file_kind
+    let (observation_id, execution, path, state, hash, kind) = connection.query_row(
+        "SELECT observation_id, execution_id, path, version_state, content_hash, file_kind
          FROM workspace_observation_events WHERE observed_sequence = ?1",
         params![sequence],
         |row| {
@@ -1593,14 +2272,16 @@ fn load_observation(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(3)?,
                 row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
             ))
         },
     )?;
     Ok(DomainEvent::WorkspaceFileObserved {
         execution_id: parse_id(execution, "execution", ExecutionId::parse)?,
         observation: FileObservation {
+            id: parse_id(observation_id, "file observation", FileObservationId::parse)?,
             path: PathBuf::from(path),
             version: parse_file_version(&state, hash, kind)?,
         },
@@ -2270,6 +2951,269 @@ impl ConductorRuntime {
     }
 }
 
+fn insert_objective_criteria(
+    transaction: &Transaction<'_>,
+    table: &str,
+    sequence_column: &str,
+    sequence: i64,
+    criteria: &[ObjectiveCriterion],
+) -> Result<(), PersistenceError> {
+    let sql = format!(
+        "INSERT INTO {table}({sequence_column}, criterion_order, criterion_id, description, required) \
+         VALUES (?1, ?2, ?3, ?4, ?5)"
+    );
+    for (index, criterion) in criteria.iter().enumerate() {
+        transaction.execute(
+            &sql,
+            params![
+                sequence,
+                sql_usize(index, "objective criterion order")?,
+                criterion.id.to_string(),
+                criterion.description,
+                i64::from(criterion.required),
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn objective_origin_columns(origin: &ObjectiveOrigin) -> (&'static str, Option<String>) {
+    match origin {
+        ObjectiveOrigin::Root => ("root", None),
+        ObjectiveOrigin::Derived { parent } => ("derived", Some(parent.to_string())),
+    }
+}
+
+fn objective_cause_columns(
+    cause: &ObjectiveTransitionCause,
+) -> (&'static str, Option<String>, Option<String>) {
+    match cause {
+        ObjectiveTransitionCause::UserIntent => ("user_intent", None, None),
+        ObjectiveTransitionCause::AgentAction { execution_id } => {
+            ("agent_action", Some(execution_id.to_string()), None)
+        }
+        ObjectiveTransitionCause::ExecutionOutcome { execution_id } => {
+            ("execution_outcome", Some(execution_id.to_string()), None)
+        }
+        ObjectiveTransitionCause::EvidenceAssessment { evidence_ref } => {
+            ("evidence_assessment", None, Some(evidence_ref.clone()))
+        }
+        ObjectiveTransitionCause::Policy { description } => {
+            ("policy", None, Some(description.clone()))
+        }
+    }
+}
+
+fn objective_state_token(state: &ObjectiveState) -> &'static str {
+    match state {
+        ObjectiveState::Draft => "draft",
+        ObjectiveState::Active => "active",
+        ObjectiveState::Completed => "completed",
+        ObjectiveState::Failed => "failed",
+        ObjectiveState::Invalidated => "invalidated",
+        ObjectiveState::Abandoned => "abandoned",
+        ObjectiveState::Superseded => "superseded",
+    }
+}
+
+fn parse_objective_state(value: &str) -> Result<ObjectiveState, PersistenceError> {
+    match value {
+        "draft" => Ok(ObjectiveState::Draft),
+        "active" => Ok(ObjectiveState::Active),
+        "completed" => Ok(ObjectiveState::Completed),
+        "failed" => Ok(ObjectiveState::Failed),
+        "invalidated" => Ok(ObjectiveState::Invalidated),
+        "abandoned" => Ok(ObjectiveState::Abandoned),
+        "superseded" => Ok(ObjectiveState::Superseded),
+        other => Err(invalid(format!("unknown objective state: {other}"))),
+    }
+}
+
+fn load_objective_criteria(
+    connection: &Connection,
+    table: &str,
+    sequence_column: &str,
+    sequence: i64,
+) -> Result<Vec<ObjectiveCriterion>, PersistenceError> {
+    let sql = format!(
+        "SELECT criterion_id, description, required FROM {table} \
+         WHERE {sequence_column} = ?1 ORDER BY criterion_order"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params![sequence], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (id, description, required) = row?;
+        Ok(ObjectiveCriterion {
+            id: parse_id(
+                id,
+                "objective criterion",
+                phenix_core::ObjectiveCriterionId::parse,
+            )?,
+            description,
+            required: required != 0,
+        })
+    })
+    .collect()
+}
+
+fn load_objective_creation(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<ObjectiveRecord, PersistenceError> {
+    let row = connection.query_row(
+        "SELECT objective_id, workspace_id, origin_kind, parent_objective_id, statement, state,\n                supersedes_objective_id\n         FROM objective_creations WHERE created_sequence = ?1",
+        params![sequence],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        },
+    )?;
+    let origin = match row.2.as_str() {
+        "root" if row.3.is_none() => ObjectiveOrigin::Root,
+        "derived" => ObjectiveOrigin::Derived {
+            parent: parse_id(
+                row.3
+                    .ok_or_else(|| invalid("derived objective has no parent"))?,
+                "objective parent",
+                ObjectiveId::parse,
+            )?,
+        },
+        other => return Err(invalid(format!("invalid objective origin: {other}"))),
+    };
+    Ok(ObjectiveRecord {
+        id: parse_id(row.0, "objective", ObjectiveId::parse)?,
+        workspace: parse_id(row.1, "workspace", WorkspaceId::parse)?,
+        origin,
+        statement: row.4,
+        criteria: load_objective_criteria(
+            connection,
+            "objective_creation_criteria",
+            "created_sequence",
+            sequence,
+        )?,
+        state: parse_objective_state(&row.5)?,
+        supersedes: row
+            .6
+            .map(|id| parse_id(id, "superseded objective", ObjectiveId::parse))
+            .transpose()?,
+    })
+}
+
+fn load_objective_draft_revision(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<ObjectiveRecord, PersistenceError> {
+    let (objective_id, statement) = connection.query_row(
+        "SELECT objective_id, statement FROM objective_draft_revisions WHERE sequence = ?1",
+        params![sequence],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    let objective_id = parse_id(objective_id, "objective", ObjectiveId::parse)?;
+    let creation_sequence = connection.query_row(
+        "SELECT created_sequence FROM objective_creations WHERE objective_id = ?1",
+        params![objective_id.to_string()],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let mut objective = load_objective_creation(connection, creation_sequence)?;
+    objective.statement = statement;
+    objective.criteria = load_objective_criteria(
+        connection,
+        "objective_draft_revision_criteria",
+        "sequence",
+        sequence,
+    )?;
+    objective.state = ObjectiveState::Draft;
+    Ok(objective)
+}
+
+fn load_objective_transition(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<ObjectiveTransition, PersistenceError> {
+    let row = connection.query_row(
+        "SELECT objective_id, from_state, to_state, cause_kind, cause_execution_id, cause_detail\n         FROM objective_state_changes WHERE sequence = ?1",
+        params![sequence],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        },
+    )?;
+    let execution = row
+        .4
+        .map(|id| parse_id(id, "execution", ExecutionId::parse))
+        .transpose()?;
+    let cause = match row.3.as_str() {
+        "user_intent" => ObjectiveTransitionCause::UserIntent,
+        "agent_action" => ObjectiveTransitionCause::AgentAction {
+            execution_id: execution
+                .ok_or_else(|| invalid("agent objective cause has no execution"))?,
+        },
+        "execution_outcome" => ObjectiveTransitionCause::ExecutionOutcome {
+            execution_id: execution
+                .ok_or_else(|| invalid("execution outcome objective cause has no execution"))?,
+        },
+        "evidence_assessment" => ObjectiveTransitionCause::EvidenceAssessment {
+            evidence_ref: row
+                .5
+                .ok_or_else(|| invalid("evidence objective cause has no reference"))?,
+        },
+        "policy" => ObjectiveTransitionCause::Policy {
+            description: row
+                .5
+                .ok_or_else(|| invalid("policy objective cause has no description"))?,
+        },
+        other => return Err(invalid(format!("unknown objective cause: {other}"))),
+    };
+    Ok(ObjectiveTransition {
+        objective_id: parse_id(row.0, "objective", ObjectiveId::parse)?,
+        from: parse_objective_state(&row.1)?,
+        to: parse_objective_state(&row.2)?,
+        cause,
+    })
+}
+
+fn load_execution_objective_assignment(
+    connection: &Connection,
+    sequence: i64,
+) -> Result<ExecutionObjectiveAssignment, PersistenceError> {
+    let (execution, primary) = connection.query_row(
+        "SELECT execution_id, primary_objective_id FROM execution_objective_assignments\n         WHERE sequence = ?1",
+        params![sequence],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    let mut statement = connection.prepare(
+        "SELECT objective_id FROM execution_supporting_objectives\n         WHERE sequence = ?1 ORDER BY objective_id",
+    )?;
+    let supporting = statement
+        .query_map(params![sequence], |row| row.get::<_, String>(0))?
+        .map(|row| parse_id(row?, "supporting objective", ObjectiveId::parse))
+        .collect::<Result<BTreeSet<_>, PersistenceError>>()?;
+    Ok(ExecutionObjectiveAssignment {
+        execution_id: parse_id(execution, "execution", ExecutionId::parse)?,
+        primary: parse_id(primary, "primary objective", ObjectiveId::parse)?,
+        supporting,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2326,7 +3270,7 @@ mod tests {
         runtime
             .record_file_observation(
                 &execution.id,
-                FileObservation {
+                phenix_core::FileObservationInput {
                     path: PathBuf::from("src/lib.rs"),
                     version: FileVersion::Present {
                         content_hash: "first-hash".to_owned(),
@@ -2338,7 +3282,7 @@ mod tests {
         runtime
             .record_file_observation(
                 &execution.id,
-                FileObservation {
+                phenix_core::FileObservationInput {
                     path: PathBuf::from("src/lib.rs"),
                     version: FileVersion::Present {
                         content_hash: "later-hash".to_owned(),
@@ -2357,6 +3301,33 @@ mod tests {
             })
             .unwrap();
         runtime
+            .record_language_observation(phenix_core::LanguageObservationInput {
+                execution: execution.id.clone(),
+                workspace: session.workspace_id.clone(),
+                service: phenix_core::LanguageServiceKind::parse("rust").unwrap(),
+                provider: phenix_core::LanguageProviderId::parse("rust-analyzer").unwrap(),
+                provider_epoch: 3,
+                operation: phenix_core::LanguageOperation::Definition {
+                    document: PathBuf::from("src/lib.rs"),
+                    position: phenix_core::LanguagePosition {
+                        line: 4,
+                        character: 2,
+                    },
+                },
+                result: phenix_core::LanguageOperationResult {
+                    value: serde_json::json!({"locations": []}),
+                    documents: vec![phenix_core::LanguageDocumentIdentity {
+                        path: PathBuf::from("src/lib.rs"),
+                        workspace_version: Some(FileVersion::Present {
+                            content_hash: "later-hash".to_owned(),
+                            kind: FileKind::Regular,
+                        }),
+                        provenance: phenix_core::LanguageDocumentProvenance::WorkspaceBacked,
+                    }],
+                },
+            })
+            .unwrap();
+        runtime
             .record_execution_output(
                 &execution.id,
                 serde_json::json!({
@@ -2370,6 +3341,158 @@ mod tests {
             .unwrap();
         runtime.close_session(&session.id).unwrap();
         runtime.journal().clone()
+    }
+
+    #[test]
+    fn context_injections_roundtrip_all_typed_relational_variants() {
+        let (directory, store) = temporary_store("context-injections");
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime
+            .create_session(None, None, fixed_target("context"))
+            .unwrap();
+        let execution = runtime.submit(&session.id, "context persistence").unwrap();
+        let sources = vec![
+            ExactReference::Objective(ObjectiveId::parse("objective-source").unwrap()),
+            ExactReference::Plan(PlanId::parse("plan-source").unwrap()),
+            ExactReference::Execution(execution.id.clone()),
+            ExactReference::Event(7),
+            ExactReference::FileObservation(FileObservationId::parse("file-source").unwrap()),
+            ExactReference::LanguageObservation(
+                LanguageObservationId::parse("language-source").unwrap(),
+            ),
+            ExactReference::Context {
+                resource_id: ContextResourceId::parse("context-source").unwrap(),
+                revision: ContextRevision::parse("revision-6").unwrap(),
+            },
+        ];
+        let requesters = [
+            ContextInjectionRequester::Agent,
+            ContextInjectionRequester::User,
+            ContextInjectionRequester::Orchestration,
+            ContextInjectionRequester::ContextPolicy,
+            ContextInjectionRequester::Hook,
+            ContextInjectionRequester::Frontend,
+        ];
+        let lifetimes = [
+            ContextInjectionLifetime::SingleRequest,
+            ContextInjectionLifetime::Execution,
+            ContextInjectionLifetime::Objective,
+        ];
+
+        for (index, source_ref) in sources.into_iter().enumerate() {
+            runtime
+                .record_domain_event(DomainEvent::ContextInjectionRecorded {
+                    injection: ContextInjection {
+                        execution_id: execution.id.clone(),
+                        source_ref,
+                        source_revision: ContextRevision::parse(format!("revision-{index}"))
+                            .unwrap(),
+                        requested_by: requesters[index % requesters.len()].clone(),
+                        reason: format!("reason-{index}"),
+                        lifetime: lifetimes[index % lifetimes.len()].clone(),
+                        content_identity: ContextRevision::parse(format!("content-{index}"))
+                            .unwrap(),
+                    },
+                })
+                .unwrap();
+        }
+
+        let journal = runtime.journal().clone();
+        store.save(&journal).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded, journal);
+        ConductorRuntime::restore(loaded).unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn relational_context_injection_rejects_unknown_tokens_and_negative_event_sequences() {
+        let (directory, store) = temporary_store("context-invalid");
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime
+            .create_session(None, None, fixed_target("context-invalid"))
+            .unwrap();
+        let execution = runtime
+            .submit(&session.id, "invalid context persistence")
+            .unwrap();
+        runtime
+            .record_domain_event(DomainEvent::ContextInjectionRecorded {
+                injection: ContextInjection {
+                    execution_id: execution.id.clone(),
+                    source_ref: ExactReference::Context {
+                        resource_id: ContextResourceId::parse("context-source").unwrap(),
+                        revision: ContextRevision::parse("revision").unwrap(),
+                    },
+                    source_revision: ContextRevision::parse("revision").unwrap(),
+                    requested_by: ContextInjectionRequester::Agent,
+                    reason: "reason".to_owned(),
+                    lifetime: ContextInjectionLifetime::Execution,
+                    content_identity: ContextRevision::parse("content").unwrap(),
+                },
+            })
+            .unwrap();
+        store.save(runtime.journal()).unwrap();
+
+        let connection = Connection::open(store.path()).unwrap();
+        connection
+            .execute("UPDATE context_injections SET source_kind = 'unknown'", [])
+            .unwrap();
+        drop(connection);
+        assert!(store.load().is_err());
+
+        std::fs::remove_file(store.path()).unwrap();
+        store.save(runtime.journal()).unwrap();
+        let connection = Connection::open(store.path()).unwrap();
+        connection
+            .execute(
+                "UPDATE context_injections
+                 SET source_kind = 'event', source_id = NULL, source_event_sequence = -1",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+        assert!(store.load().is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_migration_rolls_back_schema_and_version() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations (
+                     version INTEGER PRIMARY KEY,
+                     applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                 );",
+            )
+            .unwrap();
+
+        let error = apply_migration(
+            &mut connection,
+            1,
+            "CREATE TABLE migration_probe(value INTEGER);
+             INSERT INTO missing_table(value) VALUES (1);",
+        )
+        .unwrap_err();
+        assert!(matches!(error, PersistenceError::Sql(_)));
+
+        let probe_exists = connection
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'migration_probe'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .unwrap();
+        let version = connection
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(probe_exists, None);
+        assert_eq!(version, 0);
     }
 
     #[test]
