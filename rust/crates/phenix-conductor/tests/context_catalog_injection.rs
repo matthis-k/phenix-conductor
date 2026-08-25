@@ -1,4 +1,6 @@
-use phenix_conductor::{CompiledConfiguration, ConductorRuntime, ContextRegistry, SkillRegistry};
+use phenix_conductor::{
+    CompiledConfiguration, ConductorRuntime, ContextRegistry, ResolvedExactReference, SkillRegistry,
+};
 use phenix_core::{
     BackendId, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceId,
     ExactReference, ExecutionTarget, FilesystemAuthority, InferenceOptions, ModelId, ModelTarget,
@@ -37,6 +39,8 @@ fn configuration_for(root: &Path) -> CompiledConfiguration {
     configuration.install_skill_registry(SkillRegistry::discover(root).unwrap());
     configuration
 }
+
+fn assert_public_exact_reference_type(_: &ResolvedExactReference) {}
 
 #[test]
 fn execution_loads_exact_project_context_and_records_the_injection() {
@@ -330,6 +334,7 @@ fn exact_durable_references_resolve_without_aliases() {
     let objective = runtime
         .resolve_exact_reference(&ExactReference::Objective(assignment.primary.clone()))
         .unwrap();
+    assert_public_exact_reference_type(&objective);
     assert_eq!(
         objective
             .objective()
