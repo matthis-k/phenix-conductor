@@ -1,4 +1,6 @@
-use crate::{ConductorError, ConductorRuntime, DomainEvent, ResolvedExactReference};
+use crate::{
+    ConductorError, ConductorRuntime, ContextCheckpoint, DomainEvent, ResolvedExactReference,
+};
 use phenix_core::{
     ConfigRevisionId, ContextDescriptor, ContextInjectionLifetime, ContextInjectionRequester,
     ContextResourceKind, ContextRevision, ContextScope, ExactReference, ExecutionAuthority,
@@ -29,6 +31,7 @@ pub struct ContextArtifactView {
 pub enum ContextPruneReason {
     ArtifactBodyCompacted,
     RepeatedExactInjection,
+    CheckpointCompacted,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,12 +51,16 @@ pub struct ExecutionContextProjection {
     pub injections: Vec<ContextProjectionInspection>,
     pub artifacts: Vec<ContextArtifactView>,
     pub pruned: Vec<ContextPruneInspection>,
+    pub checkpoint: Option<ContextCheckpoint>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextProjectionAccounting {
     pub catalog_estimated_cost: u64,
+    pub base_prompt_bytes: u64,
     pub injected_content_bytes: u64,
+    pub injected_context_bytes: u64,
+    pub artifact_descriptor_bytes: u64,
     pub rendered_prompt_bytes: u64,
 }
 
@@ -93,6 +100,9 @@ impl ContextManager {
                 .then_with(|| left.revision.cmp(&right.revision))
         });
 
+        let checkpoint = runtime
+            .latest_context_checkpoint(execution_id)
+            .map(|(_, checkpoint)| checkpoint.clone());
         let mut injections = Vec::new();
         let mut artifacts = Vec::new();
         let mut pruned = Vec::new();
@@ -101,6 +111,22 @@ impl ContextManager {
                 DomainEvent::ContextInjectionRecorded { injection }
                     if injection.execution_id == *execution_id =>
                 {
+                    let mut content = exact_context_content(runtime, &injection.source_ref)?;
+                    if checkpoint.as_ref().is_some_and(|checkpoint| {
+                        checkpoint
+                            .covered_history
+                            .iter()
+                            .any(|range| range.contains(entry.sequence))
+                    }) {
+                        let original_bytes = content.as_ref().map_or(0, |value| value.len() as u64);
+                        pruned.push(ContextPruneInspection {
+                            reason: ContextPruneReason::CheckpointCompacted,
+                            recovery_ref: injection.source_ref.clone(),
+                            content_identity: injection.content_identity.clone(),
+                            original_bytes,
+                        });
+                        content = None;
+                    }
                     injections.push(ContextProjectionInspection {
                         source_ref: injection.source_ref.clone(),
                         source_revision: injection.source_revision.clone(),
@@ -108,7 +134,7 @@ impl ContextManager {
                         reason: injection.reason.clone(),
                         lifetime: injection.lifetime.clone(),
                         content_identity: injection.content_identity.clone(),
-                        content: exact_context_content(runtime, &injection.source_ref)?,
+                        content,
                     });
                 }
                 DomainEvent::ContextResourceRevisionRegistered { resource }
@@ -183,6 +209,7 @@ impl ContextManager {
             injections,
             artifacts,
             pruned,
+            checkpoint,
         })
     }
 
@@ -207,11 +234,24 @@ impl ContextManager {
         execution_id: &ExecutionId,
         input: &str,
     ) -> Result<ContextProjectionAccounting, ConductorError> {
+        let configuration = runtime.configuration_for_execution(execution_id)?;
+        let (base_prompt, _) = configuration
+            .context
+            .compose_prompt_with_activations(&configuration.skills, input)?;
         let projection = Self::project_execution(runtime, execution_id)?;
-        let (prompt, _) = Self::render_model_prompt(runtime, execution_id, input)?;
+        let injected_context = render_injected_context(&projection);
+        let artifact_descriptors = render_artifact_descriptors(&projection);
+        let prompt = render_projection_prompt_sections(
+            base_prompt.clone(),
+            &injected_context,
+            &artifact_descriptors,
+        );
         Ok(ContextProjectionAccounting {
             catalog_estimated_cost: projection.estimated_catalog_cost(),
+            base_prompt_bytes: base_prompt.len() as u64,
             injected_content_bytes: projection.injected_content_bytes(),
+            injected_context_bytes: injected_context.len() as u64,
+            artifact_descriptor_bytes: artifact_descriptors.len() as u64,
             rendered_prompt_bytes: prompt.len() as u64,
         })
     }
@@ -262,7 +302,25 @@ fn render_projection_prompt(
     base_prompt: String,
     projection: &ExecutionContextProjection,
 ) -> String {
-    let injected = projection
+    let injected_context = render_injected_context(projection);
+    let artifact_descriptors = render_artifact_descriptors(projection);
+    render_projection_prompt_sections(base_prompt, &injected_context, &artifact_descriptors)
+}
+
+fn render_injected_context(projection: &ExecutionContextProjection) -> String {
+    let checkpoint = projection
+        .checkpoint
+        .as_ref()
+        .map_or_else(String::new, |checkpoint| {
+            format!(
+                "<checkpoint model=\"{}/{}/{}\">\n{}\n</checkpoint>\n",
+                escape_xml(checkpoint.generation.model.backend.as_str()),
+                escape_xml(checkpoint.generation.model.provider.as_str()),
+                escape_xml(checkpoint.generation.model.model.as_str()),
+                escape_xml(checkpoint.summary.trim())
+            )
+        });
+    let resources = projection
         .injections
         .iter()
         .filter_map(|injection| {
@@ -276,7 +334,15 @@ fn render_projection_prompt(
             })
         })
         .collect::<String>();
-    let artifact_views = projection
+    if resources.is_empty() && checkpoint.is_empty() {
+        String::new()
+    } else {
+        format!("<injected_context>\n{checkpoint}{resources}</injected_context>\n")
+    }
+}
+
+fn render_artifact_descriptors(projection: &ExecutionContextProjection) -> String {
+    let artifacts = projection
         .artifacts
         .iter()
         .map(|artifact| {
@@ -288,16 +354,19 @@ fn render_projection_prompt(
             )
         })
         .collect::<String>();
+    if artifacts.is_empty() {
+        String::new()
+    } else {
+        format!("<artifacts>\n{artifacts}</artifacts>\n")
+    }
+}
 
-    let mut projection_block = String::new();
-    if !injected.is_empty() {
-        projection_block.push_str(&format!(
-            "<injected_context>\n{injected}</injected_context>\n"
-        ));
-    }
-    if !artifact_views.is_empty() {
-        projection_block.push_str(&format!("<artifacts>\n{artifact_views}</artifacts>\n"));
-    }
+fn render_projection_prompt_sections(
+    base_prompt: String,
+    injected_context: &str,
+    artifact_descriptors: &str,
+) -> String {
+    let projection_block = format!("{injected_context}{artifact_descriptors}");
     if projection_block.is_empty() {
         return base_prompt;
     }
@@ -572,7 +641,13 @@ mod tests {
             "frozen injected content".len() as u64
         );
         assert_eq!(accounting.rendered_prompt_bytes, prompt.len() as u64);
+        assert!(accounting.base_prompt_bytes > 0);
+        assert!(accounting.injected_context_bytes > accounting.injected_content_bytes);
+        assert_eq!(accounting.artifact_descriptor_bytes, 0);
         assert!(accounting.catalog_estimated_cost >= accounting.injected_content_bytes);
+
+        let resolved = runtime.resolve_invocation(&execution.id).unwrap();
+        assert_eq!(resolved.context_accounting, accounting);
 
         fs::remove_dir_all(root).unwrap();
     }

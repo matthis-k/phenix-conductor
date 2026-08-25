@@ -367,6 +367,64 @@ fn insert_event(
                 ],
             )?;
         }
+        DomainEvent::ContextCheckpointRecorded { checkpoint } => {
+            let target = insert_target(
+                transaction,
+                &ExecutionTarget::Fixed(checkpoint.generation.model.clone()),
+            )?;
+            transaction.execute(
+                "INSERT INTO context_checkpoints(
+                     recorded_sequence, execution_id, summary, compactor_target_id,
+                     previous_checkpoint_sequence
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    sequence,
+                    checkpoint.execution_id.to_string(),
+                    checkpoint.summary.as_str(),
+                    target,
+                    checkpoint
+                        .generation
+                        .previous_checkpoint_sequence
+                        .map(|value| sql_u64(value, "previous context checkpoint sequence"))
+                        .transpose()?,
+                ],
+            )?;
+            for (index, range) in checkpoint.covered_history.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO context_checkpoint_ranges(
+                         checkpoint_sequence, range_index, start_sequence, end_sequence
+                     ) VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        sequence,
+                        sql_usize(index, "context checkpoint range index")?,
+                        sql_u64(range.start_sequence, "context checkpoint range start")?,
+                        sql_u64(range.end_sequence, "context checkpoint range end")?,
+                    ],
+                )?;
+            }
+            for (index, reference) in checkpoint.retained_refs.iter().enumerate() {
+                let (source_kind, source_id, source_event_sequence) =
+                    context_source_columns(reference)?;
+                let source_revision = match reference {
+                    ExactReference::Context { revision, .. } => Some(revision.to_string()),
+                    _ => None,
+                };
+                transaction.execute(
+                    "INSERT INTO context_checkpoint_retained_refs(
+                         checkpoint_sequence, ref_index, source_kind, source_id,
+                         source_event_sequence, source_revision
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        sequence,
+                        sql_usize(index, "context checkpoint ref index")?,
+                        source_kind,
+                        source_id,
+                        source_event_sequence,
+                        source_revision,
+                    ],
+                )?;
+            }
+        }
         DomainEvent::ObjectiveSemanticsActivated => {}
         DomainEvent::ObjectiveCreated { objective } => {
             let (origin, parent) = objective_origin_columns(&objective.origin);

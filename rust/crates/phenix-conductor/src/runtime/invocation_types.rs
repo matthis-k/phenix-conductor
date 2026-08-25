@@ -7,6 +7,7 @@ pub struct ResolvedInvocation {
     pub requested_target: ExecutionTarget,
     pub model: ModelTarget,
     pub prompt: String,
+    pub context_accounting: ContextProjectionAccounting,
     pub tools: ToolProvision,
 }
 

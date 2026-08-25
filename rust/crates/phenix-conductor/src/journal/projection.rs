@@ -42,6 +42,7 @@ pub(crate) fn apply_domain_event(
         DomainEvent::DiagnosticWritePatchCaptured { .. }
         | DomainEvent::LanguageObservationRecorded { .. }
         | DomainEvent::ContextInjectionRecorded { .. }
+        | DomainEvent::ContextCheckpointRecorded { .. }
         | DomainEvent::WorkspaceCheckpointCaptured { .. }
         | DomainEvent::WorkspaceFileObserved { .. } => observations::apply(state, event),
 

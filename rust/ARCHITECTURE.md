@@ -282,3 +282,7 @@ Plan steps form an acyclic dependency graph and may reference objectives. Plan f
 Plan creation, draft revision, enactment, lifecycle transitions, and execution-step assignments are durable domain events. Replay must reject stale draft revisions, dependency cycles, mutation after enactment, invalid step links, execution reassignment, invalid successor state, and invalid transition causes. Live mutations enforce the same invariants before recording an event. SQLite stores the same facts relationally so restart reconstructs the same plan history without backend conversation state.
 
 `spec/plans.md` is the normative plan lifecycle contract.
+
+### Context budgeting and compaction
+
+The conductor owns per-execution context budgeting, pressure decisions, and durable checkpoints. Category demand comes from the canonical execution context projection. Deterministic pruning runs before model-backed compaction. The compactor receives a typed immutable request and returns a typed summary; it receives no runtime, workspace, tool, or semantic mutation authority. Checkpoints persist exact raw journal ranges and retained exact references. Repeated compaction may consume the previous summary, but it carries the union of raw covered ranges forward. Backend context overflow enters the same explicit management path before a bounded retry. Token pressure never creates child executions by itself.

@@ -1,10 +1,13 @@
 use crate::{
-    CompiledConfiguration, ConductorError, ConductorRuntime, DomainEvent, ExecutionPayload,
+    CompiledConfiguration, ConductorError, ConductorRuntime, ContextBudgetManager,
+    ContextCompactionOutput, ContextManagementTrigger, DomainEvent, ExecutionPayload,
     ExecutionProvider, ExecutionProviderError, ExecutionProviderEvent, ExecutionProviderHost,
-    ExecutionProviderKind, ObjectiveError, PersistenceError, PlanError, SqliteStore,
+    ExecutionProviderKind, ObjectiveError, PersistenceError, PlanError, ResolvedInvocation,
+    SqliteStore,
 };
 use phenix_backend::{
-    Backend, BackendError, BackendEvent, BackendHost, BackendSession, ToolInvocation, ToolResult,
+    Backend, BackendError, BackendEvent, BackendExecutionRequest, BackendHost, BackendSession,
+    BackendSessionRequest, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_core::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, BackendId, CallableId,
@@ -229,6 +232,26 @@ impl Drop for LiveExecutionLease {
         if let Ok(mut scopes) = self.scopes.lock() {
             scopes.remove(&self.execution_id);
         }
+    }
+}
+
+#[derive(Default)]
+struct ContextCompactorHost {
+    output: String,
+}
+
+impl BackendHost for ContextCompactorHost {
+    fn emit(&mut self, event: BackendEvent) -> Result<(), BackendError> {
+        if let BackendEvent::ContentDelta(text) = event {
+            self.output.push_str(&text);
+        }
+        Ok(())
+    }
+
+    fn invoke_tool(&mut self, _invocation: ToolInvocation) -> Result<ToolResult, BackendError> {
+        Err(BackendError::Unsupported(
+            "context compactor has zero tool authority".to_owned(),
+        ))
     }
 }
 
@@ -755,6 +778,7 @@ mod tests {
                     target: model_target(),
                     name: "Fixture".to_owned(),
                     selectable: true,
+                    context_capacity: None,
                 }],
                 authentication_state: AuthenticationState::NotRequired,
                 authentication_methods: Vec::new(),
@@ -928,6 +952,18 @@ mod tests {
         fn cancel(&self, _execution_id: &ExecutionId) -> Result<(), BackendError> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn context_compactor_host_has_zero_tool_authority() {
+        let mut host = ContextCompactorHost::default();
+        let error = host
+            .invoke_tool(ToolInvocation {
+                callable: CallableId::parse("forbidden.compactor.tool").unwrap(),
+                arguments_json: "{}".to_owned(),
+            })
+            .unwrap_err();
+        assert!(matches!(error, BackendError::Unsupported(_)));
     }
 
     include!("server_base/tests/backends.rs");
