@@ -108,7 +108,7 @@ impl Debug for ExecutionProviderBinding {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ResolvedExactReference {
     Objective(ObjectiveRecord),
     Execution(ExecutionSummary),
