@@ -53,13 +53,11 @@ fn skills_are_exact_revisioned_context_catalog_resources() {
         .skill_context_catalog()
         .unwrap();
     let id = ContextResourceId::parse("skill:review").unwrap();
-    let first_descriptor = first.current_descriptor(&id).unwrap();
+    let first_resource = first.current_revision(&id).unwrap();
+    let first_descriptor = &first_resource.descriptor;
     assert_eq!(first_descriptor.kind, ContextResourceKind::Skill);
-    let first_revision = first
-        .resolve_revision(&id, &first_descriptor.revision)
-        .unwrap();
-    assert_eq!(first_revision.tier, ContextTier::DiscoverableContent);
-    assert!(first_revision
+    assert_eq!(first_resource.tier, ContextTier::DiscoverableContent);
+    assert!(first_resource
         .content
         .as_deref()
         .unwrap()
@@ -70,13 +68,12 @@ fn skills_are_exact_revisioned_context_catalog_resources() {
         .unwrap()
         .skill_context_catalog()
         .unwrap();
-    let second_descriptor = second.current_descriptor(&id).unwrap();
+    let second_resource = second.current_revision(&id).unwrap();
+    let second_descriptor = &second_resource.descriptor;
 
     assert_eq!(first_descriptor.id, second_descriptor.id);
     assert_ne!(first_descriptor.revision, second_descriptor.revision);
-    assert!(second
-        .resolve_revision(&id, &second_descriptor.revision)
-        .unwrap()
+    assert!(second_resource
         .content
         .as_deref()
         .unwrap()
@@ -97,7 +94,12 @@ fn manual_only_skill_requires_user_requester() {
     let skills = SkillRegistry::discover(&root).unwrap();
     let catalog = skills.skill_context_catalog().unwrap();
     let id = ContextResourceId::parse("skill:review").unwrap();
-    let revision = catalog.current_descriptor(&id).unwrap().revision.clone();
+    let revision = catalog
+        .current_revision(&id)
+        .unwrap()
+        .descriptor
+        .revision
+        .clone();
 
     let mut configuration = CompiledConfiguration::default();
     configuration.install_skill_registry(skills);
