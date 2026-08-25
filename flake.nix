@@ -35,7 +35,6 @@
         ./modules/phenix-acp.nix
         ./modules/development.nix
         ./modules/stitch.nix
-        ./modules/split-transport.nix
       ];
 
       flake.flakeModules.default = import ./modules/flake-module.nix;

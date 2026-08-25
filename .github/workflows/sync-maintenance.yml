@@ -23,16 +23,6 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
-      - name: Split large conductor modules
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/run_split_conductor_modules.py
-          git fetch origin main
-          git checkout origin/main -- .github/workflows/sync-maintenance.yml flake.nix
-          git rm -f scripts/split_conductor_modules.py scripts/run_split_conductor_modules.py
-          git rm -f modules/split-transport.nix scripts/.worker-395-transport
-
       - name: Apply deterministic maintenance fixes
         run: |
           set -euo pipefail
@@ -54,7 +44,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "refactor: split large conductor modules"
+          git commit -m "chore: apply CI autofixes"
           git push origin "HEAD:$HEAD_REF"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
