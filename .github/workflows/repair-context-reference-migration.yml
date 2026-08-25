@@ -1,0 +1,108 @@
+name: Repair context reference migration
+
+on:
+  push:
+    branches:
+      - context-07-context-catalog-implementation
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: context-07-context-catalog-implementation
+          fetch-depth: 0
+
+      - name: Apply repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f"{path}: expected {count} matches, found {actual}: {old!r}")
+              file.write_text(text.replace(old, new))
+
+          core = "rust/crates/phenix-core/src/context.rs"
+          replace(
+              core,
+              "    Orchestration,\n}\n#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]\n#[serde(rename_all = \"snake_case\")]\npub enum ContextInjectionLifetime",
+              "    Orchestration,\n    ContextPolicy,\n    Hook,\n    Frontend,\n}\n#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]\n#[serde(rename_all = \"snake_case\")]\npub enum ContextInjectionLifetime",
+          )
+
+          context = "rust/crates/phenix-conductor/src/context.rs"
+          replace(
+              context,
+              "        source_ref: ExactReference::Context(id),\n        content_identity: revision,",
+              "        source_ref: ExactReference::Context {\n            resource_id: id,\n            revision: revision.clone(),\n        },\n        content_identity: revision,",
+              count=2,
+          )
+          replace(
+              context,
+              "        let first_descriptor = first_catalog.current_descriptor(&id).unwrap().clone();",
+              "        let first_descriptor = first_catalog\n            .current_revision(&id)\n            .unwrap()\n            .descriptor\n            .clone();",
+          )
+          replace(
+              context,
+              "        let second_descriptor = second_catalog.current_descriptor(&id).unwrap().clone();",
+              "        let second_descriptor = second_catalog\n            .current_revision(&id)\n            .unwrap()\n            .descriptor\n            .clone();",
+          )
+
+          relational = "rust/crates/phenix-conductor/src/persistence/relational.rs"
+          replace(
+              relational,
+              "        ExactReference::Context(id) => Ok((\"context\", Some(id.to_string()), None)),",
+              "        ExactReference::Context { resource_id, .. } => {\n            Ok((\"context\", Some(resource_id.to_string()), None))\n        }",
+          )
+          replace(
+              relational,
+              "fn parse_context_source(\n    kind: &str,\n    id: Option<String>,\n    event_sequence: Option<i64>,\n) -> Result<ExactReference, PersistenceError> {",
+              "fn parse_context_source(\n    kind: &str,\n    id: Option<String>,\n    event_sequence: Option<i64>,\n    source_revision: &ContextRevision,\n) -> Result<ExactReference, PersistenceError> {",
+          )
+          replace(
+              relational,
+              "        \"context\" => Ok(ExactReference::Context(parse_id(\n            context_source_id(id, event_sequence, kind)?,\n            \"context resource source\",\n            ContextResourceId::parse,\n        )?)),",
+              "        \"context\" => Ok(ExactReference::Context {\n            resource_id: parse_id(\n                context_source_id(id, event_sequence, kind)?,\n                \"context resource source\",\n                ContextResourceId::parse,\n            )?,\n            revision: source_revision.clone(),\n        }),",
+          )
+          replace(
+              relational,
+              "            Ok(DomainEvent::ContextInjectionRecorded {\n                injection: ContextInjection {\n                    execution_id: parse_id(row.0, \"execution\", ExecutionId::parse)?,\n                    source_ref: parse_context_source(&row.1, row.2, row.3)?,\n                    source_revision: parse_id(\n                        row.4,\n                        \"context source revision\",\n                        ContextRevision::parse,\n                    )?,",
+              "            let source_revision = parse_id(\n                row.4,\n                \"context source revision\",\n                ContextRevision::parse,\n            )?;\n            Ok(DomainEvent::ContextInjectionRecorded {\n                injection: ContextInjection {\n                    execution_id: parse_id(row.0, \"execution\", ExecutionId::parse)?,\n                    source_ref: parse_context_source(\n                        &row.1,\n                        row.2,\n                        row.3,\n                        &source_revision,\n                    )?,\n                    source_revision,",
+          )
+          replace(
+              relational,
+              "        DomainEvent::ContextInjectionRecorded { injection } => {\n            let (source_kind, source_id, source_event_sequence) =\n                context_source_columns(&injection.source_ref)?;",
+              "        DomainEvent::ContextInjectionRecorded { injection } => {\n            if let ExactReference::Context { revision, .. } = &injection.source_ref {\n                if revision != &injection.source_revision {\n                    return Err(invalid(\n                        \"context source reference revision does not match injection source revision\",\n                    ));\n                }\n            }\n            let (source_kind, source_id, source_event_sequence) =\n                context_source_columns(&injection.source_ref)?;",
+          )
+          replace(
+              relational,
+              "            ExactReference::Context(ContextResourceId::parse(\"context-source\").unwrap()),",
+              "            ExactReference::Context {\n                resource_id: ContextResourceId::parse(\"context-source\").unwrap(),\n                revision: ContextRevision::parse(\"revision-6\").unwrap(),\n            },",
+          )
+          replace(
+              relational,
+              "                    source_ref: ExactReference::Context(\n                        ContextResourceId::parse(\"context-source\").unwrap(),\n                    ),\n                    source_revision: ContextRevision::parse(\"revision\").unwrap(),",
+              "                    source_ref: ExactReference::Context {\n                        resource_id: ContextResourceId::parse(\"context-source\").unwrap(),\n                        revision: ContextRevision::parse(\"revision\").unwrap(),\n                    },\n                    source_revision: ContextRevision::parse(\"revision\").unwrap(),",
+          )
+          PY
+
+          cargo fmt --all --manifest-path rust/Cargo.toml
+          git diff --check
+          git rm .github/workflows/repair-context-reference-migration.yml
+          git add rust/crates/phenix-core/src/context.rs \
+                  rust/crates/phenix-conductor/src/context.rs \
+                  rust/crates/phenix-conductor/src/persistence/relational.rs
+          git config user.name "Matthis Kälble"
+          git config user.email "69082876+matthis-k@users.noreply.github.com"
+          git commit -m "fix: complete exact context reference migration"
+          git push origin HEAD:context-07-context-catalog-implementation
