@@ -4,6 +4,7 @@ mod callables;
 #[cfg(test)]
 mod config_revision_tests;
 mod context;
+mod context_projection;
 mod execution_provider;
 mod failure_decisions;
 mod journal;
@@ -17,6 +18,9 @@ mod server;
 
 pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
 pub use context::{ContextError, ContextRegistry, SkillRegistry};
+pub use context_projection::{
+    ContextManager, ContextProjectionInspection, ExecutionContextProjection,
+};
 pub use execution_provider::{
     ExecutionProvider, ExecutionProviderBinding, ExecutionProviderError, ExecutionProviderEvent,
     ExecutionProviderHost, ExecutionProviderKind, ExecutionProviderRequest, ResolvedExactReference,
@@ -1868,9 +1872,7 @@ impl ConductorRuntime {
             route
         };
 
-        let (prompt, explicit_skills) = configuration
-            .context
-            .compose_prompt_with_activations(&configuration.skills, &input)?;
+        let (prompt, explicit_skills) = self.render_model_prompt(execution_id, &input)?;
         if !explicit_skills.is_empty() {
             self.skill_activations
                 .entry(execution_id.clone())
@@ -1987,6 +1989,7 @@ impl ConductorRuntime {
             callable,
             config_revision,
             objective: input,
+            context: self.project_execution_context(execution_id)?,
         };
 
         self.set_state(execution_id, ExecutionState::Running)?;
