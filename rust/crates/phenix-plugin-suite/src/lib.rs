@@ -3,6 +3,7 @@
 mod artifacts;
 mod context;
 mod execution;
+mod language;
 mod planning;
 mod repository_workers;
 mod sessions;
@@ -22,6 +23,11 @@ pub use execution::{
     execution_factory, execution_manifest, execution_service, CallableRecord, ExecutionAuthority,
     ExecutionCommand, ExecutionRecord, ExecutionResponse, ExecutionState, WorkerTaskRecord,
     WorkerTaskState, EXECUTION_SERVICE,
+};
+pub use language::{
+    language_factory, language_manifest, language_service, DocumentProvenance,
+    LanguageCommand, LanguageDocumentIdentity, LanguageObservation, LanguageOperationKind,
+    LanguageOperationResult, LanguageProviderEpoch, LanguageResponse, LANGUAGE_SERVICE,
 };
 pub use planning::{
     planning_factory, planning_manifest, planning_service, DecisionRecord, HistoryEntry,
