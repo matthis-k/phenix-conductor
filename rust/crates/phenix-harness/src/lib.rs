@@ -3,8 +3,8 @@ use phenix_kernel::{
     PluginManifest,
 };
 use phenix_plugin_suite::{
-    artifact_factory, artifact_manifest, context_factory, context_manifest, repository_worker_factory,
-    repository_worker_manifest, session_factory, session_manifest,
+    artifact_factory, artifact_manifest, context_factory, context_manifest,
+    repository_worker_factory, repository_worker_manifest, session_factory, session_manifest,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -400,7 +400,11 @@ mod tests {
 
     #[test]
     fn first_party_state_plugins_require_only_persistence_authority() {
-        for authority in [session_authority(), artifact_authority(), context_authority()] {
+        for authority in [
+            session_authority(),
+            artifact_authority(),
+            context_authority(),
+        ] {
             assert!(authority.permits(&capability("kernel.persistence.schema")));
             assert!(authority.permits(&capability("kernel.persistence.read")));
             assert!(authority.permits(&capability("kernel.persistence.write")));
