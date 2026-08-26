@@ -100,12 +100,7 @@ fn plugin_delegation_and_retry_cannot_regain_denied_authority() {
 
     assert_eq!(
         kernel
-            .invoke(
-                &service("root@1"),
-                b"",
-                &Authority::new([read]),
-                None,
-            )
+            .invoke(&service("root@1"), b"", &Authority::new([read]), None,)
             .unwrap(),
         b"denied-twice"
     );
