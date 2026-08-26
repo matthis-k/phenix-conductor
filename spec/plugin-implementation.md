@@ -107,6 +107,7 @@ Each first-party component uses the same contribution, resolution, authority, du
 - [x] replacement plugin can substitute a first-party service without kernel modification
 - [x] session behavior is absent in kernel-only mode and present when the session plugin is loaded
 - [x] artifact read reuse/invalidation works through the artifact plugin
+- [x] CLI discovery/version/auth probes use the ordinary workspace service, reject arbitrary targets, and do not self-grant shell authority
 - [ ] Nix kernel-only, default Harness, and alternate-plugin compositions build
 - [ ] existing product/integration/system scenarios continue to pass through Harness assembly
 
@@ -123,6 +124,12 @@ The PR is complete only when all applicable repository validation is green on th
 - [ ] Nix checks and packaging tests
 - [ ] Maintenance checks
 - [ ] Maintenance autofix with a clean resulting tree
+
+## Current boundary
+
+The first-party Harness assembly now registers repository worker, sessions, artifacts, CLI probes, context, execution, language, planning, workspace, model routing, jobs, frontend services, hooks, and debug services through ordinary kernel manifests and factories. Focused Plugin Suite and Harness unit runs are green after repairing frontend test authority and the durable hook immutability assertion.
+
+The supported `phenix`/`phenix-harness` Nix package still maps to the legacy conductor binary, so these userspace services are not yet the canonical product path. The remaining migration must switch the product/runtime boundary before the domain checklist can be promoted.
 
 ## Completion rule
 
