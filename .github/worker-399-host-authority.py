@@ -1,0 +1,283 @@
+from pathlib import Path
+
+path = Path("rust/crates/phenix-kernel/src/runtime.rs")
+text = path.read_text()
+
+
+def replace_once(old: str, new: str) -> None:
+    global text
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"expected one match, got {count}: {old[:80]!r}")
+    text = text.replace(old, new, 1)
+
+
+replace_once(
+    "    Authority, CapabilityId, DurableSchema, EventBus, KernelConfig, KernelError, KernelEvent,\n"
+    "    LocalPersistence, PersistenceBackend, PluginExecution, PluginId, PluginManifest,\n"
+    "    ProviderBinding, ResourceNamespace, SchemaMigration, ServiceId, TaskRuntime, TransactionOp,\n",
+    "    Authority, CapabilityId, DurableSchema, EventBus, EventDispatchReport, EventEnvelope,\n"
+    "    EventError, EventTypeId, KernelConfig, KernelError, KernelEvent, LocalPersistence,\n"
+    "    PersistenceBackend, PluginExecution, PluginId, PluginManifest, ProviderBinding,\n"
+    "    ResourceNamespace, SchemaMigration, ServiceId, TaskHandle, TaskRuntime, TransactionOp,\n",
+)
+replace_once(
+    "    collections::BTreeMap,\n",
+    "    collections::{BTreeMap, BTreeSet},\n",
+)
+replace_once(
+    "pub struct PluginHost<'a> {\n"
+    "    config: &'a KernelConfig,\n"
+    "    plugin: &'a PluginId,\n"
+    "    authority: &'a Authority,\n"
+    "    persistence: &'a Mutex<Box<dyn PersistenceBackend>>,\n"
+    "}\n",
+    "pub struct PluginHost<'a> {\n"
+    "    config: &'a KernelConfig,\n"
+    "    states: &'a BTreeMap<PluginId, PluginState>,\n"
+    "    instances: &'a BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,\n"
+    "    plugin: &'a PluginId,\n"
+    "    authority: &'a Authority,\n"
+    "    call_stack: BTreeSet<PluginId>,\n"
+    "    events: &'a EventBus,\n"
+    "    tasks: &'a TaskRuntime,\n"
+    "    persistence: &'a Mutex<Box<dyn PersistenceBackend>>,\n"
+    "}\n",
+)
+replace_once(
+    "    pub fn resolve_service(\n"
+    "        &self,\n"
+    "        service: &ServiceId,\n"
+    "        binding: Option<&PluginId>,\n"
+    "    ) -> Result<ProviderBinding, KernelError> {\n"
+    "        self.config.resolve(service, self.authority, binding)\n"
+    "    }\n",
+    "    pub fn resolve_service(\n"
+    "        &self,\n"
+    "        service: &ServiceId,\n"
+    "        binding: Option<&PluginId>,\n"
+    "    ) -> Result<ProviderBinding, KernelError> {\n"
+    "        self.config.resolve(service, self.authority, binding)\n"
+    "    }\n\n"
+    "    pub fn invoke_service(\n"
+    "        &self,\n"
+    "        service: &ServiceId,\n"
+    "        input: &[u8],\n"
+    "        requested_authority: &Authority,\n"
+    "        binding: Option<&PluginId>,\n"
+    "    ) -> Result<Vec<u8>, KernelError> {\n"
+    "        let delegated_authority = self.authority.attenuate(requested_authority);\n"
+    "        invoke_service_with(\n"
+    "            self.config,\n"
+    "            self.states,\n"
+    "            self.instances,\n"
+    "            self.events,\n"
+    "            self.tasks,\n"
+    "            self.persistence,\n"
+    "            service,\n"
+    "            input,\n"
+    "            &delegated_authority,\n"
+    "            binding,\n"
+    "            &self.call_stack,\n"
+    "        )\n"
+    "    }\n\n"
+    "    pub fn spawn_task<T, F>(\n"
+    "        &self,\n"
+    "        requested_authority: &Authority,\n"
+    "        worker: F,\n"
+    "    ) -> TaskHandle<T>\n"
+    "    where\n"
+    "        T: Send + 'static,\n"
+    "        F: FnOnce(crate::CancellationToken) -> T + Send + 'static,\n"
+    "    {\n"
+    "        self.tasks.spawn(self.authority, requested_authority, worker)\n"
+    "    }\n\n"
+    "    pub fn dispatch_event(\n"
+    "        &self,\n"
+    "        event_type: EventTypeId,\n"
+    "        version: u32,\n"
+    "        causality_id: u64,\n"
+    "        kernel_policy_revision: u64,\n"
+    "        payload: Vec<u8>,\n"
+    "    ) -> Result<EventDispatchReport, EventError> {\n"
+    "        let event = EventEnvelope {\n"
+    "            event_type,\n"
+    "            version,\n"
+    "            emitter: self.plugin.clone(),\n"
+    "            causality_id,\n"
+    "            kernel_policy_revision,\n"
+    "            payload,\n"
+    "        };\n"
+    "        self.events.dispatch(&event, self.authority)\n"
+    "    }\n",
+)
+replace_once(
+    "type ExternalFactory =\n"
+    "    Arc<dyn Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync>;\n\n"
+    "pub struct Kernel {\n",
+    "type ExternalFactory =\n"
+    "    Arc<dyn Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync>;\n\n"
+    "fn invoke_service_with(\n"
+    "    config: &KernelConfig,\n"
+    "    states: &BTreeMap<PluginId, PluginState>,\n"
+    "    instances: &BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,\n"
+    "    events: &EventBus,\n"
+    "    tasks: &TaskRuntime,\n"
+    "    persistence: &Mutex<Box<dyn PersistenceBackend>>,\n"
+    "    service: &ServiceId,\n"
+    "    input: &[u8],\n"
+    "    caller_authority: &Authority,\n"
+    "    binding: Option<&PluginId>,\n"
+    "    call_stack: &BTreeSet<PluginId>,\n"
+    ") -> Result<Vec<u8>, KernelError> {\n"
+    "    let provider = config.resolve(service, caller_authority, binding)?;\n"
+    "    if call_stack.contains(&provider.plugin) {\n"
+    "        return Err(KernelError::HostOperationDenied {\n"
+    "            plugin: provider.plugin.clone(),\n"
+    "            operation: format!(\"causal service re-entry:{service}\"),\n"
+    "        });\n"
+    "    }\n"
+    "    if states.get(&provider.plugin).copied() != Some(PluginState::Active) {\n"
+    "        return Err(KernelError::PluginNotActive(provider.plugin));\n"
+    "    }\n"
+    "    let provider_manifest = config\n"
+    "        .manifest(&provider.plugin)\n"
+    "        .expect(\"resolved providers are registered\");\n"
+    "    let effective_authority = caller_authority.attenuate(&provider_manifest.maximum_authority);\n"
+    "    let mut next_stack = call_stack.clone();\n"
+    "    next_stack.insert(provider.plugin.clone());\n"
+    "    let host = PluginHost {\n"
+    "        config,\n"
+    "        states,\n"
+    "        instances,\n"
+    "        plugin: &provider.plugin,\n"
+    "        authority: &effective_authority,\n"
+    "        call_stack: next_stack,\n"
+    "        events,\n"
+    "        tasks,\n"
+    "        persistence,\n"
+    "    };\n"
+    "    let instance = instances\n"
+    "        .get(&provider.plugin)\n"
+    "        .ok_or_else(|| KernelError::WrongExecutionKind(provider.plugin.clone()))?;\n"
+    "    instance\n"
+    "        .lock()\n"
+    "        .expect(\"plugin instance mutex poisoned\")\n"
+    "        .invoke(service, input, &host)\n"
+    "        .map_err(|message| KernelError::ServiceInvoke {\n"
+    "            plugin: provider.plugin,\n"
+    "            service: service.clone(),\n"
+    "            message,\n"
+    "        })\n"
+    "}\n\n"
+    "pub struct Kernel {\n",
+)
+replace_once(
+    "    instances: BTreeMap<PluginId, Box<dyn PluginInstance>>,\n",
+    "    instances: BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,\n",
+)
+replace_once(
+    "        let host = PluginHost {\n"
+    "            config: &self.config,\n"
+    "            plugin,\n"
+    "            authority: &manifest.maximum_authority,\n"
+    "            persistence: &self.persistence,\n"
+    "        };\n",
+    "        let host = PluginHost {\n"
+    "            config: &self.config,\n"
+    "            states: &self.states,\n"
+    "            instances: &self.instances,\n"
+    "            plugin,\n"
+    "            authority: &manifest.maximum_authority,\n"
+    "            call_stack: BTreeSet::from([plugin.clone()]),\n"
+    "            events: &self.events,\n"
+    "            tasks: &self.tasks,\n"
+    "            persistence: &self.persistence,\n"
+    "        };\n",
+)
+replace_once(
+    "        self.instances.insert(plugin.clone(), instance);\n",
+    "        self.instances\n"
+    "            .insert(plugin.clone(), Arc::new(Mutex::new(instance)));\n",
+)
+replace_once(
+    """    pub fn invoke(
+        &mut self,
+        service: &ServiceId,
+        input: &[u8],
+        caller_authority: &Authority,
+        binding: Option<&PluginId>,
+    ) -> Result<Vec<u8>, KernelError> {
+        let provider = self.config.resolve(service, caller_authority, binding)?;
+        if self.state(&provider.plugin) != Some(PluginState::Active) {
+            return Err(KernelError::PluginNotActive(provider.plugin));
+        }
+        let provider_manifest = self
+            .config
+            .manifest(&provider.plugin)
+            .expect("resolved providers are registered");
+        let effective_authority = caller_authority.attenuate(&provider_manifest.maximum_authority);
+        let host = PluginHost {
+            config: &self.config,
+            plugin: &provider.plugin,
+            authority: &effective_authority,
+            persistence: &self.persistence,
+        };
+        let instance = self
+            .instances
+            .get_mut(&provider.plugin)
+            .ok_or_else(|| KernelError::WrongExecutionKind(provider.plugin.clone()))?;
+        instance
+            .invoke(service, input, &host)
+            .map_err(|message| KernelError::ServiceInvoke {
+                plugin: provider.plugin,
+                service: service.clone(),
+                message,
+            })
+    }
+""",
+    """    pub fn invoke(
+        &mut self,
+        service: &ServiceId,
+        input: &[u8],
+        caller_authority: &Authority,
+        binding: Option<&PluginId>,
+    ) -> Result<Vec<u8>, KernelError> {
+        invoke_service_with(
+            &self.config,
+            &self.states,
+            &self.instances,
+            &self.events,
+            &self.tasks,
+            &self.persistence,
+            service,
+            input,
+            caller_authority,
+            binding,
+            &BTreeSet::new(),
+        )
+    }
+""",
+)
+replace_once(
+    "        if let Some(mut instance) = self.instances.remove(plugin) {\n"
+    "            instance\n"
+    "                .stop()\n"
+    "                .map_err(|message| KernelError::PluginStart {\n"
+    "                    plugin: plugin.clone(),\n"
+    "                    message,\n"
+    "                })?;\n"
+    "        }\n",
+    "        if let Some(instance) = self.instances.remove(plugin) {\n"
+    "            instance\n"
+    "                .lock()\n"
+    "                .expect(\"plugin instance mutex poisoned\")\n"
+    "                .stop()\n"
+    "                .map_err(|message| KernelError::PluginStart {\n"
+    "                    plugin: plugin.clone(),\n"
+    "                    message,\n"
+    "                })?;\n"
+    "        }\n",
+)
+
+path.write_text(text)
