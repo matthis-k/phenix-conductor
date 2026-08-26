@@ -106,6 +106,15 @@ in
         };
         executable = externalExecutable;
       };
+      defaultComposition = mkPhenix { inherit pkgs; };
+      externalComposition = mkPhenix {
+        inherit pkgs;
+        plugins = [ externalPlugin ];
+      };
+      resourceComposition = mkPhenix {
+        inherit pkgs;
+        plugins = [ resourcePlugin ];
+      };
       kernelComposition = mkPhenix {
         inherit pkgs;
         kernelOnly = true;
@@ -120,6 +129,11 @@ in
           }
           ''
             set -euo pipefail
+            test -x "${defaultComposition}/bin/phenix-conductor"
+            test -x "${externalComposition}/bin/phenix-conductor"
+            test -x "${externalComposition}/bin/external-fixture"
+            test -x "${resourceComposition}/bin/phenix-conductor"
+            test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"
             test -x "${kernelComposition}/bin/phenix-kernel"
             test ! -e "${kernelComposition}/bin/phenix-conductor"
             test -e "${resourcePlugin}/share/phenix-plugin/resources/README.txt"
