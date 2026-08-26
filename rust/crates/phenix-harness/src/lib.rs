@@ -106,8 +106,9 @@ mod tests {
     use phenix_plugin_suite::{
         artifact_manifest, artifact_service, context_manifest, context_service,
         repository_work_queue_service, session_manifest, session_service, ArtifactCommand,
-        ArtifactProvenance, ArtifactResponse, ContextCommand, ContextDescriptor, ContextResourceKind,
-        ContextResponse, ContextScope, RepositoryWorkSnapshot, SessionCommand, SessionResponse,
+        ArtifactProvenance, ArtifactResponse, ContextCommand, ContextDescriptor,
+        ContextResourceKind, ContextResponse, ContextScope, RepositoryWorkSnapshot, SessionCommand,
+        SessionResponse,
     };
 
     fn plugin(value: &str) -> PluginId {
