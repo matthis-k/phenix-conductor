@@ -235,7 +235,10 @@ mod tests {
                 content: b"first".to_vec(),
             },
         );
-        assert!(matches!(first, ArtifactResponse::Stored { reused: false, .. }));
+        assert!(matches!(
+            first,
+            ArtifactResponse::Stored { reused: false, .. }
+        ));
 
         let reused = invoke(
             &mut kernel,
