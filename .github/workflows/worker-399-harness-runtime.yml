@@ -28,12 +28,14 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/worker399_harness_runtime.py
+          python scripts/worker399_harness_runtime_fix.py
           nix run .#phenix-maintenance -- fix
           cargo test --manifest-path rust/Cargo.toml -p phenix-harness
           nix build .#phenix-harness --no-link
           nix build .#checks.x86_64-linux.phenix-product-smoke --no-link
           rm .github/workflows/worker-399-harness-runtime.yml
           rm scripts/worker399_harness_runtime.py
+          rm scripts/worker399_harness_runtime_fix.py
           git diff --check
       - name: Commit Harness runtime migration
         shell: bash
