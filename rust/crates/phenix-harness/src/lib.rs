@@ -251,7 +251,11 @@ mod tests {
                     200,
                     Authority::default(),
                 ),
-                move || Box::new(Echo(Box::leak(alternate_factory.clone().into_boxed_slice()))),
+                move || {
+                    Box::new(Echo(Box::leak(
+                        alternate_factory.clone().into_boxed_slice(),
+                    )))
+                },
             )
             .unwrap();
         let mut harness = builder.build().unwrap();
