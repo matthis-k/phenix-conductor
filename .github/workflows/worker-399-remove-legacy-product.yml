@@ -36,8 +36,8 @@ jobs:
         run: |
           set -euo pipefail
           system="$(nix eval --impure --raw --expr builtins.currentSystem)"
-          test "$(nix eval --raw --expr 'let f = builtins.getFlake (toString ./.); in if builtins.hasAttr "phenix-conductor" f.packages.'"$system"' then "present" else "absent"')" = absent
-          test "$(nix eval --raw --expr 'let f = builtins.getFlake (toString ./.); in if builtins.hasAttr "phenix-conductor" f.apps.'"$system"' then "present" else "absent"')" = absent
+          test "$(nix eval --impure --raw --expr 'let f = builtins.getFlake (toString ./.); in if builtins.hasAttr "phenix-conductor" f.packages.'"$system"' then "present" else "absent"')" = absent
+          test "$(nix eval --impure --raw --expr 'let f = builtins.getFlake (toString ./.); in if builtins.hasAttr "phenix-conductor" f.apps.'"$system"' then "present" else "absent"')" = absent
           nix build --no-link --print-build-logs ".#packages.$system.phenix-kernel" ".#packages.$system.phenix-harness" ".#packages.$system.phenix"
 
       - name: Product and composition validation
