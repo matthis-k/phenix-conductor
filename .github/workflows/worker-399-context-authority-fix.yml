@@ -1,0 +1,35 @@
+name: Worker 399 context authority repair
+
+on:
+  push:
+    branches:
+      - feat/plugin-kernel-implementation
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/plugin-kernel-implementation
+          fetch-depth: 0
+      - name: Repair authority API and remove transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/\.maximum_authority[[:space:]]*\.contains(/.maximum_authority.permits(/g' rust/crates/phenix-plugin-suite/src/context.rs
+          rm .github/workflows/worker-399-context-authority-fix.yml
+          git diff --check
+      - name: Commit repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add rust/crates/phenix-plugin-suite/src/context.rs .github/workflows/worker-399-context-authority-fix.yml
+          git commit -m 'fix: use kernel authority permission API'
+          git push origin HEAD:feat/plugin-kernel-implementation
