@@ -72,9 +72,15 @@ pub enum JobCommand {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum JobResponse {
-    Resource { resource: Option<RuntimeResourceRecord> },
-    Resources { resources: Vec<RuntimeResourceRecord> },
-    Affected { resources: Vec<RuntimeResourceRecord> },
+    Resource {
+        resource: Option<RuntimeResourceRecord>,
+    },
+    Resources {
+        resources: Vec<RuntimeResourceRecord>,
+    },
+    Affected {
+        resources: Vec<RuntimeResourceRecord>,
+    },
 }
 
 #[must_use]
@@ -133,9 +139,15 @@ impl PluginInstance for JobPlugin {
         if service != &job_service() {
             return Err(format!("unsupported job service: {service}"));
         }
-        let command: JobCommand = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let command: JobCommand =
+            serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = match command {
-            JobCommand::Create { id, kind, owner_execution, authority } => JobResponse::Resource {
+            JobCommand::Create {
+                id,
+                kind,
+                owner_execution,
+                authority,
+            } => JobResponse::Resource {
                 resource: Some(create(host, id, kind, owner_execution, authority)?),
             },
             JobCommand::Promote { id } => JobResponse::Resource {
@@ -150,7 +162,11 @@ impl PluginInstance for JobPlugin {
                     Ok(())
                 })?),
             },
-            JobCommand::Complete { id, code, mut output_references } => JobResponse::Resource {
+            JobCommand::Complete {
+                id,
+                code,
+                mut output_references,
+            } => JobResponse::Resource {
                 resource: Some(update(host, &id, |resource| {
                     if !matches!(resource.state, RuntimeResourceState::Running) {
                         return Err("only a running resource may complete".into());
@@ -176,7 +192,10 @@ impl PluginInstance for JobPlugin {
                     }
                 })?,
             },
-            JobCommand::NarrowAuthority { execution_id, authority } => JobResponse::Affected {
+            JobCommand::NarrowAuthority {
+                execution_id,
+                authority,
+            } => JobResponse::Affected {
                 resources: mutate_matching(host, &execution_id, |resource| {
                     if !matches!(resource.state, RuntimeResourceState::Running) {
                         return false;
@@ -184,7 +203,11 @@ impl PluginInstance for JobPlugin {
                     if resource.authority.is_subset(&authority) {
                         return false;
                     }
-                    resource.authority = resource.authority.intersection(&authority).cloned().collect();
+                    resource.authority = resource
+                        .authority
+                        .intersection(&authority)
+                        .cloned()
+                        .collect();
                     resource.state = RuntimeResourceState::Revoked {
                         reason: "execution authority narrowed below resource capability".into(),
                     };
@@ -193,9 +216,13 @@ impl PluginInstance for JobPlugin {
             },
             JobCommand::Get { id } => {
                 validate_id("runtime resource id", &id)?;
-                JobResponse::Resource { resource: read(host, &id)? }
+                JobResponse::Resource {
+                    resource: read(host, &id)?,
+                }
             }
-            JobCommand::List => JobResponse::Resources { resources: load_all(host)? },
+            JobCommand::List => JobResponse::Resources {
+                resources: load_all(host)?,
+            },
         };
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
@@ -265,8 +292,14 @@ fn insert(host: &PluginHost<'_>, resource: &RuntimeResourceRecord) -> Result<(),
     host.transact_durable(
         &job_namespace(),
         &[
-            TransactionOp::AssertValue { key: key.clone(), expected: None },
-            TransactionOp::AssertValue { key: INDEX_KEY.into(), expected: old_index },
+            TransactionOp::AssertValue {
+                key: key.clone(),
+                expected: None,
+            },
+            TransactionOp::AssertValue {
+                key: INDEX_KEY.into(),
+                expected: old_index,
+            },
             TransactionOp::Put {
                 key,
                 value: serde_json::to_vec(resource).map_err(|error| error.to_string())?,
@@ -282,11 +315,15 @@ fn insert(host: &PluginHost<'_>, resource: &RuntimeResourceRecord) -> Result<(),
 
 fn replace(host: &PluginHost<'_>, resource: &RuntimeResourceRecord) -> Result<(), String> {
     let key = resource_key(&resource.id);
-    let old = read_raw(host, &key)?.ok_or_else(|| format!("unknown runtime resource: {}", resource.id))?;
+    let old = read_raw(host, &key)?
+        .ok_or_else(|| format!("unknown runtime resource: {}", resource.id))?;
     host.transact_durable(
         &job_namespace(),
         &[
-            TransactionOp::AssertValue { key: key.clone(), expected: Some(old) },
+            TransactionOp::AssertValue {
+                key: key.clone(),
+                expected: Some(old),
+            },
             TransactionOp::Put {
                 key,
                 value: serde_json::to_vec(resource).map_err(|error| error.to_string())?,
@@ -310,7 +347,8 @@ fn load_all(host: &PluginHost<'_>) -> Result<Vec<RuntimeResourceRecord>, String>
 }
 
 fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
-    host.read_durable(&job_namespace(), key).map_err(|error| error.to_string())
+    host.read_durable(&job_namespace(), key)
+        .map_err(|error| error.to_string())
 }
 
 fn decode_index(value: Option<&[u8]>) -> Result<Vec<String>, String> {
@@ -325,7 +363,9 @@ fn resource_key(id: &str) -> String {
 
 fn validate_id(label: &str, value: &str) -> Result<(), String> {
     if value.trim().is_empty() || value.contains('/') {
-        Err(format!("{label} must be non-empty and must not contain '/'"))
+        Err(format!(
+            "{label} must be non-empty and must not contain '/'"
+        ))
     } else {
         Ok(())
     }
@@ -335,40 +375,58 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use phenix_kernel::{Kernel, KernelConfig, LocalPersistence};
-    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temp_db(name: &str) -> PathBuf {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("phenix-{name}-{}-{nonce}.sqlite", std::process::id()))
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "phenix-{name}-{}-{nonce}.sqlite",
+            std::process::id()
+        ))
     }
 
     fn kernel(path: &PathBuf) -> Kernel {
         let manifest = job_manifest();
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
-        kernel.register_embedded_factory(plugin, job_factory).unwrap();
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        kernel
+            .register_embedded_factory(plugin, job_factory)
+            .unwrap();
         kernel.activate_all().unwrap();
         kernel
     }
 
     fn invoke(kernel: &mut Kernel, command: JobCommand) -> JobResponse {
-        let output = kernel.invoke(
-            &job_service(),
-            &serde_json::to_vec(&command).unwrap(),
-            &job_manifest().maximum_authority,
-            None,
-        ).unwrap();
+        let output = kernel
+            .invoke(
+                &job_service(),
+                &serde_json::to_vec(&command).unwrap(),
+                &job_manifest().maximum_authority,
+                None,
+            )
+            .unwrap();
         serde_json::from_slice(&output).unwrap()
     }
 
     fn create_job(kernel: &mut Kernel, id: &str) {
-        invoke(kernel, JobCommand::Create {
-            id: id.into(),
-            kind: RuntimeResourceKind::Job,
-            owner_execution: "execution-1".into(),
-            authority: BTreeSet::from(["workspace.read".into(), "workspace.write".into()]),
-        });
+        invoke(
+            kernel,
+            JobCommand::Create {
+                id: id.into(),
+                kind: RuntimeResourceKind::Job,
+                owner_execution: "execution-1".into(),
+                authority: BTreeSet::from(["workspace.read".into(), "workspace.write".into()]),
+            },
+        );
     }
 
     #[test]
@@ -378,24 +436,51 @@ mod tests {
             let mut kernel = kernel(&path);
             create_job(&mut kernel, "job-revoked");
             create_job(&mut kernel, "job-promoted");
-            invoke(&mut kernel, JobCommand::Promote { id: "job-promoted".into() });
-            let response = invoke(&mut kernel, JobCommand::ExecutionTerminated { execution_id: "execution-1".into() });
+            invoke(
+                &mut kernel,
+                JobCommand::Promote {
+                    id: "job-promoted".into(),
+                },
+            );
+            let response = invoke(
+                &mut kernel,
+                JobCommand::ExecutionTerminated {
+                    execution_id: "execution-1".into(),
+                },
+            );
             match response {
                 JobResponse::Affected { resources } => assert_eq!(resources.len(), 1),
                 other => panic!("unexpected response: {other:?}"),
             }
         }
         let mut restored = kernel(&path);
-        let revoked = invoke(&mut restored, JobCommand::Get { id: "job-revoked".into() });
-        let promoted = invoke(&mut restored, JobCommand::Get { id: "job-promoted".into() });
+        let revoked = invoke(
+            &mut restored,
+            JobCommand::Get {
+                id: "job-revoked".into(),
+            },
+        );
+        let promoted = invoke(
+            &mut restored,
+            JobCommand::Get {
+                id: "job-promoted".into(),
+            },
+        );
         match revoked {
-            JobResponse::Resource { resource: Some(resource) } => {
-                assert!(matches!(resource.state, RuntimeResourceState::Revoked { .. }));
+            JobResponse::Resource {
+                resource: Some(resource),
+            } => {
+                assert!(matches!(
+                    resource.state,
+                    RuntimeResourceState::Revoked { .. }
+                ));
             }
             other => panic!("unexpected response: {other:?}"),
         }
         match promoted {
-            JobResponse::Resource { resource: Some(resource) } => {
+            JobResponse::Resource {
+                resource: Some(resource),
+            } => {
                 assert!(resource.promoted_to_workspace);
                 assert_eq!(resource.state, RuntimeResourceState::Running);
             }
@@ -419,8 +504,14 @@ mod tests {
         match response {
             JobResponse::Affected { resources } => {
                 assert_eq!(resources.len(), 1);
-                assert_eq!(resources[0].authority, BTreeSet::from(["workspace.read".into()]));
-                assert!(matches!(resources[0].state, RuntimeResourceState::Revoked { .. }));
+                assert_eq!(
+                    resources[0].authority,
+                    BTreeSet::from(["workspace.read".into()])
+                );
+                assert!(matches!(
+                    resources[0].state,
+                    RuntimeResourceState::Revoked { .. }
+                ));
             }
             other => panic!("unexpected response: {other:?}"),
         }

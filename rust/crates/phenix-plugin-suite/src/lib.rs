@@ -2,11 +2,17 @@
 
 mod artifacts;
 mod context;
+mod debug;
 mod execution;
+mod frontend;
+mod hooks;
+mod jobs;
 mod language;
+mod models;
 mod planning;
 mod repository_workers;
 mod sessions;
+mod workspace;
 
 pub use artifacts::{
     artifact_factory, artifact_manifest, artifact_service, ArtifactCommand, ArtifactProvenance,
@@ -19,15 +25,38 @@ pub use context::{
     ContextResourceRevision, ContextResponse, ContextScope, ExactContextReference,
     ExecutionContextProjection, ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
 };
+pub use debug::{
+    debug_factory, debug_manifest, debug_service, DebugCommand, DebugResponse, DiagnosticEntry,
+    DiagnosticSnapshot, DEBUG_SERVICE,
+};
 pub use execution::{
     execution_factory, execution_manifest, execution_service, CallableRecord, ExecutionAuthority,
     ExecutionCommand, ExecutionRecord, ExecutionResponse, ExecutionState, WorkerTaskRecord,
     WorkerTaskState, EXECUTION_SERVICE,
 };
+pub use frontend::{
+    frontend_factory, frontend_manifest, frontend_service, FrontendCommand,
+    FrontendProviderDescriptor, FrontendResponse, FrontendServiceRequest, FrontendServiceResult,
+    LiveFrontendProvider, FRONTEND_SERVICE,
+};
+pub use hooks::{
+    hook_factory, hook_manifest, hook_service, HookAction, HookCommand, HookConfiguration,
+    HookDefinition, HookDispatch, HookFailurePolicy, HookResponse, HookWarning, LifecycleEvent,
+    HOOK_SERVICE,
+};
+pub use jobs::{
+    job_factory, job_manifest, job_service, JobCommand, JobResponse, RuntimeResourceKind,
+    RuntimeResourceRecord, RuntimeResourceState, JOB_SERVICE,
+};
 pub use language::{
     language_factory, language_manifest, language_service, DocumentProvenance, LanguageCommand,
     LanguageDocumentIdentity, LanguageObservation, LanguageOperationKind, LanguageOperationResult,
     LanguageProviderEpoch, LanguageResponse, LANGUAGE_SERVICE,
+};
+pub use models::{
+    model_inference_service, model_routing_factory, model_routing_manifest, model_routing_service,
+    ModelCommand, ModelInferenceRequest, ModelInferenceResponse, ModelResponse, ModelTarget,
+    RoutingProfile, RoutingProfileDescriptor, MODEL_INFERENCE_SERVICE, MODEL_ROUTING_SERVICE,
 };
 pub use planning::{
     planning_factory, planning_manifest, planning_service, DecisionRecord, HistoryEntry,
@@ -44,6 +73,11 @@ pub use repository_workers::{
 pub use sessions::{
     session_factory, session_manifest, session_service, SessionCommand, SessionRecord,
     SessionResponse, SESSION_SERVICE,
+};
+pub use workspace::{
+    workspace_factory, workspace_factory_for, workspace_manifest, workspace_service,
+    WorkspaceCommand, WorkspaceFileVersion, WorkspaceResponse, WorkspaceSearchMatch,
+    WORKSPACE_SERVICE,
 };
 
 use phenix_kernel::{

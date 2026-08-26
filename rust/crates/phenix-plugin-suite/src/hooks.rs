@@ -176,7 +176,8 @@ impl PluginInstance for HookPlugin {
         if service != &hook_service() {
             return Err(format!("unsupported hook service: {service}"));
         }
-        let command: HookCommand = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let command: HookCommand =
+            serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = match command {
             HookCommand::RegisterConfiguration { configuration } => {
                 validate_configuration(&configuration)?;
@@ -260,7 +261,7 @@ fn execute_action(
                 execution_id: execution_id.to_owned(),
                 resource_id: resource_id.clone(),
                 revision: revision.clone(),
-                requester: ContextInjectionRequester::Execution,
+                requester: ContextInjectionRequester::Hook,
                 lifetime: ContextInjectionLifetime::Execution,
                 reason: reason.clone(),
             };
@@ -364,7 +365,12 @@ fn ordered_hooks<'a>(
         let ready = remaining
             .iter()
             .copied()
-            .find(|id| by_id[id].depends_on.iter().all(|dependency| done.contains(dependency.as_str())))
+            .find(|id| {
+                by_id[id]
+                    .depends_on
+                    .iter()
+                    .all(|dependency| done.contains(dependency.as_str()))
+            })
             .ok_or_else(|| format!("hook dependency cycle detected for event {event:?}"))?;
         remaining.remove(ready);
         done.insert(ready);
@@ -373,12 +379,18 @@ fn ordered_hooks<'a>(
     Ok(ordered)
 }
 
-fn insert_configuration(host: &PluginHost<'_>, configuration: &HookConfiguration) -> Result<(), String> {
+fn insert_configuration(
+    host: &PluginHost<'_>,
+    configuration: &HookConfiguration,
+) -> Result<(), String> {
     let key = configuration_key(&configuration.revision);
     host.transact_durable(
         &hook_namespace(),
         &[
-            TransactionOp::AssertValue { key: key.clone(), expected: None },
+            TransactionOp::AssertValue {
+                key: key.clone(),
+                expected: None,
+            },
             TransactionOp::Put {
                 key,
                 value: serde_json::to_vec(configuration).map_err(|error| error.to_string())?,
@@ -388,7 +400,10 @@ fn insert_configuration(host: &PluginHost<'_>, configuration: &HookConfiguration
     .map_err(|error| error.to_string())
 }
 
-fn read_configuration(host: &PluginHost<'_>, revision: &str) -> Result<Option<HookConfiguration>, String> {
+fn read_configuration(
+    host: &PluginHost<'_>,
+    revision: &str,
+) -> Result<Option<HookConfiguration>, String> {
     validate_id("hook configuration revision", revision)?;
     host.read_durable(&hook_namespace(), &configuration_key(revision))
         .map_err(|error| error.to_string())?
@@ -402,7 +417,9 @@ fn configuration_key(revision: &str) -> String {
 
 fn validate_id(label: &str, value: &str) -> Result<(), String> {
     if value.trim().is_empty() || value.contains('/') {
-        Err(format!("{label} must be non-empty and must not contain '/'"))
+        Err(format!(
+            "{label} must be non-empty and must not contain '/'"
+        ))
     } else {
         Ok(())
     }
@@ -412,30 +429,45 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use phenix_kernel::{Kernel, KernelConfig, LocalPersistence};
-    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temp_db(name: &str) -> PathBuf {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("phenix-{name}-{}-{nonce}.sqlite", std::process::id()))
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "phenix-{name}-{}-{nonce}.sqlite",
+            std::process::id()
+        ))
     }
 
     fn kernel(path: &PathBuf) -> Kernel {
         let manifest = hook_manifest(Authority::default());
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
-        kernel.register_embedded_factory(plugin, hook_factory).unwrap();
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        kernel
+            .register_embedded_factory(plugin, hook_factory)
+            .unwrap();
         kernel.activate_all().unwrap();
         kernel
     }
 
     fn invoke(kernel: &mut Kernel, command: HookCommand) -> Result<HookResponse, String> {
-        let output = kernel.invoke(
-            &hook_service(),
-            &serde_json::to_vec(&command).unwrap(),
-            &hook_manifest(Authority::default()).maximum_authority,
-            None,
-        ).map_err(|error| error.to_string())?;
+        let output = kernel
+            .invoke(
+                &hook_service(),
+                &serde_json::to_vec(&command).unwrap(),
+                &hook_manifest(Authority::default()).maximum_authority,
+                None,
+            )
+            .map_err(|error| error.to_string())?;
         serde_json::from_slice(&output).map_err(|error| error.to_string())
     }
 
@@ -458,18 +490,37 @@ mod tests {
         };
         {
             let mut kernel = kernel(&path);
-            invoke(&mut kernel, HookCommand::RegisterConfiguration { configuration: configuration.clone() }).unwrap();
-            assert!(invoke(&mut kernel, HookCommand::RegisterConfiguration { configuration: configuration.clone() }).unwrap_err().contains("AssertValue"));
+            invoke(
+                &mut kernel,
+                HookCommand::RegisterConfiguration {
+                    configuration: configuration.clone(),
+                },
+            )
+            .unwrap();
+            assert!(invoke(
+                &mut kernel,
+                HookCommand::RegisterConfiguration {
+                    configuration: configuration.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("AssertValue"));
         }
         let mut restored = kernel(&path);
-        let dispatch = invoke(&mut restored, HookCommand::Trigger {
-            revision: "config-1".into(),
-            event: LifecycleEvent::ExecutionCompleted,
-            execution_id: "execution-1".into(),
-            causality_id: 1,
-        }).unwrap();
+        let dispatch = invoke(
+            &mut restored,
+            HookCommand::Trigger {
+                revision: "config-1".into(),
+                event: LifecycleEvent::ExecutionCompleted,
+                execution_id: "execution-1".into(),
+                causality_id: 1,
+            },
+        )
+        .unwrap();
         match dispatch {
-            HookResponse::Dispatch { dispatch } => assert_eq!(dispatch.executed, vec!["first", "second"]),
+            HookResponse::Dispatch { dispatch } => {
+                assert_eq!(dispatch.executed, vec!["first", "second"])
+            }
             other => panic!("unexpected response: {other:?}"),
         }
         let _ = fs::remove_file(path);
@@ -479,12 +530,16 @@ mod tests {
     fn hook_cycle_is_rejected_independent_of_registration_order() {
         let path = temp_db("hooks-cycle");
         let mut kernel = kernel(&path);
-        let error = invoke(&mut kernel, HookCommand::RegisterConfiguration {
-            configuration: HookConfiguration {
-                revision: "config-cycle".into(),
-                hooks: vec![observe("a", &["b"]), observe("b", &["a"])],
+        let error = invoke(
+            &mut kernel,
+            HookCommand::RegisterConfiguration {
+                configuration: HookConfiguration {
+                    revision: "config-cycle".into(),
+                    hooks: vec![observe("a", &["b"]), observe("b", &["a"])],
+                },
             },
-        }).unwrap_err();
+        )
+        .unwrap_err();
         assert!(error.contains("cycle"));
         let _ = fs::remove_file(path);
     }
@@ -493,24 +548,35 @@ mod tests {
     fn warning_policy_records_warning_without_failing_dispatch() {
         let path = temp_db("hooks-warn");
         let mut kernel = kernel(&path);
-        invoke(&mut kernel, HookCommand::RegisterConfiguration {
-            configuration: HookConfiguration {
-                revision: "config-1".into(),
-                hooks: vec![HookDefinition {
-                    id: "warn".into(),
-                    event: LifecycleEvent::ExecutionCompleted,
-                    depends_on: BTreeSet::new(),
-                    action: HookAction::InvokeCallable { callable_id: "missing".into(), input: vec![] },
-                    failure_policy: HookFailurePolicy::Warn,
-                }],
+        invoke(
+            &mut kernel,
+            HookCommand::RegisterConfiguration {
+                configuration: HookConfiguration {
+                    revision: "config-1".into(),
+                    hooks: vec![HookDefinition {
+                        id: "warn".into(),
+                        event: LifecycleEvent::ExecutionCompleted,
+                        depends_on: BTreeSet::new(),
+                        action: HookAction::InvokeCallable {
+                            callable_id: "missing".into(),
+                            input: vec![],
+                        },
+                        failure_policy: HookFailurePolicy::Warn,
+                    }],
+                },
             },
-        }).unwrap();
-        let response = invoke(&mut kernel, HookCommand::Trigger {
-            revision: "config-1".into(),
-            event: LifecycleEvent::ExecutionCompleted,
-            execution_id: "execution-1".into(),
-            causality_id: 2,
-        }).unwrap();
+        )
+        .unwrap();
+        let response = invoke(
+            &mut kernel,
+            HookCommand::Trigger {
+                revision: "config-1".into(),
+                event: LifecycleEvent::ExecutionCompleted,
+                execution_id: "execution-1".into(),
+                causality_id: 2,
+            },
+        )
+        .unwrap();
         match response {
             HookResponse::Dispatch { dispatch } => {
                 assert_eq!(dispatch.warnings.len(), 1);

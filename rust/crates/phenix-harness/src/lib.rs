@@ -1,15 +1,30 @@
 use phenix_kernel::{
-    Authority, Kernel, KernelConfig, KernelError, PluginExecution, PluginId, PluginInstance,
-    PluginManifest,
+    Authority, CapabilityId, Kernel, KernelConfig, KernelError, PluginExecution, PluginId,
+    PluginInstance, PluginManifest,
 };
 use phenix_plugin_suite::{
-    artifact_factory, artifact_manifest, context_factory, context_manifest, execution_factory,
-    execution_manifest, language_factory, language_manifest, planning_factory, planning_manifest,
+    artifact_factory, artifact_manifest, context_factory, context_manifest, debug_factory,
+    debug_manifest, execution_factory, execution_manifest, frontend_factory, frontend_manifest,
+    hook_factory, hook_manifest, job_factory, job_manifest, language_factory, language_manifest,
+    model_routing_factory, model_routing_manifest, planning_factory, planning_manifest,
     repository_worker_factory, repository_worker_manifest, session_factory, session_manifest,
+    workspace_factory, workspace_manifest,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
+
+fn default_suite_authority() -> Authority {
+    Authority::new([
+        CapabilityId::parse("kernel.persistence.schema").expect("static capability"),
+        CapabilityId::parse("kernel.persistence.read").expect("static capability"),
+        CapabilityId::parse("kernel.persistence.write").expect("static capability"),
+        CapabilityId::parse("workspace.read").expect("static capability"),
+        CapabilityId::parse("workspace.write").expect("static capability"),
+        CapabilityId::parse("workspace.shell").expect("static capability"),
+        CapabilityId::parse("workspace.git").expect("static capability"),
+    ])
+}
 
 #[derive(Default)]
 pub struct HarnessBuilder {
@@ -24,13 +39,23 @@ impl HarnessBuilder {
 
     pub fn with_default_suite() -> Result<Self, KernelError> {
         let mut builder = Self::new();
+        let authority = default_suite_authority();
         builder.add_embedded(repository_worker_manifest(), repository_worker_factory)?;
         builder.add_embedded(session_manifest(), session_factory)?;
         builder.add_embedded(artifact_manifest(), artifact_factory)?;
         builder.add_embedded(context_manifest(), context_factory)?;
-        builder.add_embedded(execution_manifest(Authority::default()), execution_factory)?;
+        builder.add_embedded(execution_manifest(authority.clone()), execution_factory)?;
         builder.add_embedded(language_manifest(), language_factory)?;
         builder.add_embedded(planning_manifest(), planning_factory)?;
+        builder.add_embedded(workspace_manifest(), workspace_factory)?;
+        builder.add_embedded(
+            model_routing_manifest(authority.clone()),
+            model_routing_factory,
+        )?;
+        builder.add_embedded(job_manifest(), job_factory)?;
+        builder.add_embedded(frontend_manifest(authority.clone()), frontend_factory)?;
+        builder.add_embedded(hook_manifest(authority.clone()), hook_factory)?;
+        builder.add_embedded(debug_manifest(authority), debug_factory)?;
         Ok(builder)
     }
 
@@ -231,7 +256,7 @@ mod tests {
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 7);
+        assert_eq!(harness.kernel().config().manifests().count(), 13);
 
         let input = serde_json::to_vec(&RepositoryWorkSnapshot {
             pull_requests: Vec::new(),

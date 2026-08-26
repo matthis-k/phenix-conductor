@@ -53,8 +53,12 @@ pub struct ModelInferenceResponse {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ModelCommand {
-    RegisterProfile { profile: RoutingProfile },
-    GetProfile { id: String },
+    RegisterProfile {
+        profile: RoutingProfile,
+    },
+    GetProfile {
+        id: String,
+    },
     ListProfiles,
     SetProviderAuthenticated {
         provider_plugin: String,
@@ -72,17 +76,40 @@ pub enum ModelCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "response", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelResponse {
-    Profile { profile: Option<RoutingProfile> },
-    Profiles { profiles: Vec<RoutingProfileDescriptor> },
-    Authentication { provider_plugin: String, authenticated: bool },
-    Target { target: ModelTarget },
-    Inference { target: ModelTarget, response: ModelInferenceResponse },
+    Profile {
+        profile: Option<RoutingProfile>,
+    },
+    Profiles {
+        profiles: Vec<RoutingProfileDescriptor>,
+    },
+    Authentication {
+        provider_plugin: String,
+        authenticated: bool,
+    },
+    Target {
+        target: ModelTarget,
+    },
+    Inference {
+        target: ModelTarget,
+        response: ModelInferenceResponse,
+    },
 }
 
 #[must_use]
-pub fn model_routing_manifest() -> PluginManifest {
+pub fn model_routing_manifest(maximum_authority: Authority) -> PluginManifest {
+    let persistence = Authority::new([
+        capability(PERSISTENCE_SCHEMA),
+        capability(PERSISTENCE_READ),
+        capability(PERSISTENCE_WRITE),
+    ]);
+    let maximum_authority = Authority::new(
+        maximum_authority
+            .capabilities()
+            .cloned()
+            .chain(persistence.capabilities().cloned()),
+    );
     PluginManifest {
         id: PluginId::parse(MODEL_ROUTING_PLUGIN).expect("static plugin id is valid"),
         version: 1,
@@ -94,11 +121,7 @@ pub fn model_routing_manifest() -> PluginManifest {
             required_authority: Authority::default(),
         }],
         resource_namespaces: vec![model_namespace()],
-        maximum_authority: Authority::new([
-            capability(PERSISTENCE_SCHEMA),
-            capability(PERSISTENCE_READ),
-            capability(PERSISTENCE_WRITE),
-        ]),
+        maximum_authority,
     }
 }
 
@@ -145,16 +168,21 @@ impl PluginInstance for ModelRoutingPlugin {
         if service != &model_routing_service() {
             return Err(format!("unsupported model routing service: {service}"));
         }
-        let command: ModelCommand = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let command: ModelCommand =
+            serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = match command {
             ModelCommand::RegisterProfile { profile } => {
                 validate_profile(&profile)?;
                 insert_profile(host, &profile)?;
-                ModelResponse::Profile { profile: Some(profile) }
+                ModelResponse::Profile {
+                    profile: Some(profile),
+                }
             }
             ModelCommand::GetProfile { id } => {
                 validate_identity("routing profile id", &id)?;
-                ModelResponse::Profile { profile: read_profile(host, &id)? }
+                ModelResponse::Profile {
+                    profile: read_profile(host, &id)?,
+                }
             }
             ModelCommand::ListProfiles => ModelResponse::Profiles {
                 profiles: load_profiles(host)?
@@ -162,19 +190,33 @@ impl PluginInstance for ModelRoutingPlugin {
                     .map(|profile| descriptor(&profile))
                     .collect(),
             },
-            ModelCommand::SetProviderAuthenticated { provider_plugin, authenticated } => {
-                let plugin = PluginId::parse(provider_plugin.clone()).map_err(|error| error.to_string())?;
+            ModelCommand::SetProviderAuthenticated {
+                provider_plugin,
+                authenticated,
+            } => {
+                let plugin =
+                    PluginId::parse(provider_plugin.clone()).map_err(|error| error.to_string())?;
                 if authenticated {
                     self.authenticated.insert(plugin);
                 } else {
                     self.authenticated.remove(&plugin);
                 }
-                ModelResponse::Authentication { provider_plugin, authenticated }
+                ModelResponse::Authentication {
+                    provider_plugin,
+                    authenticated,
+                }
             }
-            ModelCommand::Resolve { profile_id, callable_id } => ModelResponse::Target {
+            ModelCommand::Resolve {
+                profile_id,
+                callable_id,
+            } => ModelResponse::Target {
                 target: resolve_target(host, &profile_id, callable_id.as_deref())?,
             },
-            ModelCommand::Invoke { profile_id, callable_id, input } => {
+            ModelCommand::Invoke {
+                profile_id,
+                callable_id,
+                input,
+            } => {
                 let target = resolve_target(host, &profile_id, callable_id.as_deref())?;
                 let provider = PluginId::parse(target.provider_plugin.clone())
                     .map_err(|error| error.to_string())?;
@@ -228,8 +270,16 @@ fn validate_identity(label: &str, value: &str) -> Result<(), String> {
 
 fn descriptor(profile: &RoutingProfile) -> RoutingProfileDescriptor {
     let mut providers = BTreeSet::from([profile.default_target.provider_plugin.clone()]);
-    providers.extend(profile.callable_targets.values().map(|target| target.provider_plugin.clone()));
-    RoutingProfileDescriptor { id: profile.id.clone(), providers: providers.into_iter().collect() }
+    providers.extend(
+        profile
+            .callable_targets
+            .values()
+            .map(|target| target.provider_plugin.clone()),
+    );
+    RoutingProfileDescriptor {
+        id: profile.id.clone(),
+        providers: providers.into_iter().collect(),
+    }
 }
 
 fn resolve_target(
@@ -255,15 +305,24 @@ fn insert_profile(host: &PluginHost<'_>, profile: &RoutingProfile) -> Result<(),
         .transpose()?
         .unwrap_or_default();
     if ids.iter().any(|id| id == &profile.id) || read_raw(host, &key)?.is_some() {
-        return Err(format!("routing profile already registered: {}", profile.id));
+        return Err(format!(
+            "routing profile already registered: {}",
+            profile.id
+        ));
     }
     ids.push(profile.id.clone());
     ids.sort();
     host.transact_durable(
         &model_namespace(),
         &[
-            TransactionOp::AssertValue { key: key.clone(), expected: None },
-            TransactionOp::AssertValue { key: PROFILE_INDEX.into(), expected: old_index },
+            TransactionOp::AssertValue {
+                key: key.clone(),
+                expected: None,
+            },
+            TransactionOp::AssertValue {
+                key: PROFILE_INDEX.into(),
+                expected: old_index,
+            },
             TransactionOp::Put {
                 key,
                 value: serde_json::to_vec(profile).map_err(|error| error.to_string())?,
@@ -295,7 +354,8 @@ fn load_profiles(host: &PluginHost<'_>) -> Result<Vec<RoutingProfile>, String> {
 }
 
 fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
-    host.read_durable(&model_namespace(), key).map_err(|error| error.to_string())
+    host.read_durable(&model_namespace(), key)
+        .map_err(|error| error.to_string())
 }
 
 fn profile_key(id: &str) -> String {
@@ -306,27 +366,44 @@ fn profile_key(id: &str) -> String {
 mod tests {
     use super::*;
     use phenix_kernel::{Kernel, KernelConfig, LocalPersistence};
-    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temp_db(name: &str) -> PathBuf {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("phenix-{name}-{}-{nonce}.sqlite", std::process::id()))
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "phenix-{name}-{}-{nonce}.sqlite",
+            std::process::id()
+        ))
     }
 
     fn target(provider: &str, model: &str) -> ModelTarget {
-        ModelTarget { provider_plugin: provider.into(), model: model.into(), options: BTreeMap::new() }
+        ModelTarget {
+            provider_plugin: provider.into(),
+            model: model.into(),
+            options: BTreeMap::new(),
+        }
     }
 
     fn routing_authority() -> Authority {
-        model_routing_manifest().maximum_authority
+        model_routing_manifest(Authority::default()).maximum_authority
     }
 
     fn kernel_with(path: &PathBuf) -> Kernel {
-        let manifest = model_routing_manifest();
+        let manifest = model_routing_manifest(Authority::default());
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
-        kernel.register_embedded_factory(plugin, model_routing_factory).unwrap();
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        kernel
+            .register_embedded_factory(plugin, model_routing_factory)
+            .unwrap();
         kernel.activate_all().unwrap();
         kernel
     }
@@ -349,22 +426,44 @@ mod tests {
         let profile = RoutingProfile {
             id: "default".into(),
             default_target: target("provider.default", "root"),
-            callable_targets: BTreeMap::from([("agent.scout".into(), target("provider.scout", "scout"))]),
+            callable_targets: BTreeMap::from([(
+                "agent.scout".into(),
+                target("provider.scout", "scout"),
+            )]),
         };
         {
             let mut kernel = kernel_with(&path);
-            invoke(&mut kernel, ModelCommand::RegisterProfile { profile: profile.clone() }).unwrap();
-            assert!(invoke(&mut kernel, ModelCommand::RegisterProfile { profile: profile.clone() })
-                .unwrap_err()
-                .contains("already registered"));
+            invoke(
+                &mut kernel,
+                ModelCommand::RegisterProfile {
+                    profile: profile.clone(),
+                },
+            )
+            .unwrap();
+            assert!(invoke(
+                &mut kernel,
+                ModelCommand::RegisterProfile {
+                    profile: profile.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("already registered"));
         }
         let mut restored = kernel_with(&path);
         let response = invoke(
             &mut restored,
-            ModelCommand::Resolve { profile_id: "default".into(), callable_id: Some("agent.scout".into()) },
+            ModelCommand::Resolve {
+                profile_id: "default".into(),
+                callable_id: Some("agent.scout".into()),
+            },
         )
         .unwrap();
-        assert_eq!(response, ModelResponse::Target { target: target("provider.scout", "scout") });
+        assert_eq!(
+            response,
+            ModelResponse::Target {
+                target: target("provider.scout", "scout")
+            }
+        );
         let _ = fs::remove_file(path);
     }
 
@@ -373,10 +472,13 @@ mod tests {
         let path = temp_db("model-auth");
         {
             let mut kernel = kernel_with(&path);
-            invoke(&mut kernel, ModelCommand::SetProviderAuthenticated {
-                provider_plugin: "provider.default".into(),
-                authenticated: true,
-            })
+            invoke(
+                &mut kernel,
+                ModelCommand::SetProviderAuthenticated {
+                    provider_plugin: "provider.default".into(),
+                    authenticated: true,
+                },
+            )
             .unwrap();
         }
         let mut restored = kernel_with(&path);
@@ -390,7 +492,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             response,
-            ModelResponse::Authentication { provider_plugin: "provider.default".into(), authenticated: false }
+            ModelResponse::Authentication {
+                provider_plugin: "provider.default".into(),
+                authenticated: false
+            }
         );
         let _ = fs::remove_file(path);
     }

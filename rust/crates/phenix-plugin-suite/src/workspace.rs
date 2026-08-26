@@ -181,7 +181,9 @@ impl WorkspacePlugin {
         let resolved = self.resolve(&path)?;
         let observed = match fs::read(&resolved) {
             Ok(bytes) => version_for_bytes(&bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => WorkspaceFileVersion::Absent,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                WorkspaceFileVersion::Absent
+            }
             Err(error) => return Err(format!("inspect {path}: {error}")),
         };
         if observed != expected_version {
@@ -190,9 +192,11 @@ impl WorkspacePlugin {
             ));
         }
         if let Some(parent) = resolved.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("create parent for {path}: {error}"))?;
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("create parent for {path}: {error}"))?;
         }
-        fs::write(&resolved, content.as_bytes()).map_err(|error| format!("write {path}: {error}"))?;
+        fs::write(&resolved, content.as_bytes())
+            .map_err(|error| format!("write {path}: {error}"))?;
         Ok(WorkspaceResponse::Written {
             path,
             version: version_for_bytes(content.as_bytes()),
@@ -334,12 +338,7 @@ impl PluginInstance for WorkspacePlugin {
                 if command.trim().is_empty() {
                     return Err("shell command must not be empty".into());
                 }
-                self.process(
-                    host,
-                    "bash",
-                    &["-c".into(), command],
-                    WORKSPACE_SHELL,
-                )?
+                self.process(host, "bash", &["-c".into(), command], WORKSPACE_SHELL)?
             }
             WorkspaceCommand::Git { arguments } => {
                 self.process(host, "git", &arguments, WORKSPACE_GIT)?
@@ -378,10 +377,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "phenix-{name}-{}-{nonce}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("phenix-{name}-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         root
     }
@@ -522,7 +519,10 @@ mod tests {
             &authority(&[WORKSPACE_GIT]),
         )
         .unwrap();
-        assert!(matches!(response, WorkspaceResponse::Process { exit_code: 0, .. }));
+        assert!(matches!(
+            response,
+            WorkspaceResponse::Process { exit_code: 0, .. }
+        ));
         let _ = fs::remove_dir_all(root);
     }
 }

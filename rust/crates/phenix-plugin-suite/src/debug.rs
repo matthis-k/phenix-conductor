@@ -80,7 +80,8 @@ impl PluginInstance for DebugPlugin {
         if service != &debug_service() {
             return Err(format!("unsupported debug service: {service}"));
         }
-        let command: DebugCommand = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let command: DebugCommand =
+            serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = match command {
             DebugCommand::Snapshot => DebugResponse::Snapshot {
                 snapshot: snapshot(host),
@@ -92,8 +93,20 @@ impl PluginInstance for DebugPlugin {
 
 fn snapshot(host: &PluginHost<'_>) -> DiagnosticSnapshot {
     let mut services = BTreeMap::new();
-    probe(host, &mut services, "sessions", &session_service(), &SessionCommand::List);
-    probe(host, &mut services, "context", &context_service(), &ContextCommand::List);
+    probe(
+        host,
+        &mut services,
+        "sessions",
+        &session_service(),
+        &SessionCommand::List,
+    );
+    probe(
+        host,
+        &mut services,
+        "context",
+        &context_service(),
+        &ContextCommand::List,
+    );
     probe(
         host,
         &mut services,
@@ -104,7 +117,13 @@ fn snapshot(host: &PluginHost<'_>) -> DiagnosticSnapshot {
             query: String::new(),
         },
     );
-    probe(host, &mut services, "jobs", &job_service(), &JobCommand::List);
+    probe(
+        host,
+        &mut services,
+        "jobs",
+        &job_service(),
+        &JobCommand::List,
+    );
     probe(
         host,
         &mut services,
@@ -177,18 +196,25 @@ mod tests {
         let session_id = session_manifest.id.clone();
         let debug_manifest = debug_manifest(session_manifest.maximum_authority.clone());
         let debug_id = debug_manifest.id.clone();
-        let mut kernel = Kernel::new(KernelConfig::new([session_manifest, debug_manifest]).unwrap());
-        kernel.register_embedded_factory(session_id, session_factory).unwrap();
-        kernel.register_embedded_factory(debug_id, debug_factory).unwrap();
+        let mut kernel =
+            Kernel::new(KernelConfig::new([session_manifest, debug_manifest]).unwrap());
+        kernel
+            .register_embedded_factory(session_id, session_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(debug_id, debug_factory)
+            .unwrap();
         kernel.activate_all().unwrap();
-        let output = kernel.invoke(
-            &debug_service(),
-            &serde_json::to_vec(&DebugCommand::Snapshot).unwrap(),
-            &Authority::new([
-                phenix_kernel::CapabilityId::parse("kernel.persistence.read").unwrap(),
-            ]),
-            None,
-        ).unwrap();
+        let output = kernel
+            .invoke(
+                &debug_service(),
+                &serde_json::to_vec(&DebugCommand::Snapshot).unwrap(),
+                &Authority::new([
+                    phenix_kernel::CapabilityId::parse("kernel.persistence.read").unwrap(),
+                ]),
+                None,
+            )
+            .unwrap();
         let DebugResponse::Snapshot { snapshot } = serde_json::from_slice(&output).unwrap();
         assert!(snapshot.services["sessions"].available);
         assert!(!snapshot.services["context"].available);
