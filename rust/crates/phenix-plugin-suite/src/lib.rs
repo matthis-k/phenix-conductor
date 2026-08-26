@@ -2,6 +2,7 @@
 
 mod artifacts;
 mod context;
+mod execution;
 mod planning;
 mod repository_workers;
 mod sessions;
@@ -17,10 +18,14 @@ pub use context::{
     ContextResourceRevision, ContextResponse, ContextScope, ExactContextReference,
     ExecutionContextProjection, ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
 };
+pub use execution::{
+    execution_factory, execution_manifest, execution_service, CallableRecord, ExecutionAuthority,
+    ExecutionCommand, ExecutionRecord, ExecutionResponse, ExecutionState, WorkerTaskRecord,
+    WorkerTaskState, EXECUTION_SERVICE,
+};
 pub use planning::{
-    planning_factory, planning_manifest, planning_service, DecisionRecord, HistoryEntry,
-    HistoryKind, ObjectiveRecord, PlanRecord, PlanStep, PlanningCommand, PlanningResponse,
-    PLANNING_SERVICE,
+    planning_factory, planning_manifest, planning_service, DecisionRecord, HistoryEntry, HistoryKind,
+    ObjectiveRecord, PlanRecord, PlanStep, PlanningCommand, PlanningResponse, PLANNING_SERVICE,
 };
 pub use repository_workers::{
     ReconstructedPullRequest, RepositoryCheckState, RepositoryChecklistEvidence,
