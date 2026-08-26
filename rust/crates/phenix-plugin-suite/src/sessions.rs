@@ -10,6 +10,7 @@ const SESSION_NAMESPACE: &str = "phenix.sessions.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
+const ALL_SESSIONS_KEY: &str = "sessions/@all";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionRecord {
@@ -17,12 +18,33 @@ pub struct SessionRecord {
     pub parent: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionInputKind {
+    User,
+    Root,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SessionInput {
+    pub sequence: u64,
+    pub kind: SessionInputKind,
+    pub content: Vec<u8>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum SessionCommand {
     Create { id: String, parent: Option<String> },
     Get { id: String },
+    List,
     Children { parent: Option<String> },
+    Continue {
+        id: String,
+        kind: SessionInputKind,
+        content: Vec<u8>,
+    },
+    Inputs { id: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -30,7 +52,13 @@ pub enum SessionCommand {
 pub enum SessionResponse {
     Created { session: SessionRecord },
     Session { session: Option<SessionRecord> },
+    Sessions { sessions: Vec<SessionRecord> },
     Children { sessions: Vec<SessionRecord> },
+    Continued {
+        session: SessionRecord,
+        input: SessionInput,
+    },
+    Inputs { inputs: Vec<SessionInput> },
 }
 
 #[must_use]
@@ -96,9 +124,23 @@ impl PluginInstance for SessionPlugin {
             SessionCommand::Get { id } => SessionResponse::Session {
                 session: read_session(host, &id)?,
             },
+            SessionCommand::List => SessionResponse::Sessions {
+                sessions: read_sessions(host)?,
+            },
             SessionCommand::Children { parent } => SessionResponse::Children {
                 sessions: read_children(host, parent.as_deref())?,
             },
+            SessionCommand::Continue { id, kind, content } => {
+                continue_session(host, &id, kind, content)?
+            }
+            SessionCommand::Inputs { id } => {
+                if read_session(host, &id)?.is_none() {
+                    return Err(format!("unknown session: {id}"));
+                }
+                SessionResponse::Inputs {
+                    inputs: read_inputs(host, &id)?,
+                }
+            }
         };
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
@@ -124,13 +166,17 @@ fn create_session(
     let session = SessionRecord { id, parent };
     let session_key = session_key(&session.id);
     let children_key = children_key(session.parent.as_deref());
-    let old_children = host
-        .read_durable(&session_namespace(), &children_key)
-        .map_err(|error| error.to_string())?;
-    let mut children = decode_children(old_children.as_deref())?;
+    let old_children = read_raw(host, &children_key)?;
+    let mut children = decode_ids(old_children.as_deref())?;
     children.push(session.id.clone());
     children.sort();
     children.dedup();
+
+    let old_sessions = read_raw(host, ALL_SESSIONS_KEY)?;
+    let mut sessions = decode_ids(old_sessions.as_deref())?;
+    sessions.push(session.id.clone());
+    sessions.sort();
+    sessions.dedup();
 
     host.transact_durable(
         &session_namespace(),
@@ -143,6 +189,10 @@ fn create_session(
                 key: children_key.clone(),
                 expected: old_children,
             },
+            TransactionOp::AssertValue {
+                key: ALL_SESSIONS_KEY.into(),
+                expected: old_sessions,
+            },
             TransactionOp::Put {
                 key: session_key,
                 value: serde_json::to_vec(&session).map_err(|error| error.to_string())?,
@@ -151,6 +201,10 @@ fn create_session(
                 key: children_key,
                 value: serde_json::to_vec(&children).map_err(|error| error.to_string())?,
             },
+            TransactionOp::Put {
+                key: ALL_SESSIONS_KEY.into(),
+                value: serde_json::to_vec(&sessions).map_err(|error| error.to_string())?,
+            },
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -158,23 +212,61 @@ fn create_session(
     Ok(SessionResponse::Created { session })
 }
 
+fn continue_session(
+    host: &PluginHost<'_>,
+    id: &str,
+    kind: SessionInputKind,
+    content: Vec<u8>,
+) -> Result<SessionResponse, String> {
+    let session = read_session(host, id)?.ok_or_else(|| format!("unknown session: {id}"))?;
+    let key = inputs_key(id);
+    let old_inputs = read_raw(host, &key)?;
+    let mut inputs = decode_inputs(old_inputs.as_deref())?;
+    let input = SessionInput {
+        sequence: u64::try_from(inputs.len())
+            .map_err(|_| "session input sequence overflow".to_owned())?
+            + 1,
+        kind,
+        content,
+    };
+    inputs.push(input.clone());
+    host.transact_durable(
+        &session_namespace(),
+        &[
+            TransactionOp::AssertValue {
+                key: key.clone(),
+                expected: old_inputs,
+            },
+            TransactionOp::Put {
+                key,
+                value: serde_json::to_vec(&inputs).map_err(|error| error.to_string())?,
+            },
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(SessionResponse::Continued { session, input })
+}
+
 fn read_session(host: &PluginHost<'_>, id: &str) -> Result<Option<SessionRecord>, String> {
-    let value = host
-        .read_durable(&session_namespace(), &session_key(id))
-        .map_err(|error| error.to_string())?;
-    value
+    read_raw(host, &session_key(id))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
+}
+
+fn read_sessions(host: &PluginHost<'_>) -> Result<Vec<SessionRecord>, String> {
+    let ids = decode_ids(read_raw(host, ALL_SESSIONS_KEY)?.as_deref())?;
+    ids.into_iter()
+        .map(|id| {
+            read_session(host, &id)?.ok_or_else(|| format!("missing durable session: {id}"))
+        })
+        .collect()
 }
 
 fn read_children(
     host: &PluginHost<'_>,
     parent: Option<&str>,
 ) -> Result<Vec<SessionRecord>, String> {
-    let value = host
-        .read_durable(&session_namespace(), &children_key(parent))
-        .map_err(|error| error.to_string())?;
-    let ids = decode_children(value.as_deref())?;
+    let ids = decode_ids(read_raw(host, &children_key(parent))?.as_deref())?;
     ids.into_iter()
         .map(|id| {
             read_session(host, &id)?.ok_or_else(|| format!("missing durable child session: {id}"))
@@ -182,7 +274,22 @@ fn read_children(
         .collect()
 }
 
-fn decode_children(value: Option<&[u8]>) -> Result<Vec<String>, String> {
+fn read_inputs(host: &PluginHost<'_>, id: &str) -> Result<Vec<SessionInput>, String> {
+    decode_inputs(read_raw(host, &inputs_key(id))?.as_deref())
+}
+
+fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
+    host.read_durable(&session_namespace(), key)
+        .map_err(|error| error.to_string())
+}
+
+fn decode_ids(value: Option<&[u8]>) -> Result<Vec<String>, String> {
+    value
+        .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
+        .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+fn decode_inputs(value: Option<&[u8]>) -> Result<Vec<SessionInput>, String> {
     value
         .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
         .unwrap_or_else(|| Ok(Vec::new()))
@@ -197,6 +304,10 @@ fn children_key(parent: Option<&str>) -> String {
         Some(parent) => format!("children/{parent}"),
         None => "children/@root".into(),
     }
+}
+
+fn inputs_key(id: &str) -> String {
+    format!("inputs/{id}")
 }
 
 #[cfg(test)]
@@ -246,21 +357,18 @@ mod tests {
     }
 
     #[test]
-    fn session_tree_is_durable_across_plugin_restart() {
+    fn session_tree_and_ordered_inputs_are_durable_across_plugin_restart() {
         let path = temp_db("sessions");
         {
             let mut kernel = kernel_with(&path);
-            assert!(matches!(
-                invoke(
-                    &mut kernel,
-                    &SessionCommand::Create {
-                        id: "root".into(),
-                        parent: None,
-                    },
-                )
-                .unwrap(),
-                SessionResponse::Created { .. }
-            ));
+            invoke(
+                &mut kernel,
+                &SessionCommand::Create {
+                    id: "root".into(),
+                    parent: None,
+                },
+            )
+            .unwrap();
             invoke(
                 &mut kernel,
                 &SessionCommand::Create {
@@ -269,9 +377,38 @@ mod tests {
                 },
             )
             .unwrap();
+            for (kind, content) in [
+                (SessionInputKind::Root, b"system".to_vec()),
+                (SessionInputKind::User, b"hello".to_vec()),
+            ] {
+                invoke(
+                    &mut kernel,
+                    &SessionCommand::Continue {
+                        id: "child".into(),
+                        kind,
+                        content,
+                    },
+                )
+                .unwrap();
+            }
         }
 
         let mut restored = kernel_with(&path);
+        assert_eq!(
+            invoke(&mut restored, &SessionCommand::List).unwrap(),
+            SessionResponse::Sessions {
+                sessions: vec![
+                    SessionRecord {
+                        id: "child".into(),
+                        parent: Some("root".into()),
+                    },
+                    SessionRecord {
+                        id: "root".into(),
+                        parent: None,
+                    },
+                ],
+            }
+        );
         assert_eq!(
             invoke(
                 &mut restored,
@@ -287,6 +424,68 @@ mod tests {
                 }],
             }
         );
+        assert_eq!(
+            invoke(
+                &mut restored,
+                &SessionCommand::Inputs { id: "child".into() },
+            )
+            .unwrap(),
+            SessionResponse::Inputs {
+                inputs: vec![
+                    SessionInput {
+                        sequence: 1,
+                        kind: SessionInputKind::Root,
+                        content: b"system".to_vec(),
+                    },
+                    SessionInput {
+                        sequence: 2,
+                        kind: SessionInputKind::User,
+                        content: b"hello".to_vec(),
+                    },
+                ],
+            }
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn child_session_and_lineage_edge_commit_in_one_namespace_transaction() {
+        let path = temp_db("session-lineage");
+        let mut kernel = kernel_with(&path);
+        invoke(
+            &mut kernel,
+            &SessionCommand::Create {
+                id: "root".into(),
+                parent: None,
+            },
+        )
+        .unwrap();
+        invoke(
+            &mut kernel,
+            &SessionCommand::Create {
+                id: "child".into(),
+                parent: Some("root".into()),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            invoke(
+                &mut kernel,
+                &SessionCommand::Get { id: "child".into() },
+            )
+            .unwrap(),
+            SessionResponse::Session { session: Some(_) }
+        ));
+        assert!(matches!(
+            invoke(
+                &mut kernel,
+                &SessionCommand::Children {
+                    parent: Some("root".into()),
+                },
+            )
+            .unwrap(),
+            SessionResponse::Children { sessions } if sessions.len() == 1
+        ));
         let _ = fs::remove_file(path);
     }
 
