@@ -1,0 +1,136 @@
+name: Worker 401 package split
+
+on:
+  push:
+    branches:
+      - architecture/phenix-ai-repository-boundary
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: architecture/phenix-ai-repository-boundary
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Split first-party plugins and import Harness resources
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/matthis-k/phenix-harness.git "$RUNNER_TEMP/phenix-harness"
+          mkdir -p config/phenix-harness
+          cp "$RUNNER_TEMP/phenix-harness/config/phenix/runtime.nix" config/phenix-harness/runtime.nix
+          rm -rf config/phenix-harness/skills
+          cp -a "$RUNNER_TEMP/phenix-harness/config/phenix/skills" config/phenix-harness/skills
+
+          python - <<'PY'
+          from pathlib import Path
+
+          modules = [
+              "artifacts", "cli", "context", "debug", "execution", "frontend",
+              "hooks", "jobs", "language", "models", "planning",
+              "repository_workers", "sessions", "workspace",
+          ]
+          root = Path("rust/crates")
+          suite = root / "phenix-plugin-suite"
+
+          for module in modules:
+              package = "phenix-plugin-" + module.replace("_", "-")
+              crate = root / package
+              (crate / "src").mkdir(parents=True, exist_ok=True)
+              source = (suite / "src" / f"{module}.rs").read_text()
+              (crate / "src" / "lib.rs").write_text(source)
+              (crate / "Cargo.toml").write_text(
+                  "[package]\n"
+                  f"name = \"{package}\"\n"
+                  "version = \"0.1.0\"\n"
+                  "edition = \"2021\"\n"
+                  "publish = false\n\n"
+                  "[dependencies]\n"
+                  "phenix-kernel = { path = \"../phenix-kernel\" }\n"
+                  "serde.workspace = true\n"
+                  "serde_json.workspace = true\n"
+                  "sha2.workspace = true\n"
+              )
+
+          cargo = Path("rust/Cargo.toml")
+          text = cargo.read_text()
+          for module in modules:
+              member = f'  "crates/phenix-plugin-{module.replace("_", "-")}",\n'
+              if member not in text:
+                  marker = '  "crates/phenix-plugin-suite",\n'
+                  text = text.replace(marker, marker + member)
+          cargo.write_text(text)
+
+          suite_cargo = suite / "Cargo.toml"
+          deps = [
+              "[package]",
+              'name = "phenix-plugin-suite"',
+              'version = "0.1.0"',
+              'edition = "2021"',
+              'publish = false',
+              "",
+              "[dependencies]",
+              'phenix-kernel = { path = "../phenix-kernel" }',
+              "serde_json.workspace = true",
+          ]
+          for module in modules:
+              package = "phenix-plugin-" + module.replace("_", "-")
+              deps.append(f'{package} = {{ path = "../{package}" }}')
+          suite_cargo.write_text("\n".join(deps) + "\n")
+
+          old_lib = (suite / "src" / "lib.rs").read_text()
+          tail = old_lib[old_lib.index("use phenix_kernel::{"):]
+          exports = ["#![forbid(unsafe_code)]", ""]
+          for module in modules:
+              ident = "phenix_plugin_" + module
+              exports.append(f"pub use {ident}::*;")
+          exports.extend(["", tail])
+          (suite / "src" / "lib.rs").write_text("\n".join(exports))
+
+          for module in modules:
+              (suite / "src" / f"{module}.rs").unlink()
+          PY
+
+          (cd rust && cargo generate-lockfile)
+          nix run .#phenix-maintenance -- fix
+
+      - name: Validate split and resources
+        run: |
+          set -euo pipefail
+          test -f config/phenix-harness/runtime.nix
+          test -f config/phenix-harness/skills/write/SKILL.md
+          test -f config/phenix-harness/skills/pstack-LICENSE
+          for crate in rust/crates/phenix-plugin-*; do
+            if [ "$(basename "$crate")" != phenix-plugin-suite ]; then
+              test -f "$crate/Cargo.toml"
+              test -f "$crate/src/lib.rs"
+            fi
+          done
+          nix run .#phenix-maintenance -- check source
+          nix run .#phenix-maintenance -- check rust
+          nix run .#phenix-maintenance -- test unit
+          nix run .#phenix-maintenance -- test product
+
+      - name: Commit semantic migration
+        run: |
+          set -euo pipefail
+          rm .github/workflows/worker-401-package-split.yml
+          git config user.name matthis-k
+          git config user.email 69082876+matthis-k@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'refactor: split first-party plugin packages'
+          git push origin HEAD:architecture/phenix-ai-repository-boundary
