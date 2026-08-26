@@ -18,7 +18,6 @@ mod objectives;
 mod persistence;
 mod plans;
 mod policy;
-mod repository_workers;
 mod routing;
 mod sandbox;
 mod server;
@@ -55,17 +54,17 @@ pub use lifecycle_hooks::{
 };
 pub use objectives::ObjectiveError;
 pub use persistence::{PersistenceError, SqliteStore};
-pub use plans::PlanError;
-pub use policy::{
-    CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
-    InvocationPolicyContext, InvocationSubject, PolicyDenial,
-};
-pub use repository_workers::{
+pub use phenix_plugin_suite::{
     ReconstructedPullRequest, RepositoryCheckState, RepositoryChecklistEvidence,
     RepositoryDiscussionEvidence, RepositoryDiscussionKind, RepositoryFinding,
     RepositoryIssueCluster, RepositoryIssueEvidence, RepositoryPullRequestEvidence,
     RepositoryPullRequestState, RepositorySelectionReason, RepositoryValidation,
     RepositoryWorkPriority, RepositoryWorkSelection, RepositoryWorkSnapshot, RepositoryWorkerQueue,
+};
+pub use plans::PlanError;
+pub use policy::{
+    CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
+    InvocationPolicyContext, InvocationSubject, PolicyDenial,
 };
 pub use routing::{RoutingRegistry, RoutingRegistryError};
 pub use server::{ConductorServer, ConductorService, ServerError};
