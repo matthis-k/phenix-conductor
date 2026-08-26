@@ -35,51 +35,6 @@ _: {
             touch "$out"
           '';
 
-      phenixConductor = pkgs.rustPlatform.buildRustPackage {
-        pname = "phenix-conductor";
-        version = "0";
-        src = rustSource;
-
-        cargoLock.lockFile = ../rust/Cargo.lock;
-        cargoBuildFlags = [
-          "--package"
-          "phenix-conductor"
-          "--bin"
-          "phenix-conductor"
-        ];
-        nativeBuildInputs = [
-          pkgs.cmake
-          pkgs.makeWrapper
-        ];
-        doCheck = false;
-
-        installPhase = ''
-          runHook preInstall
-          mkdir -p "$out/bin" "$out/libexec"
-          conductor_binary="$(find target -path '*/release/phenix-conductor' -type f -print -quit)"
-          test -n "$conductor_binary"
-          cp "$conductor_binary" "$out/libexec/phenix-conductor"
-          makeWrapper "$out/libexec/phenix-conductor" "$out/bin/phenix-conductor" \
-            --set PHENIX_BASH "${pkgs.bash}/bin/bash" \
-            --set PHENIX_BWRAP "${pkgs.bubblewrap}/bin/bwrap" \
-            --set PHENIX_MKDIR "${pkgs.coreutils}/bin/mkdir" \
-            --set PHENIX_RG "${pkgs.ripgrep}/bin/rg" \
-            --set PHENIX_RM "${pkgs.coreutils}/bin/rm" \
-            --set PHENIX_RSYNC "${pkgs.rsync}/bin/rsync" \
-            --set PHENIX_SLIRP4NETNS "${pkgs.slirp4netns}/bin/slirp4netns" \
-            --prefix PATH : "${
-              pkgs.lib.makeBinPath [
-                pkgs.coreutils
-                pkgs.iproute2
-                pkgs.util-linux
-              ]
-            }" \
-            --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
-            --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-          runHook postInstall
-        '';
-      };
-
       phenixHarness = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-harness";
         version = "0";
@@ -225,7 +180,6 @@ _: {
     {
       packages = {
         phenix-kernel = phenixKernel;
-        phenix-conductor = phenixConductor;
         phenix-harness = phenixHarness;
         phenix = phenixHarness;
         phenix-acp-smoke = phenixAcpSmoke;
@@ -234,7 +188,6 @@ _: {
 
       apps = {
         phenix-kernel.program = "${phenixKernel}/bin/phenix-kernel";
-        phenix-conductor.program = "${phenixConductor}/bin/phenix-conductor";
         phenix-harness.program = "${phenixHarness}/bin/phenix-harness";
         phenix.program = "${phenixHarness}/bin/phenix";
         default.program = "${phenixHarness}/bin/phenix";
