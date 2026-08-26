@@ -26,6 +26,14 @@ pub enum KernelError {
         plugin: PluginId,
     },
     PluginNotActive(PluginId),
+    HostOperationDenied {
+        plugin: PluginId,
+        operation: String,
+    },
+    Persistence {
+        plugin: PluginId,
+        message: String,
+    },
     EmbeddedFactoryMissing(PluginId),
     WrongExecutionKind(PluginId),
     ExternalHostUnavailable(PluginId),
@@ -70,6 +78,12 @@ impl Display for KernelError {
                 "bound provider {plugin} is unavailable for service {service}"
             ),
             Self::PluginNotActive(plugin) => write!(f, "plugin is not active: {plugin}"),
+            Self::HostOperationDenied { plugin, operation } => {
+                write!(f, "plugin {plugin} is not allowed to perform host operation {operation}")
+            }
+            Self::Persistence { plugin, message } => {
+                write!(f, "plugin {plugin} persistence operation failed: {message}")
+            }
             Self::EmbeddedFactoryMissing(plugin) => {
                 write!(f, "embedded plugin has no registered factory: {plugin}")
             }
