@@ -105,17 +105,19 @@ jobs:
       - name: Validate Rust with diagnostics
         run: |
           set +e
-          nix run .#phenix-maintenance -- check rust > .github/worker-401-rust.log 2>&1
+          nix run .#phenix-maintenance -- check rust > "$RUNNER_TEMP/worker-401-rust.log" 2>&1
           status=$?
           if [ "$status" -ne 0 ]; then
+            tail -n 160 "$RUNNER_TEMP/worker-401-rust.log" > .github/worker-401-rust-tail.log
             git config user.name matthis-k
             git config user.email 69082876+matthis-k@users.noreply.github.com
-            git add -f .github/worker-401-rust.log
-            git commit -m 'chore: capture #401 Rust failure'
+            git rm -f .github/worker-401-rust.log 2>/dev/null || true
+            git add -f .github/worker-401-rust-tail.log
+            git commit -m 'chore: capture #401 Rust failure tail'
             git push origin HEAD:architecture/phenix-ai-repository-boundary
             exit "$status"
           fi
-          rm -f .github/worker-401-rust.log
+          rm -f .github/worker-401-rust-tail.log .github/worker-401-rust.log
 
       - name: Validate unit tests
         run: nix run .#phenix-maintenance -- test unit
@@ -127,6 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           rm .github/workflows/worker-401-package-split.yml
+          rm -f .github/worker-401-rust-tail.log .github/worker-401-rust.log
           git config user.name matthis-k
           git config user.email 69082876+matthis-k@users.noreply.github.com
           git add -A
