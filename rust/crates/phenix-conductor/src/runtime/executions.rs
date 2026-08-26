@@ -45,6 +45,21 @@ impl ConductorRuntime {
             )?;
             self.assign_execution_objectives(&execution.id, objective.id, BTreeSet::new())?;
         }
+        if let Err(error) =
+            self.dispatch_lifecycle_hooks(&execution.id, LifecycleEvent::ExecutionCreated)
+        {
+            self.record_domain_event(DomainEvent::ExecutionStateChanged {
+                execution_id: execution.id.clone(),
+                state: ExecutionState::Failed,
+            })?;
+            self.push_event(
+                &execution.id,
+                ExecutionEventKind::ExecutionStateChanged {
+                    state: ExecutionState::Failed,
+                },
+            )?;
+            return Err(error);
+        }
         Ok(())
     }
 

@@ -1,6 +1,6 @@
 use crate::{
     CallableOperation, ConductorError, ConductorRuntime, DomainEvent, ExecutionContextProjection,
-    ExecutionPayload, JournalEntry,
+    ExecutionPayload, JournalEntry, LifecycleEvent,
 };
 use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
@@ -511,6 +511,7 @@ impl ConductorRuntime {
         lifetime: ContextInjectionLifetime,
         reason: impl Into<String>,
     ) -> Result<(ContextResourceRevision, ContextInjection), ConductorError> {
+        self.dispatch_lifecycle_hooks(execution_id, LifecycleEvent::ContextLoaded)?;
         if lifetime == ContextInjectionLifetime::Objective
             && self.execution_objectives(execution_id)?.is_none()
         {

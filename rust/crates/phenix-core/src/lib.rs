@@ -425,6 +425,11 @@ pub enum ExecutionEventKind {
     OrchestrationDecisionMade {
         decision: OrchestrationFailureDecisionRecord,
     },
+    LifecycleHookMetadata {
+        hook_id: String,
+        key: String,
+        value: Value,
+    },
     Error {
         code: String,
         message: String,

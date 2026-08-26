@@ -13,6 +13,7 @@ mod decisions;
 mod execution_provider;
 mod failure_decisions;
 mod journal;
+mod lifecycle_hooks;
 mod objectives;
 mod persistence;
 mod plans;
@@ -44,6 +45,10 @@ pub use execution_provider::{
 pub use failure_decisions::OrchestrationFailureDecisionRequest;
 pub use journal::{
     DomainEvent, JournalEntry, JournalError, JournalExecutionPayload, ResolvedRoute, RuntimeJournal,
+};
+pub use lifecycle_hooks::{
+    HookAction, HookFailurePolicy, LifecycleEvent, LifecycleHookDefinition, LifecycleHookError,
+    LifecycleHookId,
 };
 pub use objectives::ObjectiveError;
 pub use persistence::{PersistenceError, SqliteStore};
@@ -120,6 +125,7 @@ pub struct ConductorRuntime {
     events: Vec<ExecutionEvent>,
     journal: RuntimeJournal,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
+    active_lifecycle_hooks: BTreeSet<(ExecutionId, LifecycleHookId)>,
     sandbox_states: BTreeMap<ExecutionId, std::sync::Arc<sandbox::ExecutionSandboxState>>,
     policy: InvocationPolicy,
     event_sinks: BTreeMap<u64, std::sync::mpsc::Sender<ExecutionEvent>>,
@@ -144,6 +150,7 @@ include!("runtime/events.rs");
 include!("runtime/executions.rs");
 include!("runtime/invocation.rs");
 include!("runtime/lifecycle.rs");
+include!("runtime/lifecycle_hook_runtime.rs");
 include!("runtime/orchestration.rs");
 include!("runtime/runtime.rs");
 include!("runtime/sessions.rs");
