@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod artifacts;
+mod context;
 mod repository_workers;
 mod sessions;
 
@@ -8,6 +9,12 @@ pub use artifacts::{
     artifact_factory, artifact_manifest, artifact_service, ArtifactCommand, ArtifactProvenance,
     ArtifactRecord, ArtifactResponse, NormalizedReadRequest, ReadProviderIdentity,
     ReadResultRecord, RevalidationRecord, RevalidationVerdict, ARTIFACT_SERVICE,
+};
+pub use context::{
+    context_factory, context_manifest, context_service, ContextCommand, ContextDescriptor,
+    ContextInjection, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceKind,
+    ContextResourceRevision, ContextResponse, ContextScope, ExactContextReference,
+    ExecutionContextProjection, ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
 };
 pub use repository_workers::{
     ReconstructedPullRequest, RepositoryCheckState, RepositoryChecklistEvidence,
