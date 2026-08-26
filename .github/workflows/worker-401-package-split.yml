@@ -18,14 +18,12 @@ jobs:
         with:
           ref: architecture/phenix-ai-repository-boundary
           fetch-depth: 0
-
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-
       - name: Split first-party plugins and import Harness resources
         run: |
           set -euo pipefail
@@ -34,97 +32,77 @@ jobs:
           cp "$RUNNER_TEMP/phenix-harness/config/phenix/runtime.nix" config/phenix-harness/runtime.nix
           rm -rf config/phenix-harness/skills
           cp -a "$RUNNER_TEMP/phenix-harness/config/phenix/skills" config/phenix-harness/skills
-
           python - <<'PY'
           from pathlib import Path
-          modules = [
-              "artifacts", "cli", "context", "debug", "execution", "frontend",
-              "hooks", "jobs", "language", "models", "planning",
-              "repository_workers", "sessions", "workspace",
-          ]
+          modules = ["artifacts","cli","context","debug","execution","frontend","hooks","jobs","language","models","planning","repository_workers","sessions","workspace"]
+          edges = {
+              "cli": ["workspace"],
+              "context": ["execution"],
+              "frontend": ["execution"],
+              "hooks": ["context", "execution"],
+              "debug": ["context", "frontend", "jobs", "models", "planning", "sessions"],
+          }
+          replacements = {
+              "cli": [("use crate::{workspace_service, WorkspaceCommand, WorkspaceResponse};", "use phenix_plugin_workspace::{workspace_service, WorkspaceCommand, WorkspaceResponse};")],
+              "context": [("use crate::{execution_service, ExecutionCommand, ExecutionResponse, ExecutionState};", "use phenix_plugin_execution::{execution_service, ExecutionCommand, ExecutionResponse, ExecutionState};")],
+              "frontend": [("use crate::{execution_service, ExecutionCommand, ExecutionResponse, ExecutionState};", "use phenix_plugin_execution::{execution_service, ExecutionCommand, ExecutionResponse, ExecutionState};")],
+              "hooks": [("use crate::{\n    context_service, execution_service, ContextCommand, ContextInjectionLifetime,\n    ContextInjectionRequester, ExecutionCommand, ExecutionResponse,\n};", "use phenix_plugin_context::{context_service, ContextCommand, ContextInjectionLifetime, ContextInjectionRequester};\nuse phenix_plugin_execution::{execution_service, ExecutionCommand, ExecutionResponse};")],
+              "debug": [("use crate::{\n    context_service, frontend_service, job_service, model_routing_service, planning_service,\n    session_service, ContextCommand, FrontendCommand, JobCommand, ModelCommand, PlanningCommand,\n    SessionCommand,\n};", "use phenix_plugin_context::{context_service, ContextCommand};\nuse phenix_plugin_frontend::{frontend_service, FrontendCommand};\nuse phenix_plugin_jobs::{job_service, JobCommand};\nuse phenix_plugin_models::{model_routing_service, ModelCommand};\nuse phenix_plugin_planning::{planning_service, PlanningCommand};\nuse phenix_plugin_sessions::{session_service, SessionCommand};")],
+          }
           root = Path("rust/crates")
           suite = root / "phenix-plugin-suite"
           for module in modules:
               package = "phenix-plugin-" + module.replace("_", "-")
               crate = root / package
               (crate / "src").mkdir(parents=True, exist_ok=True)
-              (crate / "src" / "lib.rs").write_text((suite / "src" / f"{module}.rs").read_text())
-              (crate / "Cargo.toml").write_text(
-                  "[package]\n"
-                  f"name = \"{package}\"\n"
-                  "version = \"0.1.0\"\n"
-                  "edition = \"2021\"\n"
-                  "publish = false\n\n"
-                  "[dependencies]\n"
-                  "phenix-kernel = { path = \"../phenix-kernel\" }\n"
-                  "serde.workspace = true\n"
-                  "serde_json.workspace = true\n"
-                  "sha2.workspace = true\n"
-              )
+              source = (suite / "src" / f"{module}.rs").read_text()
+              for old, new in replacements.get(module, []):
+                  if old not in source:
+                      raise SystemExit(f"expected import not found in {module}")
+                  source = source.replace(old, new, 1)
+              (crate / "src" / "lib.rs").write_text(source)
+              deps = [
+                  "[package]", f'name = "{package}"', 'version = "0.1.0"', 'edition = "2021"', 'publish = false', "", "[dependencies]",
+                  'phenix-kernel = { path = "../phenix-kernel" }', "serde.workspace = true", "serde_json.workspace = true", "sha2.workspace = true",
+              ]
+              for dep in edges.get(module, []):
+                  dep_package = "phenix-plugin-" + dep.replace("_", "-")
+                  deps.append(f'{dep_package} = {{ path = "../{dep_package}" }}')
+              (crate / "Cargo.toml").write_text("\n".join(deps) + "\n")
           cargo = Path("rust/Cargo.toml")
           text = cargo.read_text()
           for module in modules:
               member = f'  "crates/phenix-plugin-{module.replace("_", "-")}",\n'
               if member not in text:
-                  marker = '  "crates/phenix-plugin-suite",\n'
-                  text = text.replace(marker, marker + member)
+                  text = text.replace('  "crates/phenix-plugin-suite",\n', '  "crates/phenix-plugin-suite",\n' + member)
           cargo.write_text(text)
-          suite_cargo = suite / "Cargo.toml"
-          deps = [
-              "[package]", 'name = "phenix-plugin-suite"', 'version = "0.1.0"',
-              'edition = "2021"', 'publish = false', "", "[dependencies]",
-              'phenix-kernel = { path = "../phenix-kernel" }', "serde_json.workspace = true",
-          ]
+          deps = ["[package]", 'name = "phenix-plugin-suite"', 'version = "0.1.0"', 'edition = "2021"', 'publish = false', "", "[dependencies]", 'phenix-kernel = { path = "../phenix-kernel" }', "serde_json.workspace = true"]
           for module in modules:
               package = "phenix-plugin-" + module.replace("_", "-")
               deps.append(f'{package} = {{ path = "../{package}" }}')
-          suite_cargo.write_text("\n".join(deps) + "\n")
+          (suite / "Cargo.toml").write_text("\n".join(deps) + "\n")
           old_lib = (suite / "src" / "lib.rs").read_text()
           tail = old_lib[old_lib.index("use phenix_kernel::{"):]
-          exports = ["#![forbid(unsafe_code)]", ""]
-          for module in modules:
-              exports.append(f"pub use phenix_plugin_{module}::*;")
-          exports.extend(["", tail])
+          exports = ["#![forbid(unsafe_code)]", ""] + [f"pub use phenix_plugin_{m}::*;" for m in modules] + ["", tail]
           (suite / "src" / "lib.rs").write_text("\n".join(exports))
           for module in modules:
               (suite / "src" / f"{module}.rs").unlink()
           PY
           (cd rust && cargo generate-lockfile)
           nix run .#phenix-maintenance -- fix
-
       - name: Validate imported resources
         run: |
-          set -euo pipefail
           test -f config/phenix-harness/runtime.nix
           test -f config/phenix-harness/skills/write/SKILL.md
           test -f config/phenix-harness/skills/pstack-LICENSE
-
       - name: Validate Source
         run: nix run .#phenix-maintenance -- check source
-
-      - name: Validate Rust with diagnostics
-        run: |
-          set +e
-          nix run .#phenix-maintenance -- check rust > "$RUNNER_TEMP/worker-401-rust.log" 2>&1
-          status=$?
-          if [ "$status" -ne 0 ]; then
-            tail -n 160 "$RUNNER_TEMP/worker-401-rust.log" > .github/worker-401-rust-tail.log
-            git config user.name matthis-k
-            git config user.email 69082876+matthis-k@users.noreply.github.com
-            git rm -f .github/worker-401-rust.log 2>/dev/null || true
-            git add -f .github/worker-401-rust-tail.log
-            git commit -m 'chore: capture #401 Rust failure tail'
-            git push origin HEAD:architecture/phenix-ai-repository-boundary
-            exit "$status"
-          fi
-          rm -f .github/worker-401-rust-tail.log .github/worker-401-rust.log
-
+      - name: Validate Rust
+        run: nix run .#phenix-maintenance -- check rust
       - name: Validate unit tests
         run: nix run .#phenix-maintenance -- test unit
-
       - name: Validate Product
         run: nix run .#phenix-maintenance -- test product
-
       - name: Commit semantic migration
         run: |
           set -euo pipefail
