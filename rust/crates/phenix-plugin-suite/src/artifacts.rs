@@ -137,11 +137,20 @@ fn store(
     }
     if let Some(existing) = read_record(host, &id)? {
         if existing.content_identity == content_identity {
+            if existing.content != content {
+                return Err(format!(
+                    "artifact content identity changed bytes: {content_identity}"
+                ));
+            }
             return Ok(ArtifactResponse::Stored {
                 artifact: existing,
                 reused: true,
             });
         }
+        return Err(format!(
+            "artifact id {} is immutable at content identity {}",
+            existing.id, existing.content_identity
+        ));
     }
 
     let artifact = ArtifactRecord {
@@ -151,10 +160,16 @@ fn store(
     };
     host.transact_durable(
         &artifact_namespace(),
-        &[TransactionOp::Put {
-            key: artifact_key(&artifact.id),
-            value: serde_json::to_vec(&artifact).map_err(|error| error.to_string())?,
-        }],
+        &[
+            TransactionOp::AssertValue {
+                key: artifact_key(&artifact.id),
+                expected: None,
+            },
+            TransactionOp::Put {
+                key: artifact_key(&artifact.id),
+                value: serde_json::to_vec(&artifact).map_err(|error| error.to_string())?,
+            },
+        ],
     )
     .map_err(|error| error.to_string())?;
     Ok(ArtifactResponse::Stored {
@@ -225,35 +240,23 @@ mod tests {
     }
 
     #[test]
-    fn exact_reader_output_is_reused_until_invalidated_or_revision_changes() {
+    fn exact_reader_output_is_reused_until_invalidated() {
         let mut kernel = kernel();
-        let first = invoke(
-            &mut kernel,
-            ArtifactCommand::Store {
-                id: "read:src/lib.rs".into(),
-                content_identity: "sha256:a".into(),
-                content: b"first".to_vec(),
-            },
-        );
+        let command = ArtifactCommand::Store {
+            id: "read:src/lib.rs".into(),
+            content_identity: "sha256:a".into(),
+            content: b"first".to_vec(),
+        };
+        let first = invoke(&mut kernel, command.clone());
         assert!(matches!(
             first,
             ArtifactResponse::Stored { reused: false, .. }
         ));
 
-        let reused = invoke(
-            &mut kernel,
-            ArtifactCommand::Store {
-                id: "read:src/lib.rs".into(),
-                content_identity: "sha256:a".into(),
-                content: b"ignored duplicate".to_vec(),
-            },
-        );
+        let reused = invoke(&mut kernel, command);
         assert!(matches!(
             reused,
-            ArtifactResponse::Stored {
-                reused: true,
-                artifact: ArtifactRecord { ref content, .. },
-            } if content == b"first"
+            ArtifactResponse::Stored { reused: true, .. }
         ));
 
         assert_eq!(
@@ -276,15 +279,36 @@ mod tests {
             ),
             ArtifactResponse::Invalidated { removed: true }
         );
-        assert_eq!(
-            invoke(
-                &mut kernel,
-                ArtifactCommand::Read {
-                    id: "read:src/lib.rs".into(),
-                    content_identity: "sha256:a".into(),
-                },
-            ),
-            ArtifactResponse::Read { artifact: None }
+    }
+
+    #[test]
+    fn immutable_artifact_identity_cannot_be_reused_for_other_bytes_or_revision() {
+        let mut kernel = kernel();
+        invoke(
+            &mut kernel,
+            ArtifactCommand::Store {
+                id: "artifact-1".into(),
+                content_identity: "sha256:a".into(),
+                content: b"first".to_vec(),
+            },
         );
+
+        for command in [
+            ArtifactCommand::Store {
+                id: "artifact-1".into(),
+                content_identity: "sha256:a".into(),
+                content: b"different".to_vec(),
+            },
+            ArtifactCommand::Store {
+                id: "artifact-1".into(),
+                content_identity: "sha256:b".into(),
+                content: b"first".to_vec(),
+            },
+        ] {
+            let input = serde_json::to_vec(&command).unwrap();
+            assert!(kernel
+                .invoke(&artifact_service(), &input, &authority(), None)
+                .is_err());
+        }
     }
 }
