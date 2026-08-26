@@ -1,0 +1,75 @@
+name: Worker 399 plugin suite repair
+
+on:
+  push:
+    branches:
+      - feat/plugin-kernel-implementation
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: feat/plugin-kernel-implementation
+          fetch-depth: 0
+      - name: Repair suite and complete context discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          artifacts = Path('rust/crates/phenix-plugin-suite/src/artifacts.rs')
+          text = artifacts.read_text()
+          old = '#[serde(tag = "result", rename_all = "snake_case")]\npub enum ArtifactResponse'
+          new = '#[serde(tag = "response", rename_all = "snake_case")]\npub enum ArtifactResponse'
+          if old not in text:
+              raise SystemExit('artifact response tag marker missing')
+          artifacts.write_text(text.replace(old, new, 1))
+
+          context = Path('rust/crates/phenix-plugin-suite/src/context.rs')
+          text = context.read_text().replace('.maximum_authority\n            .contains(', '.maximum_authority\n            .permits(')
+          if '"SKILL.md" => Some(ContextResourceKind::Skill)' not in text:
+              text = text.replace(
+                  '        "CONTRIBUTING.md" | "DEVELOPMENT.md" => Some(ContextResourceKind::ProjectDocument),\n        _ => None,',
+                  '        "CONTRIBUTING.md" | "DEVELOPMENT.md" => Some(ContextResourceKind::ProjectDocument),\n        "SKILL.md" => Some(ContextResourceKind::Skill),\n        _ => None,',
+                  1,
+              )
+              text = text.replace(
+                  '        let scope = match parent_path(&source.path) {\n            Some(parent) if !parent.is_empty() => ContextScope::PathPrefix(parent.to_owned()),\n            _ => ContextScope::Workspace,\n        };\n        let prefix = match kind {\n            ContextResourceKind::ProjectInstruction => "project-instruction",\n            ContextResourceKind::ProjectDocument => "project-document",\n            ContextResourceKind::Skill | ContextResourceKind::External => unreachable!(),\n        };',
+                  '        let scope = match kind {\n            ContextResourceKind::Skill => ContextScope::Workspace,\n            _ => match parent_path(&source.path) {\n                Some(parent) if !parent.is_empty() => ContextScope::PathPrefix(parent.to_owned()),\n                _ => ContextScope::Workspace,\n            },\n        };\n        let prefix = match kind {\n            ContextResourceKind::ProjectInstruction => "project-instruction",\n            ContextResourceKind::ProjectDocument => "project-document",\n            ContextResourceKind::Skill => "skill",\n            ContextResourceKind::External => unreachable!(),\n        };',
+                  1,
+              )
+              text = text.replace(
+                  '                        RepositoryContextSource {\n                            path: "README.md".into(),\n                            content: b"not automatic context".to_vec(),\n                        },',
+                  '                        RepositoryContextSource {\n                            path: "skills/review/SKILL.md".into(),\n                            content: b"review skill".to_vec(),\n                        },\n                        RepositoryContextSource {\n                            path: "README.md".into(),\n                            content: b"not automatic context".to_vec(),\n                        },',
+                  1,
+              )
+              text = text.replace('        assert_eq!(first.len(), 3);', '        assert_eq!(first.len(), 4);', 1)
+              marker = '        assert!(first.iter().any(|descriptor| {\n            descriptor.kind == ContextResourceKind::ProjectInstruction\n                && descriptor.source == "crates/ui/AGENTS.override.md"\n                && descriptor.scope == ContextScope::PathPrefix("crates/ui".into())\n        }));\n'
+              addition = marker + '        assert!(first.iter().any(|descriptor| {\n            descriptor.kind == ContextResourceKind::Skill\n                && descriptor.source == "skills/review/SKILL.md"\n                && descriptor.scope == ContextScope::Workspace\n        }));\n'
+              if marker not in text:
+                  raise SystemExit('skill test insertion marker missing')
+              text = text.replace(marker, addition, 1)
+          context.write_text(text)
+          PY
+          cargo fmt --manifest-path rust/Cargo.toml --all
+          cargo test --manifest-path rust/Cargo.toml -p phenix-plugin-suite --lib
+          cargo test --manifest-path rust/Cargo.toml -p phenix-harness --lib
+          rm -f .github/workflows/worker-399-context-authority-fix.yml
+          rm .github/workflows/worker-399-suite-repair.yml
+          git diff --check
+      - name: Commit repaired semantic tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'feat: complete context and skill plugin service'
+          git push origin HEAD:feat/plugin-kernel-implementation
