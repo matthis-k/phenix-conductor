@@ -106,8 +106,8 @@ mod tests {
     use phenix_plugin_suite::{
         artifact_manifest, artifact_service, context_manifest, context_service,
         repository_work_queue_service, session_manifest, session_service, ArtifactCommand,
-        ArtifactProvenance, ArtifactResponse, ContextCommand, ContextResourceKind, ContextResponse,
-        ContextScope, RepositoryWorkSnapshot, SessionCommand, SessionResponse,
+        ArtifactProvenance, ArtifactResponse, ContextCommand, ContextDescriptor, ContextResourceKind,
+        ContextResponse, ContextScope, RepositoryWorkSnapshot, SessionCommand, SessionResponse,
     };
 
     fn plugin(value: &str) -> PluginId {
@@ -342,6 +342,48 @@ mod tests {
                 .invoke(&context_service(), &input, &Authority::default(), None)
                 .unwrap(),
             alternate
+        );
+    }
+
+    #[test]
+    fn mock_qml_context_provider_contributes_through_the_same_service_contract() {
+        let qml_descriptor = ContextDescriptor {
+            resource_id: "qml:Main.qml".into(),
+            revision: "qml-revision".into(),
+            kind: ContextResourceKind::External,
+            source: "Main.qml".into(),
+            scope: ContextScope::Workspace,
+            content_identity: "qml-revision".into(),
+            estimated_bytes: 128,
+        };
+        let response = serde_json::to_vec(&ContextResponse::Resources {
+            descriptors: vec![qml_descriptor.clone()],
+        })
+        .unwrap();
+        let response_factory = response.clone();
+        let mut builder = HarnessBuilder::new();
+        builder
+            .add_embedded(
+                service_manifest(
+                    "mock-qml-context",
+                    context_service(),
+                    200,
+                    Authority::default(),
+                ),
+                move || Box::new(FixedResponse(response_factory.clone())),
+            )
+            .unwrap();
+        let mut harness = builder.build().unwrap();
+        harness.activate().unwrap();
+        let input = serde_json::to_vec(&ContextCommand::List).unwrap();
+        let output = harness
+            .invoke(&context_service(), &input, &Authority::default(), None)
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ContextResponse>(&output).unwrap(),
+            ContextResponse::Resources {
+                descriptors: vec![qml_descriptor],
+            }
         );
     }
 
