@@ -78,9 +78,17 @@ pub struct CallableRecord {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum WorkerTaskState {
     Pending,
-    Running { execution_id: String },
-    Completed { execution_id: String, result_refs: Vec<String> },
-    Failed { execution_id: String, cause: String },
+    Running {
+        execution_id: String,
+    },
+    Completed {
+        execution_id: String,
+        result_refs: Vec<String>,
+    },
+    Failed {
+        execution_id: String,
+        cause: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -113,8 +121,13 @@ pub enum ExecutionCommand {
         id: String,
         requested_authority: ExecutionAuthority,
     },
-    GetExecution { id: String },
-    FinishExecution { id: String, success: bool },
+    GetExecution {
+        id: String,
+    },
+    FinishExecution {
+        id: String,
+        success: bool,
+    },
     RegisterCallable {
         id: String,
         service: String,
@@ -133,7 +146,10 @@ pub enum ExecutionCommand {
         requested_authority: ExecutionAuthority,
     },
     RunnableTasks,
-    StartTask { task_id: String, execution_id: String },
+    StartTask {
+        task_id: String,
+        execution_id: String,
+    },
     CompleteTask {
         task_id: String,
         execution_id: String,
@@ -144,7 +160,9 @@ pub enum ExecutionCommand {
         execution_id: String,
         cause: String,
     },
-    GetTask { id: String },
+    GetTask {
+        id: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -258,7 +276,10 @@ fn mutate(
     state: &mut ExecutionProjection,
 ) -> Result<ExecutionResponse, String> {
     match command {
-        ExecutionCommand::CreateExecution { id, requested_authority } => {
+        ExecutionCommand::CreateExecution {
+            id,
+            requested_authority,
+        } => {
             validate_identity("execution id", &id)?;
             ensure_new_execution(state, &id)?;
             let effective = ExecutionAuthority::from_authority(
@@ -375,7 +396,10 @@ fn mutate(
             let task_ids = runnable_tasks(state);
             Ok(ExecutionResponse::RunnableTasks { task_ids })
         }
-        ExecutionCommand::StartTask { task_id, execution_id } => {
+        ExecutionCommand::StartTask {
+            task_id,
+            execution_id,
+        } => {
             let task = state
                 .tasks
                 .get(&task_id)
@@ -403,7 +427,9 @@ fn mutate(
                 ));
             }
             if execution.authority != task.delegated_authority {
-                return Err(format!("worker execution authority does not match task: {task_id}"));
+                return Err(format!(
+                    "worker execution authority does not match task: {task_id}"
+                ));
             }
             let task = state.tasks.get_mut(&task_id).expect("task exists above");
             task.state = WorkerTaskState::Running {
@@ -438,7 +464,10 @@ fn mutate(
                 .get_mut(&task_id)
                 .ok_or_else(|| format!("unknown worker task: {task_id}"))?;
             require_running_execution(task, &execution_id)?;
-            task.state = WorkerTaskState::Failed { execution_id, cause };
+            task.state = WorkerTaskState::Failed {
+                execution_id,
+                cause,
+            };
             Ok(ExecutionResponse::Task { task: task.clone() })
         }
         ExecutionCommand::GetExecution { .. }
@@ -629,14 +658,20 @@ mod tests {
         let manifest = execution_manifest(caller_authority());
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
-        kernel.register_embedded_factory(plugin.clone(), execution_factory).unwrap();
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        kernel
+            .register_embedded_factory(plugin.clone(), execution_factory)
+            .unwrap();
         kernel.activate_all().unwrap();
         assert_eq!(kernel.state(&plugin), Some(PluginState::Active));
         kernel
     }
 
-    fn invoke(kernel: &mut Kernel, command: &ExecutionCommand) -> Result<ExecutionResponse, String> {
+    fn invoke(
+        kernel: &mut Kernel,
+        command: &ExecutionCommand,
+    ) -> Result<ExecutionResponse, String> {
         let output = kernel
             .invoke(
                 &execution_service(),
@@ -653,7 +688,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("phenix-{name}-{}-{nonce}.sqlite", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "phenix-{name}-{}-{nonce}.sqlite",
+            std::process::id()
+        ))
     }
 
     fn create(kernel: &mut Kernel, id: &str, requested: ExecutionAuthority) -> ExecutionRecord {

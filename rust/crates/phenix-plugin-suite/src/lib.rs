@@ -24,8 +24,9 @@ pub use execution::{
     WorkerTaskState, EXECUTION_SERVICE,
 };
 pub use planning::{
-    planning_factory, planning_manifest, planning_service, DecisionRecord, HistoryEntry, HistoryKind,
-    ObjectiveRecord, PlanRecord, PlanStep, PlanningCommand, PlanningResponse, PLANNING_SERVICE,
+    planning_factory, planning_manifest, planning_service, DecisionRecord, HistoryEntry,
+    HistoryKind, ObjectiveRecord, PlanRecord, PlanStep, PlanningCommand, PlanningResponse,
+    PLANNING_SERVICE,
 };
 pub use repository_workers::{
     ReconstructedPullRequest, RepositoryCheckState, RepositoryChecklistEvidence,
