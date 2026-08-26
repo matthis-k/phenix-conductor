@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-#[path = "../../phenix-conductor/src/repository_workers.rs"]
 mod repository_workers;
 
 pub use repository_workers::{
