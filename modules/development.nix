@@ -78,6 +78,12 @@
           label = "harness / supported_product_journeys";
         }
         {
+          id = "harness-process-roundtrip";
+          package = "phenix-harness";
+          test = "process_roundtrip";
+          label = "harness / process_roundtrip";
+        }
+        {
           id = "conductor-model-tool-loop";
           package = "phenix-conductor";
           test = "black_box_model_tool_loop";

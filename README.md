@@ -1,6 +1,6 @@
-# Phenix ACP
+# Phenix AI
 
-`phenix-acp` is the headless ACP protocol, conductor, and backend-orchestration repository for Phenix.
+This repository contains the Phenix kernel, replaceable first-party Plugin Suite, Harness product assembly, and protocol/backend adapters. The current GitHub repository name is temporary.
 
 The Neovim frontend lives separately in `matthis-k/phenix-nvim`. This repository does not own editor windows, input handling, transcript presentation, Neovim plugin packaging, or frontend-specific tests.
 
@@ -9,46 +9,41 @@ The project is under active architectural development. Prefer the current typed 
 ## Architecture
 
 ```text
-phenix-nvim / other ACP client
-            │
-            │ standard ACP + typed _phenix/* extensions
-            ▼
-┌──────────────────────────────┐
-│ phenix-conductor             │
-│                              │
-│ configuration revisions      │
-│ session trees + objectives   │
-│ routing + workflows          │
-│ aggregate lifecycle          │
-└──────────────┬───────────────┘
-               │ standard ACP + attached MCP-over-ACP
-               ▼
-┌──────────────────────────────┐
-│ phenix-acp-runtime (default)  │
-│ or another conforming agent  │
-└──────────────────────────────┘
+frontends / protocol adapters
+            |
+            v
+      phenix-harness
+      product policy
+            |
+            v
+      phenix-kernel
+ generic mechanisms only
+            |
+            v
+  selected plugin providers
+  Phenix Plugin Suite or alternatives
 ```
 
-`phenix-conductor` is the authoritative aggregate runtime. Northbound it exposes standard ACP plus typed `_phenix/*` extensions for aggregate concepts that standard ACP does not model. Southbound it is an ordinary ACP client.
+`phenix-kernel` owns plugin lifecycle, provider resolution, authority attenuation, generic persistence, events, and tasks. It does not own session, context, execution, planning, tool, model, frontend, or other agent-domain semantics.
 
-The `phenix-conductor` executable includes the Phenix-owned runtime behind the default-enabled `builtin-runtime` Cargo feature. It is launched as `phenix-conductor runtime`, speaks ordinary ACP, and owns provider credentials, provider/model projection, streaming inference, reasoning levels, permissions, and the model tool loop. A single permission-gated `phenix_terminal` tool provides workspace command execution; conductor-owned semantic tools arrive separately through MCP-over-ACP. Building `phenix-conductor --no-default-features` removes that implementation and leaves the generic conductor boundary intact for third-party ACP agents.
+`phenix-plugin-suite` implements the first-party Phenix services through the same contracts available to alternate plugins. `phenix-harness` selects the plugin set and product policy. Omitting a provider removes the service. Replacing a provider does not require a kernel change.
 
-A frontend may author configuration and request operations, but routing, workflows, session-tree state, downstream session ownership, lifecycle, and recovery remain conductor concerns.
+`phenix-conductor` remains in the workspace as migration source and compatibility coverage while the plugin migration is completed. It is not the supported product package and must not gain new domain ownership.
 
-For coordinator sessions, the conductor derives a fixed model-tool catalog (`phenix_delegate`, `phenix_workflow_list`, and `phenix_workflow_start`) from the immutable configuration revision. The internal `ToolProvision` binds revision, tree, node, and role authority out of band; model arguments never supply authoritative session identity. `phenix-acp-backend` exposes those semantic tools through the official ACP MCP attachment mechanism and rejects an incapable routed agent after `initialize` but before `session/new`. Delegated siblings receive no conductor tool catalog. Agent-specific compatibility remains the responsibility of that agent's ACP adapter.
+ACP is one protocol boundary. `phenix-acp` contains wire interoperability types; backend adapters translate ACP agents without becoming a second semantic runtime.
 
-## Rust boundaries
+### Rust boundaries
 
 | Crate | Responsibility |
 | --- | --- |
-| `phenix-acp` | Canonical Phenix protocol/domain types, source parsing, routing/workflow/session-tree abstractions |
-| `phenix-conductor` | Headless Phenix ACP server and authoritative aggregate runtime state |
-| `phenix-acp-backend` | Standard ACP client transport/adaptation for downstream agents |
-| `phenix-acp-runtime` | Default provider runtime, credential store, streaming agent loop, and MCP-over-ACP tool consumer |
-| `phenix-runtime-api` | Typed backend/runtime projection types used inside the headless runtime |
-| `phenix-acp-presets` | Deterministic fixture/preset machinery used by integration and product validation |
+| `phenix-kernel` | Generic plugin host, trust boundaries, persistence enforcement, events, tasks |
+| `phenix-plugin-suite` | Replaceable first-party Phenix services |
+| `phenix-harness` | Supported kernel + selected-plugin product assembly |
+| `phenix-acp` | ACP wire interoperability boundary |
+| `phenix-backend-acp` | ACP backend adapter |
+| `phenix-conductor` | Migration source and compatibility coverage until duplicate ownership is removed |
 
-There is intentionally no UI crate or Neovim plugin in this repository.
+There is no UI crate or Neovim plugin in this repository.
 
 ## Configuration
 
@@ -58,28 +53,26 @@ For the standard ACP projection, initialization order is explicit: `initialize`,
 
 The example authoring configuration under `config/phenix-harness/` is retained as an explicit application configuration. Its name is not the repository name.
 
-The conductor is mechanism, not policy. It validates and executes supplied backends, routing tables, workflows, and tool policy; it does not silently install preferred models, roles, or workflows.
+The kernel is mechanism, not Phenix policy. Harness composition and plugins own the selected product behavior.
 
 
 ### Project context and skills
 
-The conductor loads project context and skills as separate mechanisms for the working directory supplied with `--cwd`.
+Project context and skills are first-party Plugin Suite services. The context plugin owns discovery, exact content identity, injection history, and projection. The supported Harness reaches them through the ordinary kernel service contract. Kernel-only mode has no context or skill behavior.
 
-Project context is ambient instruction material. At startup the conductor resolves the repository root, loads `AGENTS.override.md` or `AGENTS.md` from the root through the selected working directory, and also loads root `CONTRIBUTING.md` and `DEVELOPMENT.md` when present. The resulting snapshot is frozen into the running conductor process rather than reread during a turn.
-
-Skills use the `SKILL.md` directory convention. Portable `.agents/skills`, Phenix `.phenix/skills` / `~/.config/phenix/skills`, and Cursor/Claude/Codex compatibility roots are discovered with project-local definitions taking precedence over user definitions. `PHENIX_SKILL_PATH` can add explicit roots. The conductor exposes only skill name and description to models until `phenix_skill_load` is called. `disable-model-invocation: true` is normalized as a manual-only policy and is enforced by the loader, while the complete catalog remains available to frontends through `get_skill_catalog`. A user can activate any known skill explicitly for one turn with `/skill <name> ...` or `/<name> ...`.
-
-Skill `allowed-tools` metadata is advisory only and never expands conductor tool permissions. Skill resources under `scripts/`, `references/`, and `assets/` are snapshotted at discovery and inventoried relative to the skill root. After a skill is active, `phenix_skill_resource_read` progressively exposes listed text resources without allowing path traversal or symlink escape; binary or oversized assets remain inventory-only. Executing scripts remains subject to the ordinary workspace/tool permission model.
+Project instructions remain ambient input. Discoverable project documents and skills are revisioned resources rather than configuration identity. Skill metadata never expands execution authority; script execution still uses ordinary workspace/tool authority.
 
 ## Packages
 
-The flake exposes the headless ACP products directly:
+The flake exposes the supported compositions directly:
 
-- `packages.<system>.phenix-conductor`;
-- `packages.<system>.phenix-acp-smoke`;
-- `packages.<system>.default` = `phenix-conductor`.
+- `packages.<system>.phenix-kernel`: kernel-only runtime;
+- `packages.<system>.phenix-harness`: default Harness composition;
+- `packages.<system>.phenix`: supported product alias for the Harness;
+- `lib.mkPhenixPlugin`: external/resource plugin packaging;
+- `lib.mkPhenix`: declarative kernel + plugin composition.
 
-The conductor package contains the default runtime; there is no second runtime package to install.
+The legacy conductor crate remains a migration source inside the Rust workspace. Product composition goes through `phenix-harness`.
 
 ## Built-in runtime authentication
 
@@ -115,6 +108,6 @@ maintenance fix
 maintenance all
 ```
 
-Validation is separated into source, Rust, integration/system, and realized ACP product boundaries. The product layer exercises the installed ACP/conductor artifacts; frontend behavior is tested in `phenix-nvim`.
+Validation is separated into source, Rust, integration/system, and realized product boundaries. The product layer exercises the installed Harness and plugin compositions; frontend behavior is tested in frontend repositories.
 
 See `DEVELOPMENT.md` for focused validation commands.

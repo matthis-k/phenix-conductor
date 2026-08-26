@@ -15,15 +15,14 @@ When documentation and code disagree, fix or remove the stale documentation in t
 
 ## Architecture discipline
 
-- `phenix-conductor` is the authoritative aggregate runtime and Phenix ACP server.
-- `phenix-acp` contains the canonical typed protocol/domain abstractions.
-- `phenix-acp-backend` adapts ordinary ACP agents through the official Rust SDK.
-- A running session tree has immutable configuration; multiple independently configured trees may coexist.
-- Standard ACP owns singular-agent behavior; typed `_phenix/*` extensions cover aggregate orchestration concepts ACP does not model.
-- Use nominal/typed identifiers and parse external data once at Rust boundaries. Do not propagate unchecked stringly state through the headless runtime.
-- Frontends are ACP clients. Frontend rendering, input handling, editor integration, and plugin packaging belong in their frontend repositories, currently `matthis-k/phenix-nvim` for Neovim.
+- `phenix-kernel` owns generic mechanisms, plugin hosting, persistence enforcement, authority attenuation, events, and tasks. It has no first-party agent-domain fallback.
+- `phenix-plugin-suite` owns Phenix-specific session, context, execution, planning, workspace, routing, language, frontend, hook, job, debug, and repository-worker semantics.
+- `phenix-harness` is the supported product assembly. It selects and configures plugins through ordinary kernel contracts.
+- `phenix-acp` is a wire/adaptation boundary. ACP types do not own application semantics or durable state.
+- `phenix-conductor` is migration source and compatibility code while #399 removes duplicated product ownership. Do not add new agent-domain ownership there.
+- Frontends remain clients. Rendering, input handling, editor integration, and frontend packaging belong in frontend repositories.
 
-There is one supported client-to-agent path: clients speak ACP to `phenix-conductor`. Do not add a second process protocol, backend selector, compatibility fallback, or duplicate orchestration implementation.
+The supported product path is kernel plus selected plugins through `phenix-harness`. Alternate or omitted services use the same plugin resolver; no kernel or compatibility registry may restore a missing first-party service.
 
 ## Change discipline
 
@@ -65,7 +64,7 @@ Validation is separated by boundary:
 - `maintenance test unit`: in-crate tests;
 - `maintenance test doc`: Rust documentation tests;
 - `maintenance test integration`: crate/API integration targets;
-- `maintenance test system`: black-box conductor/process/protocol tests;
+- `maintenance test system`: black-box Harness/process/protocol tests plus migration-only conductor coverage;
 - `maintenance test product`: realized ACP and package behavior.
 
 CI granularity is declarative. A CI-enabled maintenance command is a visible step; commands with the same `ci.stage` share a GitHub job, while distinct stages become distinct jobs. Prefer leaf commands when individual failure attribution is useful.

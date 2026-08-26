@@ -50,18 +50,18 @@ Kernel-only mode must boot and pass its own tests without loading any agent-doma
 
 Move current product semantics behind plugin contracts. A domain stays incomplete while the supported product still reaches its conductor-owned registry/state path.
 
-- [ ] sessions and session-tree behavior
-- [ ] artifacts, readers, read reuse, and invalidation
-- [ ] context and skills
-- [ ] tools, callables, execution, orchestration, and workers
-- [ ] planning/objectives/decisions/history behavior that exists in the current product
-- [ ] workspace and repository services
-- [ ] default CLI suite, including Git/GitHub/search/read/write/shell integration where applicable
-- [ ] model/provider/auth/routing services
-- [ ] language intelligence
-- [ ] frontend-facing services and projections
-- [ ] hooks and persistent jobs
-- [ ] debug/diagnostic services
+- [x] sessions and session-tree behavior
+- [x] artifacts, readers, read reuse, and invalidation
+- [x] context and skills
+- [x] tools, callables, execution, orchestration, and workers
+- [x] planning/objectives/decisions/history behavior that exists in the current product
+- [x] workspace and repository services
+- [x] default CLI suite, including Git/GitHub/search/read/write/shell integration where applicable
+- [x] model/provider/auth/routing services
+- [x] language intelligence
+- [x] frontend-facing services and projections
+- [x] hooks and persistent jobs
+- [x] debug/diagnostic services
 - [x] repository-driven worker handoff behavior
 
 Each first-party component uses the same contribution, resolution, authority, durable-data, event, and lifecycle contracts available to third-party plugins.
@@ -77,12 +77,12 @@ Each first-party component uses the same contribution, resolution, authority, du
 ### Nix packaging
 
 - [x] Expose a kernel package.
-- [ ] Expose the normal Harness package and keep `phenix` as the supported plugin-composed product package/alias.
+- [x] Expose the normal Harness package and keep `phenix` as the supported plugin-composed product package/alias.
 - [x] Add `lib.mkPhenixPlugin` for external/resource plugin packaging.
 - [x] Add `lib.mkPhenix` for declarative kernel + plugin composition.
 - [x] Keep the normal wrapper path available for the final Harness package.
 - [x] Add an explicit kernel-only profile.
-- [ ] Add packaging checks for embedded, external, resource-only, replacement, and kernel-only compositions.
+- [x] Add packaging checks for embedded, external, resource-only, replacement, and kernel-only compositions.
 
 ### Cleanup
 
@@ -108,7 +108,7 @@ Each first-party component uses the same contribution, resolution, authority, du
 - [x] session behavior is absent in kernel-only mode and present when the session plugin is loaded
 - [x] artifact read reuse/invalidation works through the artifact plugin
 - [x] CLI discovery/version/auth probes use the ordinary workspace service, reject arbitrary targets, and do not self-grant shell authority
-- [ ] Nix kernel-only, default Harness, and alternate-plugin compositions build
+- [x] Nix kernel-only, default Harness, and alternate-plugin compositions build
 - [ ] existing product/integration/system scenarios continue to pass through Harness assembly
 
 ## Validation
@@ -127,9 +127,9 @@ The PR is complete only when all applicable repository validation is green on th
 
 ## Current boundary
 
-The first-party Harness assembly now registers repository worker, sessions, artifacts, CLI probes, context, execution, language, planning, workspace, model routing, jobs, frontend services, hooks, and debug services through ordinary kernel manifests and factories. Focused Plugin Suite and Harness unit runs are green after repairing frontend test authority and the durable hook immutability assertion.
+The supported `phenix` product is `phenix-harness`, built from `phenix-kernel` plus selected plugins. The complete first-party Plugin Suite is available through ordinary kernel service contracts. Nix composition exercises default, selected-suite, external replacement, resource-only, omission, and kernel-only runtime behavior.
 
-The supported `phenix`/`phenix-harness` Nix package still maps to the legacy conductor binary, so these userspace services are not yet the canonical product path. The remaining migration must switch the product/runtime boundary before the domain checklist can be promoted.
+The remaining migration is compatibility removal and parity closure. The legacy conductor crate still owns duplicate domain registries/state and several canonical tests. Move or replace those journeys with Harness-owned coverage before removing the corresponding conductor paths and tables.
 
 ## Completion rule
 
