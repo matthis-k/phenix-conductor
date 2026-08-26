@@ -1,4 +1,4 @@
-use crate::{EventBus, KernelEvent};
+use crate::{Authority, EventBus, KernelEvent};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -9,13 +9,18 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
-pub struct CancellationToken {
+pub struct TaskContext {
     cancelled: Arc<AtomicBool>,
+    authority: Authority,
 }
 
-impl CancellationToken {
+impl TaskContext {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub fn authority(&self) -> &Authority {
+        &self.authority
     }
 }
 
@@ -67,19 +72,25 @@ impl TaskRuntime {
         Arc::clone(&self.events)
     }
 
-    pub fn spawn<T, F>(&self, worker: F) -> TaskHandle<T>
+    pub fn spawn<T, F>(
+        &self,
+        parent_authority: &Authority,
+        requested_authority: &Authority,
+        worker: F,
+    ) -> TaskHandle<T>
     where
         T: Send + 'static,
-        F: FnOnce(CancellationToken) -> T + Send + 'static,
+        F: FnOnce(TaskContext) -> T + Send + 'static,
     {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let cancelled = Arc::new(AtomicBool::new(false));
-        let token = CancellationToken {
+        let context = TaskContext {
             cancelled: Arc::clone(&cancelled),
+            authority: parent_authority.attenuate(requested_authority),
         };
         let (sender, receiver) = mpsc::sync_channel(1);
         let join = thread::spawn(move || {
-            let output = worker(token);
+            let output = worker(context);
             let _ = sender.send(output);
         });
 
@@ -96,16 +107,22 @@ impl TaskRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CapabilityId;
     use std::thread;
+
+    fn capability(value: &str) -> CapabilityId {
+        CapabilityId::parse(value).unwrap()
+    }
 
     #[test]
     fn blocking_cancellation_is_observable() {
         let runtime = TaskRuntime::default();
         let events = runtime.events();
         let event_receiver = events.subscribe();
+        let authority = Authority::default();
 
-        let handle = runtime.spawn(|token| {
-            while !token.is_cancelled() {
+        let handle = runtime.spawn(&authority, &authority, |context| {
+            while !context.is_cancelled() {
                 thread::yield_now();
             }
             42
@@ -118,5 +135,23 @@ mod tests {
             KernelEvent::TaskCancelled(id)
         );
         assert_eq!(handle.join().unwrap(), 42);
+    }
+
+    #[test]
+    fn blocking_task_authority_is_attenuated_from_parent() {
+        let runtime = TaskRuntime::default();
+        let read = capability("fs.read");
+        let write = capability("fs.write");
+        let parent = Authority::new([read.clone()]);
+        let requested = Authority::new([read.clone(), write.clone()]);
+
+        let handle = runtime.spawn(&parent, &requested, move |context| {
+            (
+                context.authority().permits(&read),
+                context.authority().permits(&write),
+            )
+        });
+
+        assert_eq!(handle.join().unwrap(), (true, false));
     }
 }
