@@ -159,7 +159,10 @@ mod tests {
         let mut harness = PhenixHarness::kernel_only();
         harness.activate().unwrap();
         assert_eq!(harness.kernel().config().manifests().count(), 0);
-        let input = serde_json::to_vec(&SessionCommand::Get { id: "missing".into() }).unwrap();
+        let input = serde_json::to_vec(&SessionCommand::Get {
+            id: "missing".into(),
+        })
+        .unwrap();
         assert!(harness
             .invoke(&session_service(), &input, &session_authority(), None)
             .is_err());

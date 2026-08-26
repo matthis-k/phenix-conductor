@@ -20,16 +20,9 @@ pub struct SessionRecord {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum SessionCommand {
-    Create {
-        id: String,
-        parent: Option<String>,
-    },
-    Get {
-        id: String,
-    },
-    Children {
-        parent: Option<String>,
-    },
+    Create { id: String, parent: Option<String> },
+    Get { id: String },
+    Children { parent: Option<String> },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -174,7 +167,10 @@ fn read_session(host: &PluginHost<'_>, id: &str) -> Result<Option<SessionRecord>
         .transpose()
 }
 
-fn read_children(host: &PluginHost<'_>, parent: Option<&str>) -> Result<Vec<SessionRecord>, String> {
+fn read_children(
+    host: &PluginHost<'_>,
+    parent: Option<&str>,
+) -> Result<Vec<SessionRecord>, String> {
     let value = host
         .read_durable(&session_namespace(), &children_key(parent))
         .map_err(|error| error.to_string())?;
@@ -207,7 +203,11 @@ fn children_key(parent: Option<&str>) -> String {
 mod tests {
     use super::*;
     use phenix_kernel::{Kernel, KernelConfig, LocalPersistence, PersistenceBackend};
-    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn authority() -> Authority {
         session_manifest().maximum_authority
@@ -225,7 +225,8 @@ mod tests {
         let manifest = session_manifest();
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
         kernel
             .register_embedded_factory(plugin, session_factory)
             .unwrap();
@@ -238,7 +239,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("phenix-{name}-{}-{nonce}.sqlite", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "phenix-{name}-{}-{nonce}.sqlite",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -296,10 +300,8 @@ mod tests {
         persistence
             .register_schema(&plugin, &DurableSchema::new(namespace, 2))
             .unwrap();
-        let mut kernel = Kernel::with_persistence(
-            KernelConfig::new([manifest]).unwrap(),
-            persistence,
-        );
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
         kernel
             .register_embedded_factory(plugin, session_factory)
             .unwrap();
