@@ -80,10 +80,30 @@ _: {
         '';
       };
 
-      # Until the first-party suite has moved behind kernel plugin contracts, the
-      # supported Harness package remains the existing product binary. The package
-      # name is stable now; the implementation behind it changes in this PR.
-      phenixHarness = phenixConductor;
+      phenixHarness = pkgs.rustPlatform.buildRustPackage {
+        pname = "phenix-harness";
+        version = "0";
+        src = rustSource;
+
+        cargoLock.lockFile = ../rust/Cargo.lock;
+        cargoBuildFlags = [
+          "--package"
+          "phenix-harness"
+          "--bin"
+          "phenix-harness"
+        ];
+        doCheck = false;
+
+        installPhase = ''
+          runHook preInstall
+          mkdir -p "$out/bin"
+          harness_binary="$(find target -path '*/release/phenix-harness' -type f -print -quit)"
+          test -n "$harness_binary"
+          cp "$harness_binary" "$out/bin/phenix-harness"
+          ln -s phenix-harness "$out/bin/phenix"
+          runHook postInstall
+        '';
+      };
 
       phenixAcpSmoke = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-acp-smoke";
@@ -114,75 +134,42 @@ _: {
           {
             nativeBuildInputs = [
               phenixAcpSmoke
-              pkgs.gnugrep
+              phenixHarness
               pkgs.jq
             ];
           }
           ''
             phenix-acp-smoke
 
-            conductor="${phenixHarness}/bin/phenix-conductor"
-            "$conductor" --help > "$TMPDIR/conductor-help.txt"
-            grep -F -- '--acp-command' "$TMPDIR/conductor-help.txt" >/dev/null
+            export PHENIX_STATE_DB="$TMPDIR/harness.sqlite"
+            phenix-harness --list-services > "$TMPDIR/services.json"
+            jq -e '
+              (.plugins | length == 14)
+              and (.services | index("phenix.sessions@1") != null)
+              and (.services | index("phenix.context@1") != null)
+              and (.services | index("phenix.execution@1") != null)
+              and (.services | index("phenix.repository.worker-queue@1") != null)
+            ' "$TMPDIR/services.json" >/dev/null
 
-            export PHENIX_CREDENTIAL_FILE="$TMPDIR/credentials.json"
-            export PHENIX_MODEL="openai-codex/product-smoke-model"
-            export XDG_STATE_HOME="$TMPDIR/state"
-            response="$TMPDIR/conductor.jsonl"
-            {
-              printf '%s\n' '{"id":1,"command":{"type":"initialize","after_sequence":null}}'
-              printf '%s\n' '{"id":2,"command":{"type":"create_session","parent_session":null,"name":"product smoke","target":{"kind":"fixed","value":{"backend":"phenix","provider":"openai-codex","model":"product-smoke-model","inference":{}}}}}'
-              printf '%s\n' '{"id":3,"command":{"type":"get_callable_catalog"}}'
-            } | "$conductor" > "$response"
+            printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"create","id":"product-smoke","parent":null}}' \
+              | phenix-harness > "$TMPDIR/create.json"
+            cat "$TMPDIR/create.json"
+            jq -e '
+              .id == 1
+              and .status == "ok"
+              and .output.result == "created"
+              and .output.session.id == "product-smoke"
+            ' "$TMPDIR/create.json" >/dev/null
 
-            jq -s -e '
-              ([
-                .[]
-                | select(
-                    .type == "response"
-                    and .id == 1
-                    and .status == "ok"
-                    and .result.type == "initialized"
-                  )
-                | .result.backends[]
-                | select(.backend == "phenix")
-                | .models[]
-                | select(
-                    .target.backend == "phenix"
-                    and .target.provider == "openai-codex"
-                    and .target.model == "product-smoke-model"
-                  )
-              ] | length == 1)
-              and ([
-                .[]
-                | select(
-                    .type == "response"
-                    and .id == 2
-                    and .status == "ok"
-                    and .result.type == "session"
-                  )
-                | .result.session
-                | select(
-                    .default_target.kind == "fixed"
-                    and .default_target.value.backend == "phenix"
-                    and .default_target.value.provider == "openai-codex"
-                    and .default_target.value.model == "product-smoke-model"
-                    and .default_target.value.inference.effort == null
-                  )
-              ] | length == 1)
-              and ([
-                .[]
-                | select(
-                    .type == "response"
-                    and .id == 3
-                    and .status == "ok"
-                    and .result.type == "callable_catalog"
-                  )
-                | .result.callables[]
-                | select(.kind == "tool" and (.id == "bash" or .id == "edit" or .id == "grep" or .id == "read" or .id == "write"))
-                | .id
-              ] | sort == ["bash", "edit", "grep", "read", "write"])
-            ' "$response" >/dev/null
+            printf '%s\n' '{"id":2,"service":"phenix.sessions@1","input":{"operation":"get","id":"product-smoke"}}' \
+              | phenix-harness > "$TMPDIR/restore.json"
+            cat "$TMPDIR/restore.json"
+            jq -e '
+              .id == 2
+              and .status == "ok"
+              and .output.result == "session"
+              and .output.session.id == "product-smoke"
+            ' "$TMPDIR/restore.json" >/dev/null
 
             touch "$out"
           '';
@@ -200,9 +187,9 @@ _: {
       apps = {
         phenix-kernel.program = "${phenixKernel}/bin/phenix-kernel";
         phenix-conductor.program = "${phenixConductor}/bin/phenix-conductor";
-        phenix-harness.program = "${phenixHarness}/bin/phenix-conductor";
-        phenix.program = "${phenixHarness}/bin/phenix-conductor";
-        default.program = "${phenixHarness}/bin/phenix-conductor";
+        phenix-harness.program = "${phenixHarness}/bin/phenix-harness";
+        phenix.program = "${phenixHarness}/bin/phenix";
+        default.program = "${phenixHarness}/bin/phenix";
       };
 
       checks = {

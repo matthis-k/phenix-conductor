@@ -1,7 +1,4 @@
-use crate::{
-    execution_factory, execution_manifest, execution_service, ExecutionAuthority, ExecutionCommand,
-    ExecutionResponse, ExecutionState,
-};
+use crate::{execution_service, ExecutionCommand, ExecutionResponse, ExecutionState};
 use phenix_kernel::{
     Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
@@ -582,6 +579,7 @@ fn parent_path(path: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{execution_factory, execution_manifest, ExecutionAuthority};
     use phenix_kernel::{Kernel, KernelConfig, LocalPersistence, PluginState};
     use std::{
         fs,

@@ -532,10 +532,9 @@ fn checklist_item(line: &str) -> Option<(bool, &str)> {
     let trimmed = line.trim_start();
     let (checked, rest) = if let Some(rest) = trimmed.strip_prefix("- [x] ") {
         (true, rest)
-    } else if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
-        (false, rest)
     } else {
-        return None;
+        let rest = trimmed.strip_prefix("- [ ] ")?;
+        (false, rest)
     };
     Some((checked, rest.trim()))
 }

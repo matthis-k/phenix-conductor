@@ -223,7 +223,7 @@ impl HookPlugin {
             let causal_key = (causality_id, hook.id.clone());
             if !self.active.insert(causal_key.clone()) {
                 let message = format!("causal hook re-entry blocked: {}", hook.id);
-                handle_failure(&hook, message, &mut dispatch)?;
+                handle_failure(hook, message, &mut dispatch)?;
                 continue;
             }
             let result = execute_action(host, hook, execution_id, &mut dispatch);

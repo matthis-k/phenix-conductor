@@ -1,6 +1,6 @@
 use phenix_kernel::{
-    Authority, CapabilityId, Kernel, KernelConfig, KernelError, PluginExecution, PluginId,
-    PluginInstance, PluginManifest,
+    Authority, CapabilityId, Kernel, KernelConfig, KernelError, PersistenceBackend,
+    PluginExecution, PluginId, PluginInstance, PluginManifest,
 };
 use phenix_plugin_suite::{
     artifact_factory, artifact_manifest, cli_factory, cli_manifest, context_factory,
@@ -14,7 +14,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
 
-fn default_suite_authority() -> Authority {
+pub fn default_suite_authority() -> Authority {
     Authority::new([
         CapabilityId::parse("kernel.persistence.schema").expect("static capability"),
         CapabilityId::parse("kernel.persistence.read").expect("static capability"),
@@ -89,6 +89,18 @@ impl HarnessBuilder {
         }
         Ok(PhenixHarness { kernel })
     }
+
+    pub fn build_with_persistence(
+        self,
+        persistence: impl PersistenceBackend + 'static,
+    ) -> Result<PhenixHarness, KernelError> {
+        let config = KernelConfig::new(self.manifests)?;
+        let mut kernel = Kernel::with_persistence(config, persistence);
+        for (plugin, factory) in self.embedded_factories {
+            kernel.register_embedded_factory(plugin, move || factory())?;
+        }
+        Ok(PhenixHarness { kernel })
+    }
 }
 
 pub struct PhenixHarness {
@@ -116,6 +128,12 @@ impl PhenixHarness {
 
     pub fn default_suite() -> Result<Self, KernelError> {
         HarnessBuilder::with_default_suite()?.build()
+    }
+
+    pub fn default_suite_with_persistence(
+        persistence: impl PersistenceBackend + 'static,
+    ) -> Result<Self, KernelError> {
+        HarnessBuilder::with_default_suite()?.build_with_persistence(persistence)
     }
 
     pub fn invoke(
