@@ -104,7 +104,7 @@ pub enum ArtifactCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "result", rename_all = "snake_case")]
+#[serde(tag = "response", rename_all = "snake_case")]
 pub enum ArtifactResponse {
     Stored {
         artifact: ArtifactRecord,

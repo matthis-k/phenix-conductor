@@ -353,14 +353,18 @@ fn discover_repository(
         let Some(kind) = project_file_kind(&source.path) else {
             continue;
         };
-        let scope = match parent_path(&source.path) {
-            Some(parent) if !parent.is_empty() => ContextScope::PathPrefix(parent.to_owned()),
-            _ => ContextScope::Workspace,
+        let scope = match kind {
+            ContextResourceKind::Skill => ContextScope::Workspace,
+            _ => match parent_path(&source.path) {
+                Some(parent) if !parent.is_empty() => ContextScope::PathPrefix(parent.to_owned()),
+                _ => ContextScope::Workspace,
+            },
         };
         let prefix = match kind {
             ContextResourceKind::ProjectInstruction => "project-instruction",
             ContextResourceKind::ProjectDocument => "project-document",
-            ContextResourceKind::Skill | ContextResourceKind::External => unreachable!(),
+            ContextResourceKind::Skill => "skill",
+            ContextResourceKind::External => unreachable!(),
         };
         let resource = register_resource(
             host,
@@ -384,6 +388,7 @@ fn project_file_kind(path: &str) -> Option<ContextResourceKind> {
     match file_name(path) {
         "AGENTS.md" | "AGENTS.override.md" => Some(ContextResourceKind::ProjectInstruction),
         "CONTRIBUTING.md" | "DEVELOPMENT.md" => Some(ContextResourceKind::ProjectDocument),
+        "SKILL.md" => Some(ContextResourceKind::Skill),
         _ => None,
     }
 }
@@ -671,6 +676,10 @@ mod tests {
                             content: b"contribute".to_vec(),
                         },
                         RepositoryContextSource {
+                            path: "skills/review/SKILL.md".into(),
+                            content: b"review skill".to_vec(),
+                        },
+                        RepositoryContextSource {
                             path: "README.md".into(),
                             content: b"not automatic context".to_vec(),
                         },
@@ -679,7 +688,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(first.len(), 3);
+        assert_eq!(first.len(), 4);
         assert!(first.iter().any(|descriptor| {
             descriptor.kind == ContextResourceKind::ProjectInstruction
                 && descriptor.source == "AGENTS.md"
@@ -689,6 +698,11 @@ mod tests {
             descriptor.kind == ContextResourceKind::ProjectInstruction
                 && descriptor.source == "crates/ui/AGENTS.override.md"
                 && descriptor.scope == ContextScope::PathPrefix("crates/ui".into())
+        }));
+        assert!(first.iter().any(|descriptor| {
+            descriptor.kind == ContextResourceKind::Skill
+                && descriptor.source == "skills/review/SKILL.md"
+                && descriptor.scope == ContextScope::Workspace
         }));
 
         let contributing = first
@@ -740,10 +754,10 @@ mod tests {
         );
         assert!(!manifest
             .maximum_authority
-            .contains(&capability("workspace.write")));
+            .permits(&capability("workspace.write")));
         assert!(!manifest
             .maximum_authority
-            .contains(&capability("network.outbound")));
+            .permits(&capability("network.outbound")));
 
         let mut kernel = kernel_with(&path);
         let registered = invoke(
