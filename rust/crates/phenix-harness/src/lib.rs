@@ -104,8 +104,8 @@ mod tests {
     use phenix_kernel::{CapabilityId, ServiceContribution, ServiceId};
     use phenix_plugin_suite::{
         artifact_manifest, artifact_service, repository_work_queue_service, session_manifest,
-        session_service, ArtifactCommand, ArtifactResponse, RepositoryWorkSnapshot, SessionCommand,
-        SessionResponse,
+        session_service, ArtifactCommand, ArtifactProvenance, ArtifactResponse,
+        RepositoryWorkSnapshot, SessionCommand, SessionResponse,
     };
 
     fn plugin(value: &str) -> PluginId {
@@ -238,9 +238,13 @@ mod tests {
         ));
 
         let store = serde_json::to_vec(&ArtifactCommand::Store {
-            id: "read:README.md".into(),
-            content_identity: "sha256:readme".into(),
             content: b"readme".to_vec(),
+            provenance: ArtifactProvenance {
+                producer: "harness-smoke".into(),
+                provider_identity: None,
+                configuration_identity: None,
+                source_observations: BTreeMap::new(),
+            },
         })
         .unwrap();
         let response = harness

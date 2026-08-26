@@ -5,8 +5,9 @@ mod repository_workers;
 mod sessions;
 
 pub use artifacts::{
-    artifact_factory, artifact_manifest, artifact_service, ArtifactCommand, ArtifactRecord,
-    ArtifactResponse, ARTIFACT_SERVICE,
+    artifact_factory, artifact_manifest, artifact_service, ArtifactCommand, ArtifactProvenance,
+    ArtifactRecord, ArtifactResponse, NormalizedReadRequest, ReadProviderIdentity,
+    ReadResultRecord, RevalidationRecord, RevalidationVerdict, ARTIFACT_SERVICE,
 };
 pub use repository_workers::{
     ReconstructedPullRequest, RepositoryCheckState, RepositoryChecklistEvidence,
