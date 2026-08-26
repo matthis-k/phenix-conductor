@@ -2,7 +2,9 @@ use phenix_kernel::{
     Authority, Kernel, KernelConfig, KernelError, PluginExecution, PluginId, PluginInstance,
     PluginManifest,
 };
-use phenix_plugin_suite::{repository_worker_factory, repository_worker_manifest};
+use phenix_plugin_suite::{
+    repository_worker_factory, repository_worker_manifest, session_factory, session_manifest,
+};
 use std::{collections::BTreeMap, sync::Arc};
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
@@ -21,6 +23,7 @@ impl HarnessBuilder {
     pub fn with_default_suite() -> Result<Self, KernelError> {
         let mut builder = Self::new();
         builder.add_embedded(repository_worker_manifest(), repository_worker_factory)?;
+        builder.add_embedded(session_manifest(), session_factory)?;
         Ok(builder)
     }
 
@@ -96,15 +99,26 @@ impl PhenixHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_kernel::{ServiceContribution, ServiceId};
-    use phenix_plugin_suite::{repository_work_queue_service, RepositoryWorkSnapshot};
+    use phenix_kernel::{CapabilityId, ServiceContribution, ServiceId};
+    use phenix_plugin_suite::{
+        repository_work_queue_service, session_manifest, session_service, RepositoryWorkSnapshot,
+        SessionCommand, SessionResponse,
+    };
 
     fn plugin(value: &str) -> PluginId {
         PluginId::parse(value).unwrap()
     }
 
+    fn capability(value: &str) -> CapabilityId {
+        CapabilityId::parse(value).unwrap()
+    }
+
     fn service() -> ServiceId {
         ServiceId::parse("fixture.echo@1").unwrap()
+    }
+
+    fn session_authority() -> Authority {
+        session_manifest().maximum_authority
     }
 
     fn manifest(id: &str, priority: i32) -> PluginManifest {
@@ -145,13 +159,17 @@ mod tests {
         let mut harness = PhenixHarness::kernel_only();
         harness.activate().unwrap();
         assert_eq!(harness.kernel().config().manifests().count(), 0);
+        let input = serde_json::to_vec(&SessionCommand::Get { id: "missing".into() }).unwrap();
+        assert!(harness
+            .invoke(&session_service(), &input, &session_authority(), None)
+            .is_err());
     }
 
     #[test]
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 1);
+        assert_eq!(harness.kernel().config().manifests().count(), 2);
 
         let input = serde_json::to_vec(&RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
@@ -169,6 +187,19 @@ mod tests {
                 .unwrap(),
             b"null"
         );
+
+        let create = serde_json::to_vec(&SessionCommand::Create {
+            id: "session-1".into(),
+            parent: None,
+        })
+        .unwrap();
+        let response = harness
+            .invoke(&session_service(), &create, &session_authority(), None)
+            .unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<SessionResponse>(&response).unwrap(),
+            SessionResponse::Created { .. }
+        ));
     }
 
     #[test]
@@ -222,5 +253,14 @@ mod tests {
             1,
             "omitted plugins do not exist as kernel fallbacks"
         );
+    }
+
+    #[test]
+    fn session_plugin_requires_only_its_persistence_authority() {
+        let authority = session_authority();
+        assert!(authority.permits(&capability("kernel.persistence.schema")));
+        assert!(authority.permits(&capability("kernel.persistence.read")));
+        assert!(authority.permits(&capability("kernel.persistence.write")));
+        assert!(!authority.permits(&capability("fs.write")));
     }
 }
