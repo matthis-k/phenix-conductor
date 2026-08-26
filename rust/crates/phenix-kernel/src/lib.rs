@@ -17,6 +17,8 @@ mod tasks;
 #[cfg(test)]
 extern crate self as phenix_kernel;
 #[cfg(test)]
+mod host_authority_regression;
+#[cfg(test)]
 #[path = "../tests/persistence_backend_conformance.rs"]
 mod persistence_backend_conformance;
 
