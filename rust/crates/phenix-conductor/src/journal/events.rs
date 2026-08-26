@@ -116,6 +116,32 @@ pub enum DomainEvent {
         execution_id: ExecutionId,
         profile_id: WorkerProfileId,
     },
+    TerminalCreated {
+        terminal: crate::TerminalRecord,
+    },
+    JobCreated {
+        job: crate::JobRecord,
+    },
+    TerminalStateChanged {
+        terminal_id: crate::TerminalId,
+        state: crate::DurableProcessState,
+    },
+    JobStateChanged {
+        job_id: crate::JobId,
+        state: crate::DurableProcessState,
+    },
+    JobPromoted {
+        job_id: crate::JobId,
+        workspace_id: WorkspaceId,
+    },
+    TerminalOutputRecorded {
+        terminal_id: crate::TerminalId,
+        output: ExactReference,
+    },
+    JobOutputRecorded {
+        job_id: crate::JobId,
+        output: ExactReference,
+    },
     RootSubmissionAccepted {
         session_id: SessionId,
         execution_id: ExecutionId,

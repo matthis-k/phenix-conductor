@@ -80,6 +80,15 @@ fn insert_event(
                 params![execution_id.to_string(), profile_id.to_string(), sequence],
             )?;
         }
+        DomainEvent::TerminalCreated { .. }
+        | DomainEvent::JobCreated { .. }
+        | DomainEvent::TerminalStateChanged { .. }
+        | DomainEvent::JobStateChanged { .. }
+        | DomainEvent::JobPromoted { .. }
+        | DomainEvent::TerminalOutputRecorded { .. }
+        | DomainEvent::JobOutputRecorded { .. } => {
+            insert_process_resource_event(transaction, sequence, event)?;
+        }
         DomainEvent::RootSubmissionAccepted {
             session_id,
             execution_id,

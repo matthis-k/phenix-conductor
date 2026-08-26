@@ -82,6 +82,7 @@ fn load_event(
                     .map_err(|_| invalid("database contains an invalid worker profile"))?,
             })
         }
+        "terminal_created" | "job_created" | "terminal_state_changed" | "job_state_changed" | "job_promoted" | "terminal_output_recorded" | "job_output_recorded" => load_process_resource_event(connection, sequence, event_type),
         "root_submission_accepted" => {
             let (session, execution, ingress) = connection.query_row(
                 "SELECT session_id, execution_id, ingress_order

@@ -30,7 +30,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 13;
+const DATABASE_SCHEMA_VERSION: i64 = 14;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -237,6 +237,8 @@ impl ConductorRuntime {
                 current_config_revision: &mut runtime.config_revision,
                 sessions: &mut runtime.sessions,
                 executions: &mut runtime.executions,
+                terminals: &mut runtime.terminals,
+                jobs: &mut runtime.jobs,
                 root_ingress: &mut runtime.root_ingress,
                 next_root_ingress: &mut runtime.next_root_ingress,
                 attempt_groups: &mut runtime.attempt_groups,
@@ -254,6 +256,8 @@ impl ConductorRuntime {
                 next_session: &mut runtime.next_session,
                 next_execution: &mut runtime.next_execution,
                 next_attempt_group: &mut runtime.next_attempt_group,
+                next_terminal: &mut runtime.next_terminal,
+                next_job: &mut runtime.next_job,
                 next_event: &mut runtime.next_event,
                 next_tool_call: &mut runtime.next_tool_call,
             };
@@ -284,6 +288,7 @@ include!("relational/authority.rs");
 include!("relational/context.rs");
 include!("relational/events.rs");
 include!("relational/objectives.rs");
+include!("relational/process_resources.rs");
 include!("relational/read_events.rs");
 include!("relational/read_events_2.rs");
 include!("relational/read_events_3.rs");

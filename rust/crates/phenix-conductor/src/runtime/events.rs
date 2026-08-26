@@ -18,6 +18,8 @@ impl ConductorRuntime {
                 current_config_revision: &mut self.config_revision,
                 sessions: &mut self.sessions,
                 executions: &mut self.executions,
+                terminals: &mut self.terminals,
+                jobs: &mut self.jobs,
                 root_ingress: &mut self.root_ingress,
                 next_root_ingress: &mut self.next_root_ingress,
                 attempt_groups: &mut self.attempt_groups,
@@ -35,6 +37,8 @@ impl ConductorRuntime {
                 next_session: &mut self.next_session,
                 next_execution: &mut self.next_execution,
                 next_attempt_group: &mut self.next_attempt_group,
+                next_terminal: &mut self.next_terminal,
+                next_job: &mut self.next_job,
                 next_event: &mut self.next_event,
                 next_tool_call: &mut self.next_tool_call,
             };

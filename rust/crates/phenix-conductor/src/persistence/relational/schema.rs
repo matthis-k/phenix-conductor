@@ -59,6 +59,10 @@ fn migrate(connection: &mut Connection) -> Result<(), PersistenceError> {
             13,
             include_str!("../../../migrations/0013_decisions_history.sql"),
         ),
+        (
+            14,
+            include_str!("../../../migrations/0014_process_resources.sql"),
+        ),
     ] {
         if version < target {
             apply_migration(connection, target, sql)?;
