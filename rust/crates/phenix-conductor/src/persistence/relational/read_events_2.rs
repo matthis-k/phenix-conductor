@@ -490,6 +490,12 @@ fn load_event(
         | "execution_plan_assigned" => {
             plan_relational::load_event(connection, sequence, event_type)
         }
+        "decision_draft_created"
+        | "decision_draft_revised"
+        | "decision_recorded"
+        | "decision_applicability_assessed" => {
+            decision_relational::load_event(connection, sequence, event_type)
+        }
         "invocation_resolved" => load_invocation_resolved(connection, sequence),
         "workspace_checkpoint_captured" => load_checkpoint(connection, sequence),
         "workspace_file_observed" => load_observation(connection, sequence),

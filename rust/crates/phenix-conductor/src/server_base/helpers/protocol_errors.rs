@@ -1,4 +1,4 @@
-use crate::WorkerProfileError;
+use crate::{DecisionError, WorkerProfileError};
 
 fn protocol_error(code: ErrorCode, message: impl Into<String>) -> ProtocolError {
     ProtocolError {
@@ -195,6 +195,24 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         ConductorError::Context(error) => {
             protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }
+        ConductorError::Decision(error) => match error {
+            DecisionError::UnknownDecision(_)
+            | DecisionError::UnknownDependency(_)
+            | DecisionError::UnknownObjective(_)
+            | DecisionError::UnknownCreatorExecution(_) => {
+                protocol_error(ErrorCode::UnknownId, error.to_string())
+            }
+            DecisionError::InvalidText(_)
+            | DecisionError::DependencyCycle(_)
+            | DecisionError::InvalidRelation(_)
+            | DecisionError::DecisionReferenceNotRecorded(_)
+            | DecisionError::RecordedDecisionIsImmutable(_)
+            | DecisionError::RevisionConflict { .. }
+            | DecisionError::DecisionAlreadyRecorded(_)
+            | DecisionError::DecisionNotRecorded(_) => {
+                protocol_error(ErrorCode::InvalidRequest, error.to_string())
+            }
+        },
         ConductorError::Objective(error) => match error {
             ObjectiveError::UnknownObjective(_)
             | ObjectiveError::UnknownCriterion { .. }

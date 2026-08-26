@@ -57,6 +57,10 @@ pub(crate) fn apply_domain_event(
         | DomainEvent::PlanDraftRevised { .. }
         | DomainEvent::PlanStateChanged { .. }
         | DomainEvent::PlanStepStateChanged { .. }
-        | DomainEvent::ExecutionPlanAssigned { .. } => Ok(()),
+        | DomainEvent::ExecutionPlanAssigned { .. }
+        | DomainEvent::DecisionDraftCreated { .. }
+        | DomainEvent::DecisionDraftRevised { .. }
+        | DomainEvent::DecisionRecorded { .. }
+        | DomainEvent::DecisionApplicabilityAssessed { .. } => Ok(()),
     }
 }

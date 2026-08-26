@@ -286,3 +286,12 @@ Plan creation, draft revision, enactment, lifecycle transitions, and execution-s
 ### Context budgeting and compaction
 
 The conductor owns per-execution context budgeting, pressure decisions, and durable checkpoints. Category demand comes from the canonical execution context projection. Deterministic pruning runs before model-backed compaction. The compactor receives a typed immutable request and returns a typed summary; it receives no runtime, workspace, tool, or semantic mutation authority. Checkpoints persist exact raw journal ranges and retained exact references. Repeated compaction may consume the previous summary, but it carries the union of raw covered ranges forward. Backend context overflow enters the same explicit management path before a bounded retry. Token pressure never creates child executions by itself.
+
+
+## Durable decisions and searchable history
+
+The conductor owns semantic decisions as durable workspace state. A draft may be revised, but recording freezes its historical identity. Later changes use a new decision with an explicit supersedes or reverts relation. Decision dependencies use a validated acyclic graph. Evidence uses typed exact references.
+
+Decision events are canonical. SQLite stores normalized event data and rebuildable FTS search data. The FTS index is derived and may be rebuilt without changing journal or relational decision state. History search defaults to the current objective and its ancestors. Whole-workspace search is an explicit scope.
+
+Recorded decisions are discoverable context resources. The existing context catalog exposes descriptors first, and the canonical context load path resolves the exact decision body. No separate decision prompt registry exists.

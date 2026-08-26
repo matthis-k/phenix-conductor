@@ -10,6 +10,9 @@ pub use objectives::*;
 #[path = "plans.rs"]
 mod plans;
 pub use plans::*;
+#[path = "decisions.rs"]
+mod decisions;
+pub use decisions::*;
 
 use crate::{CallableId, CapabilitySet, ExecutionId, InvalidId, WorkspaceId};
 use serde::{Deserialize, Serialize};
@@ -48,6 +51,7 @@ macro_rules! workspace_id_type {
 
 workspace_id_type!(ObjectiveId);
 workspace_id_type!(ObjectiveCriterionId);
+workspace_id_type!(DecisionId);
 
 pub const CAPABILITY_FILESYSTEM_READ: &str = "filesystem.read";
 pub const CAPABILITY_FILESYSTEM_WRITE: &str = "filesystem.write";

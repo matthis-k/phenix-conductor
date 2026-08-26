@@ -5,9 +5,9 @@ use crate::{
 use phenix_core::{
     CallableId, ConfigRevisionId, ContextInjection, ContextInjectionLifetime,
     ContextInjectionRequester, ContextResourceId, ContextResourceKind, ContextResourceRevision,
-    ContextRevision, ContextScope, ContextTier, ExactReference, ExecutionId, ExecutionState,
-    ExecutionSummary, FileObservation, LanguageObservation, ObjectiveRecord, PlanRecord, SessionId,
-    SkillInvocationPolicy,
+    ContextRevision, ContextScope, ContextTier, DecisionRecord, ExactReference, ExecutionId,
+    ExecutionState, ExecutionSummary, FileObservation, LanguageObservation, ObjectiveRecord,
+    PlanRecord, SessionId, SkillInvocationPolicy,
 };
 use std::fmt::{self, Debug, Display, Formatter};
 use std::sync::Arc;
@@ -114,6 +114,7 @@ impl Debug for ExecutionProviderBinding {
 pub enum ResolvedExactReference {
     Objective(ObjectiveRecord),
     Plan(PlanRecord),
+    Decision(DecisionRecord),
     Execution(ExecutionSummary),
     Event(JournalEntry),
     FileObservation(FileObservation),
@@ -134,6 +135,14 @@ impl ResolvedExactReference {
     pub fn plan(&self) -> Option<&PlanRecord> {
         match self {
             Self::Plan(plan) => Some(plan),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn decision(&self) -> Option<&DecisionRecord> {
+        match self {
+            Self::Decision(decision) => Some(decision),
             _ => None,
         }
     }
@@ -328,6 +337,9 @@ impl ConductorRuntime {
                 self.objective(objective_id)?,
             )),
             ExactReference::Plan(plan_id) => Ok(ResolvedExactReference::Plan(self.plan(plan_id)?)),
+            ExactReference::Decision(decision_id) => Ok(ResolvedExactReference::Decision(
+                self.decision(decision_id)?,
+            )),
             ExactReference::Execution(execution_id) => self
                 .executions
                 .get(execution_id)
@@ -458,6 +470,22 @@ impl ConductorRuntime {
                 (
                     ExactReference::Plan(plan.id.clone()),
                     serde_json::to_string(&plan).expect("plan context resource must serialize"),
+                )
+            }
+            ContextResourceKind::Decision => {
+                let decision_id = resource_id
+                    .as_str()
+                    .strip_prefix("decision:")
+                    .and_then(|id| phenix_core::DecisionId::parse(id).ok())
+                    .ok_or_else(|| ConductorError::InvalidExecutionData {
+                        execution_id: execution_id.clone(),
+                        message: format!("invalid decision context resource id: {resource_id}"),
+                    })?;
+                let decision = self.decision(&decision_id)?;
+                (
+                    ExactReference::Decision(decision.id.clone()),
+                    serde_json::to_string(&decision)
+                        .expect("decision context resource must serialize"),
                 )
             }
             ContextResourceKind::Skill
