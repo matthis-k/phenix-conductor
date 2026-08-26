@@ -211,6 +211,7 @@ replace_once(
     '''            test -x "${defaultComposition}/bin/phenix"
             test -x "${defaultComposition}/bin/phenix-harness"
             test ! -e "${defaultComposition}/bin/phenix-conductor"
+            export PHENIX_STATE_DB="$TMPDIR/plugin-composition.sqlite"
             default_services="$(${defaultComposition}/bin/phenix --list-services)"
             echo "$default_services" | jq -e '.plugins | index("phenix.sessions") != null' >/dev/null
             echo "$default_services" | jq -e '.services | index("phenix.sessions@1") != null' >/dev/null
