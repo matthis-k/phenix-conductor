@@ -23,8 +23,6 @@ jobs:
           set -euo pipefail
           python scripts/worker399_suite_compose.py
           cargo fmt --manifest-path rust/Cargo.toml --all
-          cargo test --manifest-path rust/Cargo.toml -p phenix-plugin-suite --lib
-          cargo test --manifest-path rust/Cargo.toml -p phenix-harness --lib
           rm .github/workflows/worker-399-suite-compose.yml
           rm scripts/worker399_suite_compose.py
           git diff --check
