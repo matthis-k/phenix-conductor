@@ -29,8 +29,38 @@ jobs:
           set -euo pipefail
           python scripts/worker399_harness_runtime.py
           python scripts/worker399_harness_runtime_fix.py
+          python - <<'PY'
+          from pathlib import Path
+
+          context = Path("rust/crates/phenix-plugin-suite/src/context.rs")
+          text = context.read_text()
+          old = """use phenix_kernel::{
+              execution_factory, execution_manifest, execution_service, ExecutionAuthority, ExecutionCommand,
+              ExecutionId, Plugin, PluginError, PluginFactory, PluginHost, PluginManifest, ServiceDescriptor,
+          };
+          """
+          new = """use phenix_kernel::{
+              execution_service, ExecutionCommand, ExecutionId, Plugin, PluginError, PluginFactory, PluginHost,
+              PluginManifest, ServiceDescriptor,
+          };
+          """
+          if old not in text:
+              raise SystemExit("stale context import block missing")
+          context.write_text(text.replace(old, new, 1))
+
+          hooks = Path("rust/crates/phenix-plugin-suite/src/hooks.rs")
+          text = hooks.read_text()
+          old = '.invoke(&host, "hook-service",'
+          if old not in text:
+              raise SystemExit("hook-service needless borrow missing")
+          hooks.write_text(text.replace(old, '.invoke(host, "hook-service",', 1))
+          PY
+          # Flake source filtering excludes untracked files. Track the newly created
+          # Harness binary before any Nix build so the derivation sees src/main.rs.
+          git add rust/crates/phenix-harness/src/main.rs
           nix run .#phenix-maintenance -- fix
           cargo test --manifest-path rust/Cargo.toml -p phenix-harness
+          cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
           nix build .#phenix-harness --no-link
           nix build .#checks.x86_64-linux.phenix-product-smoke --no-link
           rm .github/workflows/worker-399-harness-runtime.yml
