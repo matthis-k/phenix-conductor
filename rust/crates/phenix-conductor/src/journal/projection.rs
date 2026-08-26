@@ -55,7 +55,11 @@ pub(crate) fn apply_domain_event(
         | DomainEvent::WorkspaceCheckpointCaptured { .. }
         | DomainEvent::WorkspaceFileObserved { .. } => observations::apply(state, event),
 
-        DomainEvent::ContextResourceRevisionRegistered { .. }
+        DomainEvent::WorkerTaskCreated { .. }
+        | DomainEvent::WorkerTaskStarted { .. }
+        | DomainEvent::WorkerTaskCompleted { .. }
+        | DomainEvent::WorkerTaskFailed { .. }
+        | DomainEvent::ContextResourceRevisionRegistered { .. }
         | DomainEvent::ObjectiveSemanticsActivated
         | DomainEvent::ObjectiveCreated { .. }
         | DomainEvent::ObjectiveDraftRevised { .. }

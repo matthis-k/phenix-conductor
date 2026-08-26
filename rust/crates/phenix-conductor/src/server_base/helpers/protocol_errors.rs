@@ -1,4 +1,4 @@
-use crate::{DecisionError, WorkerProfileError};
+use crate::{DecisionError, WorkerProfileError, WorkerTaskError};
 
 fn protocol_error(code: ErrorCode, message: impl Into<String>) -> ProtocolError {
     ProtocolError {
@@ -179,6 +179,22 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             WorkerProfileError::InvalidId
             | WorkerProfileError::Duplicate(_)
             | WorkerProfileError::InvalidAgent { .. } => {
+                protocol_error(ErrorCode::InvalidRequest, error.to_string())
+            }
+        },
+        ConductorError::WorkerTask(error) => match error {
+            WorkerTaskError::UnknownTask(_) | WorkerTaskError::UnknownDependency(_) => {
+                protocol_error(ErrorCode::UnknownId, error.to_string())
+            }
+            WorkerTaskError::InvalidId
+            | WorkerTaskError::InvalidDescription
+            | WorkerTaskError::DuplicateTask(_)
+            | WorkerTaskError::DependencyCycle
+            | WorkerTaskError::Blocked(_)
+            | WorkerTaskError::ObjectiveScope(_)
+            | WorkerTaskError::PlanScope { .. }
+            | WorkerTaskError::InvalidState(_)
+            | WorkerTaskError::InvalidFailureCause => {
                 protocol_error(ErrorCode::InvalidRequest, error.to_string())
             }
         },

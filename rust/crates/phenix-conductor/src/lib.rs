@@ -21,6 +21,7 @@ mod policy;
 mod routing;
 mod sandbox;
 mod server;
+mod worker_tasks;
 
 pub use callables::{CallableRegistry, CallableRegistryError, ToolOutcome};
 pub use context::{ContextError, ContextRegistry, SkillRegistry};
@@ -59,6 +60,10 @@ pub use policy::{
 };
 pub use routing::{RoutingRegistry, RoutingRegistryError};
 pub use server::{ConductorServer, ConductorService, ServerError};
+pub use worker_tasks::{
+    WorkerPlanStepRef, WorkerTaskError, WorkerTaskId, WorkerTaskRecord, WorkerTaskRequest,
+    WorkerTaskState,
+};
 
 use journal::{apply_domain_event, DurableProjection};
 use phenix_backend::{

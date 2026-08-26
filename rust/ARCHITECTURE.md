@@ -307,3 +307,8 @@ Recorded decisions are discoverable context resources. The existing context cata
 ## Persistent process resources
 
 The conductor owns terminal and job identity, durable lifecycle metadata, output references, promotion, and authority provenance. Raw process and PTY handles remain runtime-local and are never reconstructed from durable state. Resources start execution-owned. Workspace lifetime requires an explicit durable promotion event. Current execution authority is always an upper bound; narrowing authority revokes a resource whose creation authority is no longer permitted. Managed language services stay in the workspace language-service subsystem rather than entering the execution job registry.
+
+
+## Adaptive worker tasks
+
+The conductor owns worker-task identity, objective and plan-step scope, dependency state, child-execution binding, and exact result references as durable semantic state. Worker profiles remain immutable configuration references and child creation continues through the canonical delegation path, so a task cannot grant authority. The task DAG exposes deterministic runnable state but does not duplicate orchestration execution semantics, retries, workspace leases, or stale-write protection. Materially different strategies use new task identity and existing successor-plan semantics rather than being disguised as retries.

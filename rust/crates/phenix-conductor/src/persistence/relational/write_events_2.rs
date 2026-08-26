@@ -80,6 +80,12 @@ fn insert_event(
                 params![execution_id.to_string(), profile_id.to_string(), sequence],
             )?;
         }
+        DomainEvent::WorkerTaskCreated { .. }
+        | DomainEvent::WorkerTaskStarted { .. }
+        | DomainEvent::WorkerTaskCompleted { .. }
+        | DomainEvent::WorkerTaskFailed { .. } => {
+            insert_worker_task_event(transaction, sequence, event)?;
+        }
         DomainEvent::TerminalCreated { .. }
         | DomainEvent::JobCreated { .. }
         | DomainEvent::TerminalStateChanged { .. }
