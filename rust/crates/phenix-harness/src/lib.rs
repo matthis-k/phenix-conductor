@@ -3,7 +3,8 @@ use phenix_kernel::{
     PluginManifest,
 };
 use phenix_plugin_suite::{
-    repository_worker_factory, repository_worker_manifest, session_factory, session_manifest,
+    artifact_factory, artifact_manifest, repository_worker_factory, repository_worker_manifest,
+    session_factory, session_manifest,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -24,6 +25,7 @@ impl HarnessBuilder {
         let mut builder = Self::new();
         builder.add_embedded(repository_worker_manifest(), repository_worker_factory)?;
         builder.add_embedded(session_manifest(), session_factory)?;
+        builder.add_embedded(artifact_manifest(), artifact_factory)?;
         Ok(builder)
     }
 
@@ -101,8 +103,9 @@ mod tests {
     use super::*;
     use phenix_kernel::{CapabilityId, ServiceContribution, ServiceId};
     use phenix_plugin_suite::{
-        repository_work_queue_service, session_manifest, session_service, RepositoryWorkSnapshot,
-        SessionCommand, SessionResponse,
+        artifact_manifest, artifact_service, repository_work_queue_service, session_manifest,
+        session_service, ArtifactCommand, ArtifactResponse, RepositoryWorkSnapshot, SessionCommand,
+        SessionResponse,
     };
 
     fn plugin(value: &str) -> PluginId {
@@ -119,6 +122,10 @@ mod tests {
 
     fn session_authority() -> Authority {
         session_manifest().maximum_authority
+    }
+
+    fn artifact_authority() -> Authority {
+        artifact_manifest().maximum_authority
     }
 
     fn manifest(id: &str, priority: i32) -> PluginManifest {
@@ -172,7 +179,7 @@ mod tests {
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 2);
+        assert_eq!(harness.kernel().config().manifests().count(), 3);
 
         let input = serde_json::to_vec(&RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
@@ -202,6 +209,20 @@ mod tests {
         assert!(matches!(
             serde_json::from_slice::<SessionResponse>(&response).unwrap(),
             SessionResponse::Created { .. }
+        ));
+
+        let store = serde_json::to_vec(&ArtifactCommand::Store {
+            id: "read:README.md".into(),
+            content_identity: "sha256:readme".into(),
+            content: b"readme".to_vec(),
+        })
+        .unwrap();
+        let response = harness
+            .invoke(&artifact_service(), &store, &artifact_authority(), None)
+            .unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<ArtifactResponse>(&response).unwrap(),
+            ArtifactResponse::Stored { reused: false, .. }
         ));
     }
 
@@ -259,11 +280,12 @@ mod tests {
     }
 
     #[test]
-    fn session_plugin_requires_only_its_persistence_authority() {
-        let authority = session_authority();
-        assert!(authority.permits(&capability("kernel.persistence.schema")));
-        assert!(authority.permits(&capability("kernel.persistence.read")));
-        assert!(authority.permits(&capability("kernel.persistence.write")));
-        assert!(!authority.permits(&capability("fs.write")));
+    fn first_party_state_plugins_require_only_persistence_authority() {
+        for authority in [session_authority(), artifact_authority()] {
+            assert!(authority.permits(&capability("kernel.persistence.schema")));
+            assert!(authority.permits(&capability("kernel.persistence.read")));
+            assert!(authority.permits(&capability("kernel.persistence.write")));
+            assert!(!authority.permits(&capability("fs.write")));
+        }
     }
 }
