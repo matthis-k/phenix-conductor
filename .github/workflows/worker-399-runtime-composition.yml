@@ -28,19 +28,6 @@ jobs:
       - name: Apply runtime composition
         run: python scripts/plugin_composition_transport.py
 
-      - name: Apply canonical fixes
-        run: nix run .#phenix-maintenance -- fix
-
-      - name: Harness tests
-        run: |
-          cd rust
-          cargo test --locked -p phenix-harness
-
-      - name: Workspace Clippy
-        run: |
-          cd rust
-          cargo clippy --workspace --all-targets --locked -- -D warnings
-
       - name: Runtime composition check
         id: composition
         continue-on-error: true
@@ -50,17 +37,31 @@ jobs:
 
       - name: Capture runtime composition failure
         if: steps.composition.outcome == 'failure'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tail -n 200 /tmp/phenix-plugin-packaging.log > worker-399-runtime-composition.txt
+          tail -n 240 /tmp/phenix-plugin-packaging.log > worker-399-runtime-composition.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f worker-399-runtime-composition.txt
           git commit -m "chore: capture #399 runtime composition failure"
           git push origin HEAD:feat/plugin-kernel-implementation
           exit 1
+
+      - name: Apply canonical fixes
+        if: steps.composition.outcome == 'success'
+        run: nix run .#phenix-maintenance -- fix
+
+      - name: Harness tests
+        if: steps.composition.outcome == 'success'
+        run: |
+          cd rust
+          cargo test --locked -p phenix-harness
+
+      - name: Workspace Clippy
+        if: steps.composition.outcome == 'success'
+        run: |
+          cd rust
+          cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Product smoke
         if: steps.composition.outcome == 'success'
@@ -78,8 +79,6 @@ jobs:
 
       - name: Commit runtime composition
         if: steps.composition.outcome == 'success'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "Matthis Kälble"
