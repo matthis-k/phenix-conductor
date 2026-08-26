@@ -390,9 +390,9 @@ impl PluginInstance for ExternalPluginProcess {
         &mut self,
         service: &ServiceId,
         input: &[u8],
-        authority: &Authority,
+        host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        self.invoke_service(service, input, authority)
+        self.invoke_service(service, input, host.authority())
             .map_err(|error| error.to_string())
     }
 
