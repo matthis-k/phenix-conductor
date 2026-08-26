@@ -28,7 +28,7 @@ jobs:
       - name: Apply runtime composition
         run: |
           python scripts/plugin_composition_transport.py
-          python -c 'from pathlib import Path; p=Path("modules/plugin-packaging.nix"); s=p.read_text(); old=".id == \\"fixture.external\\" and .execution == \\"external\\""; new=".id == \\"fixture.session-replacement\\" and .execution == \\"external\\""; assert s.count(old) == 1; p.write_text(s.replace(old, new, 1))'
+          python -c 'from pathlib import Path; p=Path("modules/plugin-packaging.nix"); s=p.read_text(); assert s.count("fixture.external") == 1; p.write_text(s.replace("fixture.external", "fixture.session-replacement", 1))'
 
       - name: Add manifest-path diagnostic
         run: |
