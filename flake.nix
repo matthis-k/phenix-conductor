@@ -33,6 +33,7 @@
 
       imports = [
         ./modules/phenix-acp.nix
+        ./modules/plugin-packaging.nix
         ./modules/development.nix
         ./modules/stitch.nix
       ];

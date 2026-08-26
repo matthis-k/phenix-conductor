@@ -4,6 +4,37 @@ _: {
     let
       rustSource = pkgs.lib.cleanSource ../rust;
 
+      phenixKernel = pkgs.rustPlatform.buildRustPackage {
+        pname = "phenix-kernel";
+        version = "0";
+        src = rustSource;
+
+        cargoLock.lockFile = ../rust/Cargo.lock;
+        cargoBuildFlags = [
+          "--package"
+          "phenix-kernel"
+          "--bin"
+          "phenix-kernel"
+        ];
+        doCheck = false;
+
+        installPhase = ''
+          runHook preInstall
+          mkdir -p "$out/bin"
+          kernel_binary="$(find target -path '*/release/phenix-kernel' -type f -print -quit)"
+          test -n "$kernel_binary"
+          cp "$kernel_binary" "$out/bin/phenix-kernel"
+          runHook postInstall
+        '';
+      };
+
+      phenixKernelSmoke =
+        pkgs.runCommand "phenix-kernel-smoke" { nativeBuildInputs = [ phenixKernel ]; }
+          ''
+            phenix-kernel
+            touch "$out"
+          '';
+
       phenixConductor = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-conductor";
         version = "0";
@@ -49,6 +80,11 @@ _: {
         '';
       };
 
+      # Until the first-party suite has moved behind kernel plugin contracts, the
+      # supported Harness package remains the existing product binary. The package
+      # name is stable now; the implementation behind it changes in this PR.
+      phenixHarness = phenixConductor;
+
       phenixAcpSmoke = pkgs.rustPlatform.buildRustPackage {
         pname = "phenix-acp-smoke";
         version = "0";
@@ -85,7 +121,7 @@ _: {
           ''
             phenix-acp-smoke
 
-            conductor="${phenixConductor}/bin/phenix-conductor"
+            conductor="${phenixHarness}/bin/phenix-conductor"
             "$conductor" --help > "$TMPDIR/conductor-help.txt"
             grep -F -- '--acp-command' "$TMPDIR/conductor-help.txt" >/dev/null
 
@@ -153,16 +189,25 @@ _: {
     in
     {
       packages = {
+        phenix-kernel = phenixKernel;
         phenix-conductor = phenixConductor;
+        phenix-harness = phenixHarness;
+        phenix = phenixHarness;
         phenix-acp-smoke = phenixAcpSmoke;
-        default = phenixConductor;
+        default = phenixHarness;
       };
 
       apps = {
+        phenix-kernel.program = "${phenixKernel}/bin/phenix-kernel";
         phenix-conductor.program = "${phenixConductor}/bin/phenix-conductor";
-        default.program = "${phenixConductor}/bin/phenix-conductor";
+        phenix-harness.program = "${phenixHarness}/bin/phenix-conductor";
+        phenix.program = "${phenixHarness}/bin/phenix-conductor";
+        default.program = "${phenixHarness}/bin/phenix-conductor";
       };
 
-      checks.phenix-product-smoke = phenixProductSmoke;
+      checks = {
+        phenix-kernel-smoke = phenixKernelSmoke;
+        phenix-product-smoke = phenixProductSmoke;
+      };
     };
 }

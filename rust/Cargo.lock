@@ -1830,6 +1830,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-kernel"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+]
+
+[[package]]
 name = "phenix-protocol"
 version = "0.1.0"
 dependencies = [
