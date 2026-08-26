@@ -26,7 +26,8 @@ let
         set -euo pipefail
         mkdir -p "$out/share/phenix-plugin"
         jq -e 'type == "object" and (.id | type == "string" and length > 0)' \
-          "$manifestJsonPath" > "$out/share/phenix-plugin/manifest.json"
+          "$manifestJsonPath" >/dev/null
+        cp "$manifestJsonPath" "$out/share/phenix-plugin/manifest.json"
 
         ${
           if isExternal then
