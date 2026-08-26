@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
 
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
@@ -23,33 +24,37 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
-      - name: Apply deterministic maintenance fixes
+      - name: Apply Nix runtime composition transport
         run: |
           set -euo pipefail
+          python scripts/plugin_composition_transport.py
           nix run .#phenix-maintenance -- fix
           git diff --check
 
-      - name: Commit autofixes
-        id: commit
+      - name: Validate Harness suite selection
+        run: |
+          set -euo pipefail
+          nix develop --command cargo test --manifest-path rust/Cargo.toml -p phenix-harness
+
+      - name: Validate runtime-backed plugin packaging
+        run: |
+          set -euo pipefail
+          nix build .#checks.x86_64-linux.phenix-plugin-packaging --no-link
+
+      - name: Commit semantic composition change
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-
-          if test -z "$(git status --porcelain=v1 --untracked-files=all)"; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
+          rm scripts/plugin_composition_transport.py
+          git checkout origin/main -- .github/workflows/sync-maintenance.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "chore: apply CI autofixes"
+          git commit -m "feat: make Nix suite selection affect Harness runtime"
           git push origin "HEAD:$HEAD_REF"
-          echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Validate corrected head
-        if: steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
