@@ -72,6 +72,12 @@
 
       systemTargets = [
         {
+          id = "harness-supported-product";
+          package = "phenix-harness";
+          test = "supported_product_journeys";
+          label = "harness / supported_product_journeys";
+        }
+        {
           id = "conductor-model-tool-loop";
           package = "phenix-conductor";
           test = "black_box_model_tool_loop";

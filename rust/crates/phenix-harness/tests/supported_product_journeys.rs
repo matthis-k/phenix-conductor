@@ -1,6 +1,4 @@
-from pathlib import Path
-
-TEST = r'''use phenix_harness::{default_suite_authority, PhenixHarness};
+use phenix_harness::{default_suite_authority, PhenixHarness};
 use phenix_kernel::ServiceId;
 use serde_json::{json, Value};
 
@@ -35,7 +33,11 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
     );
     assert!(repository.is_null());
 
-    let sessions = invoke(&mut harness, "phenix.sessions@1", json!({"operation": "list"}));
+    let sessions = invoke(
+        &mut harness,
+        "phenix.sessions@1",
+        json!({"operation": "list"}),
+    );
     assert_eq!(sessions["result"], "sessions");
 
     let artifact = invoke(
@@ -50,7 +52,11 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
     assert_eq!(artifact["response"], "artifact");
     assert!(artifact["artifact"].is_null());
 
-    let context = invoke(&mut harness, "phenix.context@1", json!({"operation": "list"}));
+    let context = invoke(
+        &mut harness,
+        "phenix.context@1",
+        json!({"operation": "list"}),
+    );
     assert_eq!(context["result"], "resources");
 
     let execution = invoke(
@@ -106,7 +112,11 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
     );
     assert_eq!(workspace["response"], "search");
 
-    let debug = invoke(&mut harness, "phenix.debug@1", json!({"operation": "snapshot"}));
+    let debug = invoke(
+        &mut harness,
+        "phenix.debug@1",
+        json!({"operation": "snapshot"}),
+    );
     assert_eq!(debug["response"], "snapshot");
     assert!(debug["snapshot"]["services"]
         .as_object()
@@ -125,15 +135,3 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
         .unwrap_err();
     assert!(error.to_string().contains("unsupported CLI probe target"));
 }
-'''
-
-Path("rust/crates/phenix-harness/tests").mkdir(parents=True, exist_ok=True)
-Path("rust/crates/phenix-harness/tests/supported_product_journeys.rs").write_text(TEST)
-
-path = Path("modules/development.nix")
-text = path.read_text()
-marker = '''      systemTargets = [\n        {\n          id = "conductor-model-tool-loop";\n'''
-replacement = '''      systemTargets = [\n        {\n          id = "harness-supported-product";\n          package = "phenix-harness";\n          test = "supported_product_journeys";\n          label = "harness / supported_product_journeys";\n        }\n        {\n          id = "conductor-model-tool-loop";\n'''
-if text.count(marker) != 1:
-    raise SystemExit(f"expected one system target marker, found {text.count(marker)}")
-path.write_text(text.replace(marker, replacement, 1))
