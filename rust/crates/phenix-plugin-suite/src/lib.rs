@@ -25,9 +25,9 @@ pub use execution::{
     WorkerTaskState, EXECUTION_SERVICE,
 };
 pub use language::{
-    language_factory, language_manifest, language_service, DocumentProvenance,
-    LanguageCommand, LanguageDocumentIdentity, LanguageObservation, LanguageOperationKind,
-    LanguageOperationResult, LanguageProviderEpoch, LanguageResponse, LANGUAGE_SERVICE,
+    language_factory, language_manifest, language_service, DocumentProvenance, LanguageCommand,
+    LanguageDocumentIdentity, LanguageObservation, LanguageOperationKind, LanguageOperationResult,
+    LanguageProviderEpoch, LanguageResponse, LANGUAGE_SERVICE,
 };
 pub use planning::{
     planning_factory, planning_manifest, planning_service, DecisionRecord, HistoryEntry,

@@ -102,9 +102,15 @@ pub enum LanguageCommand {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum LanguageResponse {
-    Provider { epoch: Option<LanguageProviderEpoch> },
-    Diagnostics { result: Option<LanguageOperationResult> },
-    Observation { observation: Option<LanguageObservation> },
+    Provider {
+        epoch: Option<LanguageProviderEpoch>,
+    },
+    Diagnostics {
+        result: Option<LanguageOperationResult>,
+    },
+    Observation {
+        observation: Option<LanguageObservation>,
+    },
 }
 
 #[must_use]
@@ -295,7 +301,10 @@ impl LanguagePlugin {
     }
 }
 
-fn store_observation(host: &PluginHost<'_>, observation: &LanguageObservation) -> Result<(), String> {
+fn store_observation(
+    host: &PluginHost<'_>,
+    observation: &LanguageObservation,
+) -> Result<(), String> {
     let key = observation_key(&observation.id);
     let encoded = serde_json::to_vec(observation).map_err(|error| error.to_string())?;
     host.transact_durable(
