@@ -129,12 +129,18 @@ in
           }
           ''
             set -euo pipefail
-            test -x "${defaultComposition}/bin/phenix-conductor"
-            test -x "${externalComposition}/bin/phenix-conductor"
+            test -x "${defaultComposition}/bin/phenix"
+            test -x "${defaultComposition}/bin/phenix-harness"
+            test ! -e "${defaultComposition}/bin/phenix-conductor"
+            test -x "${externalComposition}/bin/phenix"
+            test -x "${externalComposition}/bin/phenix-harness"
             test -x "${externalComposition}/bin/external-fixture"
-            test -x "${resourceComposition}/bin/phenix-conductor"
+            test -x "${resourceComposition}/bin/phenix"
+            test -x "${resourceComposition}/bin/phenix-harness"
             test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"
             test -x "${kernelComposition}/bin/phenix-kernel"
+            test ! -e "${kernelComposition}/bin/phenix"
+            test ! -e "${kernelComposition}/bin/phenix-harness"
             test ! -e "${kernelComposition}/bin/phenix-conductor"
             test -e "${resourcePlugin}/share/phenix-plugin/resources/README.txt"
             jq -e '.id == "fixture.resources" and .execution == "resource-only"' \
