@@ -1,8 +1,16 @@
 use crate::{
-    Authority, EventBus, KernelConfig, KernelError, KernelEvent, PluginExecution, PluginId,
-    PluginManifest, ProviderBinding, ServiceId, TaskRuntime,
+    Authority, CapabilityId, DurableSchema, EventBus, KernelConfig, KernelError, KernelEvent,
+    LocalPersistence, PersistenceBackend, PluginExecution, PluginId, PluginManifest, ProviderBinding,
+    ResourceNamespace, SchemaMigration, ServiceId, TaskRuntime, TransactionOp,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
+
+const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
+const PERSISTENCE_READ: &str = "kernel.persistence.read";
+const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginState {
@@ -15,6 +23,7 @@ pub struct PluginHost<'a> {
     config: &'a KernelConfig,
     plugin: &'a PluginId,
     authority: &'a Authority,
+    persistence: &'a Mutex<Box<dyn PersistenceBackend>>,
 }
 
 impl<'a> PluginHost<'a> {
@@ -33,6 +42,88 @@ impl<'a> PluginHost<'a> {
     ) -> Result<ProviderBinding, KernelError> {
         self.config.resolve(service, self.authority, binding)
     }
+
+    pub fn register_durable_schema(&self, schema: &DurableSchema) -> Result<(), KernelError> {
+        self.require_persistence_operation(PERSISTENCE_SCHEMA, &schema.namespace)?;
+        self.persistence
+            .lock()
+            .expect("kernel persistence mutex poisoned")
+            .register_schema(self.plugin, schema)
+            .map_err(|error| self.persistence_error(error.to_string()))
+    }
+
+    pub fn migrate_durable_schema(
+        &self,
+        schema: &DurableSchema,
+        migrations: &[SchemaMigration],
+    ) -> Result<(), KernelError> {
+        self.require_persistence_operation(PERSISTENCE_SCHEMA, &schema.namespace)?;
+        self.require_capability(PERSISTENCE_WRITE)?;
+        self.persistence
+            .lock()
+            .expect("kernel persistence mutex poisoned")
+            .migrate_schema(self.plugin, schema, migrations)
+            .map_err(|error| self.persistence_error(error.to_string()))
+    }
+
+    pub fn read_durable(
+        &self,
+        namespace: &ResourceNamespace,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, KernelError> {
+        self.require_persistence_operation(PERSISTENCE_READ, namespace)?;
+        self.persistence
+            .lock()
+            .expect("kernel persistence mutex poisoned")
+            .read(self.plugin, namespace, key)
+            .map_err(|error| self.persistence_error(error.to_string()))
+    }
+
+    pub fn transact_durable(
+        &self,
+        namespace: &ResourceNamespace,
+        operations: &[TransactionOp],
+    ) -> Result<(), KernelError> {
+        self.require_persistence_operation(PERSISTENCE_WRITE, namespace)?;
+        self.persistence
+            .lock()
+            .expect("kernel persistence mutex poisoned")
+            .transact(self.plugin, namespace, operations)
+            .map_err(|error| self.persistence_error(error.to_string()))
+    }
+
+    fn require_persistence_operation(
+        &self,
+        capability: &str,
+        namespace: &ResourceNamespace,
+    ) -> Result<(), KernelError> {
+        self.require_capability(capability)?;
+        if self.config.resource_owner(namespace) == Some(self.plugin) {
+            return Ok(());
+        }
+        Err(KernelError::HostOperationDenied {
+            plugin: self.plugin.clone(),
+            operation: format!("{capability}:{}", namespace.as_str()),
+        })
+    }
+
+    fn require_capability(&self, capability: &str) -> Result<(), KernelError> {
+        let capability = CapabilityId::parse(capability).expect("kernel capability is valid");
+        if self.authority.permits(&capability) {
+            return Ok(());
+        }
+        Err(KernelError::HostOperationDenied {
+            plugin: self.plugin.clone(),
+            operation: capability.as_str().to_owned(),
+        })
+    }
+
+    fn persistence_error(&self, message: String) -> KernelError {
+        KernelError::Persistence {
+            plugin: self.plugin.clone(),
+            message,
+        }
+    }
 }
 
 pub trait PluginInstance: Send {
@@ -42,7 +133,7 @@ pub trait PluginInstance: Send {
         &mut self,
         _service: &ServiceId,
         _input: &[u8],
-        _authority: &Authority,
+        _host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
         Err("service invocation is not implemented".into())
     }
@@ -64,10 +155,21 @@ pub struct Kernel {
     instances: BTreeMap<PluginId, Box<dyn PluginInstance>>,
     events: Arc<EventBus>,
     tasks: TaskRuntime,
+    persistence: Mutex<Box<dyn PersistenceBackend>>,
 }
 
 impl Kernel {
     pub fn new(config: KernelConfig) -> Self {
+        Self::with_persistence(
+            config,
+            LocalPersistence::open_in_memory().expect("baseline local persistence opens"),
+        )
+    }
+
+    pub fn with_persistence(
+        config: KernelConfig,
+        persistence: impl PersistenceBackend + 'static,
+    ) -> Self {
         let states = config
             .manifests()
             .map(|manifest| (manifest.id.clone(), PluginState::Registered))
@@ -80,6 +182,7 @@ impl Kernel {
             instances: BTreeMap::new(),
             events: Arc::new(EventBus::default()),
             tasks: TaskRuntime::default(),
+            persistence: Mutex::new(Box::new(persistence)),
         }
     }
 
@@ -197,6 +300,7 @@ impl Kernel {
             config: &self.config,
             plugin,
             authority: &manifest.maximum_authority,
+            persistence: &self.persistence,
         };
         instance
             .start(&host)
@@ -224,12 +328,18 @@ impl Kernel {
             .manifest(&provider.plugin)
             .expect("resolved providers are registered");
         let effective_authority = caller_authority.attenuate(&provider_manifest.maximum_authority);
+        let host = PluginHost {
+            config: &self.config,
+            plugin: &provider.plugin,
+            authority: &effective_authority,
+            persistence: &self.persistence,
+        };
         let instance = self
             .instances
             .get_mut(&provider.plugin)
             .ok_or_else(|| KernelError::WrongExecutionKind(provider.plugin.clone()))?;
         instance
-            .invoke(service, input, &effective_authority)
+            .invoke(service, input, &host)
             .map_err(|message| KernelError::ServiceInvoke {
                 plugin: provider.plugin,
                 service: service.clone(),
@@ -260,7 +370,7 @@ impl Kernel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CapabilityId, PluginManifest, ResourceNamespace, ServiceContribution};
+    use crate::{PluginManifest, ServiceContribution};
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -299,12 +409,57 @@ mod tests {
             &mut self,
             _service: &ServiceId,
             input: &[u8],
-            authority: &Authority,
+            host: &PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
-            if authority.permits(&capability("fs.write")) {
+            if host.authority().permits(&capability("fs.write")) {
                 return Err("provider regained caller write authority".into());
             }
             Ok(input.to_vec())
+        }
+    }
+
+    struct PersistencePlugin {
+        namespace: ResourceNamespace,
+    }
+
+    impl PluginInstance for PersistencePlugin {
+        fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
+            host.register_durable_schema(&DurableSchema::new(self.namespace.clone(), 1))
+                .map_err(|error| error.to_string())?;
+            host.transact_durable(
+                &self.namespace,
+                &[TransactionOp::Put {
+                    key: "seed".into(),
+                    value: b"ready".to_vec(),
+                }],
+            )
+            .map_err(|error| error.to_string())
+        }
+
+        fn invoke(
+            &mut self,
+            _service: &ServiceId,
+            input: &[u8],
+            host: &PluginHost<'_>,
+        ) -> Result<Vec<u8>, String> {
+            match input {
+                b"read" => host
+                    .read_durable(&self.namespace, "seed")
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "missing seed".to_owned()),
+                b"write" => {
+                    host.transact_durable(
+                        &self.namespace,
+                        &[TransactionOp::Put {
+                            key: "changed".into(),
+                            value: b"yes".to_vec(),
+                        }],
+                    )
+                    .map_err(|error| error.to_string())?;
+                    Ok(b"written".to_vec())
+                }
+                _ => Err("unsupported input".into()),
+            }
         }
     }
 
@@ -388,5 +543,95 @@ mod tests {
             )
             .unwrap();
         assert_eq!(output, b"hello");
+    }
+
+    #[test]
+    fn persistence_host_rechecks_effective_authority_on_every_call() {
+        let schema = capability(PERSISTENCE_SCHEMA);
+        let read = capability(PERSISTENCE_READ);
+        let write = capability(PERSISTENCE_WRITE);
+        let namespace = ResourceNamespace::parse("storage.state").unwrap();
+        let provider = PluginManifest {
+            id: plugin("storage"),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: vec![ServiceContribution {
+                service: service("storage@1"),
+                priority: 1,
+                required_authority: Authority::default(),
+            }],
+            resource_namespaces: vec![namespace.clone()],
+            maximum_authority: Authority::new([schema.clone(), read.clone(), write.clone()]),
+        };
+        let mut kernel = Kernel::new(KernelConfig::new([provider]).unwrap());
+        kernel
+            .register_embedded_factory(plugin("storage"), move || {
+                Box::new(PersistencePlugin {
+                    namespace: namespace.clone(),
+                })
+            })
+            .unwrap();
+        kernel.activate_all().unwrap();
+
+        assert_eq!(
+            kernel
+                .invoke(
+                    &service("storage@1"),
+                    b"read",
+                    &Authority::new([read.clone()]),
+                    None,
+                )
+                .unwrap(),
+            b"ready"
+        );
+
+        let error = kernel
+            .invoke(
+                &service("storage@1"),
+                b"write",
+                &Authority::new([read, write]),
+                None,
+            )
+            .unwrap();
+        assert_eq!(error, b"written");
+
+        let denied = kernel
+            .invoke(
+                &service("storage@1"),
+                b"write",
+                &Authority::new([capability(PERSISTENCE_READ)]),
+                None,
+            )
+            .unwrap_err();
+        assert!(matches!(denied, KernelError::ServiceInvoke { .. }));
+        assert!(denied.to_string().contains(PERSISTENCE_WRITE));
+    }
+
+    #[test]
+    fn persistence_host_rejects_unowned_namespace_before_backend_access() {
+        let namespace = ResourceNamespace::parse("owned.state").unwrap();
+        let other_namespace = ResourceNamespace::parse("other.state").unwrap();
+        let owner = PluginManifest {
+            id: plugin("owner"),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: Vec::new(),
+            resource_namespaces: vec![namespace],
+            maximum_authority: Authority::new([capability(PERSISTENCE_SCHEMA)]),
+        };
+        let kernel = Kernel::new(KernelConfig::new([owner]).unwrap());
+        let authority = Authority::new([capability(PERSISTENCE_SCHEMA)]);
+        let host = PluginHost {
+            config: kernel.config(),
+            plugin: &plugin("owner"),
+            authority: &authority,
+            persistence: &kernel.persistence,
+        };
+        assert!(matches!(
+            host.register_durable_schema(&DurableSchema::new(other_namespace, 1)),
+            Err(KernelError::HostOperationDenied { .. })
+        ));
     }
 }
