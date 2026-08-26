@@ -2,6 +2,7 @@
 
 mod artifacts;
 mod context;
+mod planning;
 mod repository_workers;
 mod sessions;
 
@@ -15,6 +16,10 @@ pub use context::{
     ContextInjection, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceKind,
     ContextResourceRevision, ContextResponse, ContextScope, ExactContextReference,
     ExecutionContextProjection, ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
+};
+pub use planning::{
+    planning_factory, planning_manifest, planning_service, DecisionRecord, HistoryEntry, HistoryKind,
+    ObjectiveRecord, PlanRecord, PlanStep, PlanningCommand, PlanningResponse, PLANNING_SERVICE,
 };
 pub use repository_workers::{
     ReconstructedPullRequest, RepositoryCheckState, RepositoryChecklistEvidence,
