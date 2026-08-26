@@ -1,6 +1,5 @@
 name: Worker 401 package split
 
-# Triggered after the transport exists on the branch.
 on:
   push:
     branches:
@@ -108,7 +107,7 @@ jobs:
           (cd rust && cargo generate-lockfile)
           nix run .#phenix-maintenance -- fix
 
-      - name: Validate split and resources
+      - name: Validate imported resources
         run: |
           set -euo pipefail
           test -f config/phenix-harness/runtime.nix
@@ -120,10 +119,18 @@ jobs:
               test -f "$crate/src/lib.rs"
             fi
           done
-          nix run .#phenix-maintenance -- check source
-          nix run .#phenix-maintenance -- check rust
-          nix run .#phenix-maintenance -- test unit
-          nix run .#phenix-maintenance -- test product
+
+      - name: Validate Source
+        run: nix run .#phenix-maintenance -- check source
+
+      - name: Validate Rust
+        run: nix run .#phenix-maintenance -- check rust
+
+      - name: Validate unit tests
+        run: nix run .#phenix-maintenance -- test unit
+
+      - name: Validate Product
+        run: nix run .#phenix-maintenance -- test product
 
       - name: Commit semantic migration
         run: |
