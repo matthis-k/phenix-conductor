@@ -10,6 +10,65 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fmt::{self, Display, Formatter};
 
+/// Canonical frontend/service request accepted by the supported Harness process.
+///
+/// Authority and provider binding are intentionally absent. They are product
+/// policy and cannot be supplied by an untrusted frontend request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceRequest {
+    #[serde(default)]
+    pub id: Value,
+    pub service: String,
+    #[serde(default)]
+    pub input: Value,
+}
+
+/// Canonical response produced by the supported Harness service wire.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ServiceResponse {
+    Ok {
+        id: Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_bytes: Option<Vec<u8>>,
+    },
+    Error {
+        id: Value,
+        error: String,
+    },
+}
+
+impl ServiceResponse {
+    #[must_use]
+    pub fn json(id: Value, output: Value) -> Self {
+        Self::Ok {
+            id,
+            output: Some(output),
+            output_bytes: None,
+        }
+    }
+
+    #[must_use]
+    pub fn bytes(id: Value, output: Vec<u8>) -> Self {
+        Self::Ok {
+            id,
+            output: None,
+            output_bytes: Some(output),
+        }
+    }
+
+    #[must_use]
+    pub fn error(id: Value, error: impl Into<String>) -> Self {
+        Self::Error {
+            id,
+            error: error.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InvalidFrontendServiceProviderId;
 
@@ -294,6 +353,50 @@ pub enum ServerMessage {
 mod tests {
     use super::*;
     use phenix_core::{ProviderId, RoutingProfileId};
+
+    #[test]
+    fn harness_service_wire_is_protocol_owned_and_policy_neutral() {
+        let request: ServiceRequest = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "service": "phenix.sessions@1",
+            "input": {"operation": "list"}
+        }))
+        .unwrap();
+        assert_eq!(request.id, serde_json::json!(7));
+        assert_eq!(request.service, "phenix.sessions@1");
+        assert_eq!(request.input["operation"], "list");
+
+        for forbidden in ["authority", "binding"] {
+            let mut value = serde_json::json!({
+                "id": 7,
+                "service": "phenix.sessions@1",
+                "input": null
+            });
+            value[forbidden] = serde_json::json!("ambient");
+            assert!(serde_json::from_value::<ServiceRequest>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn harness_service_response_preserves_json_and_byte_wire_shapes() {
+        assert_eq!(
+            serde_json::to_value(ServiceResponse::json(
+                serde_json::json!(1),
+                serde_json::json!({"result": "ok"})
+            ))
+            .unwrap(),
+            serde_json::json!({"status": "ok", "id": 1, "output": {"result": "ok"}})
+        );
+        assert_eq!(
+            serde_json::to_value(ServiceResponse::bytes(serde_json::json!(2), vec![1, 2, 3]))
+                .unwrap(),
+            serde_json::json!({"status": "ok", "id": 2, "output_bytes": [1, 2, 3]})
+        );
+        assert_eq!(
+            serde_json::to_value(ServiceResponse::error(serde_json::json!(3), "denied")).unwrap(),
+            serde_json::json!({"status": "error", "id": 3, "error": "denied"})
+        );
+    }
 
     #[test]
     fn protocol_has_explicit_request_ids() {

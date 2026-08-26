@@ -1,0 +1,11 @@
+[package]
+name = "phenix-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+phenix-kernel = { path = "../phenix-kernel" }
+phenix-plugin-suite = { path = "../phenix-plugin-suite" }
+phenix-protocol = { path = "../phenix-protocol" }
+serde_json.workspace = true
