@@ -3,7 +3,7 @@ use genai::adapter::AdapterKind;
 use genai::resolver::{AuthData, Endpoint};
 use genai::{ModelIden, ServiceTarget};
 use phenix_backend::BackendError;
-use phenix_core::{ModelId, ProviderId};
+use phenix_domain::{ModelId, ProviderId};
 
 pub(crate) const OPENAI_API_PROVIDER: &str = "openai-api";
 pub(crate) const ANTHROPIC_PROVIDER: &str = "anthropic";

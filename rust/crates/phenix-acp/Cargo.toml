@@ -9,3 +9,5 @@ path = "src/lib.rs"
 
 [dependencies]
 agent-client-protocol.workspace = true
+phenix-client = { path = "../phenix-client" }
+serde_json.workspace = true

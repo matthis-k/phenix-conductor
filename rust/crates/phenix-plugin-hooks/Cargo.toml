@@ -1,0 +1,13 @@
+[package]
+name = "phenix-plugin-hooks"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+phenix-core = { path = "../phenix-core" }
+phenix-plugin-context = { path = "../phenix-plugin-context" }
+phenix-plugin-execution = { path = "../phenix-plugin-execution" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true

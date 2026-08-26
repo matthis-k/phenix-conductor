@@ -1,8 +1,8 @@
 # Phenix AI
 
-This repository contains the Phenix kernel, replaceable first-party Plugin Suite, Harness product assembly, and protocol/backend adapters. The current GitHub repository name is temporary.
+This repository owns the generic Phenix runtime, conductor, shared client contracts, independently packaged first-party plugins, client adapters, and the supported Harness product. The current GitHub repository name is temporary.
 
-The Neovim frontend lives separately in `matthis-k/phenix-nvim`. This repository does not own editor windows, input handling, transcript presentation, Neovim plugin packaging, or frontend-specific tests.
+The Neovim frontend lives in `matthis-k/phenix-nvim`. This repository does not own editor windows, input handling, transcript presentation, Neovim packaging, or frontend-specific tests.
 
 The project is under active architectural development. Replace obsolete contracts instead of preserving compatibility layers.
 
@@ -16,67 +16,83 @@ frontends / protocol adapters
       product policy
             |
             v
-      phenix-kernel
- generic mechanisms only
+     phenix-conductor
+ generic server process
+            |
+            v
+       phenix-core
+ generic runtime mechanisms
             |
             v
   selected plugin providers
-  Phenix Plugin Suite or alternatives
 ```
 
-`phenix-kernel` owns plugin lifecycle, provider resolution, authority attenuation, generic persistence, events, and tasks. It does not own session, context, execution, planning, tool, model, frontend, or other agent-domain semantics.
+`phenix-core` owns plugin identity and lifecycle, deterministic service resolution, authority attenuation, generic persistence, events, tasks, and embedded, external, and resource-only hosting. It does not own session, context, execution, planning, tool, model, frontend, or other first-party agent semantics.
 
-`phenix-plugin-suite` implements the first-party Phenix services through the same contracts available to alternate plugins. `phenix-harness` selects the plugin set and product policy. Omitting a provider removes the service. Replacing a provider does not require a kernel change.
+`phenix-conductor` owns the generic server process and client transport. It hosts only configured plugins. A zero-plugin conductor has no first-party fallback behavior.
 
-The superseded conductor runtime has been removed. Product and test paths use Harness-selected plugin services; do not restore a parallel conductor-owned semantic runtime.
+First-party `phenix-plugin-*` crates own Phenix agent-domain services through the same core contracts available to alternate providers. A thin `phenix-plugin-catalog` collects embedded factories but owns no durable state or product policy.
 
-ACP is one protocol boundary. `phenix-acp` owns ACP wire interoperability, while the supported product semantics remain in Harness-selected plugins.
+`phenix-harness` owns the supported product assembly. It selects plugins, grants authority, chooses persistence, loads product configuration and skills, and exposes the wrapped `phenix` product.
+
+`phenix-client` owns the canonical client/server contract. `phenix-acp` translates that contract to ACP without owning application semantics.
 
 ### Rust boundaries
 
-| Crate | Responsibility |
+| Crate or package | Responsibility |
 | --- | --- |
-| `phenix-kernel` | Generic plugin host, trust boundaries, persistence enforcement, events, tasks |
-| `phenix-plugin-suite` | Replaceable first-party Phenix services |
-| `phenix-harness` | Supported kernel + selected-plugin product assembly |
-| `phenix-acp` | ACP wire interoperability boundary |
-| `phenix-backend-acp` | ACP backend adapter |
+| `phenix-core` | Generic plugin host, trust boundaries, persistence enforcement, events, tasks |
+| `phenix-client` | Canonical client/server contracts |
+| `phenix-conductor` | Generic configured server and transport |
+| `phenix-plugin-*` | Independently owned first-party services |
+| `phenix-plugin-catalog` | Thin embedded-factory catalog |
+| `phenix-harness` | Supported conductor + selected-plugin product assembly |
+| `phenix-acp` | ACP adapter to `phenix-client` |
+| `phenix-backend-*` | Provider/backend adapters |
 
 There is no UI crate or Neovim plugin in this repository.
 
 ## Product composition
 
-The supported runtime is `phenix-harness`. It activates a selected plugin set through ordinary kernel manifests and service resolution. The default composition loads the first-party Plugin Suite.
+The normal `phenix` package is the supported Harness composition. It is built through the same public package interfaces available to users.
 
-Nix composition can select a subset of embedded first-party plugins, add external or resource-only plugins, or replace a first-party provider. Provider omission must remove the service rather than expose a kernel fallback.
+Nix exposes independently packaged first-party plugins through `phenixPlugins.<system>.*` and client adapters through `phenixClients.<system>.*`. `wrappers.phenix.wrap` and `lib.mkPhenix` assemble a conductor with an explicit plugin selection. Omitting a plugin removes its service unless another selected provider supplies the same contract.
 
-Plugin-owned durable state is canonical. The kernel enforces namespace ownership, migrations, transactions, and authority without interpreting first-party domain rows.
+Plugin-owned durable state is canonical. Core enforces namespace ownership, migrations, transactions, and authority without interpreting first-party domain rows.
 
-### Project context and skills
+### Product configuration and skills
 
-Project context and skills are first-party Plugin Suite services. The context plugin owns discovery, exact content identity, injection history, and projection. The supported Harness reaches them through the ordinary kernel service contract. Kernel-only mode has no context or skill behavior.
+Supported runtime configuration lives in `config/phenix/runtime.nix`. Skills and product resources live under `config/phenix/skills/`.
 
-Project instructions remain ambient input. Discoverable project documents and skills are revisioned resources rather than configuration identity. Skill metadata never expands execution authority; script execution still uses ordinary workspace/tool authority.
+The Harness packages these resources and loads agent definitions, orchestration definitions, and routing profiles through plugin-owned services. Product configuration does not become hidden conductor policy.
+
+Project context and skills are context-plugin resources. Their metadata never expands execution authority. Script or workspace access still uses ordinary service authority.
 
 ## Packages
 
-The flake exposes the supported compositions directly:
+The flake exposes:
 
-- `packages.<system>.phenix-kernel`: kernel-only runtime;
-- `packages.<system>.phenix-harness`: default Harness composition;
-- `packages.<system>.phenix`: supported product alias for the Harness;
-- `lib.mkPhenixPlugin`: external/resource plugin packaging;
-- `lib.mkPhenix`: declarative kernel + plugin composition.
+- `packages.<system>.phenix-core`;
+- `packages.<system>.phenix-client`;
+- `packages.<system>.phenix-conductor`;
+- `packages.<system>.phenix-harness`;
+- `packages.<system>.phenix`;
+- `phenixPlugins.<system>.*`;
+- `phenixClients.<system>.*`;
+- `wrappers.phenix.wrap`;
+- `lib.mkPhenixPlugin`;
+- `lib.mkPhenixClient`;
+- `lib.mkPhenix`.
 
-There is no `phenix-conductor` package, app, or runtime. The superseded conductor crate and its first-party durable schema have been removed.
+`phenix-kernel`, `phenix-protocol`, and `phenix-plugin-suite` are superseded names. Do not restore them as competing package owners.
 
 ## Protocol and provider boundaries
 
-ACP is an adapter boundary. Frontends and other ACP clients should reach the supported Harness/plugin composition rather than a second conductor-owned semantic runtime.
+Frontends and protocol adapters reach configured conductor services through the canonical client contract. They do not own durable application state.
 
-Backend adapters translate plugin-owned execution requests into provider protocols. Provider conversation state is disposable. Durable Phenix state stays with the owning plugins.
+Backend adapters translate execution requests into provider protocols. Provider conversation state is disposable. Durable Phenix state stays with the owning plugins.
 
-Authentication and provider selection are product/plugin concerns. They must not become privileged kernel APIs or ambient process authority.
+Authentication and provider selection are plugin and Harness concerns. They must not become privileged core APIs or ambient process authority.
 
 ## Design rules
 
@@ -85,11 +101,11 @@ Authentication and provider selection are product/plugin concerns. They must not
 - Parse external data at boundaries and keep invalid runtime states difficult to represent internally.
 - Preserve typed failure modes across configuration, transport, protocol, plugin, and provider boundaries.
 - Authority only attenuates across plugin, task, retry, event, persistence, and provider boundaries.
-- Kernel-only mode has no hidden first-party fallbacks.
+- Zero-plugin mode has no hidden first-party fallbacks.
 - First-party plugins use the same contracts as alternate plugins.
-- Do not add parallel frontend-to-agent protocols or duplicate orchestration implementations.
+- Do not add parallel frontend-to-agent protocols or duplicate orchestration registries.
 - Keep frontend-specific behavior and packaging in frontend repositories.
-- Tests should assert domain behavior, user-visible protocol semantics, or cross-boundary integration rather than duplicated configuration facts.
+- Tests should assert behavior, protocol semantics, or cross-boundary integration rather than duplicated configuration facts.
 
 ## Development
 
@@ -99,6 +115,6 @@ maintenance fix
 maintenance all
 ```
 
-Validation is separated into source, Rust, integration/system, realized product, Nix composition, and Maintenance boundaries. Product validation exercises the installed Harness and plugin compositions. Frontend behavior is tested in frontend repositories.
+Validation is separated into source, Rust, integration/system, realized product, Nix composition, and Maintenance boundaries. Product validation exercises installed conductor and Harness compositions. Frontend behavior is tested in frontend repositories.
 
 See `DEVELOPMENT.md` for focused validation commands and `rust/ARCHITECTURE.md` for the current ownership model.

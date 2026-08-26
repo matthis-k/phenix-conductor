@@ -15,7 +15,7 @@ use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
     BackendSession, BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolPresentation,
 };
-use phenix_core::{
+use phenix_domain::{
     AuthenticationInput, AuthenticationMethodDescriptor, AuthenticationMethodId,
     AuthenticationMethodKind, AuthenticationState, BackendCatalog, BackendId, InferenceEffort,
     InferenceOptions, ModelDescriptor, ModelId, ModelTarget, ProviderId, SessionId,
@@ -565,7 +565,7 @@ impl BackendSession for PhenixSession {
         result.map(|_| ())
     }
 
-    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+    fn cancel(&self, _execution_id: &phenix_domain::ExecutionId) -> Result<(), BackendError> {
         self.cancelled.store(true, Ordering::Release);
         Ok(())
     }
@@ -657,7 +657,7 @@ fn configured_models() -> Result<Vec<ModelTarget>, BackendError> {
 mod tests {
     use super::*;
     use phenix_backend::{ToolProvision, ToolResult};
-    use phenix_core::{
+    use phenix_domain::{
         CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
     };
     use serde_json::json;

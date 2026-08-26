@@ -64,10 +64,16 @@
           label = "phenix-acp / repeated_prompts";
         }
         {
-          id = "phenix-core-context-serialization";
-          package = "phenix-core";
+          id = "phenix-acp-client-contract-adapter";
+          package = "phenix-acp";
+          test = "client_contract_adapter";
+          label = "phenix-acp / client_contract_adapter";
+        }
+        {
+          id = "phenix-domain-context-serialization";
+          package = "phenix-domain";
           test = "context_serialization";
-          label = "phenix-core / context_serialization";
+          label = "phenix-domain / context_serialization";
         }
       ];
 

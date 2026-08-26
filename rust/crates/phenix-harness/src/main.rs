@@ -1,17 +1,18 @@
-use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};
-use phenix_kernel::{
+mod runtime_config;
+
+use phenix_conductor::serve_jsonl;
+use phenix_core::{
     Authority, CapabilityId, ExternalPluginProcess, ExternalSandbox, ExternalTransportConfig,
     LocalPersistence, PluginExecution, PluginId, PluginManifest, ResourceNamespace,
     ServiceContribution, ServiceId,
 };
-use phenix_protocol::{ServiceRequest, ServiceResponse};
+use phenix_harness::{default_suite_authority, HarnessBuilder};
 use serde_json::{json, Map, Value};
 use std::{
     collections::BTreeSet,
     env,
     error::Error,
-    fs,
-    io::{self, BufRead, Write},
+    fs, io,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Arc,
@@ -46,6 +47,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
     let mut harness = builder.build_with_persistence(persistence)?;
     harness.activate()?;
+    if let Some(path) = env::var_os("PHENIX_RUNTIME_CONFIG") {
+        runtime_config::apply_runtime_config(&mut harness, Path::new(&path))?;
+    }
 
     if env::args().any(|argument| argument == "--list-services") {
         let plugins = harness
@@ -71,17 +75,14 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     let stdin = io::stdin();
-    let mut stdout = io::BufWriter::new(io::stdout().lock());
-    for line in stdin.lock().lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let response = handle_request(&mut harness, &line);
-        serde_json::to_writer(&mut stdout, &response)?;
-        stdout.write_all(b"\n")?;
-        stdout.flush()?;
-    }
+    let stdout = io::stdout();
+    let mut stdout = io::BufWriter::new(stdout.lock());
+    serve_jsonl(
+        harness.kernel_mut(),
+        &default_suite_authority(),
+        stdin.lock(),
+        &mut stdout,
+    )?;
     Ok(())
 }
 
@@ -265,30 +266,6 @@ fn packaged_executable(package: &Path) -> Result<PathBuf, Box<dyn Error>> {
             directory.display()
         )
         .into()),
-    }
-}
-
-fn handle_request(harness: &mut PhenixHarness, line: &str) -> ServiceResponse {
-    let request = match serde_json::from_str::<ServiceRequest>(line) {
-        Ok(request) => request,
-        Err(error) => return ServiceResponse::error(Value::Null, error.to_string()),
-    };
-    let id = request.id;
-    let service = match ServiceId::parse(request.service) {
-        Ok(service) => service,
-        Err(error) => return ServiceResponse::error(id, error.to_string()),
-    };
-    let input = match serde_json::to_vec(&request.input) {
-        Ok(input) => input,
-        Err(error) => return ServiceResponse::error(id, error.to_string()),
-    };
-
-    match harness.invoke(&service, &input, &default_suite_authority(), None) {
-        Ok(output) => match serde_json::from_slice::<Value>(&output) {
-            Ok(output) => ServiceResponse::json(id, output),
-            Err(_) => ServiceResponse::bytes(id, output),
-        },
-        Err(error) => ServiceResponse::error(id, error.to_string()),
     }
 }
 
