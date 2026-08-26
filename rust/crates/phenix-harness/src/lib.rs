@@ -134,7 +134,7 @@ mod tests {
             &mut self,
             _service: &ServiceId,
             _input: &[u8],
-            _authority: &Authority,
+            _host: &phenix_kernel::PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
             Ok(self.0.to_vec())
         }
