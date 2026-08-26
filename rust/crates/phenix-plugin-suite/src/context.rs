@@ -134,12 +134,25 @@ pub enum ContextCommand {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum ContextResponse {
-    Registered { resource: ContextResourceRevision },
-    Resource { resource: Option<ContextResourceRevision> },
-    Resources { descriptors: Vec<ContextDescriptor> },
-    Discovered { descriptors: Vec<ContextDescriptor> },
-    Loaded { injection: ContextInjection, resource: ContextResourceRevision },
-    Projection { projection: ExecutionContextProjection },
+    Registered {
+        resource: ContextResourceRevision,
+    },
+    Resource {
+        resource: Option<ContextResourceRevision>,
+    },
+    Resources {
+        descriptors: Vec<ContextDescriptor>,
+    },
+    Discovered {
+        descriptors: Vec<ContextDescriptor>,
+    },
+    Loaded {
+        injection: ContextInjection,
+        resource: ContextResourceRevision,
+    },
+    Projection {
+        projection: ExecutionContextProjection,
+    },
 }
 
 #[must_use]
@@ -201,22 +214,30 @@ impl PluginInstance for ContextPlugin {
         let command: ContextCommand =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = match command {
-            ContextCommand::Register { resource_id, kind, source, scope, content } => {
-                ContextResponse::Registered {
-                    resource: register_resource(host, resource_id, kind, source, scope, content)?,
-                }
-            }
-            ContextCommand::Get { resource_id, revision } => ContextResponse::Resource {
+            ContextCommand::Register {
+                resource_id,
+                kind,
+                source,
+                scope,
+                content,
+            } => ContextResponse::Registered {
+                resource: register_resource(host, resource_id, kind, source, scope, content)?,
+            },
+            ContextCommand::Get {
+                resource_id,
+                revision,
+            } => ContextResponse::Resource {
                 resource: read_resource(host, &resource_id, &revision)?,
             },
             ContextCommand::List => ContextResponse::Resources {
                 descriptors: list_descriptors(host)?,
             },
-            ContextCommand::DiscoverRepository { workspace_id, sources } => {
-                ContextResponse::Discovered {
-                    descriptors: discover_repository(host, &workspace_id, sources)?,
-                }
-            }
+            ContextCommand::DiscoverRepository {
+                workspace_id,
+                sources,
+            } => ContextResponse::Discovered {
+                descriptors: discover_repository(host, &workspace_id, sources)?,
+            },
             ContextCommand::Load {
                 execution_id,
                 resource_id,
@@ -234,7 +255,10 @@ impl PluginInstance for ContextPlugin {
                     lifetime,
                     reason,
                 )?;
-                ContextResponse::Loaded { injection, resource }
+                ContextResponse::Loaded {
+                    injection,
+                    resource,
+                }
             }
             ContextCommand::Project { execution_id } => ContextResponse::Projection {
                 projection: project_context(host, execution_id)?,
@@ -276,21 +300,29 @@ fn register_resource(
         let existing: ContextResourceRevision =
             serde_json::from_slice(&existing).map_err(|error| error.to_string())?;
         if existing != resource {
-            return Err(format!("immutable context revision collision: {resource_id}@{revision}"));
+            return Err(format!(
+                "immutable context revision collision: {resource_id}@{revision}"
+            ));
         }
         return Ok(existing);
     }
 
     let old_refs = read_raw(host, ALL_RESOURCES_KEY)?;
     let mut refs = decode_refs(old_refs.as_deref())?;
-    refs.push(ExactContextReference { resource_id, revision });
+    refs.push(ExactContextReference {
+        resource_id,
+        revision,
+    });
     refs.sort();
     refs.dedup();
 
     host.transact_durable(
         &context_namespace(),
         &[
-            TransactionOp::AssertValue { key: key.clone(), expected: None },
+            TransactionOp::AssertValue {
+                key: key.clone(),
+                expected: None,
+            },
             TransactionOp::AssertValue {
                 key: ALL_RESOURCES_KEY.into(),
                 expected: old_refs,
@@ -378,7 +410,10 @@ fn load_context(
     let injection = ContextInjection {
         sequence,
         execution_id,
-        source: ExactContextReference { resource_id, revision },
+        source: ExactContextReference {
+            resource_id,
+            revision,
+        },
         requester,
         lifetime,
         reason,
@@ -387,7 +422,10 @@ fn load_context(
     host.transact_durable(
         &context_namespace(),
         &[
-            TransactionOp::AssertValue { key: key.clone(), expected: old },
+            TransactionOp::AssertValue {
+                key: key.clone(),
+                expected: old,
+            },
             TransactionOp::Put {
                 key,
                 value: serde_json::to_vec(&injections).map_err(|error| error.to_string())?,
@@ -418,10 +456,16 @@ fn project_context(
                     injection.source.resource_id, injection.source.revision
                 )
             })?;
-            Ok(ProjectedContextEntry { injection, resource })
+            Ok(ProjectedContextEntry {
+                injection,
+                resource,
+            })
         })
         .collect::<Result<Vec<_>, String>>()?;
-    Ok(ExecutionContextProjection { execution_id, entries })
+    Ok(ExecutionContextProjection {
+        execution_id,
+        entries,
+    })
 }
 
 fn read_resource(
@@ -522,8 +566,11 @@ mod tests {
         let manifest = context_manifest();
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
-        kernel.register_embedded_factory(plugin.clone(), context_factory).unwrap();
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        kernel
+            .register_embedded_factory(plugin.clone(), context_factory)
+            .unwrap();
         kernel.activate_all().unwrap();
         assert_eq!(kernel.state(&plugin), Some(PluginState::Active));
         kernel
@@ -585,7 +632,9 @@ mod tests {
         let mut restored = kernel_with(&path);
         let response = invoke(
             &mut restored,
-            &ContextCommand::Project { execution_id: "exec-1".into() },
+            &ContextCommand::Project {
+                execution_id: "exec-1".into(),
+            },
         )
         .unwrap();
         match response {
@@ -685,7 +734,10 @@ mod tests {
     fn context_and_skill_activation_require_no_unrelated_caller_authority() {
         let path = temp_db("context-authority");
         let manifest = context_manifest();
-        assert_eq!(manifest.services[0].required_authority, Authority::default());
+        assert_eq!(
+            manifest.services[0].required_authority,
+            Authority::default()
+        );
         assert!(!manifest
             .maximum_authority
             .contains(&capability("workspace.write")));
