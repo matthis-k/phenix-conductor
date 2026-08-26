@@ -86,3 +86,33 @@
         let _ = std::fs::remove_file(db.with_extension("sqlite-wal"));
         let _ = std::fs::remove_file(db.with_extension("sqlite-shm"));
     }
+
+    #[test]
+    fn managed_language_observations_do_not_create_execution_jobs() {
+        use phenix_core::{LanguageOperationResult, LanguageProviderId, LanguageServiceKind};
+
+        let mut runtime = ConductorRuntime::new();
+        let session = runtime.create_session(None, None, fixed("language")).unwrap();
+        let execution = runtime.submit(&session.id, "inspect symbols").unwrap();
+        runtime
+            .record_language_observation(LanguageObservationInput {
+                execution: execution.id,
+                workspace: session.workspace_id,
+                service: LanguageServiceKind::parse("rust").unwrap(),
+                provider: LanguageProviderId::parse("rust-analyzer").unwrap(),
+                provider_epoch: 1,
+                operation: LanguageOperation::WorkspaceSymbols {
+                    query: "symbol".to_owned(),
+                },
+                result: LanguageOperationResult {
+                    value: json!({"symbols": []}),
+                    documents: Vec::new(),
+                },
+            })
+            .unwrap();
+
+        assert!(runtime.jobs.is_empty());
+        assert!(!runtime.journal().entries.iter().any(|entry| {
+            matches!(entry.event, DomainEvent::JobCreated { .. })
+        }));
+    }

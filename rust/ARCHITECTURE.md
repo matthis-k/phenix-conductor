@@ -303,3 +303,7 @@ The conductor owns semantic decisions as durable workspace state. A draft may be
 Decision events are canonical. SQLite stores normalized event data and rebuildable FTS search data. The FTS index is derived and may be rebuilt without changing journal or relational decision state. History search defaults to the current objective and its ancestors. Whole-workspace search is an explicit scope.
 
 Recorded decisions are discoverable context resources. The existing context catalog exposes descriptors first, and the canonical context load path resolves the exact decision body. No separate decision prompt registry exists.
+
+## Persistent process resources
+
+The conductor owns terminal and job identity, durable lifecycle metadata, output references, promotion, and authority provenance. Raw process and PTY handles remain runtime-local and are never reconstructed from durable state. Resources start execution-owned. Workspace lifetime requires an explicit durable promotion event. Current execution authority is always an upper bound; narrowing authority revokes a resource whose creation authority is no longer permitted. Managed language services stay in the workspace language-service subsystem rather than entering the execution job registry.

@@ -1,5 +1,8 @@
 use super::super::ResolvedRoute;
-use crate::{ConfigRevisionSlot, ExecutionRecord, SessionRecord};
+use crate::{
+    ConfigRevisionSlot, ExecutionRecord, JobId, JobRecord, SessionRecord, TerminalId,
+    TerminalRecord,
+};
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, DiagnosticWritePatch, ExecutionEvent,
     ExecutionId, ExecutionReadSet, OrchestrationFailureDecisionRecord, OrchestrationNodeId,
@@ -12,6 +15,8 @@ pub(crate) struct DurableProjection<'a> {
     pub current_config_revision: &'a mut ConfigRevisionId,
     pub sessions: &'a mut BTreeMap<SessionId, SessionRecord>,
     pub executions: &'a mut BTreeMap<ExecutionId, ExecutionRecord>,
+    pub terminals: &'a mut BTreeMap<TerminalId, TerminalRecord>,
+    pub jobs: &'a mut BTreeMap<JobId, JobRecord>,
     pub root_ingress: &'a mut BTreeMap<ExecutionId, u64>,
     pub next_root_ingress: &'a mut BTreeMap<SessionId, u64>,
     pub attempt_groups: &'a mut BTreeMap<AttemptGroupId, AttemptGroup>,
@@ -30,6 +35,8 @@ pub(crate) struct DurableProjection<'a> {
     pub next_session: &'a mut u64,
     pub next_execution: &'a mut u64,
     pub next_attempt_group: &'a mut u64,
+    pub next_terminal: &'a mut u64,
+    pub next_job: &'a mut u64,
     pub next_event: &'a mut u64,
     pub next_tool_call: &'a mut u64,
 }

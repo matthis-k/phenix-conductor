@@ -103,6 +103,10 @@ pub(crate) struct ConfigRevisionSlot {
 
 include!("runtime/invocation_types.rs");
 
+pub trait RuntimeProcessHandle: Send + fmt::Debug {
+    fn authority(&self) -> &ExecutionAuthority;
+}
+
 #[derive(Debug)]
 pub struct ConductorRuntime {
     config_revision: ConfigRevisionId,
@@ -126,6 +130,10 @@ pub struct ConductorRuntime {
     journal: RuntimeJournal,
     skill_activations: BTreeMap<ExecutionId, BTreeSet<SkillId>>,
     active_lifecycle_hooks: BTreeSet<(ExecutionId, LifecycleHookId)>,
+    terminals: BTreeMap<TerminalId, TerminalRecord>,
+    jobs: BTreeMap<JobId, JobRecord>,
+    terminal_runtime_handles: BTreeMap<TerminalId, Box<dyn RuntimeProcessHandle>>,
+    job_runtime_handles: BTreeMap<JobId, Box<dyn RuntimeProcessHandle>>,
     sandbox_states: BTreeMap<ExecutionId, std::sync::Arc<sandbox::ExecutionSandboxState>>,
     policy: InvocationPolicy,
     event_sinks: BTreeMap<u64, std::sync::mpsc::Sender<ExecutionEvent>>,
@@ -134,6 +142,8 @@ pub struct ConductorRuntime {
     next_session: u64,
     next_execution: u64,
     next_attempt_group: u64,
+    next_terminal: u64,
+    next_job: u64,
     next_event: u64,
     next_tool_call: u64,
 }
@@ -152,6 +162,7 @@ include!("runtime/invocation.rs");
 include!("runtime/lifecycle.rs");
 include!("runtime/lifecycle_hook_runtime.rs");
 include!("runtime/orchestration.rs");
+include!("runtime/process_resources.rs");
 include!("runtime/runtime.rs");
 include!("runtime/sessions.rs");
 include!("runtime/support.rs");

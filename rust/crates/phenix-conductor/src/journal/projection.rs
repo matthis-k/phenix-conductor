@@ -2,6 +2,7 @@ mod attempts;
 mod executions;
 mod observations;
 mod orchestration;
+mod process_resources;
 mod replay;
 mod sessions;
 mod state;
@@ -27,6 +28,14 @@ pub(crate) fn apply_domain_event(
         | DomainEvent::ExecutionStateChanged { .. }
         | DomainEvent::InvocationResolved { .. }
         | DomainEvent::FrontendEvent { .. } => executions::apply(state, event),
+
+        DomainEvent::TerminalCreated { .. }
+        | DomainEvent::JobCreated { .. }
+        | DomainEvent::TerminalStateChanged { .. }
+        | DomainEvent::JobStateChanged { .. }
+        | DomainEvent::JobPromoted { .. }
+        | DomainEvent::TerminalOutputRecorded { .. }
+        | DomainEvent::JobOutputRecorded { .. } => process_resources::apply(state, event),
 
         DomainEvent::AttemptGroupCreated { .. }
         | DomainEvent::AttemptFailureRecorded { .. }
