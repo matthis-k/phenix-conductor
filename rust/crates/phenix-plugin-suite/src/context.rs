@@ -1,3 +1,7 @@
+use crate::{
+    execution_factory, execution_manifest, execution_service, ExecutionAuthority, ExecutionCommand,
+    ExecutionResponse, ExecutionState,
+};
 use phenix_kernel::{
     Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
@@ -404,6 +408,7 @@ fn load_context(
 ) -> Result<(ContextInjection, ContextResourceRevision), String> {
     validate_identity("execution id", &execution_id)?;
     validate_identity("context load reason", &reason)?;
+    require_active_execution(host, &execution_id)?;
     let resource = read_resource(host, &resource_id, &revision)?
         .ok_or_else(|| format!("unknown context revision: {resource_id}@{revision}"))?;
     let key = injections_key(&execution_id);
@@ -439,6 +444,35 @@ fn load_context(
     )
     .map_err(|error| error.to_string())?;
     Ok((injection, resource))
+}
+
+fn require_active_execution(host: &PluginHost<'_>, execution_id: &str) -> Result<(), String> {
+    let command = ExecutionCommand::GetExecution {
+        id: execution_id.to_owned(),
+    };
+    let output = host
+        .invoke_service(
+            &execution_service(),
+            &serde_json::to_vec(&command).map_err(|error| error.to_string())?,
+            host.authority(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+    match serde_json::from_slice::<ExecutionResponse>(&output).map_err(|error| error.to_string())? {
+        ExecutionResponse::ExecutionLookup {
+            execution: Some(execution),
+        } if execution.state == ExecutionState::Active => Ok(()),
+        ExecutionResponse::ExecutionLookup {
+            execution: Some(execution),
+        } => Err(format!(
+            "context target execution is not active: {execution_id} ({:?})",
+            execution.state
+        )),
+        ExecutionResponse::ExecutionLookup { execution: None } => {
+            Err(format!("unknown context target execution: {execution_id}"))
+        }
+        other => Err(format!("unexpected execution lookup response: {other:?}")),
+    }
 }
 
 fn project_context(
@@ -568,17 +602,40 @@ mod tests {
     }
 
     fn kernel_with(path: &PathBuf) -> Kernel {
-        let manifest = context_manifest();
-        let plugin = manifest.id.clone();
+        let context_manifest = context_manifest();
+        let context_plugin = context_manifest.id.clone();
+        let execution_manifest = execution_manifest(authority());
+        let execution_plugin = execution_manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel =
-            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        let mut kernel = Kernel::with_persistence(
+            KernelConfig::new([execution_manifest, context_manifest]).unwrap(),
+            persistence,
+        );
         kernel
-            .register_embedded_factory(plugin.clone(), context_factory)
+            .register_embedded_factory(execution_plugin.clone(), execution_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(context_plugin.clone(), context_factory)
             .unwrap();
         kernel.activate_all().unwrap();
-        assert_eq!(kernel.state(&plugin), Some(PluginState::Active));
+        assert_eq!(kernel.state(&execution_plugin), Some(PluginState::Active));
+        assert_eq!(kernel.state(&context_plugin), Some(PluginState::Active));
         kernel
+    }
+
+    fn create_execution(kernel: &mut Kernel, execution_id: &str) {
+        let command = ExecutionCommand::CreateExecution {
+            id: execution_id.to_owned(),
+            requested_authority: ExecutionAuthority::new(Vec::<String>::new()),
+        };
+        kernel
+            .invoke(
+                &execution_service(),
+                &serde_json::to_vec(&command).unwrap(),
+                &authority(),
+                None,
+            )
+            .unwrap();
     }
 
     fn temp_db(name: &str) -> PathBuf {
@@ -620,6 +677,7 @@ mod tests {
                 ContextResponse::Registered { resource } => resource.descriptor,
                 other => panic!("unexpected response: {other:?}"),
             };
+            create_execution(&mut kernel, "exec-1");
             invoke(
                 &mut kernel,
                 &ContextCommand::Load {
@@ -741,6 +799,69 @@ mod tests {
             .unwrap(),
             ContextResponse::Resource { resource: Some(_) }
         ));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn context_load_rejects_unknown_or_finished_execution() {
+        let path = temp_db("context-execution-provenance");
+        let mut kernel = kernel_with(&path);
+        let registered = invoke(
+            &mut kernel,
+            &ContextCommand::Register {
+                resource_id: "skill:bounded".into(),
+                kind: ContextResourceKind::Skill,
+                source: "skills/bounded/SKILL.md".into(),
+                scope: ContextScope::Workspace,
+                content: b"bounded".to_vec(),
+            },
+        )
+        .unwrap();
+        let descriptor = match registered {
+            ContextResponse::Registered { resource } => resource.descriptor,
+            other => panic!("unexpected response: {other:?}"),
+        };
+
+        let unknown = invoke(
+            &mut kernel,
+            &ContextCommand::Load {
+                execution_id: "missing".into(),
+                resource_id: descriptor.resource_id.clone(),
+                revision: descriptor.revision.clone(),
+                requester: ContextInjectionRequester::User,
+                lifetime: ContextInjectionLifetime::Execution,
+                reason: "must be execution-bound".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(unknown.contains("unknown context target execution"));
+
+        create_execution(&mut kernel, "finished");
+        kernel
+            .invoke(
+                &execution_service(),
+                &serde_json::to_vec(&ExecutionCommand::FinishExecution {
+                    id: "finished".into(),
+                    success: true,
+                })
+                .unwrap(),
+                &authority(),
+                None,
+            )
+            .unwrap();
+        let finished = invoke(
+            &mut kernel,
+            &ContextCommand::Load {
+                execution_id: "finished".into(),
+                resource_id: descriptor.resource_id,
+                revision: descriptor.revision,
+                requester: ContextInjectionRequester::User,
+                lifetime: ContextInjectionLifetime::Execution,
+                reason: "must still be active".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(finished.contains("context target execution is not active"));
         let _ = fs::remove_file(path);
     }
 
