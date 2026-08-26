@@ -29,7 +29,8 @@ jobs:
         run: python scripts/plugin_composition_transport.py
 
       - name: Add manifest-path diagnostic
-        run: python -c 'from pathlib import Path; p=Path("rust/crates/phenix-harness/src/main.rs"); s=p.read_text(); old="        .ok_or(\"plugin manifest must be a JSON object\")?;"; new="        .ok_or_else(|| format!(\"plugin manifest {} must be a JSON object: {value}\", manifest_path.display()))?;"; assert old in s; p.write_text(s.replace(old,new,1))'
+        run: |
+          python -c 'from pathlib import Path; p=Path("rust/crates/phenix-harness/src/main.rs"); s=p.read_text(); old="        .ok_or(\"plugin manifest must be a JSON object\")?;"; new="        .ok_or_else(|| format!(\"plugin manifest {} must be a JSON object: {value}\", manifest_path.display()))?;"; assert old in s; p.write_text(s.replace(old,new,1))'
 
       - name: Runtime composition check
         id: composition
