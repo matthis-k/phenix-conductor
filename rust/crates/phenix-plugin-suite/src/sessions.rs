@@ -35,30 +35,49 @@ pub struct SessionInput {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum SessionCommand {
-    Create { id: String, parent: Option<String> },
-    Get { id: String },
+    Create {
+        id: String,
+        parent: Option<String>,
+    },
+    Get {
+        id: String,
+    },
     List,
-    Children { parent: Option<String> },
+    Children {
+        parent: Option<String>,
+    },
     Continue {
         id: String,
         kind: SessionInputKind,
         content: Vec<u8>,
     },
-    Inputs { id: String },
+    Inputs {
+        id: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum SessionResponse {
-    Created { session: SessionRecord },
-    Session { session: Option<SessionRecord> },
-    Sessions { sessions: Vec<SessionRecord> },
-    Children { sessions: Vec<SessionRecord> },
+    Created {
+        session: SessionRecord,
+    },
+    Session {
+        session: Option<SessionRecord>,
+    },
+    Sessions {
+        sessions: Vec<SessionRecord>,
+    },
+    Children {
+        sessions: Vec<SessionRecord>,
+    },
     Continued {
         session: SessionRecord,
         input: SessionInput,
     },
-    Inputs { inputs: Vec<SessionInput> },
+    Inputs {
+        inputs: Vec<SessionInput>,
+    },
 }
 
 #[must_use]
@@ -256,9 +275,7 @@ fn read_session(host: &PluginHost<'_>, id: &str) -> Result<Option<SessionRecord>
 fn read_sessions(host: &PluginHost<'_>) -> Result<Vec<SessionRecord>, String> {
     let ids = decode_ids(read_raw(host, ALL_SESSIONS_KEY)?.as_deref())?;
     ids.into_iter()
-        .map(|id| {
-            read_session(host, &id)?.ok_or_else(|| format!("missing durable session: {id}"))
-        })
+        .map(|id| read_session(host, &id)?.ok_or_else(|| format!("missing durable session: {id}")))
         .collect()
 }
 
@@ -469,11 +486,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            invoke(
-                &mut kernel,
-                &SessionCommand::Get { id: "child".into() },
-            )
-            .unwrap(),
+            invoke(&mut kernel, &SessionCommand::Get { id: "child".into() },).unwrap(),
             SessionResponse::Session { session: Some(_) }
         ));
         assert!(matches!(
