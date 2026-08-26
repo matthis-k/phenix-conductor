@@ -23,7 +23,7 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-      - name: Build real Harness runtime
+      - name: Apply Harness runtime transform
         shell: bash
         run: |
           set -euo pipefail
@@ -85,17 +85,21 @@ jobs:
               f'{indent}(false, rest)\n'
               f'{indent[:-4]}}};'
           )
-          text = pattern.sub(replacement, text, count=1)
-          repository_workers.write_text(text)
+          repository_workers.write_text(pattern.sub(replacement, text, count=1))
           PY
-          # The flake source only sees tracked files. Stage the new executable
-          # before Nix evaluates the Rust source tree.
           git add rust/crates/phenix-harness/src/main.rs
-          nix run .#phenix-maintenance -- fix
-          cargo test --manifest-path rust/Cargo.toml -p phenix-harness
-          cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
-          nix build .#phenix-harness --no-link
-          nix build .#checks.x86_64-linux.phenix-product-smoke --no-link
+      - name: Apply canonical fixes
+        run: nix run .#phenix-maintenance -- fix
+      - name: Harness tests
+        run: cargo test --manifest-path rust/Cargo.toml -p phenix-harness
+      - name: Workspace Clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
+      - name: Harness package
+        run: nix build .#phenix-harness --no-link
+      - name: Product smoke
+        run: nix build .#checks.x86_64-linux.phenix-product-smoke --no-link
+      - name: Clean transport files
+        run: |
           rm .github/workflows/worker-399-harness-runtime.yml
           rm scripts/worker399_harness_runtime.py
           rm scripts/worker399_harness_runtime_fix.py
