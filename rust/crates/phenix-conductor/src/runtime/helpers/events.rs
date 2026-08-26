@@ -67,6 +67,9 @@ fn redact_event(
     secret_values: &BTreeSet<String>,
 ) {
     match &mut event.kind {
+        ExecutionEventKind::LifecycleHookMetadata { value, .. } => {
+            redact_value(value, secret_names, secret_values);
+        }
         ExecutionEventKind::UserInput { text }
         | ExecutionEventKind::AssistantContentDelta { text }
         | ExecutionEventKind::ReasoningDelta { text }

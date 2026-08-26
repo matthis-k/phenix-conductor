@@ -62,10 +62,7 @@ impl ConductorRuntime {
         execution_id: &ExecutionId,
         state: ExecutionState,
     ) -> Result<(), ConductorError> {
-        if state == ExecutionState::Completed {
-            self.ensure_orchestration_child_output(execution_id)?;
-        }
-        let (current, parent) = {
+        let (current, parent, has_callable) = {
             let execution = self
                 .executions
                 .get(execution_id)
@@ -73,11 +70,26 @@ impl ConductorRuntime {
             (
                 execution.summary.state.clone(),
                 execution.summary.parent_execution.clone(),
+                execution.summary.callable.is_some(),
             )
         };
         if is_terminal(&current) {
             return Err(ConductorError::InvalidLifecycle(execution_id.clone()));
         }
+
+        if state == ExecutionState::Running && has_callable {
+            self.dispatch_lifecycle_hooks(execution_id, LifecycleEvent::CallableStarted)?;
+        }
+        if state == ExecutionState::Completed {
+            self.ensure_orchestration_child_output(execution_id)?;
+            if has_callable {
+                self.dispatch_lifecycle_hooks(execution_id, LifecycleEvent::CallableCompleted)?;
+            }
+            self.dispatch_lifecycle_hooks(execution_id, LifecycleEvent::ExecutionCompleted)?;
+        } else if state == ExecutionState::Failed {
+            self.dispatch_lifecycle_hooks(execution_id, LifecycleEvent::ExecutionFailed)?;
+        }
+
         self.record_domain_event(DomainEvent::ExecutionStateChanged {
             execution_id: execution_id.clone(),
             state: state.clone(),

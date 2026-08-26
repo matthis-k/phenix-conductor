@@ -217,6 +217,14 @@ Configuration compiles to immutable revisions. Sessions pin a revision.
 
 Reload creates a new revision. Existing sessions do not silently change meaning. New sessions use the current revision. An explicit rebase operation may move an existing session to a newer compatible revision. Existing executions keep the revision they started with.
 
+## Lifecycle hooks
+
+Lifecycle hooks are immutable `CompiledConfiguration` semantics. An execution resolves them only from the configuration revision it started with. Each event uses one explicit dependency DAG; registration order is not runtime order.
+
+The conductor owns dispatch and causal recursion guards. Hook actions request canonical conductor operations: context loading uses exact-revision injection, while callable and orchestration actions use normal policy, authority, lease, schema, sandbox, child-execution, and persistence paths. Hooks do not gain hidden side-effect authority or a second scheduler. A hook identity is executed at most once in one synchronous causal dispatch chain.
+
+Hook metadata and warnings use canonical durable execution events. Runtime frontend connections and process handles are excluded from hook configuration identity.
+
 ## Context catalog
 
 The conductor owns context resource identity, revision history, discovery, loading, and injection history. Skills, discoverable project documents, objectives, and plans use one catalog. Backends receive projected context bytes; backend conversation state never becomes the authoritative context store.

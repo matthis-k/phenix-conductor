@@ -14,6 +14,7 @@ pub struct CompiledConfiguration {
     context: ContextRegistry,
     skills: SkillRegistry,
     worker_profiles: WorkerProfileRegistry,
+    lifecycle_hooks: lifecycle_hooks::LifecycleHookRegistry,
     pub(crate) context_compaction: Option<ContextCompactionConfiguration>,
 }
 
@@ -25,6 +26,7 @@ impl CompiledConfiguration {
             "context": self.context.semantic_manifest(),
             "skills": self.skills.semantic_manifest(),
             "worker_profiles": self.worker_profiles.semantic_manifest(),
+            "lifecycle_hooks": self.lifecycle_hooks.semantic_manifest(),
             "context_compaction": self.context_compaction.as_ref().map(|configuration| json!({
                 "compactor_target": configuration.compactor_target,
                 "output_reserve_tokens": configuration.budget_policy.output_reserve_tokens,
@@ -71,6 +73,20 @@ impl CompiledConfiguration {
 
     pub fn clear_context_compaction(&mut self) {
         self.context_compaction = None;
+    }
+
+    pub fn register_lifecycle_hook(
+        &mut self,
+        hook: LifecycleHookDefinition,
+    ) -> Result<(), LifecycleHookError> {
+        self.lifecycle_hooks.register(hook)
+    }
+
+    pub fn lifecycle_hooks_for_event(
+        &self,
+        event: &LifecycleEvent,
+    ) -> Result<Vec<&LifecycleHookDefinition>, LifecycleHookError> {
+        self.lifecycle_hooks.ordered_for_event(event)
     }
 
     pub fn register_tool<F, O>(

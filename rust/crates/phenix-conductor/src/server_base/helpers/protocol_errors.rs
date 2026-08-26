@@ -185,6 +185,9 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
         ConductorError::CallableRegistry(error) => {
             protocol_error(ErrorCode::InvalidRequest, error.to_string())
         }
+        ConductorError::LifecycleHook(error) => {
+            protocol_error(ErrorCode::InvalidRequest, error.to_string())
+        }
         ConductorError::ExecutionProvider(error) => map_execution_provider_error(error),
         ConductorError::Journal(error) => {
             protocol_error(ErrorCode::BackendProtocol, error.to_string())

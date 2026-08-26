@@ -120,6 +120,14 @@ fn load_frontend_event(
                 decision: parse_decision(&required(row.16, "decision kind")?, row.17)?,
             },
         },
+        "lifecycle_hook_metadata" => {
+            let encoded = required(row.4, "lifecycle hook metadata")?;
+            let (hook_id, key, value): (String, String, Value) =
+                serde_json::from_str(&encoded).map_err(|error| {
+                    invalid(format!("invalid lifecycle hook metadata: {error}"))
+                })?;
+            ExecutionEventKind::LifecycleHookMetadata { hook_id, key, value }
+        }
         "error" => ExecutionEventKind::Error {
             code: required(row.18, "error code")?,
             message: required(row.19, "error message")?,

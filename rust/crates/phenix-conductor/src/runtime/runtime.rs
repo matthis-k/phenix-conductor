@@ -34,6 +34,7 @@ impl ConductorRuntime {
             read_sets: BTreeMap::new(),
             events: Vec::new(),
             skill_activations: BTreeMap::new(),
+            active_lifecycle_hooks: BTreeSet::new(),
             sandbox_states: BTreeMap::new(),
             policy: InvocationPolicy::new(),
             event_sinks: BTreeMap::new(),

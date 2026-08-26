@@ -73,6 +73,7 @@ fn execution_event_type(kind: &ExecutionEventKind) -> &'static str {
         ExecutionEventKind::ChildExecutionStarted { .. } => "child_execution_started",
         ExecutionEventKind::ChildExecutionFinished { .. } => "child_execution_finished",
         ExecutionEventKind::OrchestrationDecisionMade { .. } => "orchestration_decision_made",
+        ExecutionEventKind::LifecycleHookMetadata { .. } => "lifecycle_hook_metadata",
         ExecutionEventKind::Error { .. } => "error",
     }
 }

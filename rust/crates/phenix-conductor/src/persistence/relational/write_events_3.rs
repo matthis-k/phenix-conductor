@@ -156,6 +156,13 @@ fn insert_frontend_event(
             columns.decision_kind = Some(kind.to_owned());
             columns.decision_recovery_execution_id = recovery;
         }
+        ExecutionEventKind::LifecycleHookMetadata { hook_id, key, value } => {
+            columns.text = Some(
+                serde_json::to_string(&(hook_id, key, value)).map_err(|error| {
+                    invalid(format!("cannot encode lifecycle hook metadata: {error}"))
+                })?,
+            );
+        }
         ExecutionEventKind::Error { code, message } => {
             columns.error_code = Some(code.clone());
             columns.error_message = Some(message.clone());

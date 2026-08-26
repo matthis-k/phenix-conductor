@@ -82,6 +82,8 @@ impl ConductorRuntime {
                 invocation.callable
             )));
         }
+        self.dispatch_lifecycle_hooks(execution_id, LifecycleEvent::CallableStarted)
+            .map_err(conductor_protocol_error)?;
         let tool_call_id = self.new_tool_call_id();
         self.push_event(
             execution_id,
@@ -164,6 +166,8 @@ impl ConductorRuntime {
             },
             Err(error) => return Err(conductor_protocol_error(error)),
         };
+        self.dispatch_lifecycle_hooks(execution_id, LifecycleEvent::CallableCompleted)
+            .map_err(conductor_protocol_error)?;
         self.push_event(
             execution_id,
             ExecutionEventKind::ToolCallFinished {
