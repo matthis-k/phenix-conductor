@@ -260,7 +260,7 @@ replacement = '''      phenixProductSmoke =
               and (.services | index("phenix.sessions@1") != null)
               and (.services | index("phenix.context@1") != null)
               and (.services | index("phenix.execution@1") != null)
-              and (.services | index("phenix.repository-work-queue@1") != null)
+              and (.services | index("phenix.repository.worker-queue@1") != null)
             ' "$TMPDIR/services.json" >/dev/null
 
             printf '%s\\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"create","id":"product-smoke","parent":null}}' \\
