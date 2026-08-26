@@ -1,222 +1,518 @@
 from pathlib import Path
 
 
-def replace_once(path: str, old: str, new: str) -> None:
-    file = Path(path)
-    text = file.read_text()
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"{path}: expected one replacement, found {count}")
-    file.write_text(text.replace(old, new, 1))
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if old not in text:
+        raise SystemExit(f"{label} anchor missing")
+    return text.replace(old, new, 1)
 
 
-replace_once(
-    "rust/crates/phenix-harness/src/lib.rs",
-    "use std::{collections::BTreeMap, sync::Arc};",
-    "use std::{\n    collections::{BTreeMap, BTreeSet},\n    sync::Arc,\n};",
+lib = Path("rust/crates/phenix-harness/src/lib.rs")
+text = lib.read_text()
+text = replace_once(
+    text,
+    "type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;\n",
+    "type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;\n"
+    "type ExternalFactory = Arc<\n"
+    "    dyn Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync,\n"
+    ">;\n",
+    "external factory type",
 )
+text = replace_once(
+    text,
+    "    embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,\n",
+    "    embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,\n"
+    "    external_factories: BTreeMap<PluginId, ExternalFactory>,\n",
+    "external factory registry",
+)
+text = replace_once(
+    text,
+    "    pub fn build(self) -> Result<PhenixHarness, KernelError> {\n",
+    "    pub fn add_external<F>(\n"
+    "        &mut self,\n"
+    "        manifest: PluginManifest,\n"
+    "        factory: F,\n"
+    "    ) -> Result<(), KernelError>\n"
+    "    where\n"
+    "        F: Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String>\n"
+    "            + Send\n"
+    "            + Sync\n"
+    "            + 'static,\n"
+    "    {\n"
+    "        if !matches!(manifest.execution, PluginExecution::External { .. }) {\n"
+    "            return Err(KernelError::WrongExecutionKind(manifest.id));\n"
+    "        }\n"
+    "        let id = manifest.id.clone();\n"
+    "        self.manifests.push(manifest);\n"
+    "        self.external_factories.insert(id, Arc::new(factory));\n"
+    "        Ok(())\n"
+    "    }\n\n"
+    "    pub fn build(self) -> Result<PhenixHarness, KernelError> {\n",
+    "add external API",
+)
+loop = "        for (plugin, factory) in self.embedded_factories {\n            kernel.register_embedded_factory(plugin, move || factory())?;\n        }\n"
+loop_with_external = loop + "        for (plugin, factory) in self.external_factories {\n            kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;\n        }\n"
+if text.count(loop) != 2:
+    raise SystemExit(f"expected two HarnessBuilder factory loops, found {text.count(loop)}")
+text = text.replace(loop, loop_with_external)
+lib.write_text(text)
 
-old_default_suite = '''    pub fn with_default_suite() -> Result<Self, KernelError> {
-        let mut builder = Self::new();
-        let authority = default_suite_authority();
-        builder.add_embedded(repository_worker_manifest(), repository_worker_factory)?;
-        builder.add_embedded(session_manifest(), session_factory)?;
-        builder.add_embedded(artifact_manifest(), artifact_factory)?;
-        builder.add_embedded(cli_manifest(authority.clone()), cli_factory)?;
-        builder.add_embedded(context_manifest(), context_factory)?;
-        builder.add_embedded(execution_manifest(authority.clone()), execution_factory)?;
-        builder.add_embedded(language_manifest(), language_factory)?;
-        builder.add_embedded(planning_manifest(), planning_factory)?;
-        builder.add_embedded(workspace_manifest(), workspace_factory)?;
-        builder.add_embedded(
-            model_routing_manifest(authority.clone()),
-            model_routing_factory,
-        )?;
-        builder.add_embedded(job_manifest(), job_factory)?;
-        builder.add_embedded(frontend_manifest(authority.clone()), frontend_factory)?;
-        builder.add_embedded(hook_manifest(authority.clone()), hook_factory)?;
-        builder.add_embedded(debug_manifest(authority), debug_factory)?;
-        Ok(builder)
+main = Path("rust/crates/phenix-harness/src/main.rs")
+main.write_text(r'''use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};
+use phenix_kernel::{
+    Authority, CapabilityId, ExternalPluginProcess, ExternalSandbox, ExternalTransportConfig,
+    LocalPersistence, PluginExecution, PluginId, PluginManifest, ResourceNamespace,
+    ServiceContribution, ServiceId,
+};
+use serde_json::{json, Map, Value};
+use std::{
+    env,
+    error::Error,
+    fs,
+    io::{self, BufRead, Write},
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::Arc,
+    time::Duration,
+};
+
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("phenix-harness: {error}");
+        std::process::exit(1);
     }
-'''
+}
 
-new_default_suite = '''    pub fn with_default_suite() -> Result<Self, KernelError> {
-        Self::with_default_suite_selection(&BTreeSet::new())
+fn run() -> Result<(), Box<dyn Error>> {
+    if env::args().any(|argument| argument == "--help" || argument == "-h") {
+        println!("phenix-harness [--list-services]\n\nWithout arguments, reads JSONL service requests from stdin and writes JSONL responses.");
+        return Ok(());
     }
 
-    pub fn with_default_suite_selection(
-        disabled: &BTreeSet<PluginId>,
-    ) -> Result<Self, KernelError> {
-        let mut builder = Self::new();
-        let authority = default_suite_authority();
+    let state = state_path()?;
+    if let Some(parent) = state.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let persistence = LocalPersistence::open(&state)?;
+    let mut builder = HarnessBuilder::with_default_suite()?;
+    for package in configured_plugin_packages()? {
+        add_packaged_plugin(&mut builder, &package)?;
+    }
+    let mut harness = builder.build_with_persistence(persistence)?;
+    harness.activate()?;
 
-        macro_rules! add_if_enabled {
-            ($manifest:expr, $factory:expr) => {{
-                let manifest = $manifest;
-                if !disabled.contains(&manifest.id) {
-                    builder.add_embedded(manifest, $factory)?;
-                }
-            }};
-        }
-
-        add_if_enabled!(repository_worker_manifest(), repository_worker_factory);
-        add_if_enabled!(session_manifest(), session_factory);
-        add_if_enabled!(artifact_manifest(), artifact_factory);
-        add_if_enabled!(cli_manifest(authority.clone()), cli_factory);
-        add_if_enabled!(context_manifest(), context_factory);
-        add_if_enabled!(execution_manifest(authority.clone()), execution_factory);
-        add_if_enabled!(language_manifest(), language_factory);
-        add_if_enabled!(planning_manifest(), planning_factory);
-        add_if_enabled!(workspace_manifest(), workspace_factory);
-        add_if_enabled!(
-            model_routing_manifest(authority.clone()),
-            model_routing_factory
+    if env::args().any(|argument| argument == "--list-services") {
+        let plugins = harness
+            .kernel()
+            .config()
+            .manifests()
+            .map(|manifest| manifest.id.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let mut services = harness
+            .kernel()
+            .config()
+            .manifests()
+            .flat_map(|manifest| manifest.services.iter())
+            .map(|contribution| contribution.service.as_str().to_owned())
+            .collect::<Vec<_>>();
+        services.sort();
+        services.dedup();
+        println!(
+            "{}",
+            serde_json::to_string(&json!({ "plugins": plugins, "services": services }))?
         );
-        add_if_enabled!(job_manifest(), job_factory);
-        add_if_enabled!(frontend_manifest(authority.clone()), frontend_factory);
-        add_if_enabled!(hook_manifest(authority.clone()), hook_factory);
-        add_if_enabled!(debug_manifest(authority), debug_factory);
-        Ok(builder)
+        return Ok(());
     }
-'''
-replace_once("rust/crates/phenix-harness/src/lib.rs", old_default_suite, new_default_suite)
 
-replace_once(
-    "rust/crates/phenix-harness/src/main.rs",
-    "use phenix_harness::{default_suite_authority, PhenixHarness};\nuse phenix_kernel::{LocalPersistence, ServiceId};",
-    "use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};\nuse phenix_kernel::{LocalPersistence, PluginId, ServiceId};",
-)
-replace_once(
-    "rust/crates/phenix-harness/src/main.rs",
-    "    env,\n    error::Error,",
-    "    collections::BTreeSet,\n    env,\n    error::Error,",
-)
-replace_once(
-    "rust/crates/phenix-harness/src/main.rs",
-    "    let persistence = LocalPersistence::open(&state)?;\n    let mut harness = PhenixHarness::default_suite_with_persistence(persistence)?;",
-    "    let persistence = LocalPersistence::open(&state)?;\n    let disabled = disabled_plugins()?;\n    let mut harness = HarnessBuilder::with_default_suite_selection(&disabled)?\n        .build_with_persistence(persistence)?;",
-)
+    let stdin = io::stdin();
+    let mut stdout = io::BufWriter::new(io::stdout().lock());
+    for line in stdin.lock().lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let response = handle_request(&mut harness, &line);
+        serde_json::to_writer(&mut stdout, &response)?;
+        stdout.write_all(b"\n")?;
+        stdout.flush()?;
+    }
+    Ok(())
+}
 
-main_tail = '''fn state_path() -> Result<PathBuf, Box<dyn Error>> {
-'''
-main_insert = '''fn disabled_plugins() -> Result<BTreeSet<PluginId>, Box<dyn Error>> {
-    let Some(config_path) = env::var_os("PHENIX_RUNTIME_CONFIG") else {
-        return Ok(BTreeSet::new());
+#[derive(Clone)]
+struct ProcessSandbox;
+
+impl ExternalSandbox for ProcessSandbox {
+    fn spawn(&self, executable: &str) -> io::Result<Child> {
+        Command::new(executable)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+    }
+}
+
+fn configured_plugin_packages() -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let Some(value) = env::var_os("PHENIX_PLUGIN_PACKAGES") else {
+        return Ok(Vec::new());
     };
-    let config = serde_json::from_slice::<Value>(&fs::read(config_path)?)?;
-    let disabled = config
-        .get("disabledPlugins")
-        .and_then(Value::as_array)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "runtime config missing disabledPlugins array"))?;
-    disabled
+    let value = value
+        .into_string()
+        .map_err(|_| "PHENIX_PLUGIN_PACKAGES must be valid UTF-8")?;
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(value.split(':').map(PathBuf::from).collect())
+}
+
+fn add_packaged_plugin(
+    builder: &mut HarnessBuilder,
+    package: &Path,
+) -> Result<(), Box<dyn Error>> {
+    let manifest_path = package.join("share/phenix-plugin/manifest.json");
+    let value: Value = serde_json::from_slice(&fs::read(&manifest_path)?)?;
+    let object = value
+        .as_object()
+        .ok_or("plugin manifest must be a JSON object")?;
+    let id = PluginId::parse(required_string(object, "id")?.to_owned())?;
+    let version = object
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .try_into()
+        .map_err(|_| "plugin manifest version does not fit u32")?;
+    let execution_name = required_string(object, "execution")?;
+    let execution = match execution_name {
+        "resource-only" => PluginExecution::ResourceOnly,
+        "external" => PluginExecution::External {
+            executable: packaged_executable(package)?.display().to_string(),
+        },
+        "embedded" => {
+            return Err("packaged embedded plugins must be linked through Harness policy".into());
+        }
+        other => return Err(format!("unsupported packaged plugin execution: {other}").into()),
+    };
+    let manifest = PluginManifest {
+        id,
+        version,
+        execution,
+        dependencies: parse_strings(object.get("dependencies"))?
+            .into_iter()
+            .map(PluginId::parse)
+            .collect::<Result<_, _>>()?,
+        services: parse_services(object.get("services"))?,
+        resource_namespaces: parse_strings(object.get("resource_namespaces"))?
+            .into_iter()
+            .map(ResourceNamespace::parse)
+            .collect::<Result<_, _>>()?,
+        maximum_authority: parse_authority(object.get("maximum_authority"))?,
+    };
+    if matches!(manifest.execution, PluginExecution::External { .. }) {
+        let transport =
+            ExternalTransportConfig::new(Arc::new(ProcessSandbox), Duration::from_secs(5));
+        builder.add_external(manifest, move |manifest| {
+            let PluginExecution::External { executable } = &manifest.execution else {
+                return Err("external factory received non-external manifest".into());
+            };
+            Ok(Box::new(ExternalPluginProcess::new(
+                manifest.clone(),
+                executable.clone(),
+                transport.clone(),
+            )))
+        })?;
+    } else {
+        builder.add_manifest(manifest);
+    }
+    Ok(())
+}
+
+fn required_string<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a str, String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("plugin manifest field {key} must be a string"))
+}
+
+fn parse_strings(value: Option<&Value>) -> Result<Vec<String>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    value
+        .as_array()
+        .ok_or_else(|| "plugin manifest list field must be an array".to_owned())?
         .iter()
         .map(|value| {
-            let id = value.as_str().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "disabled plugin id must be a string")
-            })?;
-            PluginId::parse(id).map_err(|message| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid disabled plugin id {id}: {message}"),
-                )
-                .into()
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "plugin manifest list entries must be strings".to_owned())
+        })
+        .collect()
+}
+
+fn parse_authority(value: Option<&Value>) -> Result<Authority, String> {
+    Ok(Authority::new(
+        parse_strings(value)?
+            .into_iter()
+            .map(CapabilityId::parse)
+            .collect::<Result<Vec<_>, _>>()?,
+    ))
+}
+
+fn parse_services(value: Option<&Value>) -> Result<Vec<ServiceContribution>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    value
+        .as_array()
+        .ok_or_else(|| "plugin manifest services must be an array".to_owned())?
+        .iter()
+        .map(|value| {
+            let object = value
+                .as_object()
+                .ok_or_else(|| "plugin service contribution must be an object".to_owned())?;
+            let service = ServiceId::parse(required_string(object, "service")?.to_owned())?;
+            let priority = object
+                .get("priority")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .try_into()
+                .map_err(|_| "plugin service priority does not fit i32".to_owned())?;
+            Ok(ServiceContribution {
+                service,
+                priority,
+                required_authority: parse_authority(object.get("required_authority"))?,
             })
         })
         .collect()
 }
 
+fn packaged_executable(package: &Path) -> Result<PathBuf, Box<dyn Error>> {
+    let directory = package.join("bin");
+    let mut entries = fs::read_dir(&directory)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() || path.is_symlink())
+        .collect::<Vec<_>>();
+    entries.sort();
+    match entries.as_slice() {
+        [executable] => Ok(executable.clone()),
+        [] => Err(format!(
+            "external plugin package has no executable: {}",
+            directory.display()
+        )
+        .into()),
+        _ => Err(format!(
+            "external plugin package must contain exactly one executable: {}",
+            directory.display()
+        )
+        .into()),
+    }
+}
+
+fn handle_request(harness: &mut PhenixHarness, line: &str) -> Value {
+    let request = match serde_json::from_str::<Value>(line) {
+        Ok(Value::Object(request)) => request,
+        Ok(_) => {
+            return json!({ "id": Value::Null, "status": "error", "error": "request must be a JSON object" });
+        }
+        Err(error) => {
+            return json!({ "id": Value::Null, "status": "error", "error": error.to_string() });
+        }
+    };
+    let id = request.get("id").cloned().unwrap_or(Value::Null);
+    let Some(service) = request.get("service").and_then(Value::as_str) else {
+        return json!({ "id": id, "status": "error", "error": "missing string field: service" });
+    };
+    let service = match ServiceId::parse(service) {
+        Ok(service) => service,
+        Err(error) => return json!({ "id": id, "status": "error", "error": error }),
+    };
+    let input = request.get("input").cloned().unwrap_or(Value::Null);
+    let input = match serde_json::to_vec(&input) {
+        Ok(input) => input,
+        Err(error) => return json!({ "id": id, "status": "error", "error": error.to_string() }),
+    };
+    if request.contains_key("authority") || request.contains_key("binding") {
+        return json!({
+            "id": id,
+            "status": "error",
+            "error": "authority and provider binding are owned by Harness policy",
+        });
+    }
+
+    match harness.invoke(&service, &input, &default_suite_authority(), None) {
+        Ok(output) => match serde_json::from_slice::<Value>(&output) {
+            Ok(output) => json!({ "id": id, "status": "ok", "output": output }),
+            Err(_) => json!({ "id": id, "status": "ok", "output_bytes": output }),
+        },
+        Err(error) => json!({ "id": id, "status": "error", "error": error.to_string() }),
+    }
+}
+
 fn state_path() -> Result<PathBuf, Box<dyn Error>> {
-'''
-replace_once("rust/crates/phenix-harness/src/main.rs", main_tail, main_insert)
+    if let Some(path) = env::var_os("PHENIX_STATE_DB") {
+        return Ok(PathBuf::from(path));
+    }
+    if let Some(state_home) = env::var_os("XDG_STATE_HOME") {
+        return Ok(PathBuf::from(state_home).join("phenix/harness.sqlite"));
+    }
+    if let Some(home) = env::var_os("HOME") {
+        return Ok(PathBuf::from(home).join(".local/state/phenix/harness.sqlite"));
+    }
+    Err("cannot determine durable state path; set PHENIX_STATE_DB or XDG_STATE_HOME".into())
+}
+''')
 
-replace_once(
-    "modules/plugin-packaging.nix",
-    "      kernelOnly ? false,\n      plugins ? [ ],\n      ...",
-    "      kernelOnly ? false,\n      plugins ? [ ],\n      disabledPlugins ? [ ],\n      ...",
-)
-
-old_mkphenix_body = '''    let
-      base =
-        if kernelOnly then
-          self.packages.${pkgs.system}.phenix-kernel
-        else
-          self.packages.${pkgs.system}.phenix-harness;
-    in
-    if plugins == [ ] then
+nix = Path("modules/plugin-packaging.nix")
+text = nix.read_text()
+text = replace_once(
+    text,
+    '''    if plugins == [ ] then
       base
     else
       pkgs.symlinkJoin {
         name = if kernelOnly then "phenix-kernel-composed" else "phenix-composed";
         paths = [ base ] ++ plugins;
       };
-'''
-new_mkphenix_body = '''    let
-      base =
-        if kernelOnly then
-          self.packages.${pkgs.system}.phenix-kernel
-        else
-          self.packages.${pkgs.system}.phenix-harness;
-      runtimeConfig = pkgs.writeText "phenix-runtime-config.json" (
-        builtins.toJSON {
-          inherit disabledPlugins;
-          pluginPackages = map toString plugins;
-        }
-      );
-    in
-    if kernelOnly then
-      if plugins == [ ] then
-        base
-      else
-        pkgs.symlinkJoin {
-          name = "phenix-kernel-composed";
-          paths = [ base ] ++ plugins;
-        }
+''',
+    '''    if plugins == [ ] then
+      base
     else
       pkgs.symlinkJoin {
-        name = "phenix-composed";
+        name = if kernelOnly then "phenix-kernel-composed" else "phenix-composed";
         paths = [ base ] ++ plugins;
         nativeBuildInputs = [ pkgs.makeWrapper ];
-        postBuild = ''
-          wrapProgram "$out/bin/phenix" --set PHENIX_RUNTIME_CONFIG "${runtimeConfig}"
-          wrapProgram "$out/bin/phenix-harness" --set PHENIX_RUNTIME_CONFIG "${runtimeConfig}"
-        '';
-      };
-'''
-replace_once("modules/plugin-packaging.nix", old_mkphenix_body, new_mkphenix_body)
-
-replace_once(
-    "modules/plugin-packaging.nix",
-    '''      externalComposition = mkPhenix {
-        inherit pkgs;
-        plugins = [ externalPlugin ];
-      };
-''',
-    '''      omittedSessionComposition = mkPhenix {
-        inherit pkgs;
-        disabledPlugins = [ "phenix.sessions" ];
-      };
-      externalComposition = mkPhenix {
-        inherit pkgs;
-        plugins = [ externalPlugin ];
+        postBuild =
+          if kernelOnly then
+            ""
+          else
+            let
+              pluginPackages = pkgs.lib.concatStringsSep ":" (map toString plugins);
+            in
+            ''
+              for program in phenix phenix-harness; do
+                if [ -e "$out/bin/$program" ]; then
+                  wrapProgram "$out/bin/$program" \\
+                    --set PHENIX_PLUGIN_PACKAGES ${pkgs.lib.escapeShellArg pluginPackages}
+                fi
+              done
+            '';
       };
 ''',
+    "mkPhenix runtime plugin composition",
 )
-
-replace_once(
-    "modules/plugin-packaging.nix",
-    '''            test -x "${defaultComposition}/bin/phenix"
-            test -x "${defaultComposition}/bin/phenix-harness"
-            test ! -e "${defaultComposition}/bin/phenix-conductor"
+text = replace_once(
+    text,
+    '''      externalExecutable = pkgs.writeShellScript "external-fixture" ''
+        exit 0
+      '';
+      externalPlugin = mkPhenixPlugin {
+        inherit pkgs;
+        name = "external-fixture";
+        manifest = {
+          id = "fixture.external";
+          execution = "external";
+        };
+        executable = externalExecutable;
+      };
 ''',
-    '''            test -x "${defaultComposition}/bin/phenix"
-            test -x "${defaultComposition}/bin/phenix-harness"
-            test ! -e "${defaultComposition}/bin/phenix-conductor"
-            export PHENIX_STATE_DB="$TMPDIR/plugin-composition.sqlite"
-            default_services="$(${defaultComposition}/bin/phenix --list-services)"
-            echo "$default_services" | jq -e '.plugins | index("phenix.sessions") != null' >/dev/null
-            echo "$default_services" | jq -e '.services | index("phenix.sessions@1") != null' >/dev/null
-            omitted_services="$(${omittedSessionComposition}/bin/phenix --list-services)"
-            echo "$omitted_services" | jq -e '.plugins | index("phenix.sessions") == null' >/dev/null
-            echo "$omitted_services" | jq -e '.services | index("phenix.sessions@1") == null' >/dev/null
+    '''      externalExecutable = pkgs.writeShellScript "external-fixture" ''
+        set -euo pipefail
+        while IFS= read -r frame; do
+          type="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .type)"
+          case "$type" in
+            handshake)
+              generation="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .generation)"
+              ${pkgs.jq}/bin/jq -cn \\
+                --argjson generation "$generation" \\
+                '{type:"handshake_ok",protocol:1,plugin:"fixture.session-replacement",generation:$generation,services:["phenix.sessions@1"]}'
+              ;;
+            invoke)
+              request_id="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .request_id)"
+              generation="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .generation)"
+              ${pkgs.jq}/bin/jq -cn \\
+                --argjson request_id "$request_id" \\
+                --argjson generation "$generation" \\
+                '{type:"result",request_id:$request_id,generation:$generation,output:[123,34,114,101,112,108,97,99,101,109,101,110,116,34,58,116,114,117,101,125]}'
+              ;;
+            stop)
+              exit 0
+              ;;
+            *)
+              exit 2
+              ;;
+          esac
+        done
+      '';
+      externalPlugin = mkPhenixPlugin {
+        inherit pkgs;
+        name = "external-fixture";
+        manifest = {
+          id = "fixture.session-replacement";
+          version = 1;
+          execution = "external";
+          dependencies = [ ];
+          services = [
+            {
+              service = "phenix.sessions@1";
+              priority = 200;
+              required_authority = [ ];
+            }
+          ];
+          resource_namespaces = [ ];
+          maximum_authority = [ ];
+        };
+        executable = externalExecutable;
+      };
 ''',
+    "external runtime fixture",
 )
+text = replace_once(
+    text,
+    '''        manifest = {
+          id = "fixture.resources";
+          execution = "resource-only";
+        };
+''',
+    '''        manifest = {
+          id = "fixture.resources";
+          version = 1;
+          execution = "resource-only";
+          dependencies = [ ];
+          services = [ ];
+          resource_namespaces = [ ];
+          maximum_authority = [ ];
+        };
+''',
+    "resource manifest",
+)
+text = replace_once(
+    text,
+    '''            test -x "${externalComposition}/bin/phenix"
+            test -x "${externalComposition}/bin/phenix-harness"
+            test -x "${externalComposition}/bin/external-fixture"
+            test -x "${resourceComposition}/bin/phenix"
+            test -x "${resourceComposition}/bin/phenix-harness"
+            test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"
+''',
+    '''            test -x "${externalComposition}/bin/phenix"
+            test -x "${externalComposition}/bin/phenix-harness"
+            test -x "${externalComposition}/bin/external-fixture"
+            export PHENIX_STATE_DB="$TMPDIR/composition.sqlite"
+            "${defaultComposition}/bin/phenix" --list-services > "$TMPDIR/default-services.json"
+            jq -e '(.plugins | index("fixture.session-replacement")) == null' "$TMPDIR/default-services.json" >/dev/null
+            "${externalComposition}/bin/phenix" --list-services > "$TMPDIR/external-services.json"
+            jq -e '(.plugins | index("fixture.session-replacement")) != null' "$TMPDIR/external-services.json" >/dev/null
+            printf '%s\\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"get","id":"missing"}}' \\
+              | "${externalComposition}/bin/phenix" > "$TMPDIR/replacement.json"
+            jq -e '.status == "ok" and .output.replacement == true' "$TMPDIR/replacement.json" >/dev/null
+            test -x "${resourceComposition}/bin/phenix"
+            test -x "${resourceComposition}/bin/phenix-harness"
+            test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"
+            "${resourceComposition}/bin/phenix" --list-services > "$TMPDIR/resource-services.json"
+            jq -e '(.plugins | index("fixture.resources")) != null' "$TMPDIR/resource-services.json" >/dev/null
+''',
+    "runtime composition checks",
+)
+nix.write_text(text)
