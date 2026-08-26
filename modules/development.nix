@@ -4,6 +4,7 @@
     {
       pkgs,
       self',
+      system,
       ...
     }:
     let
@@ -124,6 +125,11 @@
         }:
         {
           description = "Run all ${boundary} Rust tests before reporting failures";
+          dependencies = builtins.map (target: [
+            "test"
+            boundary
+            target.id
+          ]) targets;
           ci = (mkRustCi stage name) // {
             stepName = name;
           };
@@ -205,6 +211,10 @@
         commands = {
           all = {
             description = "Run the complete read-only validation graph";
+            dependencies = [
+              [ "check" ]
+              [ "test" ]
+            ];
             exec = ''
               "$0" check
               "$0" test
@@ -389,6 +399,12 @@
                 ci = (mkRustCi "rust-clippy" "Rust / Clippy") // {
                   stepName = "Clippy";
                 };
+                dependencies = [
+                  [
+                    "check"
+                    "rust"
+                  ]
+                ];
                 runtimeInputs = pkgs: [ pkgs.git ];
                 exec = ''
                   ${repositoryRoot}
@@ -401,6 +417,12 @@
                 ci = (mkRustCi "rust-unit" "Rust / Unit") // {
                   stepName = "Unit tests";
                 };
+                dependencies = [
+                  [
+                    "test"
+                    "unit"
+                  ]
+                ];
                 runtimeInputs = pkgs: [ pkgs.git ];
                 exec = ''
                   ${repositoryRoot}
@@ -413,6 +435,12 @@
                 ci = (mkRustCi "rust-doc" "Rust / Docs") // {
                   stepName = "Doc tests";
                 };
+                dependencies = [
+                  [
+                    "test"
+                    "doc"
+                  ]
+                ];
                 runtimeInputs = pkgs: [ pkgs.git ];
                 exec = ''
                   ${repositoryRoot}
@@ -563,10 +591,16 @@
       maintenancePackage = maintenanceLib.mkMaintenancePackage {
         inherit pkgs maintenance;
       };
+      maintenanceOutputs = maintenanceLib.mkMaintenanceOutputs {
+        inherit maintenance;
+        systems = [ system ];
+        pkgsFor = _: pkgs;
+        outputName = "phenix-maintenance";
+      };
     in
     {
-      packages.phenix-maintenance = maintenancePackage.package;
-      apps.phenix-maintenance = maintenancePackage.app;
+      packages = maintenanceOutputs.packages.${system};
+      apps = maintenanceOutputs.apps.${system};
 
       devShells.default = pkgs.mkShell {
         name = "phenix-acp-dev";
