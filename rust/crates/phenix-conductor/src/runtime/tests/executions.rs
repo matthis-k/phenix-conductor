@@ -598,6 +598,18 @@
             .unwrap();
         let result_ref = phenix_core::ExactReference::Execution(child.id.clone());
         runtime
+            .record_worker_result(
+                &task.id,
+                crate::WorkerResultEnvelope {
+                    task_id: task.id.clone(),
+                    execution_id: child.id.clone(),
+                    output: serde_json::json!({"summary": "completed"}),
+                    evidence_refs: vec![result_ref.clone()],
+                    artifact_refs: Vec::new(),
+                },
+            )
+            .unwrap();
+        runtime
             .complete_worker_task(&task.id, vec![result_ref.clone()])
             .unwrap();
 
@@ -707,6 +719,18 @@
         let child = runtime.start_worker_task(&first.id).unwrap();
         runtime
             .set_state(&child.id, ExecutionState::Completed)
+            .unwrap();
+        runtime
+            .record_worker_result(
+                &first.id,
+                crate::WorkerResultEnvelope {
+                    task_id: first.id.clone(),
+                    execution_id: child.id.clone(),
+                    output: serde_json::json!({}),
+                    evidence_refs: Vec::new(),
+                    artifact_refs: Vec::new(),
+                },
+            )
             .unwrap();
         runtime.complete_worker_task(&first.id, Vec::new()).unwrap();
         assert!(runtime.worker_task_is_runnable(&second.id).unwrap());
@@ -1010,4 +1034,225 @@
                 .mode,
             phenix_core::WorkspaceLeaseMode::Write
         );
+    }
+
+
+    #[test]
+    fn worker_result_schema_and_required_verification_gate_completion() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.child"],
+                ),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let profile_id = WorkerProfileId::parse("worker.verified").unwrap();
+        runtime
+            .register_worker_profile(WorkerProfileDefinition {
+                id: profile_id.clone(),
+                role: "verified worker".to_owned(),
+                agent: CallableId::parse("agent.child").unwrap(),
+                authority_maximum: ExecutionAuthority::read_only(),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "verified objective",
+            )
+            .unwrap();
+        runtime.ensure_objective_semantics_active().unwrap();
+        let objective = runtime.execution_objectives(&parent.id).unwrap().unwrap().primary;
+        let task = runtime
+            .create_worker_task(
+                &parent.id,
+                crate::WorkerTaskRequest {
+                    primary_objective: objective,
+                    supporting_objectives: std::collections::BTreeSet::new(),
+                    plan_step: None,
+                    description: "return structured evidence".to_owned(),
+                    profile_id,
+                    depends_on: std::collections::BTreeSet::new(),
+                    input_refs: Vec::new(),
+                    expected_result_schema: serde_json::json!({
+                        "type": "object",
+                        "required": ["summary"],
+                        "properties": {"summary": {"type": "string"}}
+                    }),
+                    delegated_authority: ExecutionAuthority::read_only(),
+                },
+            )
+            .unwrap();
+        runtime.require_worker_task_verification(&task.id).unwrap();
+        let child = runtime.start_worker_task(&task.id).unwrap();
+        runtime.set_state(&child.id, ExecutionState::Completed).unwrap();
+
+        assert!(matches!(
+            runtime.record_worker_result(
+                &task.id,
+                crate::WorkerResultEnvelope {
+                    task_id: task.id.clone(),
+                    execution_id: child.id.clone(),
+                    output: serde_json::json!({"wrong": true}),
+                    evidence_refs: Vec::new(),
+                    artifact_refs: Vec::new(),
+                },
+            ),
+            Err(ConductorError::WorkerTask(crate::WorkerTaskError::InvalidResult(message)))
+                if message.contains("schema")
+        ));
+
+        let evidence = phenix_core::ExactReference::Execution(child.id.clone());
+        runtime
+            .record_worker_result(
+                &task.id,
+                crate::WorkerResultEnvelope {
+                    task_id: task.id.clone(),
+                    execution_id: child.id.clone(),
+                    output: serde_json::json!({"summary": "done"}),
+                    evidence_refs: vec![evidence.clone()],
+                    artifact_refs: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            runtime.complete_worker_task(&task.id, vec![evidence.clone()]),
+            Err(ConductorError::WorkerTask(crate::WorkerTaskError::InvalidResult(message)))
+                if message.contains("verification")
+        ));
+
+        let verifier_authority = runtime.execution_authority(&parent.id).unwrap();
+        runtime
+            .record_worker_verification(
+                &task.id,
+                crate::WorkerVerificationResult::Passed {
+                    verifier_execution_id: parent.id.clone(),
+                    evidence_refs: vec![evidence.clone()],
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.execution_authority(&parent.id).unwrap(), verifier_authority);
+        runtime
+            .complete_worker_task(&task.id, vec![evidence.clone()])
+            .unwrap();
+
+        let parent_projection = runtime.worker_result_for_parent(&task.id).unwrap();
+        assert_eq!(parent_projection.output, serde_json::json!({"summary": "done"}));
+        assert_eq!(parent_projection.evidence_refs, vec![evidence.clone()]);
+        assert!(matches!(
+            parent_projection.verification,
+            Some(crate::WorkerVerificationResult::Passed { .. })
+        ));
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("phenix-worker-result-{nonce}"));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = SqliteStore::new(root.join("state.sqlite"));
+        store.save(runtime.journal()).unwrap();
+        let restored = ConductorRuntime::restore(store.load().unwrap()).unwrap();
+        assert_eq!(
+            restored.worker_result_for_parent(&task.id).unwrap(),
+            parent_projection
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn worker_failure_analysis_is_proposal_only() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.child"],
+                ),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let profile_id = WorkerProfileId::parse("worker.failure-analysis").unwrap();
+        runtime
+            .register_worker_profile(WorkerProfileDefinition {
+                id: profile_id.clone(),
+                role: "failure worker".to_owned(),
+                agent: CallableId::parse("agent.child").unwrap(),
+                authority_maximum: ExecutionAuthority::read_only(),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "failure objective",
+            )
+            .unwrap();
+        runtime.ensure_objective_semantics_active().unwrap();
+        let objective = runtime.execution_objectives(&parent.id).unwrap().unwrap().primary;
+        let before_objective = runtime.objective(&objective).unwrap();
+        let task = runtime
+            .create_worker_task(
+                &parent.id,
+                crate::WorkerTaskRequest {
+                    primary_objective: objective.clone(),
+                    supporting_objectives: std::collections::BTreeSet::new(),
+                    plan_step: None,
+                    description: "attempt bounded work".to_owned(),
+                    profile_id,
+                    depends_on: std::collections::BTreeSet::new(),
+                    input_refs: Vec::new(),
+                    expected_result_schema: serde_json::json!({"type": "object"}),
+                    delegated_authority: ExecutionAuthority::read_only(),
+                },
+            )
+            .unwrap();
+        let child = runtime.start_worker_task(&task.id).unwrap();
+        runtime.set_state(&child.id, ExecutionState::Failed).unwrap();
+        runtime.fail_worker_task(&task.id, "failed attempt").unwrap();
+        let parent_authority = runtime.execution_authority(&parent.id).unwrap();
+        runtime
+            .record_worker_failure_analysis(
+                &task.id,
+                crate::WorkerFailureAnalysis {
+                    analyzer_execution_id: parent.id.clone(),
+                    diagnosis: "retry with a different approach".to_owned(),
+                    evidence_refs: vec![phenix_core::ExactReference::Execution(child.id.clone())],
+                    proposed_action: crate::WorkerFailureAction::SuccessorTask,
+                },
+            )
+            .unwrap();
+        assert_eq!(runtime.objective(&objective).unwrap(), before_objective);
+        assert_eq!(runtime.execution_authority(&parent.id).unwrap(), parent_authority);
+        assert!(matches!(
+            runtime.worker_task(&task.id).unwrap().state,
+            crate::WorkerTaskState::Failed { .. }
+        ));
+        assert_eq!(runtime.worker_failure_analyses(&task.id).unwrap().len(), 1);
     }

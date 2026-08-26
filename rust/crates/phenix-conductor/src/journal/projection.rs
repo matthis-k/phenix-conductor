@@ -57,6 +57,10 @@ pub(crate) fn apply_domain_event(
 
         DomainEvent::WorkerTaskCreated { .. }
         | DomainEvent::WorkerTaskStarted { .. }
+        | DomainEvent::WorkerTaskVerificationRequired { .. }
+        | DomainEvent::WorkerResultRecorded { .. }
+        | DomainEvent::WorkerVerificationRecorded { .. }
+        | DomainEvent::WorkerFailureAnalysisRecorded { .. }
         | DomainEvent::WorkerTaskCompleted { .. }
         | DomainEvent::WorkerTaskFailed { .. }
         | DomainEvent::ContextResourceRevisionRegistered { .. }

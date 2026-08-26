@@ -194,7 +194,8 @@ fn map_conductor_error(error: ConductorError) -> ProtocolError {
             | WorkerTaskError::ObjectiveScope(_)
             | WorkerTaskError::PlanScope { .. }
             | WorkerTaskError::InvalidState(_)
-            | WorkerTaskError::InvalidFailureCause => {
+            | WorkerTaskError::InvalidFailureCause
+            | WorkerTaskError::InvalidResult(_) => {
                 protocol_error(ErrorCode::InvalidRequest, error.to_string())
             }
         },

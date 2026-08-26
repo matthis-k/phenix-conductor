@@ -82,6 +82,10 @@ fn insert_event(
         }
         DomainEvent::WorkerTaskCreated { .. }
         | DomainEvent::WorkerTaskStarted { .. }
+        | DomainEvent::WorkerTaskVerificationRequired { .. }
+        | DomainEvent::WorkerResultRecorded { .. }
+        | DomainEvent::WorkerVerificationRecorded { .. }
+        | DomainEvent::WorkerFailureAnalysisRecorded { .. }
         | DomainEvent::WorkerTaskCompleted { .. }
         | DomainEvent::WorkerTaskFailed { .. } => {
             insert_worker_task_event(transaction, sequence, event)?;

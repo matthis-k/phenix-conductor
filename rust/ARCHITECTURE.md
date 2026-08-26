@@ -312,3 +312,7 @@ The conductor owns terminal and job identity, durable lifecycle metadata, output
 ## Adaptive worker tasks
 
 The conductor owns worker-task identity, objective and plan-step scope, dependency state, child-execution binding, and exact result references as durable semantic state. Worker profiles remain immutable configuration references and child creation continues through the canonical delegation path, so a task cannot grant authority. The task DAG exposes deterministic runnable state but does not duplicate orchestration execution semantics, retries, workspace leases, or stale-write protection. Materially different strategies use new task identity and existing successor-plan semantics rather than being disguised as retries.
+
+## Worker results and verification
+
+Worker task results are durable conductor state. A result is bound to the exact task and current worker execution, validated against the task's expected JSON schema, and records exact evidence/artifact references. Required verification is a separate durable gate; the worker execution cannot verify its own result. Failure analysis records diagnosis and a proposed canonical transition but does not mutate task, plan, objective, or authority state. Parent integration reads the compact structured result and exact references from this durable projection rather than inheriting worker transcript state.

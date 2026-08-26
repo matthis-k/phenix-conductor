@@ -1,6 +1,7 @@
 use crate::{
-    ConfigRevisionFingerprint, ContextCheckpoint, ExecutionPayload, WorkerProfileId, WorkerTaskId,
-    WorkerTaskRecord,
+    ConfigRevisionFingerprint, ContextCheckpoint, ExecutionPayload, WorkerFailureAnalysis,
+    WorkerProfileId, WorkerResultEnvelope, WorkerTaskId, WorkerTaskRecord,
+    WorkerVerificationResult,
 };
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, ContextInjection, ContextResourceRevision,
@@ -125,6 +126,20 @@ pub enum DomainEvent {
     WorkerTaskStarted {
         task_id: WorkerTaskId,
         execution_id: ExecutionId,
+    },
+    WorkerTaskVerificationRequired {
+        task_id: WorkerTaskId,
+    },
+    WorkerResultRecorded {
+        result: WorkerResultEnvelope,
+    },
+    WorkerVerificationRecorded {
+        task_id: WorkerTaskId,
+        result: WorkerVerificationResult,
+    },
+    WorkerFailureAnalysisRecorded {
+        task_id: WorkerTaskId,
+        analysis: WorkerFailureAnalysis,
     },
     WorkerTaskCompleted {
         task_id: WorkerTaskId,
@@ -341,6 +356,7 @@ impl RuntimeJournal {
         crate::plans::validate_journal_plans(self)?;
         crate::decisions::validate_journal_decisions(self)?;
         crate::worker_tasks::validate_journal_worker_tasks(self)?;
+        crate::worker_results::validate_journal_worker_results(self)?;
         Ok(())
     }
 
