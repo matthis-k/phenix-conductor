@@ -30,7 +30,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 14;
+const DATABASE_SCHEMA_VERSION: i64 = 15;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -302,6 +302,7 @@ include!("relational/values.rs");
 include!("relational/write_events.rs");
 include!("relational/write_events_2.rs");
 include!("relational/write_events_3.rs");
+include!("relational/worker_tasks.rs");
 
 #[cfg(test)]
 mod tests {

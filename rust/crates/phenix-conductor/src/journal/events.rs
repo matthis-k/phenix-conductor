@@ -1,4 +1,7 @@
-use crate::{ConfigRevisionFingerprint, ContextCheckpoint, ExecutionPayload, WorkerProfileId};
+use crate::{
+    ConfigRevisionFingerprint, ContextCheckpoint, ExecutionPayload, WorkerProfileId, WorkerTaskId,
+    WorkerTaskRecord,
+};
 use phenix_core::{
     AttemptGroup, AttemptGroupId, ConfigRevisionId, ContextInjection, ContextResourceRevision,
     DecisionApplicability, DecisionId, DecisionRecord, DiagnosticWritePatch, ExactReference,
@@ -115,6 +118,23 @@ pub enum DomainEvent {
     WorkerProfileBound {
         execution_id: ExecutionId,
         profile_id: WorkerProfileId,
+    },
+    WorkerTaskCreated {
+        task: WorkerTaskRecord,
+    },
+    WorkerTaskStarted {
+        task_id: WorkerTaskId,
+        execution_id: ExecutionId,
+    },
+    WorkerTaskCompleted {
+        task_id: WorkerTaskId,
+        execution_id: ExecutionId,
+        result_refs: Vec<ExactReference>,
+    },
+    WorkerTaskFailed {
+        task_id: WorkerTaskId,
+        execution_id: ExecutionId,
+        cause: String,
     },
     TerminalCreated {
         terminal: crate::TerminalRecord,
@@ -320,6 +340,7 @@ impl RuntimeJournal {
         crate::objectives::validate_journal_objectives(self)?;
         crate::plans::validate_journal_plans(self)?;
         crate::decisions::validate_journal_decisions(self)?;
+        crate::worker_tasks::validate_journal_worker_tasks(self)?;
         Ok(())
     }
 

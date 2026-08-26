@@ -55,6 +55,7 @@ pub enum ConductorError {
         denial: PolicyDenial,
     },
     WorkerProfile(WorkerProfileError),
+    WorkerTask(WorkerTaskError),
     CallableRegistry(CallableRegistryError),
     LifecycleHook(LifecycleHookError),
     ExecutionProvider(ExecutionProviderError),
@@ -134,6 +135,7 @@ impl Display for ConductorError {
             }
             Self::PolicyDenied { denial, .. } => Display::fmt(denial, f),
             Self::WorkerProfile(error) => Display::fmt(error, f),
+            Self::WorkerTask(error) => Display::fmt(error, f),
             Self::CallableRegistry(error) => Display::fmt(error, f),
             Self::LifecycleHook(error) => Display::fmt(error, f),
             Self::ExecutionProvider(error) => Display::fmt(error, f),
@@ -159,6 +161,12 @@ impl From<BackendError> for ConductorError {
 impl From<WorkerProfileError> for ConductorError {
     fn from(value: WorkerProfileError) -> Self {
         Self::WorkerProfile(value)
+    }
+}
+
+impl From<WorkerTaskError> for ConductorError {
+    fn from(value: WorkerTaskError) -> Self {
+        Self::WorkerTask(value)
     }
 }
 

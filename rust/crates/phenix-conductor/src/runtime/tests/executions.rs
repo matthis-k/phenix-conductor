@@ -493,3 +493,521 @@
             Err(PersistenceError::InvalidJournal(message)) if message.contains("not delegated by parent")
         ));
     }
+
+
+    #[test]
+    fn worker_task_runtime_preserves_scope_authority_and_restore() {
+        let mut runtime = ConductorRuntime::new();
+        let parent_authority = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::Outbound,
+            RepositoryAuthority::Write,
+            &[],
+            &[],
+            &["agent.child"],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                parent_authority.clone(),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                parent_authority.clone(),
+            ))
+            .unwrap();
+        let profile_id = WorkerProfileId::parse("worker.task").unwrap();
+        runtime
+            .register_worker_profile(WorkerProfileDefinition {
+                id: profile_id.clone(),
+                role: "bounded task".to_owned(),
+                agent: CallableId::parse("agent.child").unwrap(),
+                authority_maximum: ExecutionAuthority::read_only(),
+            })
+            .unwrap();
+
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "parent objective",
+            )
+            .unwrap();
+        runtime.ensure_objective_semantics_active().unwrap();
+        let assignment = runtime
+            .execution_objectives(&parent.id)
+            .unwrap()
+            .expect("root execution has an objective");
+
+        let step_id = phenix_core::PlanStepId::parse("step-1").unwrap();
+        let plan = runtime
+            .create_plan(
+                std::collections::BTreeSet::from([assignment.primary.clone()]),
+                vec![phenix_core::PlanStep {
+                    id: step_id.clone(),
+                    description: "bounded worker task".to_owned(),
+                    state: phenix_core::PlanStepState::Proposed,
+                    revisability: phenix_core::PlanStepRevisability::Revisable,
+                    depends_on: std::collections::BTreeSet::new(),
+                    objective_refs: std::collections::BTreeSet::from([
+                        assignment.primary.clone(),
+                    ]),
+                }],
+            )
+            .unwrap();
+        runtime
+            .assign_execution_to_plan_step(&parent.id, &plan.id, &step_id)
+            .unwrap();
+
+        let request = crate::WorkerTaskRequest {
+            primary_objective: assignment.primary.clone(),
+            supporting_objectives: std::collections::BTreeSet::new(),
+            plan_step: Some(crate::WorkerPlanStepRef {
+                plan_id: plan.id.clone(),
+                step_id: step_id.clone(),
+            }),
+            description: "review the bounded change".to_owned(),
+            profile_id: profile_id.clone(),
+            depends_on: std::collections::BTreeSet::new(),
+            input_refs: Vec::new(),
+            expected_result_schema: serde_json::json!({"type": "object"}),
+            delegated_authority: ExecutionAuthority::read_only(),
+        };
+        let task = runtime.create_worker_task(&parent.id, request).unwrap();
+        assert!(runtime.worker_task_is_runnable(&task.id).unwrap());
+
+        let child = runtime.start_worker_task(&task.id).unwrap();
+        assert_eq!(child.parent_execution.as_ref(), Some(&parent.id));
+        assert_eq!(
+            runtime.execution_authority(&child.id).unwrap(),
+            parent_authority.attenuate(&ExecutionAuthority::read_only())
+        );
+        assert_eq!(
+            runtime.execution_plan(&child.id).unwrap().unwrap().plan_id,
+            plan.id
+        );
+        assert!(matches!(
+            runtime.worker_task(&task.id).unwrap().state,
+            crate::WorkerTaskState::Running { execution_id } if execution_id == child.id
+        ));
+        runtime
+            .set_state(&child.id, ExecutionState::Completed)
+            .unwrap();
+        let result_ref = phenix_core::ExactReference::Execution(child.id.clone());
+        runtime
+            .complete_worker_task(&task.id, vec![result_ref.clone()])
+            .unwrap();
+
+        let restored = ConductorRuntime::restore(runtime.journal().clone()).unwrap();
+        assert!(matches!(
+            restored.worker_task(&task.id).unwrap().state,
+            crate::WorkerTaskState::Completed { execution_id, result_refs }
+                if execution_id == child.id && result_refs == vec![result_ref.clone()]
+        ));
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("phenix-worker-task-{nonce}"));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = SqliteStore::new(root.join("state.sqlite"));
+        store.save(runtime.journal()).unwrap();
+        let relational = ConductorRuntime::restore(store.load().unwrap()).unwrap();
+        assert!(matches!(
+            relational.worker_task(&task.id).unwrap().state,
+            crate::WorkerTaskState::Completed { execution_id, result_refs }
+                if execution_id == child.id && result_refs == vec![result_ref]
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn worker_task_dependencies_and_failed_attempts_keep_distinct_identity() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.child"],
+                ),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let profile_id = WorkerProfileId::parse("worker.dependencies").unwrap();
+        runtime
+            .register_worker_profile(WorkerProfileDefinition {
+                id: profile_id.clone(),
+                role: "dependency worker".to_owned(),
+                agent: CallableId::parse("agent.child").unwrap(),
+                authority_maximum: ExecutionAuthority::read_only(),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "dependency objective",
+            )
+            .unwrap();
+        runtime.ensure_objective_semantics_active().unwrap();
+        let objective = runtime
+            .execution_objectives(&parent.id)
+            .unwrap()
+            .unwrap()
+            .primary;
+
+        let request = |depends_on| crate::WorkerTaskRequest {
+            primary_objective: objective.clone(),
+            supporting_objectives: std::collections::BTreeSet::new(),
+            plan_step: None,
+            description: "bounded dependency work".to_owned(),
+            profile_id: profile_id.clone(),
+            depends_on,
+            input_refs: Vec::new(),
+            expected_result_schema: serde_json::json!({"type": "object"}),
+            delegated_authority: ExecutionAuthority::read_only(),
+        };
+
+        let first = runtime
+            .create_worker_task(&parent.id, request(std::collections::BTreeSet::new()))
+            .unwrap();
+        let second = runtime
+            .create_worker_task(
+                &parent.id,
+                request(std::collections::BTreeSet::from([first.id.clone()])),
+            )
+            .unwrap();
+        assert!(runtime.worker_task_is_runnable(&first.id).unwrap());
+        assert!(!runtime.worker_task_is_runnable(&second.id).unwrap());
+        assert_eq!(
+            runtime
+                .runnable_worker_tasks()
+                .unwrap()
+                .into_iter()
+                .map(|task| task.id)
+                .collect::<Vec<_>>(),
+            vec![first.id.clone()]
+        );
+
+        let child = runtime.start_worker_task(&first.id).unwrap();
+        runtime
+            .set_state(&child.id, ExecutionState::Completed)
+            .unwrap();
+        runtime.complete_worker_task(&first.id, Vec::new()).unwrap();
+        assert!(runtime.worker_task_is_runnable(&second.id).unwrap());
+        assert_eq!(
+            runtime
+                .runnable_worker_tasks()
+                .unwrap()
+                .into_iter()
+                .map(|task| task.id)
+                .collect::<Vec<_>>(),
+            vec![second.id.clone()]
+        );
+
+        let second_child = runtime.start_worker_task(&second.id).unwrap();
+        runtime
+            .set_state(&second_child.id, ExecutionState::Failed)
+            .unwrap();
+        runtime
+            .fail_worker_task(&second.id, "approach failed")
+            .unwrap();
+        assert!(matches!(
+            runtime.start_worker_task(&second.id),
+            Err(ConductorError::WorkerTask(crate::WorkerTaskError::Blocked(id))) if id == second.id
+        ));
+
+        let successor = runtime
+            .create_worker_task(&parent.id, request(std::collections::BTreeSet::new()))
+            .unwrap();
+        assert_ne!(successor.id, second.id);
+    }
+
+    #[test]
+    fn worker_task_rejects_objective_outside_parent_scope() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "scoped objective",
+            )
+            .unwrap();
+        runtime.ensure_objective_semantics_active().unwrap();
+        let outside = phenix_core::ObjectiveId::parse("objective-outside").unwrap();
+        let result = runtime.create_worker_task(
+            &parent.id,
+            crate::WorkerTaskRequest {
+                primary_objective: outside.clone(),
+                supporting_objectives: std::collections::BTreeSet::new(),
+                plan_step: None,
+                description: "must be rejected".to_owned(),
+                profile_id: WorkerProfileId::parse("worker.missing").unwrap(),
+                depends_on: std::collections::BTreeSet::new(),
+                input_refs: Vec::new(),
+                expected_result_schema: serde_json::json!({"type": "object"}),
+                delegated_authority: ExecutionAuthority::read_only(),
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(ConductorError::WorkerTask(crate::WorkerTaskError::ObjectiveScope(id))) if id == outside
+        ));
+    }
+
+
+    #[test]
+    fn worker_task_profile_resolution_uses_parent_pinned_configuration() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.child"],
+                ),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "pinned configuration objective",
+            )
+            .unwrap();
+        runtime.ensure_objective_semantics_active().unwrap();
+        let objective = runtime
+            .execution_objectives(&parent.id)
+            .unwrap()
+            .unwrap()
+            .primary;
+
+        let profile_id = WorkerProfileId::parse("worker.late").unwrap();
+        runtime
+            .register_worker_profile(WorkerProfileDefinition {
+                id: profile_id.clone(),
+                role: "registered after parent creation".to_owned(),
+                agent: CallableId::parse("agent.child").unwrap(),
+                authority_maximum: ExecutionAuthority::read_only(),
+            })
+            .unwrap();
+
+        let request = crate::WorkerTaskRequest {
+            primary_objective: objective,
+            supporting_objectives: std::collections::BTreeSet::new(),
+            plan_step: None,
+            description: "must use parent-pinned configuration".to_owned(),
+            profile_id: profile_id.clone(),
+            depends_on: std::collections::BTreeSet::new(),
+            input_refs: Vec::new(),
+            expected_result_schema: serde_json::json!({"type": "object"}),
+            delegated_authority: ExecutionAuthority::read_only(),
+        };
+        assert!(matches!(
+            runtime.create_worker_task(&parent.id, request),
+            Err(ConductorError::WorkerProfile(WorkerProfileError::Unknown(id))) if id == profile_id
+        ));
+    }
+
+    #[test]
+    fn worker_task_rejects_plan_step_that_is_not_enacted_and_runnable() {
+        let mut runtime = ConductorRuntime::new();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                authority(
+                    FilesystemAuthority::ReadOnly,
+                    NetworkAuthority::None,
+                    RepositoryAuthority::Read,
+                    &[],
+                    &[],
+                    &["agent.child"],
+                ),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                ExecutionAuthority::read_only(),
+            ))
+            .unwrap();
+        let profile_id = WorkerProfileId::parse("worker.plan-scope").unwrap();
+        runtime
+            .register_worker_profile(WorkerProfileDefinition {
+                id: profile_id.clone(),
+                role: "plan scoped worker".to_owned(),
+                agent: CallableId::parse("agent.child").unwrap(),
+                authority_maximum: ExecutionAuthority::read_only(),
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "plan scope objective",
+            )
+            .unwrap();
+        runtime.ensure_objective_semantics_active().unwrap();
+        let objective = runtime
+            .execution_objectives(&parent.id)
+            .unwrap()
+            .unwrap()
+            .primary;
+        let step_id = phenix_core::PlanStepId::parse("step-draft").unwrap();
+        let plan = runtime
+            .create_plan(
+                std::collections::BTreeSet::from([objective.clone()]),
+                vec![phenix_core::PlanStep {
+                    id: step_id.clone(),
+                    description: "still prospective".to_owned(),
+                    state: phenix_core::PlanStepState::Proposed,
+                    revisability: phenix_core::PlanStepRevisability::Revisable,
+                    depends_on: std::collections::BTreeSet::new(),
+                    objective_refs: std::collections::BTreeSet::from([objective.clone()]),
+                }],
+            )
+            .unwrap();
+
+        let request = crate::WorkerTaskRequest {
+            primary_objective: objective,
+            supporting_objectives: std::collections::BTreeSet::new(),
+            plan_step: Some(crate::WorkerPlanStepRef {
+                plan_id: plan.id.clone(),
+                step_id: step_id.clone(),
+            }),
+            description: "must not enact a draft step implicitly".to_owned(),
+            profile_id,
+            depends_on: std::collections::BTreeSet::new(),
+            input_refs: Vec::new(),
+            expected_result_schema: serde_json::json!({"type": "object"}),
+            delegated_authority: ExecutionAuthority::read_only(),
+        };
+        assert!(matches!(
+            runtime.create_worker_task(&parent.id, request),
+            Err(ConductorError::WorkerTask(crate::WorkerTaskError::PlanScope {
+                plan_id,
+                step_id: rejected_step,
+            })) if plan_id == plan.id && rejected_step == step_id
+        ));
+    }
+
+
+    #[test]
+    fn worker_tasks_use_canonical_workspace_lease_modes() {
+        let mut runtime = ConductorRuntime::new();
+        let maximum = authority(
+            FilesystemAuthority::Write,
+            NetworkAuthority::None,
+            RepositoryAuthority::Write,
+            &[],
+            &[],
+            &["agent.child"],
+        );
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.parent"),
+                maximum.clone(),
+            ))
+            .unwrap();
+        runtime
+            .register_agent(AgentDefinition::new(
+                agent("agent.child"),
+                maximum.clone(),
+            ))
+            .unwrap();
+        let profile_id = WorkerProfileId::parse("worker.lease").unwrap();
+        runtime
+            .register_worker_profile(WorkerProfileDefinition {
+                id: profile_id.clone(),
+                role: "lease semantics".to_owned(),
+                agent: CallableId::parse("agent.child").unwrap(),
+                authority_maximum: maximum,
+            })
+            .unwrap();
+        let session = runtime.create_session(None, None, fixed("fixed")).unwrap();
+        let parent = runtime
+            .start_session_callable(
+                &session.id,
+                &CallableId::parse("agent.parent").unwrap(),
+                "lease objective",
+            )
+            .unwrap();
+        runtime.ensure_objective_semantics_active().unwrap();
+        let objective = runtime
+            .execution_objectives(&parent.id)
+            .unwrap()
+            .unwrap()
+            .primary;
+        let request = |authority| crate::WorkerTaskRequest {
+            primary_objective: objective.clone(),
+            supporting_objectives: std::collections::BTreeSet::new(),
+            plan_step: None,
+            description: "bounded lease work".to_owned(),
+            profile_id: profile_id.clone(),
+            depends_on: std::collections::BTreeSet::new(),
+            input_refs: Vec::new(),
+            expected_result_schema: serde_json::json!({"type": "object"}),
+            delegated_authority: authority,
+        };
+
+        let read_task = runtime
+            .create_worker_task(&parent.id, request(ExecutionAuthority::read_only()))
+            .unwrap();
+        let read_child = runtime.start_worker_task(&read_task.id).unwrap();
+        assert_eq!(
+            runtime
+                .workspace_lease_request(&read_child.id)
+                .unwrap()
+                .mode,
+            phenix_core::WorkspaceLeaseMode::Read
+        );
+
+        let mut write_authority = ExecutionAuthority::read_only();
+        write_authority.filesystem = FilesystemAuthority::Write;
+        write_authority.repository = RepositoryAuthority::Write;
+        let write_task = runtime
+            .create_worker_task(&parent.id, request(write_authority))
+            .unwrap();
+        let write_child = runtime.start_worker_task(&write_task.id).unwrap();
+        assert_eq!(
+            runtime
+                .workspace_lease_request(&write_child.id)
+                .unwrap()
+                .mode,
+            phenix_core::WorkspaceLeaseMode::Write
+        );
+    }
