@@ -2,6 +2,7 @@ use phenix_kernel::{
     Authority, Kernel, KernelConfig, KernelError, PluginExecution, PluginId, PluginInstance,
     PluginManifest,
 };
+use phenix_plugin_suite::{repository_worker_factory, repository_worker_manifest};
 use std::{collections::BTreeMap, sync::Arc};
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
@@ -15,6 +16,12 @@ pub struct HarnessBuilder {
 impl HarnessBuilder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_default_suite() -> Result<Self, KernelError> {
+        let mut builder = Self::new();
+        builder.add_embedded(repository_worker_manifest(), repository_worker_factory)?;
+        Ok(builder)
     }
 
     pub fn add_manifest(&mut self, manifest: PluginManifest) {
@@ -67,6 +74,10 @@ impl PhenixHarness {
         }
     }
 
+    pub fn default_suite() -> Result<Self, KernelError> {
+        HarnessBuilder::with_default_suite()?.build()
+    }
+
     pub fn invoke(
         &mut self,
         service: &phenix_kernel::ServiceId,
@@ -82,6 +93,7 @@ impl PhenixHarness {
 mod tests {
     use super::*;
     use phenix_kernel::{ServiceContribution, ServiceId};
+    use phenix_plugin_suite::{repository_work_queue_service, RepositoryWorkSnapshot};
 
     fn plugin(value: &str) -> PluginId {
         PluginId::parse(value).unwrap()
@@ -129,6 +141,30 @@ mod tests {
         let mut harness = PhenixHarness::kernel_only();
         harness.activate().unwrap();
         assert_eq!(harness.kernel().config().manifests().count(), 0);
+    }
+
+    #[test]
+    fn default_harness_loads_first_party_suite_through_kernel_contracts() {
+        let mut harness = PhenixHarness::default_suite().unwrap();
+        harness.activate().unwrap();
+        assert_eq!(harness.kernel().config().manifests().count(), 1);
+
+        let input = serde_json::to_vec(&RepositoryWorkSnapshot {
+            pull_requests: Vec::new(),
+            issues: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(
+            harness
+                .invoke(
+                    &repository_work_queue_service(),
+                    &input,
+                    &Authority::default(),
+                    None,
+                )
+                .unwrap(),
+            b"null"
+        );
     }
 
     #[test]
