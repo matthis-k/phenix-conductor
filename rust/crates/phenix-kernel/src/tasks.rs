@@ -9,12 +9,12 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
-pub struct TaskContext {
+pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
     authority: Authority,
 }
 
-impl TaskContext {
+impl CancellationToken {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
@@ -80,17 +80,17 @@ impl TaskRuntime {
     ) -> TaskHandle<T>
     where
         T: Send + 'static,
-        F: FnOnce(TaskContext) -> T + Send + 'static,
+        F: FnOnce(CancellationToken) -> T + Send + 'static,
     {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let cancelled = Arc::new(AtomicBool::new(false));
-        let context = TaskContext {
+        let token = CancellationToken {
             cancelled: Arc::clone(&cancelled),
             authority: parent_authority.attenuate(requested_authority),
         };
         let (sender, receiver) = mpsc::sync_channel(1);
         let join = thread::spawn(move || {
-            let output = worker(context);
+            let output = worker(token);
             let _ = sender.send(output);
         });
 
@@ -121,8 +121,8 @@ mod tests {
         let event_receiver = events.subscribe();
         let authority = Authority::default();
 
-        let handle = runtime.spawn(&authority, &authority, |context| {
-            while !context.is_cancelled() {
+        let handle = runtime.spawn(&authority, &authority, |token| {
+            while !token.is_cancelled() {
                 thread::yield_now();
             }
             42
@@ -145,10 +145,10 @@ mod tests {
         let parent = Authority::new([read.clone()]);
         let requested = Authority::new([read.clone(), write.clone()]);
 
-        let handle = runtime.spawn(&parent, &requested, move |context| {
+        let handle = runtime.spawn(&parent, &requested, move |token| {
             (
-                context.authority().permits(&read),
-                context.authority().permits(&write),
+                token.authority().permits(&read),
+                token.authority().permits(&write),
             )
         });
 
