@@ -30,7 +30,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 
-const DATABASE_SCHEMA_VERSION: i64 = 15;
+const DATABASE_SCHEMA_VERSION: i64 = 16;
 
 #[derive(Debug)]
 pub enum PersistenceError {

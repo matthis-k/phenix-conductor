@@ -109,6 +109,7 @@ pub enum WorkerTaskError {
     },
     InvalidState(WorkerTaskId),
     InvalidFailureCause,
+    InvalidResult(String),
 }
 
 impl Display for WorkerTaskError {
@@ -130,6 +131,7 @@ impl Display for WorkerTaskError {
             ),
             Self::InvalidState(id) => write!(f, "worker task has invalid lifecycle state: {id}"),
             Self::InvalidFailureCause => f.write_str("worker task failure cause must not be empty"),
+            Self::InvalidResult(message) => write!(f, "invalid worker result: {message}"),
         }
     }
 }
@@ -592,7 +594,10 @@ impl ConductorRuntime {
         Ok(child)
     }
 
-    fn current_worker_task_execution(&self, initial_execution: &ExecutionId) -> ExecutionId {
+    pub(crate) fn current_worker_task_execution(
+        &self,
+        initial_execution: &ExecutionId,
+    ) -> ExecutionId {
         self.attempt_groups
             .values()
             .find(|group| group.contains_execution(initial_execution))
@@ -621,8 +626,12 @@ impl ConductorRuntime {
         if execution.summary.state != ExecutionState::Completed {
             return Err(WorkerTaskError::InvalidState(id.clone()).into());
         }
-        for reference in &result_refs {
-            self.resolve_exact_reference(reference)?;
+        let expected_result_refs = self.worker_completion_result_refs(id, &execution_id)?;
+        if result_refs != expected_result_refs {
+            return Err(WorkerTaskError::InvalidResult(
+                "completion references must exactly match the recorded worker result".to_owned(),
+            )
+            .into());
         }
         self.record_domain_event(DomainEvent::WorkerTaskCompleted {
             task_id: id.clone(),
