@@ -72,106 +72,16 @@
 
       systemTargets = [
         {
-          id = "conductor-model-tool-loop";
-          package = "phenix-conductor";
-          test = "black_box_model_tool_loop";
-          label = "conductor / black_box_model_tool_loop";
+          id = "harness-supported-product";
+          package = "phenix-harness";
+          test = "supported_product_journeys";
+          label = "harness / supported_product_journeys";
         }
         {
-          id = "conductor-workflow-callables";
-          package = "phenix-conductor";
-          test = "black_box_workflow_callables";
-          label = "conductor / black_box_workflow_callables";
-        }
-        {
-          id = "conductor-context-catalog-configuration-identity";
-          package = "phenix-conductor";
-          test = "context_catalog_configuration_identity";
-          label = "conductor / context_catalog_configuration_identity";
-        }
-        {
-          id = "conductor-context-catalog-injection";
-          package = "phenix-conductor";
-          test = "context_catalog_injection";
-          label = "conductor / context_catalog_injection";
-        }
-        {
-          id = "conductor-context-catalog-project-documents";
-          package = "phenix-conductor";
-          test = "context_catalog_project_documents";
-          label = "conductor / context_catalog_project_documents";
-        }
-        {
-          id = "conductor-context-catalog-skills";
-          package = "phenix-conductor";
-          test = "context_catalog_skills";
-          label = "conductor / context_catalog_skills";
-        }
-        {
-          id = "conductor-durable-objectives";
-          package = "phenix-conductor";
-          test = "durable_objectives";
-          label = "conductor / durable_objectives";
-        }
-        {
-          id = "conductor-durable-plans";
-          package = "phenix-conductor";
-          test = "durable_plans";
-          label = "conductor / durable_plans";
-        }
-        {
-          id = "conductor-durable-retries";
-          package = "phenix-conductor";
-          test = "durable_retries";
-          label = "conductor / durable_retries";
-        }
-        {
-          id = "conductor-execution-providers";
-          package = "phenix-conductor";
-          test = "execution_provider_runtime";
-          label = "conductor / execution_provider_runtime";
-        }
-        {
-          id = "conductor-fixed-target-continuity";
-          package = "phenix-conductor";
-          test = "fixed_target_continuity";
-          label = "conductor / fixed_target_continuity";
-        }
-        {
-          id = "conductor-routed-context-continuity";
-          package = "phenix-conductor";
-          test = "routed_context_continuity";
-          label = "conductor / routed_context_continuity";
-        }
-        {
-          id = "conductor-stdio-roundtrip";
-          package = "phenix-conductor";
-          test = "stdio_roundtrip";
-          label = "conductor / stdio_roundtrip";
-        }
-        {
-          id = "conductor-protocol-e2e";
-          package = "phenix-conductor";
-          test = "protocol_e2e";
-          label = "conductor / protocol_e2e";
-        }
-        {
-          id = "conductor-runtime-edge-cases";
-          package = "phenix-conductor";
-          test = "runtime_edge_cases";
-          label = "conductor / runtime_edge_cases";
-        }
-        {
-          id = "conductor-termination-causes";
-          package = "phenix-conductor";
-          test = "termination_causes";
-          label = "conductor / termination_causes";
-        }
-        {
-          id = "conductor-workspace-execution-leases";
-          package = "phenix-conductor";
-          test = "workspace_execution_leases";
-          label = "conductor / workspace_execution_leases";
+          id = "harness-process-roundtrip";
+          package = "phenix-harness";
+          test = "process_roundtrip";
+          label = "harness / process_roundtrip";
         }
       ];
 
