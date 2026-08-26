@@ -32,6 +32,11 @@ jobs:
       - name: Canonical fixes
         run: nix run .#phenix-maintenance -- fix
 
+      - name: Refresh Cargo lock
+        run: |
+          cd rust
+          cargo generate-lockfile
+
       - name: Protocol and Harness tests
         run: |
           cd rust
