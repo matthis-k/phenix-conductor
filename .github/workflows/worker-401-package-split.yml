@@ -1,5 +1,6 @@
 name: Worker 401 package split
 
+# Triggered after the transport exists on the branch.
 on:
   push:
     branches:
