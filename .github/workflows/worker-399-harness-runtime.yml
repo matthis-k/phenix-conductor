@@ -35,9 +35,28 @@ jobs:
 
           context = Path("rust/crates/phenix-plugin-suite/src/context.rs")
           text = context.read_text()
-          for stale in ("execution_factory, ", "execution_manifest, ", "ExecutionAuthority, "):
-              text = text.replace(stale, "")
-          context.write_text(text)
+          old = '''use crate::{
+              execution_factory, execution_manifest, execution_service, ExecutionAuthority, ExecutionCommand,
+              ExecutionResponse, ExecutionState,
+          };
+          '''
+          new = '''use crate::{execution_service, ExecutionCommand, ExecutionResponse, ExecutionState};
+          '''
+          if old not in text:
+              raise SystemExit("context execution import block missing")
+          text = text.replace(old, new, 1)
+          old = '''mod tests {
+              use super::*;
+              use phenix_kernel::{Kernel, KernelConfig, LocalPersistence, PluginState};
+          '''
+          new = '''mod tests {
+              use super::*;
+              use crate::{execution_factory, execution_manifest, ExecutionAuthority};
+              use phenix_kernel::{Kernel, KernelConfig, LocalPersistence, PluginState};
+          '''
+          if old not in text:
+              raise SystemExit("context test import anchor missing")
+          context.write_text(text.replace(old, new, 1))
 
           hooks = Path("rust/crates/phenix-plugin-suite/src/hooks.rs")
           text = hooks.read_text()
