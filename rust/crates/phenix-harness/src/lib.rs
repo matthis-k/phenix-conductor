@@ -3,8 +3,8 @@ use phenix_kernel::{
     PluginManifest,
 };
 use phenix_plugin_suite::{
-    artifact_factory, artifact_manifest, repository_worker_factory, repository_worker_manifest,
-    session_factory, session_manifest,
+    artifact_factory, artifact_manifest, context_factory, context_manifest, repository_worker_factory,
+    repository_worker_manifest, session_factory, session_manifest,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -26,6 +26,7 @@ impl HarnessBuilder {
         builder.add_embedded(repository_worker_manifest(), repository_worker_factory)?;
         builder.add_embedded(session_manifest(), session_factory)?;
         builder.add_embedded(artifact_manifest(), artifact_factory)?;
+        builder.add_embedded(context_manifest(), context_factory)?;
         Ok(builder)
     }
 
@@ -103,9 +104,10 @@ mod tests {
     use super::*;
     use phenix_kernel::{CapabilityId, ServiceContribution, ServiceId};
     use phenix_plugin_suite::{
-        artifact_manifest, artifact_service, repository_work_queue_service, session_manifest,
-        session_service, ArtifactCommand, ArtifactProvenance, ArtifactResponse,
-        RepositoryWorkSnapshot, SessionCommand, SessionResponse,
+        artifact_manifest, artifact_service, context_manifest, context_service,
+        repository_work_queue_service, session_manifest, session_service, ArtifactCommand,
+        ArtifactProvenance, ArtifactResponse, ContextCommand, ContextResourceKind, ContextResponse,
+        ContextScope, RepositoryWorkSnapshot, SessionCommand, SessionResponse,
     };
 
     fn plugin(value: &str) -> PluginId {
@@ -126,6 +128,10 @@ mod tests {
 
     fn artifact_authority() -> Authority {
         artifact_manifest().maximum_authority
+    }
+
+    fn context_authority() -> Authority {
+        context_manifest().maximum_authority
     }
 
     fn manifest(id: &str, priority: i32) -> PluginManifest {
@@ -199,13 +205,17 @@ mod tests {
         assert!(harness
             .invoke(&session_service(), &input, &session_authority(), None)
             .is_err());
+        let context = serde_json::to_vec(&ContextCommand::List).unwrap();
+        assert!(harness
+            .invoke(&context_service(), &context, &context_authority(), None)
+            .is_err());
     }
 
     #[test]
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 3);
+        assert_eq!(harness.kernel().config().manifests().count(), 4);
 
         let input = serde_json::to_vec(&RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
@@ -254,6 +264,22 @@ mod tests {
             serde_json::from_slice::<ArtifactResponse>(&response).unwrap(),
             ArtifactResponse::Stored { reused: false, .. }
         ));
+
+        let register = serde_json::to_vec(&ContextCommand::Register {
+            resource_id: "skill:review".into(),
+            kind: ContextResourceKind::Skill,
+            source: "skills/review/SKILL.md".into(),
+            scope: ContextScope::Workspace,
+            content: b"review".to_vec(),
+        })
+        .unwrap();
+        let response = harness
+            .invoke(&context_service(), &register, &context_authority(), None)
+            .unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<ContextResponse>(&response).unwrap(),
+            ContextResponse::Registered { .. }
+        ));
     }
 
     #[test]
@@ -281,6 +307,39 @@ mod tests {
         assert_eq!(
             harness
                 .invoke(&session_service(), &input, &Authority::default(), None)
+                .unwrap(),
+            alternate
+        );
+    }
+
+    #[test]
+    fn first_party_context_provider_is_replaceable_through_normal_resolution() {
+        let alternate = serde_json::to_vec(&ContextResponse::Resources {
+            descriptors: Vec::new(),
+        })
+        .unwrap();
+        let alternate_factory = alternate.clone();
+        let mut builder = HarnessBuilder::new();
+        builder
+            .add_embedded(context_manifest(), context_factory)
+            .unwrap();
+        builder
+            .add_embedded(
+                service_manifest(
+                    "alternate-context",
+                    context_service(),
+                    200,
+                    Authority::default(),
+                ),
+                move || Box::new(FixedResponse(alternate_factory.clone())),
+            )
+            .unwrap();
+        let mut harness = builder.build().unwrap();
+        harness.activate().unwrap();
+        let input = serde_json::to_vec(&ContextCommand::List).unwrap();
+        assert_eq!(
+            harness
+                .invoke(&context_service(), &input, &Authority::default(), None)
                 .unwrap(),
             alternate
         );
@@ -341,7 +400,7 @@ mod tests {
 
     #[test]
     fn first_party_state_plugins_require_only_persistence_authority() {
-        for authority in [session_authority(), artifact_authority()] {
+        for authority in [session_authority(), artifact_authority(), context_authority()] {
             assert!(authority.permits(&capability("kernel.persistence.schema")));
             assert!(authority.permits(&capability("kernel.persistence.read")));
             assert!(authority.permits(&capability("kernel.persistence.write")));
