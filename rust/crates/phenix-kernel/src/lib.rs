@@ -14,6 +14,12 @@ mod registry;
 mod runtime;
 mod tasks;
 
+#[cfg(test)]
+extern crate self as phenix_kernel;
+#[cfg(test)]
+#[path = "../tests/persistence_backend_conformance.rs"]
+mod persistence_backend_conformance;
+
 pub use authority::Authority;
 pub use events::{
     EventBus, EventDispatchReport, EventEnvelope, EventError, EventFailurePolicy, EventHandler,
