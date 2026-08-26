@@ -405,7 +405,7 @@ fn search_history(
         if objective_id.is_some_and(|scope| scope != objective.id) {
             continue;
         }
-        if matches_query(&query, [&objective.title]) {
+        if matches_query(&query, [objective.title.as_str()]) {
             entries.push(HistoryEntry {
                 kind: HistoryKind::Objective,
                 id: objective.id.clone(),
@@ -418,7 +418,7 @@ fn search_history(
         if objective_id.is_some_and(|scope| scope != plan.objective_id) {
             continue;
         }
-        if matches_query(&query, [&plan.goal]) {
+        if matches_query(&query, [plan.goal.as_str()]) {
             entries.push(HistoryEntry {
                 kind: HistoryKind::Plan,
                 id: plan.id,
@@ -431,7 +431,10 @@ fn search_history(
         if objective_id.is_some_and(|scope| scope != decision.objective_id) {
             continue;
         }
-        if matches_query(&query, [&decision.statement, &decision.rationale]) {
+        if matches_query(
+            &query,
+            [decision.statement.as_str(), decision.rationale.as_str()],
+        ) {
             entries.push(HistoryEntry {
                 kind: HistoryKind::Decision,
                 id: decision.id,

@@ -490,13 +490,13 @@ fn invoke_callable(
         .callables
         .get(callable_id)
         .ok_or_else(|| format!("unknown callable: {callable_id}"))?;
-    let requested = execution
-        .authority
-        .attenuate(&callable.required_authority)?
-        .parse()?;
-    if !callable.required_authority.parse()?.permits_all(&requested) {
-        return Err(format!("invalid callable authority: {callable_id}"));
+    let required = callable.required_authority.parse()?;
+    if !execution.authority.parse()?.permits_all(&required)
+        || !host.authority().permits_all(&required)
+    {
+        return Err(format!("callable authority denied: {callable_id}"));
     }
+    let requested = required;
     let service = ServiceId::parse(&callable.service).map_err(|error| error.to_string())?;
     let output = host
         .invoke_service(&service, input, &requested, None)

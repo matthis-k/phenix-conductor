@@ -3,9 +3,9 @@ use phenix_kernel::{
     PluginManifest,
 };
 use phenix_plugin_suite::{
-    artifact_factory, artifact_manifest, context_factory, context_manifest, planning_factory,
-    planning_manifest, repository_worker_factory, repository_worker_manifest, session_factory,
-    session_manifest,
+    artifact_factory, artifact_manifest, context_factory, context_manifest, execution_factory,
+    execution_manifest, language_factory, language_manifest, planning_factory, planning_manifest,
+    repository_worker_factory, repository_worker_manifest, session_factory, session_manifest,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -28,6 +28,8 @@ impl HarnessBuilder {
         builder.add_embedded(session_manifest(), session_factory)?;
         builder.add_embedded(artifact_manifest(), artifact_factory)?;
         builder.add_embedded(context_manifest(), context_factory)?;
+        builder.add_embedded(execution_manifest(Authority::default()), execution_factory)?;
+        builder.add_embedded(language_manifest(), language_factory)?;
         builder.add_embedded(planning_manifest(), planning_factory)?;
         Ok(builder)
     }
@@ -229,7 +231,7 @@ mod tests {
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 5);
+        assert_eq!(harness.kernel().config().manifests().count(), 7);
 
         let input = serde_json::to_vec(&RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
