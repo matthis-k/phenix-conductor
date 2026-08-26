@@ -4,7 +4,7 @@ This repository contains the Phenix kernel, replaceable first-party Plugin Suite
 
 The Neovim frontend lives separately in `matthis-k/phenix-nvim`. This repository does not own editor windows, input handling, transcript presentation, Neovim plugin packaging, or frontend-specific tests.
 
-The project is under active architectural development. Prefer the current typed Rust/ACP implementation over compatibility layers or historical APIs.
+The project is under active architectural development. Replace obsolete contracts instead of preserving compatibility layers.
 
 ## Architecture
 
@@ -28,9 +28,9 @@ frontends / protocol adapters
 
 `phenix-plugin-suite` implements the first-party Phenix services through the same contracts available to alternate plugins. `phenix-harness` selects the plugin set and product policy. Omitting a provider removes the service. Replacing a provider does not require a kernel change.
 
-`phenix-conductor` remains in the workspace as migration source and compatibility coverage while the plugin migration is completed. It is not the supported product package and must not gain new domain ownership.
+`phenix-conductor` remains in the Rust workspace as migration source and compatibility coverage while the plugin migration is completed. It is not a supported product package and must not gain new domain ownership.
 
-ACP is one protocol boundary. `phenix-acp` contains wire interoperability types; backend adapters translate ACP agents without becoming a second semantic runtime.
+ACP is one protocol boundary. `phenix-acp` owns ACP wire interoperability, while the supported product semantics remain in Harness-selected plugins.
 
 ### Rust boundaries
 
@@ -45,16 +45,13 @@ ACP is one protocol boundary. `phenix-acp` contains wire interoperability types;
 
 There is no UI crate or Neovim plugin in this repository.
 
-## Configuration
+## Product composition
 
-A fresh conductor is unconfigured. A client selects a source root and descriptors, then calls `_phenix/config/load`; the conductor resolves relative paths beneath that root, validates every source, and atomically creates an immutable revision. New session trees use the active revision; existing trees remain pinned to the revision under which they were created. The conductor does not implicitly discover XDG configuration or repository examples.
+The supported runtime is `phenix-harness`. It activates a selected plugin set through ordinary kernel manifests and service resolution. The default composition loads the first-party Plugin Suite.
 
-For the standard ACP projection, initialization order is explicit: `initialize`, then `_phenix/config/load`, then `session/new`. `session/new` cannot create a standard Phenix session before an active configuration revision exists. Frontends are responsible for supplying their selected configuration before requesting the session. After loading, `_phenix/config/get` returns the active revision and its callable workflow catalog; integrations must use that conductor-owned catalog rather than re-derive workflows from their authoring input.
+Nix composition can select a subset of embedded first-party plugins, add external or resource-only plugins, or replace a first-party provider. Provider omission must remove the service rather than expose a kernel fallback.
 
-The example authoring configuration under `config/phenix-harness/` is retained as an explicit application configuration. Its name is not the repository name.
-
-The kernel is mechanism, not Phenix policy. Harness composition and plugins own the selected product behavior.
-
+Plugin-owned durable state is canonical. The kernel enforces namespace ownership, migrations, transactions, and authority without interpreting first-party domain rows.
 
 ### Project context and skills
 
@@ -72,33 +69,28 @@ The flake exposes the supported compositions directly:
 - `lib.mkPhenixPlugin`: external/resource plugin packaging;
 - `lib.mkPhenix`: declarative kernel + plugin composition.
 
-The legacy conductor crate remains a migration source inside the Rust workspace. Product composition goes through `phenix-harness`.
+There is no supported `phenix-conductor` package or app. The conductor crate remains only inside the Rust workspace while compatibility paths are migrated or removed.
 
-## Built-in runtime authentication
+## Protocol and provider boundaries
 
-The runtime advertises one ACP terminal-auth method per implemented provider. ACP frontends can launch those flows directly; the equivalent command is:
+ACP is an adapter boundary. Frontends and other ACP clients should reach the supported Harness/plugin composition rather than a second conductor-owned semantic runtime.
 
-```sh
-phenix-conductor runtime auth login <provider>
-```
+Backend adapters translate plugin-owned execution requests into provider protocols. Provider conversation state is disposable. Durable Phenix state stays with the owning plugins.
 
-Credentials are stored atomically in `${XDG_STATE_HOME:-$HOME/.local/state}/phenix/credentials.json`; on Unix, newly created credential directories use mode `0700` and credential files are forced to `0600`. Set `PHENIX_CREDENTIAL_FILE` to select a different credential store. Provider-native environment variables remain supported and are used when no stored credential exists.
-
-`openai-responses` is OpenAI's API-key-authenticated Responses API. `openai-codex` is the distinct ChatGPT subscription path: `auth login openai-codex` prints a browser authorization link, verifies the OAuth callback state and PKCE exchange, persists refresh credentials, and refreshes access tokens before use. Its model requests use the Phenix-owned prompt and tool loop against the ChatGPT Codex Responses endpoint, so no additional agent harness or system prompt is introduced.
-
-Configured model identities use `Phenix/provider/model`. The bundled ChatGPT subscription profile is `router.chatgpt-plus`.
-
-The Neovim plugin and configured Neovim wrapper are exported by `phenix-nvim` instead.
+Authentication and provider selection are product/plugin concerns. They must not become privileged kernel APIs or ambient process authority.
 
 ## Design rules
 
-- Prefer one canonical typed API over versioned or compatibility surfaces.
+- Keep one canonical typed API per semantic operation.
+- Keep one durable owner per semantic domain.
 - Parse external data at boundaries and keep invalid runtime states difficult to represent internally.
-- Preserve typed failure modes across configuration, transport, protocol, and runtime boundaries.
-- Standard ACP remains authoritative for singular-agent behavior; Phenix extensions cover aggregate orchestration concepts.
+- Preserve typed failure modes across configuration, transport, protocol, plugin, and provider boundaries.
+- Authority only attenuates across plugin, task, retry, event, persistence, and provider boundaries.
+- Kernel-only mode has no hidden first-party fallbacks.
+- First-party plugins use the same contracts as alternate plugins.
 - Do not add parallel frontend-to-agent protocols or duplicate orchestration implementations.
 - Keep frontend-specific behavior and packaging in frontend repositories.
-- Tests should assert domain behavior, user-visible protocol semantics, or cross-boundary integration, not duplicated configuration facts.
+- Tests should assert domain behavior, user-visible protocol semantics, or cross-boundary integration rather than duplicated configuration facts.
 
 ## Development
 
@@ -108,6 +100,6 @@ maintenance fix
 maintenance all
 ```
 
-Validation is separated into source, Rust, integration/system, and realized product boundaries. The product layer exercises the installed Harness and plugin compositions; frontend behavior is tested in frontend repositories.
+Validation is separated into source, Rust, integration/system, realized product, Nix composition, and Maintenance boundaries. Product validation exercises the installed Harness and plugin compositions. Frontend behavior is tested in frontend repositories.
 
-See `DEVELOPMENT.md` for focused validation commands.
+See `DEVELOPMENT.md` for focused validation commands and `rust/ARCHITECTURE.md` for the current ownership model.
