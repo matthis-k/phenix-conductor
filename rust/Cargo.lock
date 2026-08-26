@@ -1814,6 +1814,7 @@ dependencies = [
  "phenix-backend-acp",
  "phenix-backend-native",
  "phenix-core",
+ "phenix-plugin-suite",
  "phenix-protocol",
  "rusqlite",
  "serde",
@@ -1830,10 +1831,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-harness"
+version = "0.1.0"
+dependencies = [
+ "phenix-kernel",
+ "phenix-plugin-suite",
+ "serde_json",
+]
+
+[[package]]
 name = "phenix-kernel"
 version = "0.1.0"
 dependencies = [
  "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "phenix-plugin-suite"
+version = "0.1.0"
+dependencies = [
+ "phenix-kernel",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
