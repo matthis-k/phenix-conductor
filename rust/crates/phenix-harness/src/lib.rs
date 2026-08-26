@@ -28,7 +28,11 @@ impl HarnessBuilder {
         self.manifests.push(manifest);
     }
 
-    pub fn add_embedded<F>(&mut self, manifest: PluginManifest, factory: F) -> Result<(), KernelError>
+    pub fn add_embedded<F>(
+        &mut self,
+        manifest: PluginManifest,
+        factory: F,
+    ) -> Result<(), KernelError>
     where
         F: Fn() -> Box<dyn PluginInstance> + Send + Sync + 'static,
     {

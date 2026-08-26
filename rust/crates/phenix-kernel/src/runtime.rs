@@ -1,7 +1,7 @@
 use crate::{
     Authority, CapabilityId, DurableSchema, EventBus, KernelConfig, KernelError, KernelEvent,
-    LocalPersistence, PersistenceBackend, PluginExecution, PluginId, PluginManifest, ProviderBinding,
-    ResourceNamespace, SchemaMigration, ServiceId, TaskRuntime, TransactionOp,
+    LocalPersistence, PersistenceBackend, PluginExecution, PluginId, PluginManifest,
+    ProviderBinding, ResourceNamespace, SchemaMigration, ServiceId, TaskRuntime, TransactionOp,
 };
 use std::{
     collections::BTreeMap,

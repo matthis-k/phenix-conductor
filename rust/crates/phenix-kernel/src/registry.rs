@@ -79,7 +79,10 @@ impl Display for KernelError {
             ),
             Self::PluginNotActive(plugin) => write!(f, "plugin is not active: {plugin}"),
             Self::HostOperationDenied { plugin, operation } => {
-                write!(f, "plugin {plugin} is not allowed to perform host operation {operation}")
+                write!(
+                    f,
+                    "plugin {plugin} is not allowed to perform host operation {operation}"
+                )
             }
             Self::Persistence { plugin, message } => {
                 write!(f, "plugin {plugin} persistence operation failed: {message}")
