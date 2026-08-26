@@ -59,7 +59,7 @@ let
     hooks = "phenix.hooks";
     jobs = "phenix.jobs";
     language = "phenix.language";
-    models = "phenix.models.routing";
+    models = "phenix.models";
     planning = "phenix.planning";
     repository-workers = "phenix.repository-workers";
     sessions = "phenix.sessions";
