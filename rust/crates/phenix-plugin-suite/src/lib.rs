@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod repository_workers;
+mod sessions;
 
 pub use repository_workers::{
     ReconstructedPullRequest, RepositoryCheckState, RepositoryChecklistEvidence,
@@ -8,6 +9,10 @@ pub use repository_workers::{
     RepositoryIssueCluster, RepositoryIssueEvidence, RepositoryPullRequestEvidence,
     RepositoryPullRequestState, RepositorySelectionReason, RepositoryValidation,
     RepositoryWorkPriority, RepositoryWorkSelection, RepositoryWorkSnapshot, RepositoryWorkerQueue,
+};
+pub use sessions::{
+    session_factory, session_manifest, session_service, SessionCommand, SessionRecord,
+    SessionResponse, SESSION_SERVICE,
 };
 
 use phenix_kernel::{
