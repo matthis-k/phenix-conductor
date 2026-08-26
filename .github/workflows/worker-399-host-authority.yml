@@ -28,10 +28,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/worker-399-host-authority.py
+          python3 .github/worker-399-host-authority-fix.py
           cargo fmt --manifest-path rust/Cargo.toml --all
           cargo test --manifest-path rust/Cargo.toml -p phenix-kernel --lib
           git diff --check
           rm .github/worker-399-host-authority.py
+          rm .github/worker-399-host-authority-fix.py
           rm .github/workflows/worker-399-host-authority.yml
 
       - name: Commit semantic tree
