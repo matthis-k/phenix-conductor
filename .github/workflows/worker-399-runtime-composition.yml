@@ -74,7 +74,7 @@ jobs:
 
       - name: Product smoke
         if: steps.composition.outcome == 'success'
-        run: nix build --no-link --print-build-logs .#checks.x86_64-linux.phenix-plugin-suite-smoke
+        run: nix build --no-link --print-build-logs .#checks.x86_64-linux.phenix-product-smoke
 
       - name: Validate source
         if: steps.composition.outcome == 'success'
@@ -84,7 +84,10 @@ jobs:
 
       - name: Clean transport
         if: steps.composition.outcome == 'success'
-        run: rm .github/workflows/worker-399-runtime-composition.yml scripts/plugin_composition_transport.py
+        run: |
+          rm .github/workflows/worker-399-runtime-composition.yml scripts/plugin_composition_transport.py
+          rm -f worker-399-runtime-composition.txt
+          git checkout origin/main -- .github/workflows/sync-maintenance.yml
 
       - name: Commit runtime composition
         if: steps.composition.outcome == 'success'
