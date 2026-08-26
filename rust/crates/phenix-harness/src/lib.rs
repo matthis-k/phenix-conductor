@@ -3,8 +3,9 @@ use phenix_kernel::{
     PluginManifest,
 };
 use phenix_plugin_suite::{
-    artifact_factory, artifact_manifest, context_factory, context_manifest,
-    repository_worker_factory, repository_worker_manifest, session_factory, session_manifest,
+    artifact_factory, artifact_manifest, context_factory, context_manifest, planning_factory,
+    planning_manifest, repository_worker_factory, repository_worker_manifest, session_factory,
+    session_manifest,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -27,6 +28,7 @@ impl HarnessBuilder {
         builder.add_embedded(session_manifest(), session_factory)?;
         builder.add_embedded(artifact_manifest(), artifact_factory)?;
         builder.add_embedded(context_manifest(), context_factory)?;
+        builder.add_embedded(planning_manifest(), planning_factory)?;
         Ok(builder)
     }
 
@@ -104,11 +106,11 @@ mod tests {
     use super::*;
     use phenix_kernel::{CapabilityId, ServiceContribution, ServiceId};
     use phenix_plugin_suite::{
-        artifact_manifest, artifact_service, context_manifest, context_service,
-        repository_work_queue_service, session_manifest, session_service, ArtifactCommand,
-        ArtifactProvenance, ArtifactResponse, ContextCommand, ContextDescriptor,
-        ContextResourceKind, ContextResponse, ContextScope, RepositoryWorkSnapshot, SessionCommand,
-        SessionResponse,
+        artifact_manifest, artifact_service, context_manifest, context_service, planning_manifest,
+        planning_service, repository_work_queue_service, session_manifest, session_service,
+        ArtifactCommand, ArtifactProvenance, ArtifactResponse, ContextCommand, ContextDescriptor,
+        ContextResourceKind, ContextResponse, ContextScope, PlanningCommand, PlanningResponse,
+        RepositoryWorkSnapshot, SessionCommand, SessionResponse,
     };
 
     fn plugin(value: &str) -> PluginId {
@@ -133,6 +135,10 @@ mod tests {
 
     fn context_authority() -> Authority {
         context_manifest().maximum_authority
+    }
+
+    fn planning_authority() -> Authority {
+        planning_manifest().maximum_authority
     }
 
     fn manifest(id: &str, priority: i32) -> PluginManifest {
@@ -210,13 +216,20 @@ mod tests {
         assert!(harness
             .invoke(&context_service(), &context, &context_authority(), None)
             .is_err());
+        let planning = serde_json::to_vec(&PlanningCommand::GetObjective {
+            id: "missing".into(),
+        })
+        .unwrap();
+        assert!(harness
+            .invoke(&planning_service(), &planning, &planning_authority(), None)
+            .is_err());
     }
 
     #[test]
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 4);
+        assert_eq!(harness.kernel().config().manifests().count(), 5);
 
         let input = serde_json::to_vec(&RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
@@ -280,6 +293,20 @@ mod tests {
         assert!(matches!(
             serde_json::from_slice::<ContextResponse>(&response).unwrap(),
             ContextResponse::Registered { .. }
+        ));
+
+        let objective = serde_json::to_vec(&PlanningCommand::CreateObjective {
+            id: "objective-1".into(),
+            title: "Use plugin-owned planning".into(),
+            parent: None,
+        })
+        .unwrap();
+        let response = harness
+            .invoke(&planning_service(), &objective, &planning_authority(), None)
+            .unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<PlanningResponse>(&response).unwrap(),
+            PlanningResponse::Objective { objective: Some(_) }
         ));
     }
 
@@ -447,6 +474,7 @@ mod tests {
             session_authority(),
             artifact_authority(),
             context_authority(),
+            planning_authority(),
         ] {
             assert!(authority.permits(&capability("kernel.persistence.schema")));
             assert!(authority.permits(&capability("kernel.persistence.read")));
