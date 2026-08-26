@@ -3,6 +3,7 @@ name = "phenix-kernel"
 version = "0.1.0"
 edition = "2021"
 publish = false
+autotests = false
 
 [dependencies]
 rusqlite.workspace = true
