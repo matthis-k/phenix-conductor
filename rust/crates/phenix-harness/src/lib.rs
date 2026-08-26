@@ -129,18 +129,27 @@ mod tests {
     }
 
     fn manifest(id: &str, priority: i32) -> PluginManifest {
+        service_manifest(id, service(), priority, Authority::default())
+    }
+
+    fn service_manifest(
+        id: &str,
+        service: ServiceId,
+        priority: i32,
+        maximum_authority: Authority,
+    ) -> PluginManifest {
         PluginManifest {
             id: plugin(id),
             version: 1,
             execution: PluginExecution::Embedded,
             dependencies: Vec::new(),
             services: vec![ServiceContribution {
-                service: service(),
+                service,
                 priority,
                 required_authority: Authority::default(),
             }],
             resource_namespaces: Vec::new(),
-            maximum_authority: Authority::default(),
+            maximum_authority,
         }
     }
 
@@ -224,6 +233,36 @@ mod tests {
             serde_json::from_slice::<ArtifactResponse>(&response).unwrap(),
             ArtifactResponse::Stored { reused: false, .. }
         ));
+    }
+
+    #[test]
+    fn first_party_session_provider_is_replaceable_through_normal_resolution() {
+        let alternate = serde_json::to_vec(&SessionResponse::Session { session: None }).unwrap();
+        let alternate_factory = alternate.clone();
+        let mut builder = HarnessBuilder::new();
+        builder
+            .add_embedded(session_manifest(), session_factory)
+            .unwrap();
+        builder
+            .add_embedded(
+                service_manifest(
+                    "alternate-sessions",
+                    session_service(),
+                    200,
+                    Authority::default(),
+                ),
+                move || Box::new(Echo(Box::leak(alternate_factory.clone().into_boxed_slice()))),
+            )
+            .unwrap();
+        let mut harness = builder.build().unwrap();
+        harness.activate().unwrap();
+        let input = serde_json::to_vec(&SessionCommand::Get { id: "x".into() }).unwrap();
+        assert_eq!(
+            harness
+                .invoke(&session_service(), &input, &Authority::default(), None)
+                .unwrap(),
+            alternate
+        );
     }
 
     #[test]
