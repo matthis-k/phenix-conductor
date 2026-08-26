@@ -533,7 +533,8 @@ mod tests {
         let manifest = artifact_manifest();
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
         kernel
             .register_embedded_factory(plugin, artifact_factory)
             .unwrap();
