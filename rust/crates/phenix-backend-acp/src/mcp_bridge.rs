@@ -7,7 +7,7 @@ use agent_client_protocol::schema::v1::{
 use phenix_backend::{
     BackendError, PreparedToolSurface, ToolInvocation, ToolPresentation, ToolResult,
 };
-use phenix_core::CallableDescriptor;
+use phenix_domain::CallableDescriptor;
 use serde_json::{json, value::RawValue, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{mpsc, Arc, Mutex};
@@ -248,7 +248,7 @@ fn raw_value(value: Value) -> Result<Arc<RawValue>, agent_client_protocol::Error
 mod tests {
     use super::*;
     use phenix_backend::{BackendCapabilities, ToolProvision};
-    use phenix_core::{CallableId, CallableKind, CallablePolicy, CapabilitySet};
+    use phenix_domain::{CallableId, CallableKind, CallablePolicy, CapabilitySet};
 
     fn callable() -> CallableDescriptor {
         CallableDescriptor {

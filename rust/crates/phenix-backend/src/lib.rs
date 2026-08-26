@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use phenix_core::{
+use phenix_domain::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId,
     ExecutionId, ModelTarget, SessionId,
 };
@@ -232,7 +232,7 @@ impl Error for BackendError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{BackendId, InferenceOptions, ModelId, ProviderId};
+    use phenix_domain::{BackendId, InferenceOptions, ModelId, ProviderId};
 
     fn capabilities(
         presentations: impl IntoIterator<Item = ToolPresentation>,

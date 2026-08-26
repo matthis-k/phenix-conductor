@@ -1,0 +1,21 @@
+[package]
+name = "phenix-plugin-catalog"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+phenix-plugin-artifacts = { path = "../phenix-plugin-artifacts" }
+phenix-plugin-cli = { path = "../phenix-plugin-cli" }
+phenix-plugin-context = { path = "../phenix-plugin-context" }
+phenix-plugin-debug = { path = "../phenix-plugin-debug" }
+phenix-plugin-execution = { path = "../phenix-plugin-execution" }
+phenix-plugin-frontend = { path = "../phenix-plugin-frontend" }
+phenix-plugin-hooks = { path = "../phenix-plugin-hooks" }
+phenix-plugin-jobs = { path = "../phenix-plugin-jobs" }
+phenix-plugin-language = { path = "../phenix-plugin-language" }
+phenix-plugin-models = { path = "../phenix-plugin-models" }
+phenix-plugin-planning = { path = "../phenix-plugin-planning" }
+phenix-plugin-repository-workers = { path = "../phenix-plugin-repository-workers" }
+phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }
+phenix-plugin-workspace = { path = "../phenix-plugin-workspace" }

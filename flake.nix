@@ -1,5 +1,5 @@
 {
-  description = "Phenix ACP protocol, conductor, and backend orchestration";
+  description = "Phenix core, conductor, plugins, clients, and supported harness";
 
   inputs = {
     phenix-flake-ci.url = "github:matthis-k/phenix-flake-ci";
@@ -34,6 +34,7 @@
       imports = [
         ./modules/phenix-acp.nix
         ./modules/plugin-packaging.nix
+        ./modules/package-sets.nix
         ./modules/development.nix
         ./modules/stitch.nix
       ];

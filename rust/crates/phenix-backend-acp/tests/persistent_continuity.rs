@@ -3,7 +3,7 @@ use phenix_backend::{
     BackendSessionRequest, ToolInvocation, ToolProvision, ToolResult,
 };
 use phenix_backend_acp::{AcpBackend, AcpBackendConfig};
-use phenix_core::{
+use phenix_domain::{
     BackendId, ExecutionId, InferenceOptions, ModelId, ModelTarget, ProviderId, SessionId,
 };
 

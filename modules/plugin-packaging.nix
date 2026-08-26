@@ -5,15 +5,19 @@ let
       pkgs,
       name,
       manifest,
+      package ? null,
       executable ? null,
       resources ? null,
     }:
     let
       execution = manifest.execution or null;
+      isEmbedded = execution == "embedded";
       isExternal = execution == "external";
       isResourceOnly = execution == "resource-only";
+      metadataDirectory = if isEmbedded then "share/phenix-plugins/${name}" else "share/phenix-plugin";
     in
-    assert isExternal || isResourceOnly;
+    assert isEmbedded || isExternal || isResourceOnly;
+    assert (!isEmbedded) || (package != null && executable == null);
     assert (!isExternal) || executable != null;
     assert (!isResourceOnly) || executable == null;
     pkgs.runCommand "phenix-plugin-${name}"
@@ -21,77 +25,101 @@ let
         nativeBuildInputs = [ pkgs.jq ];
         passAsFile = [ "manifestJson" ];
         manifestJson = builtins.toJSON manifest;
+        passthru = {
+          phenixPluginId = manifest.id;
+          phenixPluginExecution = execution;
+        };
       }
       ''
         set -euo pipefail
-        mkdir -p "$out/share/phenix-plugin"
+        mkdir -p "$out/${metadataDirectory}"
         jq -e 'type == "object" and (.id | type == "string" and length > 0)' \
           "$manifestJsonPath" >/dev/null
-        cp "$manifestJsonPath" "$out/share/phenix-plugin/manifest.json"
+        cp "$manifestJsonPath" "$out/${metadataDirectory}/manifest.json"
 
-        ${
-          if isExternal then
-            ''
-              test -x "${executable}"
-              mkdir -p "$out/bin"
-              ln -s "${executable}" "$out/bin/${name}"
-            ''
-          else
-            ""
-        }
-
-        ${
-          if resources != null then
-            ''
-              test -e "${resources}"
-              ln -s "${resources}" "$out/share/phenix-plugin/resources"
-            ''
-          else
-            ""
-        }
+        ${pkgs.lib.optionalString isEmbedded ''
+          ln -s "${package}" "$out/${metadataDirectory}/embedded-package"
+        ''}
+        ${pkgs.lib.optionalString isExternal ''
+          test -x "${executable}"
+          mkdir -p "$out/bin"
+          ln -s "${executable}" "$out/bin/${name}"
+        ''}
+        ${pkgs.lib.optionalString (resources != null) ''
+          test -e "${resources}"
+          ln -s "${resources}" "$out/share/phenix-plugin/resources"
+        ''}
       '';
+
+  mkPhenixClient =
+    {
+      pkgs,
+      name,
+      package,
+    }:
+    pkgs.runCommand "phenix-client-${name}" { } ''
+      mkdir -p "$out/share/phenix-client"
+      printf '%s\n' ${pkgs.lib.escapeShellArg name} > "$out/share/phenix-client/name"
+      ln -s ${package} "$out/share/phenix-client/rust-package"
+    '';
 
   mkPhenix =
     {
       pkgs,
-      kernelOnly ? false,
+      conductorOnly ? false,
       plugins ? [ ],
+      resources ? [ ],
       enabledPlugins ? null,
       ...
     }:
     let
       base =
-        if kernelOnly then
-          self.packages.${pkgs.system}.phenix-kernel
+        if conductorOnly then
+          self.packages.${pkgs.system}.phenix-conductor
         else
-          self.packages.${pkgs.system}.phenix-harness;
+          self.packages.${pkgs.system}.phenix-harness-runtime;
+      isEmbedded = plugin: (plugin.phenixPluginExecution or null) == "embedded";
+      embeddedPlugins = builtins.filter isEmbedded plugins;
+      packagedPlugins = builtins.filter (plugin: !isEmbedded plugin) plugins;
+      selectedEmbeddedIds = map (plugin: plugin.phenixPluginId) embeddedPlugins;
+      selectedIds =
+        if enabledPlugins != null then
+          enabledPlugins
+        else if embeddedPlugins != [ ] then
+          selectedEmbeddedIds
+        else
+          null;
     in
-    if plugins == [ ] && enabledPlugins == null then
+    if plugins == [ ] && resources == [ ] && selectedIds == null then
       base
     else
       pkgs.symlinkJoin {
-        name = if kernelOnly then "phenix-kernel-composed" else "phenix-composed";
-        paths = [ base ] ++ plugins;
+        name = if conductorOnly then "phenix-conductor-composed" else "phenix-composed";
+        paths = [ base ] ++ plugins ++ resources;
         nativeBuildInputs = [ pkgs.makeWrapper ];
         postBuild =
-          if kernelOnly then
+          if conductorOnly then
             ""
           else
             let
-              pluginPackages = pkgs.lib.concatStringsSep ":" (map toString plugins);
-              enabledPluginIds =
-                if enabledPlugins == null then null else pkgs.lib.concatStringsSep "," enabledPlugins;
+              pluginPackages = pkgs.lib.concatStringsSep ":" (map toString packagedPlugins);
+              enabledPluginIds = if selectedIds == null then null else pkgs.lib.concatStringsSep "," selectedIds;
             in
             ''
               for program in phenix phenix-harness; do
                 if [ -e "$out/bin/$program" ]; then
-                  ${pkgs.lib.optionalString (plugins != [ ]) ''
+                  ${pkgs.lib.optionalString (packagedPlugins != [ ]) ''
                     wrapProgram "$out/bin/$program" \
                       --set PHENIX_PLUGIN_PACKAGES ${pkgs.lib.escapeShellArg pluginPackages}
                   ''}
-                  ${pkgs.lib.optionalString (enabledPlugins != null) ''
+                  ${pkgs.lib.optionalString (selectedIds != null) ''
                     wrapProgram "$out/bin/$program" \
                       --set PHENIX_ENABLED_PLUGINS ${pkgs.lib.escapeShellArg enabledPluginIds}
+                  ''}
+                  ${pkgs.lib.optionalString (resources != [ ]) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_RUNTIME_CONFIG "$out/share/phenix/runtime.json" \
+                      --set PHENIX_SKILL_PATH "$out/share/phenix/skills"
                   ''}
                 fi
               done
@@ -101,9 +129,8 @@ in
 {
   flake = {
     lib = {
-      inherit mkPhenix mkPhenixPlugin;
+      inherit mkPhenix mkPhenixClient mkPhenixPlugin;
     };
-
     wrappers.phenix.wrap = mkPhenix;
   };
 
@@ -132,24 +159,17 @@ in
           case "$type" in
             handshake)
               generation="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .generation)"
-              ${pkgs.jq}/bin/jq -cn \
-                --argjson generation "$generation" \
+              ${pkgs.jq}/bin/jq -cn --argjson generation "$generation" \
                 '{type:"handshake_ok",protocol:1,plugin:"fixture.session-replacement",generation:$generation,services:["phenix.sessions@1"]}'
               ;;
             invoke)
               request_id="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .request_id)"
               generation="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .generation)"
-              ${pkgs.jq}/bin/jq -cn \
-                --argjson request_id "$request_id" \
-                --argjson generation "$generation" \
+              ${pkgs.jq}/bin/jq -cn --argjson request_id "$request_id" --argjson generation "$generation" \
                 '{type:"result",request_id:$request_id,generation:$generation,output:[123,34,114,101,112,108,97,99,101,109,101,110,116,34,58,116,114,117,101,125]}'
               ;;
-            stop)
-              exit 0
-              ;;
-            *)
-              exit 2
-              ;;
+            stop) exit 0 ;;
+            *) exit 2 ;;
           esac
         done
       '';
@@ -173,91 +193,86 @@ in
         };
         executable = externalExecutable;
       };
-      defaultComposition = mkPhenix { inherit pkgs; };
+      firstPartyPlugins = builtins.attrValues self.phenixPlugins.${pkgs.system};
+      harnessResources = self.packages.${pkgs.system}.phenix-harness-resources;
+      defaultComposition = mkPhenix {
+        inherit pkgs;
+        plugins = firstPartyPlugins;
+        resources = [ harnessResources ];
+      };
       externalComposition = mkPhenix {
         inherit pkgs;
-        plugins = [ externalPlugin ];
+        plugins = firstPartyPlugins ++ [ externalPlugin ];
+        resources = [ harnessResources ];
       };
       resourceComposition = mkPhenix {
         inherit pkgs;
-        plugins = [ resourcePlugin ];
+        plugins = firstPartyPlugins ++ [ resourcePlugin ];
+        resources = [ harnessResources ];
       };
-      kernelComposition = mkPhenix {
+      conductorComposition = mkPhenix {
         inherit pkgs;
-        kernelOnly = true;
-        plugins = [ resourcePlugin ];
+        conductorOnly = true;
       };
       sessionOnlyComposition = mkPhenix {
         inherit pkgs;
-        enabledPlugins = [ "phenix.sessions" ];
+        plugins = [ self.phenixPlugins.${pkgs.system}.sessions ];
       };
       contextOnlyComposition = mkPhenix {
         inherit pkgs;
-        enabledPlugins = [ "phenix.context" ];
-      };
-      invalidEmbeddedComposition = mkPhenix {
-        inherit pkgs;
-        enabledPlugins = [ "fixture.missing" ];
+        plugins = [ self.phenixPlugins.${pkgs.system}.context ];
       };
     in
     {
+      packages = {
+        phenix-harness = defaultComposition;
+        phenix = defaultComposition;
+        default = defaultComposition;
+      };
+      apps = {
+        phenix-harness.program = "${defaultComposition}/bin/phenix-harness";
+        phenix.program = "${defaultComposition}/bin/phenix";
+        default.program = "${defaultComposition}/bin/phenix";
+        phenix-conductor.program = "${self.packages.${pkgs.system}.phenix-conductor}/bin/phenix-conductor";
+      };
       checks.phenix-plugin-packaging =
-        pkgs.runCommand "phenix-plugin-packaging-check"
-          {
-            nativeBuildInputs = [ pkgs.jq ];
-          }
+        pkgs.runCommand "phenix-plugin-packaging-check" { nativeBuildInputs = [ pkgs.jq ]; }
           ''
             set -euxo pipefail
             test -x "${defaultComposition}/bin/phenix"
             test -x "${defaultComposition}/bin/phenix-harness"
-            test ! -e "${defaultComposition}/bin/phenix-conductor"
-            test -x "${externalComposition}/bin/phenix"
-            test -x "${externalComposition}/bin/phenix-harness"
-            test -x "${externalComposition}/bin/external-fixture"
+            test -f "${defaultComposition}/share/phenix/runtime.json"
+            test -f "${defaultComposition}/share/phenix/skills/write/SKILL.md"
+            test -f "${defaultComposition}/share/phenix/skills/pstack-LICENSE"
             export PHENIX_STATE_DB="$TMPDIR/composition.sqlite"
             "${defaultComposition}/bin/phenix" --list-services > "$TMPDIR/default-services.json"
-            jq -e '(.plugins | index("fixture.session-replacement")) == null' "$TMPDIR/default-services.json" >/dev/null
+            jq -e '(.plugins | length == 14) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
+
+            export PHENIX_STATE_DB="$TMPDIR/external.sqlite"
             "${externalComposition}/bin/phenix" --list-services > "$TMPDIR/external-services.json"
             jq -e '(.plugins | index("fixture.session-replacement")) != null' "$TMPDIR/external-services.json" >/dev/null
             printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"get","id":"missing"}}' \
               | "${externalComposition}/bin/phenix" > "$TMPDIR/replacement.json"
             jq -e '.status == "ok" and .output.replacement == true' "$TMPDIR/replacement.json" >/dev/null
+
             export PHENIX_STATE_DB="$TMPDIR/session-only.sqlite"
             "${sessionOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/session-only.json"
-            jq -e '
-              (.plugins | length == 1)
-              and (.plugins[0] == "phenix.sessions")
-              and (.services | index("phenix.sessions@1") != null)
-              and (.services | index("phenix.context@1") == null)
-            ' "$TMPDIR/session-only.json" >/dev/null
+            jq -e '(.plugins == ["phenix.sessions"]) and (.services | index("phenix.sessions@1") != null) and (.services | index("phenix.context@1") == null)' "$TMPDIR/session-only.json" >/dev/null
+
             export PHENIX_STATE_DB="$TMPDIR/context-only.sqlite"
             "${contextOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/context-only.json"
-            jq -e '
-              (.plugins | length == 1)
-              and (.plugins[0] == "phenix.context")
-              and (.services | index("phenix.context@1") != null)
-              and (.services | index("phenix.sessions@1") == null)
-            ' "$TMPDIR/context-only.json" >/dev/null
-            export PHENIX_STATE_DB="$TMPDIR/invalid-embedded.sqlite"
-            if "${invalidEmbeddedComposition}/bin/phenix" --list-services > "$TMPDIR/invalid-embedded.json" 2>&1; then
-              echo "unknown embedded plugin selection unexpectedly succeeded" >&2
-              exit 1
-            fi
-            test -x "${resourceComposition}/bin/phenix"
-            test -x "${resourceComposition}/bin/phenix-harness"
+            jq -e '(.plugins == ["phenix.context"]) and (.services | index("phenix.context@1") != null) and (.services | index("phenix.sessions@1") == null)' "$TMPDIR/context-only.json" >/dev/null
+
+            export PHENIX_STATE_DB="$TMPDIR/resource.sqlite"
             test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"
             "${resourceComposition}/bin/phenix" --list-services > "$TMPDIR/resource-services.json"
             jq -e '(.plugins | index("fixture.resources")) != null' "$TMPDIR/resource-services.json" >/dev/null
-            test -x "${kernelComposition}/bin/phenix-kernel"
-            test ! -e "${kernelComposition}/bin/phenix"
-            test ! -e "${kernelComposition}/bin/phenix-harness"
-            test ! -e "${kernelComposition}/bin/phenix-conductor"
-            test -e "${resourcePlugin}/share/phenix-plugin/resources/README.txt"
-            jq -e '.id == "fixture.resources" and .execution == "resource-only"' \
-              "${resourcePlugin}/share/phenix-plugin/manifest.json" >/dev/null
-            test -x "${externalPlugin}/bin/external-fixture"
-            jq -e '.id == "fixture.session-replacement" and .execution == "external"' \
-              "${externalPlugin}/share/phenix-plugin/manifest.json" >/dev/null
+
+            test -x "${conductorComposition}/bin/phenix-conductor"
+            test ! -e "${conductorComposition}/bin/phenix"
+            test ! -e "${conductorComposition}/bin/phenix-harness"
+            "${conductorComposition}/bin/phenix-conductor" --list-services > "$TMPDIR/conductor-services.json"
+            jq -e '(.plugins == []) and (.services == [])' "$TMPDIR/conductor-services.json" >/dev/null
             touch "$out"
           '';
     };

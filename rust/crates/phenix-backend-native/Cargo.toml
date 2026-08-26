@@ -10,7 +10,7 @@ futures.workspace = true
 genai.workspace = true
 getrandom.workspace = true
 phenix-backend = { path = "../phenix-backend" }
-phenix-core = { path = "../phenix-core" }
+phenix-domain = { path = "../phenix-domain" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

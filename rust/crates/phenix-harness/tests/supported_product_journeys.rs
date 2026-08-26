@@ -1,9 +1,9 @@
-use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};
-use phenix_kernel::{
+use phenix_core::{
     Authority, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
     ServiceContribution, ServiceId,
 };
-use phenix_plugin_suite::{
+use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};
+use phenix_plugin_catalog::{
     execution_service, model_inference_service, model_routing_service, ExecutionAuthority,
     ExecutionCommand, ExecutionResponse, ModelCommand, ModelInferenceRequest,
     ModelInferenceResponse, ModelResponse, ModelTarget, RoutingProfile,

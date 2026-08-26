@@ -6,9 +6,9 @@
     {
       phenixWrapped = {
         phenix = inputs.self.packages.${system}.phenix;
-        conductor = inputs.self.packages.${system}.phenix-kernel;
+        conductor = inputs.self.packages.${system}.phenix-conductor;
         harness = inputs.self.packages.${system}.phenix-harness;
-        runtime = inputs.self.packages.${system}.phenix-harness;
+        runtime = inputs.self.packages.${system}.phenix;
         stitch = inputs.self.packages.${system}.stitch;
         stitchMcp = inputs.self.packages.${system}.stitch-mcp;
       };

@@ -1,8 +1,8 @@
-use phenix_kernel::{
+use phenix_core::{
     Authority, CapabilityId, Kernel, KernelConfig, KernelError, PersistenceBackend,
     PluginExecution, PluginId, PluginInstance, PluginManifest,
 };
-use phenix_plugin_suite::{
+use phenix_plugin_catalog::{
     artifact_factory, artifact_manifest, cli_factory, cli_manifest, context_factory,
     context_manifest, debug_factory, debug_manifest, execution_factory, execution_manifest,
     frontend_factory, frontend_manifest, hook_factory, hook_manifest, job_factory, job_manifest,
@@ -251,7 +251,7 @@ impl PhenixHarness {
 
     pub fn invoke(
         &mut self,
-        service: &phenix_kernel::ServiceId,
+        service: &phenix_core::ServiceId,
         input: &[u8],
         authority: &Authority,
         binding: Option<&PluginId>,
@@ -263,8 +263,8 @@ impl PhenixHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_kernel::{CapabilityId, ServiceContribution, ServiceId};
-    use phenix_plugin_suite::{
+    use phenix_core::{CapabilityId, ServiceContribution, ServiceId};
+    use phenix_plugin_catalog::{
         artifact_manifest, artifact_service, context_manifest, context_service, planning_manifest,
         planning_service, repository_work_queue_service, session_manifest, session_service,
         ArtifactCommand, ArtifactProvenance, ArtifactResponse, ContextCommand, ContextDescriptor,
@@ -328,7 +328,7 @@ mod tests {
     struct Echo(&'static [u8]);
 
     impl PluginInstance for Echo {
-        fn start(&mut self, _host: &phenix_kernel::PluginHost<'_>) -> Result<(), String> {
+        fn start(&mut self, _host: &phenix_core::PluginHost<'_>) -> Result<(), String> {
             Ok(())
         }
 
@@ -336,7 +336,7 @@ mod tests {
             &mut self,
             _service: &ServiceId,
             _input: &[u8],
-            _host: &phenix_kernel::PluginHost<'_>,
+            _host: &phenix_core::PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
             Ok(self.0.to_vec())
         }
@@ -345,7 +345,7 @@ mod tests {
     struct FixedResponse(Vec<u8>);
 
     impl PluginInstance for FixedResponse {
-        fn start(&mut self, _host: &phenix_kernel::PluginHost<'_>) -> Result<(), String> {
+        fn start(&mut self, _host: &phenix_core::PluginHost<'_>) -> Result<(), String> {
             Ok(())
         }
 
@@ -353,7 +353,7 @@ mod tests {
             &mut self,
             _service: &ServiceId,
             _input: &[u8],
-            _host: &phenix_kernel::PluginHost<'_>,
+            _host: &phenix_core::PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
             Ok(self.0.clone())
         }
@@ -507,6 +507,12 @@ mod tests {
         .unwrap();
         let alternate_factory = alternate.clone();
         let mut builder = HarnessBuilder::new();
+        builder
+            .add_embedded(
+                execution_manifest(default_suite_authority()),
+                execution_factory,
+            )
+            .unwrap();
         builder
             .add_embedded(context_manifest(), context_factory)
             .unwrap();

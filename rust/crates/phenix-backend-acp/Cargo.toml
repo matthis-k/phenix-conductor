@@ -18,5 +18,5 @@ bench = false
 [dependencies]
 agent-client-protocol.workspace = true
 phenix-backend = { path = "../phenix-backend" }
-phenix-core = { path = "../phenix-core" }
+phenix-domain = { path = "../phenix-domain" }
 serde_json.workspace = true

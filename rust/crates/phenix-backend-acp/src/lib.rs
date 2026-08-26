@@ -16,7 +16,7 @@ use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
     BackendSession, BackendSessionRequest, PreparedToolSurface, ToolPresentation,
 };
-use phenix_core::{
+use phenix_domain::{
     AuthenticationMethodDescriptor, AuthenticationMethodId, AuthenticationMethodKind,
     AuthenticationState, BackendCatalog, BackendId, InferenceOptions, ModelDescriptor, ModelId,
     ModelTarget, ProviderId, SessionId,
@@ -305,7 +305,7 @@ impl BackendSession for AcpBackendSession {
         result
     }
 
-    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+    fn cancel(&self, _execution_id: &phenix_domain::ExecutionId) -> Result<(), BackendError> {
         request_cancellation(&self.cancellation)
     }
 }
@@ -414,7 +414,7 @@ impl BackendSession for AcpPersistentSession {
         result
     }
 
-    fn cancel(&self, _execution_id: &phenix_core::ExecutionId) -> Result<(), BackendError> {
+    fn cancel(&self, _execution_id: &phenix_domain::ExecutionId) -> Result<(), BackendError> {
         request_cancellation(&self.cancellation)
     }
 }
@@ -1117,7 +1117,7 @@ fn block_on<F: Future>(future: F) -> F::Output {
 mod tests {
     use super::*;
     use phenix_backend::ToolProvision;
-    use phenix_core::InferenceEffort;
+    use phenix_domain::InferenceEffort;
     use serde_json::json;
 
     fn config() -> AcpBackendConfig {
@@ -1156,7 +1156,7 @@ mod tests {
     #[test]
     fn cancel_before_execute_is_latched() {
         let session = backend_session();
-        let execution = phenix_core::ExecutionId::parse("execution-1").unwrap();
+        let execution = phenix_domain::ExecutionId::parse("execution-1").unwrap();
         session.cancel(&execution).unwrap();
         assert!(session.arm_cancellation().unwrap().is_none());
         assert!(session.arm_cancellation().unwrap().is_some());
@@ -1166,7 +1166,7 @@ mod tests {
     #[test]
     fn cancel_signals_active_execution() {
         let session = backend_session();
-        let execution = phenix_core::ExecutionId::parse("execution-1").unwrap();
+        let execution = phenix_domain::ExecutionId::parse("execution-1").unwrap();
         let cancellation = session.arm_cancellation().unwrap().unwrap();
         session.cancel(&execution).unwrap();
         assert_eq!(cancellation.receiver.recv(), Ok(CancellationSignal::Cancel));

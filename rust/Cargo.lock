@@ -1482,6 +1482,8 @@ name = "phenix-acp"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "phenix-client",
+ "serde_json",
 ]
 
 [[package]]
@@ -1495,7 +1497,7 @@ dependencies = [
 name = "phenix-backend"
 version = "0.1.0"
 dependencies = [
- "phenix-core",
+ "phenix-domain",
 ]
 
 [[package]]
@@ -1504,7 +1506,7 @@ version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
  "phenix-backend",
- "phenix-core",
+ "phenix-domain",
  "serde_json",
 ]
 
@@ -1517,7 +1519,7 @@ dependencies = [
  "genai",
  "getrandom 0.4.3",
  "phenix-backend",
- "phenix-core",
+ "phenix-domain",
  "reqwest",
  "serde",
  "serde_json",
@@ -1527,7 +1529,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-client"
+version = "0.1.0"
+dependencies = [
+ "phenix-domain",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "phenix-conductor"
+version = "0.1.0"
+dependencies = [
+ "phenix-client",
+ "phenix-core",
+ "serde_json",
+]
+
+[[package]]
 name = "phenix-core"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "phenix-domain"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1538,38 +1567,182 @@ dependencies = [
 name = "phenix-harness"
 version = "0.1.0"
 dependencies = [
- "phenix-kernel",
- "phenix-plugin-suite",
- "phenix-protocol",
- "serde_json",
-]
-
-[[package]]
-name = "phenix-kernel"
-version = "0.1.0"
-dependencies = [
- "rusqlite",
+ "phenix-conductor",
+ "phenix-core",
+ "phenix-plugin-catalog",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "phenix-plugin-suite"
+name = "phenix-plugin-artifacts"
 version = "0.1.0"
 dependencies = [
- "phenix-kernel",
+ "phenix-core",
  "serde",
  "serde_json",
  "sha2",
 ]
 
 [[package]]
-name = "phenix-protocol"
+name = "phenix-plugin-catalog"
+version = "0.1.0"
+dependencies = [
+ "phenix-plugin-artifacts",
+ "phenix-plugin-cli",
+ "phenix-plugin-context",
+ "phenix-plugin-debug",
+ "phenix-plugin-execution",
+ "phenix-plugin-frontend",
+ "phenix-plugin-hooks",
+ "phenix-plugin-jobs",
+ "phenix-plugin-language",
+ "phenix-plugin-models",
+ "phenix-plugin-planning",
+ "phenix-plugin-repository-workers",
+ "phenix-plugin-sessions",
+ "phenix-plugin-workspace",
+]
+
+[[package]]
+name = "phenix-plugin-cli"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-workspace",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-context"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-execution",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-debug"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-context",
+ "phenix-plugin-frontend",
+ "phenix-plugin-jobs",
+ "phenix-plugin-models",
+ "phenix-plugin-planning",
+ "phenix-plugin-sessions",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-execution"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
  "serde",
  "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-frontend"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-execution",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-hooks"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-context",
+ "phenix-plugin-execution",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-jobs"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-language"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-models"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-planning"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-repository-workers"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-sessions"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-workspace"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

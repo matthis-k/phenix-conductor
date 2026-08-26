@@ -1,0 +1,10 @@
+[package]
+name = "phenix-conductor"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+phenix-core = { path = "../phenix-core" }
+phenix-client = { path = "../phenix-client" }
+serde_json.workspace = true
