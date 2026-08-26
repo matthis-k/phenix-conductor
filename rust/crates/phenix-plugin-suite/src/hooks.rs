@@ -497,14 +497,15 @@ mod tests {
                 },
             )
             .unwrap();
-            assert!(invoke(
+            let duplicate_error = invoke(
                 &mut kernel,
                 HookCommand::RegisterConfiguration {
-                    configuration: configuration.clone()
-                }
+                    configuration: configuration.clone(),
+                },
             )
-            .unwrap_err()
-            .contains("AssertValue"));
+            .unwrap_err();
+            assert!(duplicate_error.contains("transaction assertion failed"));
+            assert!(duplicate_error.contains("configuration/config-1"));
         }
         let mut restored = kernel(&path);
         let dispatch = invoke(

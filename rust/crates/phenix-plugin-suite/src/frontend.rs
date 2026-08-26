@@ -382,12 +382,16 @@ mod tests {
         kernel
     }
 
+    fn suite_authority() -> Authority {
+        execution_manifest(Authority::default()).maximum_authority
+    }
+
     fn invoke(kernel: &mut Kernel, command: FrontendCommand) -> Result<FrontendResponse, String> {
         let output = kernel
             .invoke(
                 &frontend_service(),
                 &serde_json::to_vec(&command).unwrap(),
-                &Authority::default(),
+                &suite_authority(),
                 None,
             )
             .map_err(|error| error.to_string())?;
@@ -410,7 +414,7 @@ mod tests {
             .invoke(
                 &execution_service(),
                 &serde_json::to_vec(&command).unwrap(),
-                &Authority::default(),
+                &suite_authority(),
                 None,
             )
             .unwrap();

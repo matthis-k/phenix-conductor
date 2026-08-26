@@ -157,9 +157,7 @@ impl CliPlugin {
             Err(error) => return Err(error),
         };
         let WorkspaceResponse::Process {
-            exit_code,
-            stdout,
-            ..
+            exit_code, stdout, ..
         } = response
         else {
             return Err("workspace shell returned a non-process response".into());
@@ -259,17 +257,18 @@ mod tests {
     use super::*;
     use crate::{workspace_factory_for, workspace_manifest};
     use phenix_kernel::{Kernel, KernelConfig};
-    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temp_workspace() -> std::path::PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "phenix-cli-plugin-{}-{nonce}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("phenix-cli-plugin-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         root
     }
@@ -311,10 +310,14 @@ mod tests {
     fn manifest_depends_on_workspace_and_cannot_self_grant_shell() {
         let denied = cli_manifest(Authority::default());
         assert_eq!(denied.dependencies, vec![plugin(WORKSPACE_PLUGIN)]);
-        assert!(!denied.maximum_authority.permits(&capability(WORKSPACE_SHELL)));
+        assert!(!denied
+            .maximum_authority
+            .permits(&capability(WORKSPACE_SHELL)));
 
         let granted = cli_manifest(Authority::new([capability(WORKSPACE_SHELL)]));
-        assert!(granted.maximum_authority.permits(&capability(WORKSPACE_SHELL)));
+        assert!(granted
+            .maximum_authority
+            .permits(&capability(WORKSPACE_SHELL)));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod artifacts;
+mod cli;
 mod context;
 mod debug;
 mod execution;
@@ -18,6 +19,11 @@ pub use artifacts::{
     artifact_factory, artifact_manifest, artifact_service, ArtifactCommand, ArtifactProvenance,
     ArtifactRecord, ArtifactResponse, NormalizedReadRequest, ReadProviderIdentity,
     ReadResultRecord, RevalidationRecord, RevalidationVerdict, ARTIFACT_SERVICE,
+};
+pub use cli::{
+    cli_auth_state_service, cli_discover_service, cli_factory, cli_manifest, cli_version_service,
+    CliAuthState, CliAvailability, CliDescriptor, CliProbeRequest, CLI_AUTH_STATE_SERVICE,
+    CLI_DISCOVER_SERVICE, CLI_VERSION_SERVICE,
 };
 pub use context::{
     context_factory, context_manifest, context_service, ContextCommand, ContextDescriptor,

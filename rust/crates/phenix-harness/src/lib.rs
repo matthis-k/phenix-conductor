@@ -3,12 +3,12 @@ use phenix_kernel::{
     PluginInstance, PluginManifest,
 };
 use phenix_plugin_suite::{
-    artifact_factory, artifact_manifest, context_factory, context_manifest, debug_factory,
-    debug_manifest, execution_factory, execution_manifest, frontend_factory, frontend_manifest,
-    hook_factory, hook_manifest, job_factory, job_manifest, language_factory, language_manifest,
-    model_routing_factory, model_routing_manifest, planning_factory, planning_manifest,
-    repository_worker_factory, repository_worker_manifest, session_factory, session_manifest,
-    workspace_factory, workspace_manifest,
+    artifact_factory, artifact_manifest, cli_factory, cli_manifest, context_factory,
+    context_manifest, debug_factory, debug_manifest, execution_factory, execution_manifest,
+    frontend_factory, frontend_manifest, hook_factory, hook_manifest, job_factory, job_manifest,
+    language_factory, language_manifest, model_routing_factory, model_routing_manifest,
+    planning_factory, planning_manifest, repository_worker_factory, repository_worker_manifest,
+    session_factory, session_manifest, workspace_factory, workspace_manifest,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -43,6 +43,7 @@ impl HarnessBuilder {
         builder.add_embedded(repository_worker_manifest(), repository_worker_factory)?;
         builder.add_embedded(session_manifest(), session_factory)?;
         builder.add_embedded(artifact_manifest(), artifact_factory)?;
+        builder.add_embedded(cli_manifest(authority.clone()), cli_factory)?;
         builder.add_embedded(context_manifest(), context_factory)?;
         builder.add_embedded(execution_manifest(authority.clone()), execution_factory)?;
         builder.add_embedded(language_manifest(), language_factory)?;
@@ -256,7 +257,7 @@ mod tests {
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 13);
+        assert_eq!(harness.kernel().config().manifests().count(), 14);
 
         let input = serde_json::to_vec(&RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
