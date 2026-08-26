@@ -7,3 +7,4 @@ publish = false
 [dependencies]
 phenix-kernel = { path = "../phenix-kernel" }
 phenix-plugin-suite = { path = "../phenix-plugin-suite" }
+serde_json.workspace = true
