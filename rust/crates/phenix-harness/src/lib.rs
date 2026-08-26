@@ -170,6 +170,23 @@ mod tests {
         }
     }
 
+    struct FixedResponse(Vec<u8>);
+
+    impl PluginInstance for FixedResponse {
+        fn start(&mut self, _host: &phenix_kernel::PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn invoke(
+            &mut self,
+            _service: &ServiceId,
+            _input: &[u8],
+            _host: &phenix_kernel::PluginHost<'_>,
+        ) -> Result<Vec<u8>, String> {
+            Ok(self.0.clone())
+        }
+    }
+
     #[test]
     fn kernel_only_harness_has_no_userspace_plugins() {
         let mut harness = PhenixHarness::kernel_only();
@@ -251,11 +268,7 @@ mod tests {
                     200,
                     Authority::default(),
                 ),
-                move || {
-                    Box::new(Echo(Box::leak(
-                        alternate_factory.clone().into_boxed_slice(),
-                    )))
-                },
+                move || Box::new(FixedResponse(alternate_factory.clone())),
             )
             .unwrap();
         let mut harness = builder.build().unwrap();
