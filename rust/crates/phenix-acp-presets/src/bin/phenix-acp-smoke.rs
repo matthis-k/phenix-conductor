@@ -14,6 +14,9 @@ fn main() {
         .expect("supported Harness product must be executable for ACP smoke");
     let _ = fs::remove_file(&state);
 
-    assert!(status.success(), "supported Harness product must boot for ACP smoke");
+    assert!(
+        status.success(),
+        "supported Harness product must boot for ACP smoke"
+    );
     println!("phenix ACP boundary: wire interoperability through supported Harness product");
 }
