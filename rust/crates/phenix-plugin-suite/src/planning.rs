@@ -549,7 +549,9 @@ fn decision_key(id: &str) -> String {
 
 fn validate_identity(label: &str, value: &str) -> Result<(), String> {
     if value.trim().is_empty() || value.contains('/') {
-        Err(format!("{label} must be non-empty and must not contain '/'"))
+        Err(format!(
+            "{label} must be non-empty and must not contain '/'"
+        ))
     } else {
         Ok(())
     }
@@ -567,22 +569,32 @@ fn validate_text(label: &str, value: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use phenix_kernel::{Kernel, KernelConfig, LocalPersistence};
-    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temp_db(name: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("phenix-{name}-{}-{nonce}.sqlite", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "phenix-{name}-{}-{nonce}.sqlite",
+            std::process::id()
+        ))
     }
 
     fn kernel_with(path: &PathBuf) -> Kernel {
         let manifest = planning_manifest();
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
-        kernel.register_embedded_factory(plugin, planning_factory).unwrap();
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        kernel
+            .register_embedded_factory(plugin, planning_factory)
+            .unwrap();
         kernel.activate_all().unwrap();
         kernel
     }
@@ -590,7 +602,12 @@ mod tests {
     fn invoke(kernel: &mut Kernel, command: PlanningCommand) -> Result<PlanningResponse, String> {
         let input = serde_json::to_vec(&command).unwrap();
         let output = kernel
-            .invoke(&planning_service(), &input, &planning_manifest().maximum_authority, None)
+            .invoke(
+                &planning_service(),
+                &input,
+                &planning_manifest().maximum_authority,
+                None,
+            )
             .map_err(|error| error.to_string())?;
         serde_json::from_slice(&output).map_err(|error| error.to_string())
     }
@@ -600,39 +617,69 @@ mod tests {
         let path = temp_db("planning-restore");
         {
             let mut kernel = kernel_with(&path);
-            invoke(&mut kernel, PlanningCommand::CreateObjective {
-                id: "objective-1".into(),
-                title: "Ship plugin suite".into(),
-                parent: None,
-            }).unwrap();
-            invoke(&mut kernel, PlanningCommand::CreatePlan {
-                id: "plan-1".into(),
-                objective_id: "objective-1".into(),
-                goal: "Move durable planning state behind plugins".into(),
-                steps: vec![
-                    PlanStep { id: "persist".into(), description: "Persist state".into(), dependencies: vec![] },
-                    PlanStep { id: "verify".into(), description: "Verify restore".into(), dependencies: vec!["persist".into()] },
-                ],
-            }).unwrap();
-            invoke(&mut kernel, PlanningCommand::RecordDecision {
-                id: "decision-1".into(),
-                objective_id: "objective-1".into(),
-                statement: "Use plugin-owned schema".into(),
-                rationale: "Kernel must not interpret planning rows".into(),
-                dependencies: vec![],
-                supersedes: None,
-            }).unwrap();
+            invoke(
+                &mut kernel,
+                PlanningCommand::CreateObjective {
+                    id: "objective-1".into(),
+                    title: "Ship plugin suite".into(),
+                    parent: None,
+                },
+            )
+            .unwrap();
+            invoke(
+                &mut kernel,
+                PlanningCommand::CreatePlan {
+                    id: "plan-1".into(),
+                    objective_id: "objective-1".into(),
+                    goal: "Move durable planning state behind plugins".into(),
+                    steps: vec![
+                        PlanStep {
+                            id: "persist".into(),
+                            description: "Persist state".into(),
+                            dependencies: vec![],
+                        },
+                        PlanStep {
+                            id: "verify".into(),
+                            description: "Verify restore".into(),
+                            dependencies: vec!["persist".into()],
+                        },
+                    ],
+                },
+            )
+            .unwrap();
+            invoke(
+                &mut kernel,
+                PlanningCommand::RecordDecision {
+                    id: "decision-1".into(),
+                    objective_id: "objective-1".into(),
+                    statement: "Use plugin-owned schema".into(),
+                    rationale: "Kernel must not interpret planning rows".into(),
+                    dependencies: vec![],
+                    supersedes: None,
+                },
+            )
+            .unwrap();
         }
 
         let mut restored = kernel_with(&path);
         assert!(matches!(
-            invoke(&mut restored, PlanningCommand::GetPlan { id: "plan-1".into() }).unwrap(),
+            invoke(
+                &mut restored,
+                PlanningCommand::GetPlan {
+                    id: "plan-1".into()
+                }
+            )
+            .unwrap(),
             PlanningResponse::Plan { plan: Some(_) }
         ));
-        let search = invoke(&mut restored, PlanningCommand::SearchHistory {
-            objective_id: Some("objective-1".into()),
-            query: "plugin".into(),
-        }).unwrap();
+        let search = invoke(
+            &mut restored,
+            PlanningCommand::SearchHistory {
+                objective_id: Some("objective-1".into()),
+                query: "plugin".into(),
+            },
+        )
+        .unwrap();
         match search {
             PlanningResponse::History { entries } => assert!(entries.len() >= 2),
             other => panic!("unexpected response: {other:?}"),
@@ -644,30 +691,48 @@ mod tests {
     fn invalid_plan_and_decision_dependencies_are_rejected() {
         let path = temp_db("planning-dag");
         let mut kernel = kernel_with(&path);
-        invoke(&mut kernel, PlanningCommand::CreateObjective {
-            id: "objective-1".into(),
-            title: "Validate DAGs".into(),
-            parent: None,
-        }).unwrap();
-        let cycle = invoke(&mut kernel, PlanningCommand::CreatePlan {
-            id: "plan-cycle".into(),
-            objective_id: "objective-1".into(),
-            goal: "Reject cycle".into(),
-            steps: vec![
-                PlanStep { id: "a".into(), description: "a".into(), dependencies: vec!["b".into()] },
-                PlanStep { id: "b".into(), description: "b".into(), dependencies: vec!["a".into()] },
-            ],
-        });
+        invoke(
+            &mut kernel,
+            PlanningCommand::CreateObjective {
+                id: "objective-1".into(),
+                title: "Validate DAGs".into(),
+                parent: None,
+            },
+        )
+        .unwrap();
+        let cycle = invoke(
+            &mut kernel,
+            PlanningCommand::CreatePlan {
+                id: "plan-cycle".into(),
+                objective_id: "objective-1".into(),
+                goal: "Reject cycle".into(),
+                steps: vec![
+                    PlanStep {
+                        id: "a".into(),
+                        description: "a".into(),
+                        dependencies: vec!["b".into()],
+                    },
+                    PlanStep {
+                        id: "b".into(),
+                        description: "b".into(),
+                        dependencies: vec!["a".into()],
+                    },
+                ],
+            },
+        );
         assert!(cycle.unwrap_err().contains("cycle"));
 
-        let missing = invoke(&mut kernel, PlanningCommand::RecordDecision {
-            id: "decision-2".into(),
-            objective_id: "objective-1".into(),
-            statement: "Depends on missing decision".into(),
-            rationale: "must fail".into(),
-            dependencies: vec!["missing".into()],
-            supersedes: None,
-        });
+        let missing = invoke(
+            &mut kernel,
+            PlanningCommand::RecordDecision {
+                id: "decision-2".into(),
+                objective_id: "objective-1".into(),
+                statement: "Depends on missing decision".into(),
+                rationale: "must fail".into(),
+                dependencies: vec!["missing".into()],
+                supersedes: None,
+            },
+        );
         assert!(missing.unwrap_err().contains("unknown decision dependency"));
         let _ = fs::remove_file(path);
     }
@@ -676,11 +741,15 @@ mod tests {
     fn decisions_are_immutable_and_supersession_is_explicit() {
         let path = temp_db("planning-decisions");
         let mut kernel = kernel_with(&path);
-        invoke(&mut kernel, PlanningCommand::CreateObjective {
-            id: "objective-1".into(),
-            title: "Decision history".into(),
-            parent: None,
-        }).unwrap();
+        invoke(
+            &mut kernel,
+            PlanningCommand::CreateObjective {
+                id: "objective-1".into(),
+                title: "Decision history".into(),
+                parent: None,
+            },
+        )
+        .unwrap();
         let first = PlanningCommand::RecordDecision {
             id: "decision-1".into(),
             objective_id: "objective-1".into(),
@@ -690,17 +759,25 @@ mod tests {
             supersedes: None,
         };
         invoke(&mut kernel, first.clone()).unwrap();
-        assert!(invoke(&mut kernel, first).unwrap_err().contains("already exists"));
-        let replacement = invoke(&mut kernel, PlanningCommand::RecordDecision {
-            id: "decision-2".into(),
-            objective_id: "objective-1".into(),
-            statement: "Replacement choice".into(),
-            rationale: "new evidence".into(),
-            dependencies: vec!["decision-1".into()],
-            supersedes: Some("decision-1".into()),
-        }).unwrap();
+        assert!(invoke(&mut kernel, first)
+            .unwrap_err()
+            .contains("already exists"));
+        let replacement = invoke(
+            &mut kernel,
+            PlanningCommand::RecordDecision {
+                id: "decision-2".into(),
+                objective_id: "objective-1".into(),
+                statement: "Replacement choice".into(),
+                rationale: "new evidence".into(),
+                dependencies: vec!["decision-1".into()],
+                supersedes: Some("decision-1".into()),
+            },
+        )
+        .unwrap();
         match replacement {
-            PlanningResponse::Decision { decision: Some(decision) } => {
+            PlanningResponse::Decision {
+                decision: Some(decision),
+            } => {
                 assert_eq!(decision.supersedes.as_deref(), Some("decision-1"));
             }
             other => panic!("unexpected response: {other:?}"),
