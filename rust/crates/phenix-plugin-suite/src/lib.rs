@@ -58,7 +58,7 @@ impl PluginInstance for RepositoryWorkerPlugin {
         &mut self,
         service: &ServiceId,
         input: &[u8],
-        _authority: &Authority,
+        _host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
         if service != &repository_work_queue_service() {
             return Err(format!("unsupported repository worker service: {service}"));
