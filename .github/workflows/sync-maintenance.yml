@@ -26,7 +26,7 @@ jobs:
       - name: Apply deterministic maintenance fixes
         run: |
           set -euo pipefail
-          nix run .#phenix-maintenance -- fix
+          nix run .#phenix-maintenance-command-1c6e6c4c02e5 -- fix
           git diff --check
 
       - name: Commit autofixes

@@ -33,22 +33,22 @@ jobs:
             max-jobs = auto
 
       - name: "Nix formatting"
-        run: nix run .#phenix-maintenance -- check source nix-format
+        run: nix run .#phenix-maintenance-command-fa944a2937b3 -- check source nix-format
 
       - name: "Rust formatting"
-        run: nix run .#phenix-maintenance -- check source rust-format
+        run: nix run .#phenix-maintenance-command-31a6c0b16724 -- check source rust-format
 
       - name: "Statix"
-        run: nix run .#phenix-maintenance -- check source statix
+        run: nix run .#phenix-maintenance-command-4ff10aceddac -- check source statix
 
       - name: "Actionlint"
-        run: nix run .#phenix-maintenance -- check source actionlint
+        run: nix run .#phenix-maintenance-command-e0c2105ec1ec -- check source actionlint
 
       - name: "Test target classification"
-        run: nix run .#phenix-maintenance -- check source test-targets
+        run: nix run .#phenix-maintenance-command-fe564e52f93c -- check source test-targets
 
       - name: "Generated workflow"
-        run: nix run .#phenix-maintenance -- check source workflow-sync
+        run: nix run .#phenix-maintenance-command-9383b20a4494 -- check source workflow-sync
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -81,7 +81,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance -- rust-ci clippy
+        run: nix run .#phenix-maintenance-command-c1105b6c6a09 -- rust-ci clippy
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -114,7 +114,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance -- rust-ci unit
+        run: nix run .#phenix-maintenance-command-97fe98b8077a -- rust-ci unit
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -147,7 +147,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance -- rust-ci doc
+        run: nix run .#phenix-maintenance-command-921e9ef0f383 -- rust-ci doc
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -180,7 +180,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance -- rust-ci integration
+        run: nix run .#phenix-maintenance-command-6fb7965ed7ff -- rust-ci integration
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -213,7 +213,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance -- rust-ci system
+        run: nix run .#phenix-maintenance-command-baa4bc2e5ec8 -- rust-ci system
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -242,13 +242,13 @@ jobs:
             max-jobs = auto
 
       - name: "Phenix ACP smoke"
-        run: nix run .#phenix-maintenance -- test product phenix-acp
+        run: nix run .#phenix-maintenance-command-f2591028a001 -- test product phenix-acp
 
       - name: "Stitch runtime smoke"
-        run: nix run .#phenix-maintenance -- test product stitch-runtime
+        run: nix run .#phenix-maintenance-command-5ee69eb72dfd -- test product stitch-runtime
 
       - name: "Stitch MCP package"
-        run: nix run .#phenix-maintenance -- test product stitch-mcp
+        run: nix run .#phenix-maintenance-command-2e4593f2b523 -- test product stitch-mcp
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
