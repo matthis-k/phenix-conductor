@@ -18,6 +18,7 @@ mod objectives;
 mod persistence;
 mod plans;
 mod policy;
+mod repository_workers;
 mod routing;
 mod sandbox;
 mod server;
@@ -58,6 +59,13 @@ pub use plans::PlanError;
 pub use policy::{
     CallableOperation, CallablePermissionGuard, InvocationGuard, InvocationPolicy,
     InvocationPolicyContext, InvocationSubject, PolicyDenial,
+};
+pub use repository_workers::{
+    ReconstructedPullRequest, RepositoryCheckState, RepositoryChecklistEvidence,
+    RepositoryDiscussionEvidence, RepositoryDiscussionKind, RepositoryFinding,
+    RepositoryIssueCluster, RepositoryIssueEvidence, RepositoryPullRequestEvidence,
+    RepositoryPullRequestState, RepositorySelectionReason, RepositoryValidation,
+    RepositoryWorkPriority, RepositoryWorkSelection, RepositoryWorkSnapshot, RepositoryWorkerQueue,
 };
 pub use routing::{RoutingRegistry, RoutingRegistryError};
 pub use server::{ConductorServer, ConductorService, ServerError};

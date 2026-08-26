@@ -316,3 +316,7 @@ The conductor owns worker-task identity, objective and plan-step scope, dependen
 ## Worker results and verification
 
 Worker task results are durable conductor state. A result is bound to the exact task and current worker execution, validated against the task's expected JSON schema, and records exact evidence/artifact references. Required verification is a separate durable gate; the worker execution cannot verify its own result. Failure analysis records diagnosis and a proposed canonical transition but does not mutate task, plan, objective, or authority state. Parent integration reads the compact structured result and exact references from this durable projection rather than inheriting worker transcript state.
+
+## Repository-driven workers
+
+Repository hosting is an adapter boundary. Adapters provide pull-request, review, issue, ancestry, and validation evidence; conductor worker logic reconstructs the queue, reconciles evidence-backed contract state, enforces dependency green boundaries, normalizes unresolved findings, groups issue traceability by semantic responsibility, and selects one active owner. GitHub state remains canonical in the repository. The conductor does not create a parallel repository registry or use chat history as durable worker state.
