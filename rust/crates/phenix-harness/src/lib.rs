@@ -13,6 +13,8 @@ use phenix_plugin_suite::{
 use std::{collections::BTreeMap, sync::Arc};
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
+type ExternalFactory =
+    Arc<dyn Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync>;
 
 pub fn default_suite_authority() -> Authority {
     Authority::new([
@@ -30,6 +32,7 @@ pub fn default_suite_authority() -> Authority {
 pub struct HarnessBuilder {
     manifests: Vec<PluginManifest>,
     embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,
+    external_factories: BTreeMap<PluginId, ExternalFactory>,
 }
 
 impl HarnessBuilder {
@@ -81,11 +84,31 @@ impl HarnessBuilder {
         Ok(())
     }
 
+    pub fn add_external<F>(
+        &mut self,
+        manifest: PluginManifest,
+        factory: F,
+    ) -> Result<(), KernelError>
+    where
+        F: Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync + 'static,
+    {
+        if !matches!(manifest.execution, PluginExecution::External { .. }) {
+            return Err(KernelError::WrongExecutionKind(manifest.id));
+        }
+        let id = manifest.id.clone();
+        self.manifests.push(manifest);
+        self.external_factories.insert(id, Arc::new(factory));
+        Ok(())
+    }
+
     pub fn build(self) -> Result<PhenixHarness, KernelError> {
         let config = KernelConfig::new(self.manifests)?;
         let mut kernel = Kernel::new(config);
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;
+        }
+        for (plugin, factory) in self.external_factories {
+            kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;
         }
         Ok(PhenixHarness { kernel })
     }
@@ -98,6 +121,9 @@ impl HarnessBuilder {
         let mut kernel = Kernel::with_persistence(config, persistence);
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;
+        }
+        for (plugin, factory) in self.external_factories {
+            kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;
         }
         Ok(PhenixHarness { kernel })
     }

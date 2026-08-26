@@ -15,7 +15,6 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
 
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
         with:
@@ -24,59 +23,33 @@ jobs:
             experimental-features = nix-command flakes
             accept-flake-config = true
 
-      - name: Apply Nix runtime composition transport
+      - name: Apply deterministic maintenance fixes
         run: |
           set -euo pipefail
-          python scripts/plugin_composition_transport.py
-          python -c 'from pathlib import Path; p=Path("modules/plugin-packaging.nix"); s=p.read_text(); assert s.count("fixture.external") == 1; p.write_text(s.replace("fixture.external", "fixture.session-replacement", 1))'
           nix run .#phenix-maintenance -- fix
           git diff --check
 
-      - name: Validate Harness suite selection
-        run: |
-          set -euo pipefail
-          nix develop --command cargo test --manifest-path rust/Cargo.toml -p phenix-harness
-
-      - name: Validate runtime-backed plugin packaging
-        id: composition
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          nix build .#checks.x86_64-linux.phenix-plugin-packaging --no-link --print-build-logs 2>&1 | tee /tmp/phenix-plugin-packaging.log
-
-      - name: Prepare runtime composition diagnostic
-        if: steps.composition.outcome == 'failure'
-        run: tail -n 240 /tmp/phenix-plugin-packaging.log > worker-399-runtime-composition.txt
-
-      - name: Upload runtime composition diagnostic
-        if: steps.composition.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: worker-399-runtime-composition
-          path: worker-399-runtime-composition.txt
-
-      - name: Fail runtime composition diagnostic run
-        if: steps.composition.outcome == 'failure'
-        run: exit 1
-
-      - name: Commit semantic composition change
-        if: steps.composition.outcome == 'success'
+      - name: Commit autofixes
+        id: commit
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-          rm scripts/plugin_composition_transport.py
-          rm -f worker-399-runtime-composition.txt
-          git checkout origin/main -- .github/workflows/sync-maintenance.yml
-          rm -f .github/workflows/worker-399-runtime-composition.yml
-          git config user.name "Matthis Kälble"
-          git config user.email "69082876+matthis-k@users.noreply.github.com"
+
+          if test -z "$(git status --porcelain=v1 --untracked-files=all)"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: make Nix suite selection affect Harness runtime"
+          git commit -m "chore: apply CI autofixes"
           git push origin "HEAD:$HEAD_REF"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Validate corrected head
-        if: steps.composition.outcome == 'success'
+        if: steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
