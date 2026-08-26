@@ -31,6 +31,7 @@ jobs:
           python scripts/worker399_harness_runtime_fix.py
           python - <<'PY'
           from pathlib import Path
+          import re
 
           context = Path("rust/crates/phenix-plugin-suite/src/context.rs")
           text = context.read_text()
@@ -48,19 +49,24 @@ jobs:
 
           repository_workers = Path("rust/crates/phenix-plugin-suite/src/repository_workers.rs")
           text = repository_workers.read_text()
-          old = '''    } else if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
-              (false, rest)
-          } else {
-              return None;
-          };
-          '''
-          new = '''    } else {
-              let rest = trimmed.strip_prefix("- [ ] ")?;
-              (false, rest)
-          };
-          '''
-          if old in text:
-              text = text.replace(old, new, 1)
+          pattern = re.compile(
+              r'\} else if let Some\(rest\) = trimmed\.strip_prefix\("- \[ \] "\) \{\n'
+              r'(?P<indent>\s+)\(false, rest\)\n'
+              r'\s+\} else \{\n'
+              r'\s+return None;\n'
+              r'\s+\};'
+          )
+          match = pattern.search(text)
+          if not match:
+              raise SystemExit("repository worker checkbox parser Clippy anchor missing")
+          indent = match.group("indent")
+          replacement = (
+              '} else {\n'
+              f'{indent}let rest = trimmed.strip_prefix("- [ ] ")?;\n'
+              f'{indent}(false, rest)\n'
+              f'{indent[:-4]}}};'
+          )
+          text = pattern.sub(replacement, text, count=1)
           repository_workers.write_text(text)
           PY
           # The flake source only sees tracked files. Stage the new executable
