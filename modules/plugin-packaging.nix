@@ -129,7 +129,7 @@ in
             nativeBuildInputs = [ pkgs.jq ];
           }
           ''
-            set -euo pipefail
+            set -euxo pipefail
             test -x "${defaultComposition}/bin/phenix"
             test -x "${defaultComposition}/bin/phenix-harness"
             test ! -e "${defaultComposition}/bin/phenix-conductor"
