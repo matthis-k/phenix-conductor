@@ -44,6 +44,9 @@ jobs:
       - name: Nix composition regression
         run: nix build --no-link --print-build-logs .#checks.x86_64-linux.phenix-plugin-packaging
 
+      - name: Product smoke
+        run: nix build --no-link --print-build-logs .#checks.x86_64-linux.phenix-product-smoke
+
       - name: Source validation
         run: |
           nix run .#phenix-maintenance -- check source
