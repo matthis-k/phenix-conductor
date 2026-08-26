@@ -28,6 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/plugin_composition_transport.py
+          python -c 'from pathlib import Path; p=Path("modules/plugin-packaging.nix"); s=p.read_text(); assert s.count("fixture.external") == 1; p.write_text(s.replace("fixture.external", "fixture.session-replacement", 1))'
           nix run .#phenix-maintenance -- fix
           git diff --check
 
@@ -65,9 +66,11 @@ jobs:
         run: |
           set -euo pipefail
           rm scripts/plugin_composition_transport.py
+          rm -f worker-399-runtime-composition.txt
           git checkout origin/main -- .github/workflows/sync-maintenance.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/worker-399-runtime-composition.yml
+          git config user.name "Matthis Kälble"
+          git config user.email "69082876+matthis-k@users.noreply.github.com"
           git add -A
           git commit -m "feat: make Nix suite selection affect Harness runtime"
           git push origin "HEAD:$HEAD_REF"
