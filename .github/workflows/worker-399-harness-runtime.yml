@@ -40,8 +40,28 @@ jobs:
 
           hooks = Path("rust/crates/phenix-plugin-suite/src/hooks.rs")
           text = hooks.read_text()
-          text = text.replace('.invoke(&host, "hook-service",', '.invoke(host, "hook-service",')
+          text = text.replace(
+              "handle_failure(&hook, message, &mut dispatch)?;",
+              "handle_failure(hook, message, &mut dispatch)?;",
+          )
           hooks.write_text(text)
+
+          repository_workers = Path("rust/crates/phenix-plugin-suite/src/repository_workers.rs")
+          text = repository_workers.read_text()
+          old = '''    } else if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
+              (false, rest)
+          } else {
+              return None;
+          };
+          '''
+          new = '''    } else {
+              let rest = trimmed.strip_prefix("- [ ] ")?;
+              (false, rest)
+          };
+          '''
+          if old in text:
+              text = text.replace(old, new, 1)
+          repository_workers.write_text(text)
           PY
           # The flake source only sees tracked files. Stage the new executable
           # before Nix evaluates the Rust source tree.
