@@ -10,7 +10,10 @@ use phenix_plugin_suite::{
     planning_factory, planning_manifest, repository_worker_factory, repository_worker_manifest,
     session_factory, session_manifest, workspace_factory, workspace_manifest,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
 type ExternalFactory =
@@ -61,6 +64,90 @@ impl HarnessBuilder {
         builder.add_embedded(hook_manifest(authority.clone()), hook_factory)?;
         builder.add_embedded(debug_manifest(authority), debug_factory)?;
         Ok(builder)
+    }
+
+    pub fn default_suite_plugin_ids() -> BTreeSet<String> {
+        let authority = default_suite_authority();
+        [
+            repository_worker_manifest(),
+            session_manifest(),
+            artifact_manifest(),
+            cli_manifest(authority.clone()),
+            context_manifest(),
+            execution_manifest(authority.clone()),
+            language_manifest(),
+            planning_manifest(),
+            workspace_manifest(),
+            model_routing_manifest(authority.clone()),
+            job_manifest(),
+            frontend_manifest(authority.clone()),
+            hook_manifest(authority.clone()),
+            debug_manifest(authority),
+        ]
+        .into_iter()
+        .map(|manifest| manifest.id.as_str().to_owned())
+        .collect()
+    }
+
+    pub fn with_selected_suite(enabled: &BTreeSet<String>) -> Result<Self, String> {
+        let available = Self::default_suite_plugin_ids();
+        let unknown = enabled.difference(&available).cloned().collect::<Vec<_>>();
+        if !unknown.is_empty() {
+            return Err(format!(
+                "unknown first-party plugin id(s): {}",
+                unknown.join(", ")
+            ));
+        }
+
+        let mut builder = Self::new();
+        let authority = default_suite_authority();
+        builder.add_selected(
+            enabled,
+            repository_worker_manifest(),
+            repository_worker_factory,
+        )?;
+        builder.add_selected(enabled, session_manifest(), session_factory)?;
+        builder.add_selected(enabled, artifact_manifest(), artifact_factory)?;
+        builder.add_selected(enabled, cli_manifest(authority.clone()), cli_factory)?;
+        builder.add_selected(enabled, context_manifest(), context_factory)?;
+        builder.add_selected(
+            enabled,
+            execution_manifest(authority.clone()),
+            execution_factory,
+        )?;
+        builder.add_selected(enabled, language_manifest(), language_factory)?;
+        builder.add_selected(enabled, planning_manifest(), planning_factory)?;
+        builder.add_selected(enabled, workspace_manifest(), workspace_factory)?;
+        builder.add_selected(
+            enabled,
+            model_routing_manifest(authority.clone()),
+            model_routing_factory,
+        )?;
+        builder.add_selected(enabled, job_manifest(), job_factory)?;
+        builder.add_selected(
+            enabled,
+            frontend_manifest(authority.clone()),
+            frontend_factory,
+        )?;
+        builder.add_selected(enabled, hook_manifest(authority.clone()), hook_factory)?;
+        builder.add_selected(enabled, debug_manifest(authority), debug_factory)?;
+        Ok(builder)
+    }
+
+    fn add_selected<F>(
+        &mut self,
+        enabled: &BTreeSet<String>,
+        manifest: PluginManifest,
+        factory: F,
+    ) -> Result<(), String>
+    where
+        F: Fn() -> Box<dyn PluginInstance> + Send + Sync + 'static,
+    {
+        if enabled.contains(manifest.id.as_str()) {
+            self.add_embedded(manifest, factory)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 
     pub fn add_manifest(&mut self, manifest: PluginManifest) {

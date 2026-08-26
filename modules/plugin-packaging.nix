@@ -56,6 +56,7 @@ let
       pkgs,
       kernelOnly ? false,
       plugins ? [ ],
+      enabledPlugins ? null,
       ...
     }:
     let
@@ -65,7 +66,7 @@ let
         else
           self.packages.${pkgs.system}.phenix-harness;
     in
-    if plugins == [ ] then
+    if plugins == [ ] && enabledPlugins == null then
       base
     else
       pkgs.symlinkJoin {
@@ -78,12 +79,20 @@ let
           else
             let
               pluginPackages = pkgs.lib.concatStringsSep ":" (map toString plugins);
+              enabledPluginIds =
+                if enabledPlugins == null then null else pkgs.lib.concatStringsSep "," enabledPlugins;
             in
             ''
               for program in phenix phenix-harness; do
                 if [ -e "$out/bin/$program" ]; then
-                  wrapProgram "$out/bin/$program" \
-                    --set PHENIX_PLUGIN_PACKAGES ${pkgs.lib.escapeShellArg pluginPackages}
+                  ${pkgs.lib.optionalString (plugins != [ ]) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_PLUGIN_PACKAGES ${pkgs.lib.escapeShellArg pluginPackages}
+                  ''}
+                  ${pkgs.lib.optionalString (enabledPlugins != null) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_ENABLED_PLUGINS ${pkgs.lib.escapeShellArg enabledPluginIds}
+                  ''}
                 fi
               done
             '';
@@ -178,6 +187,18 @@ in
         kernelOnly = true;
         plugins = [ resourcePlugin ];
       };
+      sessionOnlyComposition = mkPhenix {
+        inherit pkgs;
+        enabledPlugins = [ "phenix.sessions" ];
+      };
+      contextOnlyComposition = mkPhenix {
+        inherit pkgs;
+        enabledPlugins = [ "phenix.context" ];
+      };
+      invalidEmbeddedComposition = mkPhenix {
+        inherit pkgs;
+        enabledPlugins = [ "fixture.missing" ];
+      };
     in
     {
       checks.phenix-plugin-packaging =
@@ -201,6 +222,27 @@ in
             printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"get","id":"missing"}}' \
               | "${externalComposition}/bin/phenix" > "$TMPDIR/replacement.json"
             jq -e '.status == "ok" and .output.replacement == true' "$TMPDIR/replacement.json" >/dev/null
+            export PHENIX_STATE_DB="$TMPDIR/session-only.sqlite"
+            "${sessionOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/session-only.json"
+            jq -e '
+              (.plugins | length == 1)
+              and (.plugins[0] == "phenix.sessions")
+              and (.services | index("phenix.sessions@1") != null)
+              and (.services | index("phenix.context@1") == null)
+            ' "$TMPDIR/session-only.json" >/dev/null
+            export PHENIX_STATE_DB="$TMPDIR/context-only.sqlite"
+            "${contextOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/context-only.json"
+            jq -e '
+              (.plugins | length == 1)
+              and (.plugins[0] == "phenix.context")
+              and (.services | index("phenix.context@1") != null)
+              and (.services | index("phenix.sessions@1") == null)
+            ' "$TMPDIR/context-only.json" >/dev/null
+            export PHENIX_STATE_DB="$TMPDIR/invalid-embedded.sqlite"
+            if "${invalidEmbeddedComposition}/bin/phenix" --list-services > "$TMPDIR/invalid-embedded.json" 2>&1; then
+              echo "unknown embedded plugin selection unexpectedly succeeded" >&2
+              exit 1
+            fi
             test -x "${resourceComposition}/bin/phenix"
             test -x "${resourceComposition}/bin/phenix-harness"
             test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"

@@ -6,6 +6,7 @@ use phenix_kernel::{
 };
 use serde_json::{json, Map, Value};
 use std::{
+    collections::BTreeSet,
     env,
     error::Error,
     fs,
@@ -34,7 +35,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         fs::create_dir_all(parent)?;
     }
     let persistence = LocalPersistence::open(&state)?;
-    let mut builder = HarnessBuilder::with_default_suite()?;
+    let mut builder = match configured_first_party_plugins()? {
+        Some(enabled) => HarnessBuilder::with_selected_suite(&enabled)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
+        None => HarnessBuilder::with_default_suite()?,
+    };
     for package in configured_plugin_packages()? {
         add_packaged_plugin(&mut builder, &package)?;
     }
@@ -90,6 +95,21 @@ impl ExternalSandbox for ProcessSandbox {
             .stderr(Stdio::inherit())
             .spawn()
     }
+}
+
+fn configured_first_party_plugins() -> Result<Option<BTreeSet<String>>, Box<dyn Error>> {
+    let Some(value) = env::var_os("PHENIX_ENABLED_PLUGINS") else {
+        return Ok(None);
+    };
+    let value = value
+        .into_string()
+        .map_err(|_| "PHENIX_ENABLED_PLUGINS must be valid UTF-8")?;
+    let enabled = value
+        .split(',')
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Ok(Some(enabled))
 }
 
 fn configured_plugin_packages() -> Result<Vec<PathBuf>, Box<dyn Error>> {
