@@ -40,12 +40,7 @@ jobs:
 
           hooks = Path("rust/crates/phenix-plugin-suite/src/hooks.rs")
           text = hooks.read_text()
-          old = '.invoke(&host, "hook-service",'
-          new = '.invoke(host, "hook-service",'
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif new not in text:
-              raise SystemExit("hook-service invocation anchor missing")
+          text = text.replace('.invoke(&host, "hook-service",', '.invoke(host, "hook-service",')
           hooks.write_text(text)
           PY
           # The flake source only sees tracked files. Stage the new executable
