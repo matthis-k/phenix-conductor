@@ -15,8 +15,9 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           ref: agent/plugin-sdk-contributions
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
       - run: python3 .github/pr407_add_settings_test.py
-      - run: nixfmt modules/plugin-packaging.nix
+      - run: nix run nixpkgs#nixfmt -- modules/plugin-packaging.nix
       - run: |
           if git diff --quiet; then
             exit 0
