@@ -33,11 +33,32 @@ The supported product path is a configured conductor plus selected plugins throu
 - Remove superseded APIs and compatibility paths instead of maintaining parallel versions.
 - Prefer an existing platform or library abstraction when it expresses the required semantics.
 - Keep semantic names even when using a library type internally.
-- Make invalid runtime states difficult or impossible to represent.
+- Make invalid states unrepresentable. Prefer enums, newtypes, non-zero types, ownership, and constructors over correlated strings, booleans, options, or later checks.
+- Parse, don't validate. Convert external, configuration, and wire inputs into invariant-bearing types at the boundary. Once parsed, internal code assumes local invariants. Reserve resolution checks for facts that depend on other runtime state.
+- Use guard clauses and early returns for errors, unsupported cases, and exceptional branches. Keep the success path shallow and linear.
+- Keep the common success path short. Derive state where possible; remove intermediate representations or branches that exist only to support validation.
 - Preserve typed errors at subsystem boundaries. Do not collapse actionable failures into generic exit states.
 - Add focused regression tests for behavioral fixes and integration tests for cross-boundary behavior.
 - Keep implementation-specific invariants close to the code and tests that enforce them instead of creating speculative documents.
 - Keep plugin dependencies explicit. A plugin may depend on another plugin when the service dependency is real, but it must not load unrelated first-party implementations.
+
+## Rust implementation discipline
+
+Use Canonical's Rust best practices as the primary external Rust reference. Use `mre/idiomatic-rust` as a curated index to idiomatic Rust guidance, and follow the linked primary source when adopting a rule. Repository architecture and established local conventions take precedence.
+
+- Use exhaustive pattern matching on internal enums and relevant structs when new variants or fields must force a compiler error at each decision point.
+- Keep foreign serialization shapes at the boundary. Deserialize into boundary types, then parse or convert into internal domain types. External formats must not dictate core representation.
+- Prefer standard conversion traits when their semantics fit: `From`, `TryFrom`, `FromStr`, `AsRef`, and their corresponding blanket conversions. Avoid ad hoc conversion methods that encode the same contract.
+- Model semantic modes and state machines with enums or state-specific types. Use booleans only for genuinely binary facts that do not carry future states or extra meaning.
+- Use newtypes for identifiers, units, validated values, and other domain concepts that should not be interchangeable as bare `String`, integers, or tuples.
+- Keep values immutable by default. Scope mutability to construction or the smallest block that needs it. Prefer returning a value over out-parameters or mutation used only to shuttle data between branches.
+- Keep production code panic-free for user, configuration, network, persistence, and runtime failures. Prefer invariant-bearing types, `?`, and typed errors. Preserve useful source context across subsystem boundaries. Use `expect` only for programmer-proven invariants and state the invariant in the message.
+- Keep generic bounds and lifetime parameters no broader than required. Hide incidental generic parameters with ordinary Rust API patterns when that makes the call site simpler.
+- Prefer borrowed inputs when the callee only needs a view and owned outputs when ownership transfers. Do not clone only to satisfy the borrow checker when a simpler ownership shape removes the clone.
+- Prefer iterator adapters when they make ownership, filtering, or error propagation clearer. Use an ordinary loop when it is easier to read or needs explicit control flow.
+- For `Result<()>` success paths, propagate fallible work with `?` and use an explicit `Ok(())` when it makes the no-information success case clear.
+- Keep helper and boundary-only types in the narrowest useful scope. Promote them only when multiple callers share the same concept.
+- Public Rust APIs should follow the Rust API Guidelines where they apply: conventional trait implementations, predictable ownership, useful derives, and names that match Rust conventions.
 
 ## Testing discipline
 
