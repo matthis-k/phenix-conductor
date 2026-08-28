@@ -17,6 +17,17 @@ jobs:
           ref: agent/plugin-sdk-contributions
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
       - run: python3 .github/pr407_config_source_patch.py
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("rust/crates/phenix-harness/src/main.rs")
+          text = path.read_text()
+          old = '        let precedence = match env::var("PHENIX_SETTINGS_PRECEDENCE").as_deref() {\n'
+          new = '        let precedence_value = env::var("PHENIX_SETTINGS_PRECEDENCE");\n        let precedence = match precedence_value.as_deref() {\n'
+          if old not in text:
+              raise SystemExit("precedence match anchor missing")
+          path.write_text(text.replace(old, new, 1))
+          PY
       - run: cargo fmt --manifest-path rust/Cargo.toml --all
       - run: nix run nixpkgs#nixfmt -- modules/plugin-packaging.nix
       - run: cargo test --manifest-path rust/Cargo.toml -p phenix-plugin-options -p phenix-plugin-sdk -p phenix-harness
