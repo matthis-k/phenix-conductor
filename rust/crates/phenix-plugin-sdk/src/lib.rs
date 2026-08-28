@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod authoring;
+pub use authoring::*;
+
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginExecution, PluginHost, PluginId, PluginInstance,
