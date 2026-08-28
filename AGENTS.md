@@ -44,15 +44,21 @@ The supported product path is a configured conductor plus selected plugins throu
 
 ## Rust implementation discipline
 
-Use Canonical's Rust best practices as the default style reference when they do not conflict with repository-specific architecture or established local conventions.
+Use Canonical's Rust best practices as the primary external Rust reference. Use `mre/idiomatic-rust` as a curated index to idiomatic Rust guidance, and follow the linked primary source when adopting a rule. Repository architecture and established local conventions take precedence.
 
 - Use exhaustive pattern matching on internal enums and relevant structs when new variants or fields must force a compiler error at each decision point.
 - Keep foreign serialization shapes at the boundary. Deserialize into boundary types, then parse or convert into internal domain types. External formats must not dictate core representation.
-- Keep production code panic-free for user, configuration, network, persistence, and runtime failures. Prefer invariant-bearing types, `?`, and typed errors. Use `expect` only for programmer-proven invariants and state the invariant in the message.
-- Scope mutability to construction or the smallest block that needs it. Prefer expressions and block return values over unassigned `let` declarations and mutation used only to shuttle a value between branches.
+- Prefer standard conversion traits when their semantics fit: `From`, `TryFrom`, `FromStr`, `AsRef`, and their corresponding blanket conversions. Avoid ad hoc conversion methods that encode the same contract.
+- Model semantic modes and state machines with enums or state-specific types. Use booleans only for genuinely binary facts that do not carry future states or extra meaning.
+- Use newtypes for identifiers, units, validated values, and other domain concepts that should not be interchangeable as bare `String`, integers, or tuples.
+- Keep values immutable by default. Scope mutability to construction or the smallest block that needs it. Prefer returning a value over out-parameters or mutation used only to shuttle data between branches.
+- Keep production code panic-free for user, configuration, network, persistence, and runtime failures. Prefer invariant-bearing types, `?`, and typed errors. Preserve useful source context across subsystem boundaries. Use `expect` only for programmer-proven invariants and state the invariant in the message.
 - Keep generic bounds and lifetime parameters no broader than required. Hide incidental generic parameters with ordinary Rust API patterns when that makes the call site simpler.
+- Prefer borrowed inputs when the callee only needs a view and owned outputs when ownership transfers. Do not clone only to satisfy the borrow checker when a simpler ownership shape removes the clone.
+- Prefer iterator adapters when they make ownership, filtering, or error propagation clearer. Use an ordinary loop when it is easier to read or needs explicit control flow.
 - For `Result<()>` success paths, propagate fallible work with `?` and use an explicit `Ok(())` when it makes the no-information success case clear.
 - Keep helper and boundary-only types in the narrowest useful scope. Promote them only when multiple callers share the same concept.
+- Public Rust APIs should follow the Rust API Guidelines where they apply: conventional trait implementations, predictable ownership, useful derives, and names that match Rust conventions.
 
 ## Testing discipline
 
