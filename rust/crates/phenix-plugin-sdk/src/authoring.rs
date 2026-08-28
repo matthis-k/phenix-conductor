@@ -27,9 +27,7 @@ pub struct PluginContext<'host, 'runtime, Sdk, Settings = (), State = ()> {
     pub call: CallContext<'host>,
 }
 
-impl<'host, 'runtime, Sdk, Settings, State>
-    PluginContext<'host, 'runtime, Sdk, Settings, State>
-{
+impl<'host, 'runtime, Sdk, Settings, State> PluginContext<'host, 'runtime, Sdk, Settings, State> {
     pub fn new(
         host: &'host PluginHost<'runtime>,
         sdk: Sdk,
@@ -312,12 +310,10 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
         id: impl Into<String>,
         agent: Option<String>,
     ) -> Result<OpenedSession<'host, 'runtime>, SdkError> {
-        let response = self
-            .policy
-            .invoke(&SdkSessionCommand::Open {
-                id: id.into(),
-                agent,
-            })?;
+        let response = self.policy.invoke(&SdkSessionCommand::Open {
+            id: id.into(),
+            agent,
+        })?;
         let SdkSessionResponse::Opened { session, created } = response;
         Ok(OpenedSession {
             session: Session::new(session, self.clone()),
@@ -329,7 +325,9 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
         &self,
         id: impl Into<String>,
     ) -> Result<Option<Session<'host, 'runtime>>, SdkError> {
-        let response = self.storage.invoke(&SessionCommand::Get { id: id.into() })?;
+        let response = self
+            .storage
+            .invoke(&SessionCommand::Get { id: id.into() })?;
         let SessionResponse::Session { session } = response else {
             return Err(SdkError::UnexpectedResponse {
                 operation: "finding session",
@@ -497,7 +495,10 @@ mod tests {
                 sdk, plugin, call, ..
             } = context;
 
-            let opened = sdk.sessions.open("root").map_err(|error| error.to_string())?;
+            let opened = sdk
+                .sessions
+                .open("root")
+                .map_err(|error| error.to_string())?;
             let found = sdk
                 .sessions
                 .iter()
