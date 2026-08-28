@@ -112,4 +112,4 @@ Removing either plugin removes its SDK contribution. A compatible replacement ca
 
 The default `phenix` SDK exposes `phenix.sdk.config@1`. `Read` accepts a plain relative path and reads it under `PHENIX_CONFIG_DIR`. Absolute paths and `.` or `..` components are rejected.
 
-The Nix wrapper owns `PHENIX_CONFIG_DIR`. SDK code receives relative names such as `settings.json`; it does not discover host configuration directories.
+The Nix wrapper owns `PHENIX_CONFIG_DIR`. It points at the selected user configuration directory, or the packaged default directory when none is supplied. SDK code receives relative names such as `settings.json`; it does not discover host configuration directories. Nix-generated settings are a separate startup source and are not written into that directory.

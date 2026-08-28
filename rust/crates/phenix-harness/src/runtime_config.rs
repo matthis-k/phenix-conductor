@@ -89,32 +89,82 @@ impl RuntimeRoutingProfile {
     }
 }
 
-pub(super) fn apply_config_directory(
+pub(super) fn apply_default_config_directory(
     harness: &mut PhenixHarness,
     directory: &Path,
 ) -> Result<(), Box<dyn Error>> {
     if !directory.is_dir() {
-        return Err(format!("config directory does not exist: {}", directory.display()).into());
+        return Err(format!(
+            "default config directory does not exist: {}",
+            directory.display()
+        )
+        .into());
     }
-
     let runtime = directory.join("runtime.json");
     if runtime.is_file() {
         apply_runtime_config(harness, &runtime)?;
     }
-
-    let settings = directory.join("settings.json");
-    let settings = if settings.is_file() {
-        serde_json::from_slice(&fs::read(settings)?)?
-    } else {
-        SettingsConfiguration::default()
-    };
-    apply_settings_configuration(harness, settings)
+    Ok(())
 }
 
-fn apply_settings_configuration(
+pub(super) fn apply_startup_settings(
     harness: &mut PhenixHarness,
-    settings: SettingsConfiguration,
+    config_directory: Option<&Path>,
+    nix_settings: Option<&Path>,
+    precedence: OptionStartupPrecedence,
 ) -> Result<(), Box<dyn Error>> {
+    let file_path = config_directory.map(|directory| directory.join("settings.json"));
+    let file_settings = read_optional_settings(file_path.as_deref())?;
+    let nix_settings = read_optional_settings(nix_settings)?;
+    let file_values = settings_assignments(file_settings)?;
+    let nix_values = settings_assignments(nix_settings)?;
+
+    let service = options_service();
+    let has_options = harness.kernel().config().manifests().any(|manifest| {
+        manifest
+            .services
+            .iter()
+            .any(|contribution| contribution.service == service)
+    });
+    if !has_options {
+        if file_values.is_empty() && nix_values.is_empty() {
+            return Ok(());
+        }
+        return Err("startup settings require the phenix.options plugin".into());
+    }
+
+    let output = harness.invoke(
+        &service,
+        &serde_json::to_vec(&OptionCommand::Configure {
+            file_values,
+            nix_values,
+            precedence,
+        })?,
+        &default_suite_authority(),
+        None,
+    )?;
+    match serde_json::from_slice::<OptionResponse>(&output)? {
+        OptionResponse::Configured { .. } => Ok(()),
+        _ => Err("options service rejected startup settings".into()),
+    }
+}
+
+fn read_optional_settings(path: Option<&Path>) -> Result<SettingsConfiguration, Box<dyn Error>> {
+    let Some(path) = path else {
+        return Ok(SettingsConfiguration::default());
+    };
+    if !path.exists() {
+        return Ok(SettingsConfiguration::default());
+    }
+    if !path.is_file() {
+        return Err(format!("settings path is not a file: {}", path.display()).into());
+    }
+    Ok(serde_json::from_slice(&fs::read(path)?)?)
+}
+
+fn settings_assignments(
+    settings: SettingsConfiguration,
+) -> Result<Vec<OptionAssignment>, Box<dyn Error>> {
     let mut values = Vec::new();
     for (key, value) in settings.global {
         values.push(option_assignment(key, OptionScope::Global, value)?);
@@ -145,17 +195,7 @@ fn apply_settings_configuration(
             )?);
         }
     }
-
-    let output = harness.invoke(
-        &options_service(),
-        &serde_json::to_vec(&OptionCommand::Configure { values })?,
-        &default_suite_authority(),
-        None,
-    )?;
-    match serde_json::from_slice::<OptionResponse>(&output)? {
-        OptionResponse::Configured { .. } => Ok(()),
-        _ => Err("options service rejected settings configuration".into()),
-    }
+    Ok(values)
 }
 
 fn option_assignment(

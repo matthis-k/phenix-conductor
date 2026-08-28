@@ -80,7 +80,6 @@
             PHENIX_HARNESS=${supportedPhenix}/bin/phenix-harness phenix-acp-smoke
 
             test -f ${supportedPhenix}/share/phenix/runtime.json
-            test -f ${supportedPhenix}/share/phenix/settings.json
             test -f ${supportedPhenix}/share/phenix/skills/write/SKILL.md
             test -f ${supportedPhenix}/share/phenix/skills/pstack-LICENSE
             test -f ${supportedPhenix}/share/phenix/NOTICE.md

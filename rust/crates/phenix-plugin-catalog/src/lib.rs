@@ -73,8 +73,9 @@ pub use phenix_plugin_models::{
 };
 pub use phenix_plugin_options::{
     default_option_definitions, options_component_id, options_component_manifest, options_factory,
-    options_manifest, options_service, OptionCommand, OptionContext, OptionDefinition, OptionKey,
-    OptionResponse, OptionScope, OptionScopeKind, OptionSubjectId, OptionValue, OptionValueSource,
+    options_manifest, options_service, OptionAssignment, OptionCommand, OptionContext,
+    OptionDefinition, OptionKey, OptionResponse, OptionScope, OptionScopeKind,
+    OptionStartupPrecedence, OptionSubjectId, OptionValue, OptionValueLayer, OptionValueSource,
     OptionsInterface, ResolvedOption, OPTIONS_COMPONENT, OPTIONS_PLUGIN, OPTIONS_SERVICE,
 };
 pub use phenix_plugin_planning::{

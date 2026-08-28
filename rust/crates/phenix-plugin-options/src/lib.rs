@@ -162,6 +162,23 @@ impl OptionValue {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionStartupPrecedence {
+    #[default]
+    Nix,
+    File,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionValueLayer {
+    Runtime,
+    Nix,
+    File,
+    Default,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptionDefinition {
@@ -216,6 +233,7 @@ pub struct ResolvedOption {
     pub key: OptionKey,
     pub value: OptionValue,
     pub source: OptionValueSource,
+    pub layer: OptionValueLayer,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -228,7 +246,9 @@ pub enum OptionCommand {
         key: OptionKey,
     },
     Configure {
-        values: Vec<OptionAssignment>,
+        file_values: Vec<OptionAssignment>,
+        nix_values: Vec<OptionAssignment>,
+        precedence: OptionStartupPrecedence,
     },
     Set {
         key: OptionKey,
@@ -394,7 +414,11 @@ fn builtin_definition(
 struct OptionState {
     definitions: BTreeMap<OptionKey, OptionDefinition>,
     #[serde(default)]
-    configured_values: BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
+    file_values: BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
+    #[serde(default)]
+    nix_values: BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
+    #[serde(default)]
+    startup_precedence: OptionStartupPrecedence,
     values: BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
 }
 
@@ -432,12 +456,35 @@ impl OptionState {
         }
     }
 
-    fn configure(&mut self, values: Vec<OptionAssignment>) -> Result<bool, String> {
-        let mut configured_values = BTreeMap::<String, BTreeMap<OptionKey, OptionValue>>::new();
+    fn configure(
+        &mut self,
+        file_values: Vec<OptionAssignment>,
+        nix_values: Vec<OptionAssignment>,
+        precedence: OptionStartupPrecedence,
+    ) -> Result<bool, String> {
+        let file_values = self.configuration_layer(file_values)?;
+        let nix_values = self.configuration_layer(nix_values)?;
+        if self.file_values == file_values
+            && self.nix_values == nix_values
+            && self.startup_precedence == precedence
+        {
+            return Ok(false);
+        }
+        self.file_values = file_values;
+        self.nix_values = nix_values;
+        self.startup_precedence = precedence;
+        Ok(true)
+    }
+
+    fn configuration_layer(
+        &self,
+        values: Vec<OptionAssignment>,
+    ) -> Result<BTreeMap<String, BTreeMap<OptionKey, OptionValue>>, String> {
+        let mut layer = BTreeMap::<String, BTreeMap<OptionKey, OptionValue>>::new();
         for assignment in values {
             self.validate_value(&assignment.key, &assignment.scope, &assignment.value)?;
             let scope = assignment.scope.storage_key();
-            if configured_values
+            if layer
                 .entry(scope.clone())
                 .or_default()
                 .insert(assignment.key.clone(), assignment.value)
@@ -449,11 +496,7 @@ impl OptionState {
                 ));
             }
         }
-        if self.configured_values == configured_values {
-            return Ok(false);
-        }
-        self.configured_values = configured_values;
-        Ok(true)
+        Ok(layer)
     }
 
     fn set(
@@ -514,55 +557,75 @@ impl OptionState {
             .get(key)
             .ok_or_else(|| format!("unknown option: {key}"))?;
 
-        if let Some(agent) = &context.agent {
-            let scope = OptionScope::Agent {
-                agent: agent.clone(),
-            };
-            if let Some(value) = self.value_at(key, &scope) {
-                return Ok(ResolvedOption {
-                    key: key.clone(),
-                    value: value.clone(),
-                    source: OptionValueSource::Agent,
-                });
-            }
-        }
-        if let Some(session) = &context.session {
-            let scope = OptionScope::Session {
-                session: session.clone(),
-            };
-            if let Some(value) = self.value_at(key, &scope) {
-                return Ok(ResolvedOption {
-                    key: key.clone(),
-                    value: value.clone(),
-                    source: OptionValueSource::Session,
-                });
-            }
-        }
-        if let Some(value) = self.value_at(key, &OptionScope::Global) {
+        if let Some((value, source)) = resolve_layer(&self.values, key, context) {
             return Ok(ResolvedOption {
                 key: key.clone(),
                 value: value.clone(),
-                source: OptionValueSource::Global,
+                source,
+                layer: OptionValueLayer::Runtime,
             });
         }
+
+        let startup_layers = match self.startup_precedence {
+            OptionStartupPrecedence::Nix => [
+                (OptionValueLayer::Nix, &self.nix_values),
+                (OptionValueLayer::File, &self.file_values),
+            ],
+            OptionStartupPrecedence::File => [
+                (OptionValueLayer::File, &self.file_values),
+                (OptionValueLayer::Nix, &self.nix_values),
+            ],
+        };
+        for (layer, values) in startup_layers {
+            if let Some((value, source)) = resolve_layer(values, key, context) {
+                return Ok(ResolvedOption {
+                    key: key.clone(),
+                    value: value.clone(),
+                    source,
+                    layer,
+                });
+            }
+        }
+
         Ok(ResolvedOption {
             key: key.clone(),
             value: definition.default.clone(),
             source: OptionValueSource::Default,
+            layer: OptionValueLayer::Default,
         })
     }
+}
 
-    fn value_at(&self, key: &OptionKey, scope: &OptionScope) -> Option<&OptionValue> {
-        let scope = scope.storage_key();
-        self.values
-            .get(&scope)
-            .and_then(|values| values.get(key))
-            .or_else(|| {
-                self.configured_values
-                    .get(&scope)
-                    .and_then(|values| values.get(key))
-            })
+fn resolve_layer<'a>(
+    values: &'a BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
+    key: &OptionKey,
+    context: &OptionContext,
+) -> Option<(&'a OptionValue, OptionValueSource)> {
+    if let Some(agent) = &context.agent {
+        let scope = OptionScope::Agent {
+            agent: agent.clone(),
+        };
+        if let Some(value) = value_at(values, key, &scope) {
+            return Some((value, OptionValueSource::Agent));
+        }
     }
+    if let Some(session) = &context.session {
+        let scope = OptionScope::Session {
+            session: session.clone(),
+        };
+        if let Some(value) = value_at(values, key, &scope) {
+            return Some((value, OptionValueSource::Session));
+        }
+    }
+    value_at(values, key, &OptionScope::Global).map(|value| (value, OptionValueSource::Global))
+}
+
+fn value_at<'a>(
+    values: &'a BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
+    key: &OptionKey,
+    scope: &OptionScope,
+) -> Option<&'a OptionValue> {
+    values.get(&scope.storage_key())?.get(key)
 }
 
 struct OptionsPlugin;
@@ -594,9 +657,13 @@ impl PluginInstance for OptionsPlugin {
             OptionCommand::GetDefinition { key } => OptionResponse::Definition {
                 definition: state.definitions.get(&key).cloned(),
             },
-            OptionCommand::Configure { values } => {
-                let count = values.len();
-                changed = state.configure(values)?;
+            OptionCommand::Configure {
+                file_values,
+                nix_values,
+                precedence,
+            } => {
+                let count = file_values.len() + nix_values.len();
+                changed = state.configure(file_values, nix_values, precedence)?;
                 OptionResponse::Configured { count }
             }
             OptionCommand::Set { key, scope, value } => {
@@ -738,27 +805,39 @@ mod tests {
         let resolved = state.resolve(&key, &context).unwrap();
         assert_eq!(resolved.value, OptionValue::String("agent".into()));
         assert_eq!(resolved.source, OptionValueSource::Agent);
+        assert_eq!(resolved.layer, OptionValueLayer::Runtime);
         serde_json::to_vec(&state).unwrap();
     }
 
     #[test]
-    fn configuration_snapshot_replaces_removed_values_without_overwriting_runtime_state() {
+    fn runtime_values_win_before_startup_source_and_scope_precedence() {
         let mut state = OptionState::default().with_defaults().unwrap();
         let key = key("model.default");
         state
-            .configure(vec![OptionAssignment {
-                key: key.clone(),
-                scope: OptionScope::Global,
-                value: OptionValue::String("configured".into()),
-            }])
+            .configure(
+                vec![OptionAssignment {
+                    key: key.clone(),
+                    scope: OptionScope::Agent {
+                        agent: subject("worker"),
+                    },
+                    value: OptionValue::String("file".into()),
+                }],
+                vec![OptionAssignment {
+                    key: key.clone(),
+                    scope: OptionScope::Global,
+                    value: OptionValue::String("nix".into()),
+                }],
+                OptionStartupPrecedence::Nix,
+            )
             .unwrap();
-        assert_eq!(
-            state
-                .resolve(&key, &OptionContext::default())
-                .unwrap()
-                .value,
-            OptionValue::String("configured".into())
-        );
+        let context = OptionContext {
+            session: None,
+            agent: Some(subject("worker")),
+        };
+        let resolved = state.resolve(&key, &context).unwrap();
+        assert_eq!(resolved.value, OptionValue::String("nix".into()));
+        assert_eq!(resolved.source, OptionValueSource::Global);
+        assert_eq!(resolved.layer, OptionValueLayer::Nix);
 
         state
             .set(
@@ -767,23 +846,40 @@ mod tests {
                 OptionValue::String("runtime".into()),
             )
             .unwrap();
-        assert_eq!(
-            state
-                .resolve(&key, &OptionContext::default())
-                .unwrap()
-                .value,
-            OptionValue::String("runtime".into())
-        );
+        let resolved = state.resolve(&key, &context).unwrap();
+        assert_eq!(resolved.value, OptionValue::String("runtime".into()));
+        assert_eq!(resolved.layer, OptionValueLayer::Runtime);
+    }
 
-        state.configure(Vec::new()).unwrap();
-        state.unset(&key, &OptionScope::Global).unwrap();
-        assert_eq!(
-            state
-                .resolve(&key, &OptionContext::default())
-                .unwrap()
-                .value,
-            OptionValue::String("default".into())
-        );
+    #[test]
+    fn file_precedence_and_configuration_removal_are_declarative() {
+        let mut state = OptionState::default().with_defaults().unwrap();
+        let key = key("model.default");
+        state
+            .configure(
+                vec![OptionAssignment {
+                    key: key.clone(),
+                    scope: OptionScope::Global,
+                    value: OptionValue::String("file".into()),
+                }],
+                vec![OptionAssignment {
+                    key: key.clone(),
+                    scope: OptionScope::Global,
+                    value: OptionValue::String("nix".into()),
+                }],
+                OptionStartupPrecedence::File,
+            )
+            .unwrap();
+        let resolved = state.resolve(&key, &OptionContext::default()).unwrap();
+        assert_eq!(resolved.value, OptionValue::String("file".into()));
+        assert_eq!(resolved.layer, OptionValueLayer::File);
+
+        state
+            .configure(Vec::new(), Vec::new(), OptionStartupPrecedence::Nix)
+            .unwrap();
+        let resolved = state.resolve(&key, &OptionContext::default()).unwrap();
+        assert_eq!(resolved.value, OptionValue::String("default".into()));
+        assert_eq!(resolved.layer, OptionValueLayer::Default);
     }
 
     #[test]
