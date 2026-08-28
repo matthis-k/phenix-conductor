@@ -24,8 +24,7 @@ struct RuntimeRoutingProfile {
     callable_targets: BTreeMap<String, RuntimeModelTarget>,
 }
 
-#[derive(Debug, Deserialize)]
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SettingsConfiguration {
     #[serde(default)]

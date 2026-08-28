@@ -93,7 +93,9 @@ let
         else
           null;
     in
-    if plugins == [ ] && resources == [ ] && selectedIds == null && layerPolicies == [ ] && settings == { } then
+    if
+      plugins == [ ] && resources == [ ] && selectedIds == null && layerPolicies == [ ] && settings == { }
+    then
       base
     else
       pkgs.symlinkJoin {
