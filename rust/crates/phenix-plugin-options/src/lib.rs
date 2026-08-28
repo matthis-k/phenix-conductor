@@ -124,6 +124,16 @@ impl OptionScope {
             Self::Agent { .. } => OptionScopeKind::Agent,
         }
     }
+
+    fn storage_key(&self) -> String {
+        match self {
+            Self::Global => "global".into(),
+            Self::Session { session } => {
+                format!("session:{}", encode_subject(session.as_str()))
+            }
+            Self::Agent { agent } => format!("agent:{}", encode_subject(agent.as_str())),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -162,15 +172,17 @@ pub struct OptionDefinition {
 
 impl OptionDefinition {
     pub fn new(
-        key: impl Into<String>,
+        key: OptionKey,
         default: OptionValue,
         scopes: impl IntoIterator<Item = OptionScopeKind>,
-    ) -> Self {
-        Self {
-            key: OptionKey::parse(key).expect("static option key is valid"),
+    ) -> Result<Self, String> {
+        let definition = Self {
+            key,
             default,
             scopes: scopes.into_iter().collect(),
-        }
+        };
+        definition.validate()?;
+        Ok(definition)
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -201,49 +213,26 @@ pub struct ResolvedOption {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OptionCommand {
-    Define {
-        definition: OptionDefinition,
-    },
-    GetDefinition {
-        key: OptionKey,
-    },
+    Define { definition: OptionDefinition },
+    GetDefinition { key: OptionKey },
     Set {
         key: OptionKey,
         scope: OptionScope,
         value: OptionValue,
     },
-    Unset {
-        key: OptionKey,
-        scope: OptionScope,
-    },
-    Resolve {
-        key: OptionKey,
-        context: OptionContext,
-    },
-    List {
-        context: OptionContext,
-    },
+    Unset { key: OptionKey, scope: OptionScope },
+    Resolve { key: OptionKey, context: OptionContext },
+    List { context: OptionContext },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OptionResponse {
-    Defined {
-        definition: OptionDefinition,
-    },
-    Definition {
-        definition: Option<OptionDefinition>,
-    },
-    Updated {
-        key: OptionKey,
-        scope: OptionScope,
-    },
-    Value {
-        option: ResolvedOption,
-    },
-    Options {
-        options: Vec<ResolvedOption>,
-    },
+    Defined { definition: OptionDefinition },
+    Definition { definition: Option<OptionDefinition> },
+    Updated { key: OptionKey, scope: OptionScope },
+    Value { option: ResolvedOption },
+    Options { options: Vec<ResolvedOption> },
 }
 
 pub struct OptionsInterface;
@@ -308,42 +297,42 @@ pub fn options_factory() -> Box<dyn PluginInstance> {
 pub fn default_option_definitions() -> Vec<OptionDefinition> {
     use OptionScopeKind::{Agent, Global, Session};
     vec![
-        OptionDefinition::new(
+        builtin_definition(
             "session.auto_create",
             OptionValue::Bool(true),
             [Global, Session, Agent],
         ),
-        OptionDefinition::new(
+        builtin_definition(
             "session.reuse_existing",
             OptionValue::Bool(true),
             [Global, Session, Agent],
         ),
-        OptionDefinition::new(
+        builtin_definition(
             "session.max_turns",
             OptionValue::Integer(0),
             [Global, Session],
         ),
-        OptionDefinition::new(
+        builtin_definition(
             "model.default",
             OptionValue::String("default".into()),
             [Global, Session, Agent],
         ),
-        OptionDefinition::new(
+        builtin_definition(
             "tools.confirmation",
             OptionValue::String("ask".into()),
             [Global, Session, Agent],
         ),
-        OptionDefinition::new(
+        builtin_definition(
             "skills.auto_load",
             OptionValue::Bool(true),
             [Global, Session, Agent],
         ),
-        OptionDefinition::new(
+        builtin_definition(
             "context.auto_load",
             OptionValue::Bool(true),
             [Global, Session, Agent],
         ),
-        OptionDefinition::new(
+        builtin_definition(
             "agent.max_parallel_tasks",
             OptionValue::Integer(1),
             [Global, Agent],
@@ -351,10 +340,23 @@ pub fn default_option_definitions() -> Vec<OptionDefinition> {
     ]
 }
 
+fn builtin_definition(
+    key: &str,
+    default: OptionValue,
+    scopes: impl IntoIterator<Item = OptionScopeKind>,
+) -> OptionDefinition {
+    OptionDefinition::new(
+        OptionKey::parse(key).expect("static option key is valid"),
+        default,
+        scopes,
+    )
+    .expect("static option definition is valid")
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 struct OptionState {
     definitions: BTreeMap<OptionKey, OptionDefinition>,
-    values: BTreeMap<OptionScope, BTreeMap<OptionKey, OptionValue>>,
+    values: BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
 }
 
 impl OptionState {
@@ -380,10 +382,7 @@ impl OptionState {
         definition.validate()?;
         match self.definitions.get(&definition.key) {
             Some(existing) if existing == &definition => Ok(false),
-            Some(_) => Err(format!(
-                "option {} is already defined differently",
-                definition.key
-            )),
+            Some(_) => Err(format!("option {} is already defined differently", definition.key)),
             None => {
                 self.definitions.insert(definition.key.clone(), definition);
                 Ok(true)
@@ -391,29 +390,19 @@ impl OptionState {
         }
     }
 
-    fn set(
-        &mut self,
-        key: &OptionKey,
-        scope: OptionScope,
-        value: OptionValue,
-    ) -> Result<(), String> {
+    fn set(&mut self, key: &OptionKey, scope: OptionScope, value: OptionValue) -> Result<(), String> {
         let definition = self
             .definitions
             .get(key)
             .ok_or_else(|| format!("unknown option: {key}"))?;
         if !definition.scopes.contains(&scope.kind()) {
-            return Err(format!(
-                "option {key} cannot be set at {:?} scope",
-                scope.kind()
-            ));
+            return Err(format!("option {key} cannot be set at {:?} scope", scope.kind()));
         }
         if !definition.default.has_same_type(&value) {
-            return Err(format!(
-                "option {key} value type does not match its definition"
-            ));
+            return Err(format!("option {key} value type does not match its definition"));
         }
         self.values
-            .entry(scope)
+            .entry(scope.storage_key())
             .or_default()
             .insert(key.clone(), value);
         Ok(())
@@ -423,10 +412,11 @@ impl OptionState {
         if !self.definitions.contains_key(key) {
             return Err(format!("unknown option: {key}"));
         }
-        if let Some(values) = self.values.get_mut(scope) {
+        let storage_key = scope.storage_key();
+        if let Some(values) = self.values.get_mut(&storage_key) {
             values.remove(key);
             if values.is_empty() {
-                self.values.remove(scope);
+                self.values.remove(&storage_key);
             }
         }
         Ok(())
@@ -477,7 +467,7 @@ impl OptionState {
     }
 
     fn value_at(&self, key: &OptionKey, scope: &OptionScope) -> Option<&OptionValue> {
-        self.values.get(scope)?.get(key)
+        self.values.get(&scope.storage_key())?.get(key)
     }
 }
 
@@ -570,6 +560,16 @@ fn save_state(
     .map_err(|error| error.to_string())
 }
 
+fn encode_subject(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(value.len() * 2);
+    for byte in value.bytes() {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
 fn options_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(OPTIONS_NAMESPACE).expect("static options namespace is valid")
 }
@@ -607,11 +607,7 @@ mod tests {
         );
 
         state
-            .set(
-                &key,
-                OptionScope::Global,
-                OptionValue::String("global".into()),
-            )
+            .set(&key, OptionScope::Global, OptionValue::String("global".into()))
             .unwrap();
         state
             .set(
@@ -639,6 +635,7 @@ mod tests {
         let resolved = state.resolve(&key, &context).unwrap();
         assert_eq!(resolved.value, OptionValue::String("agent".into()));
         assert_eq!(resolved.source, OptionValueSource::Agent);
+        serde_json::to_vec(&state).unwrap();
     }
 
     #[test]
@@ -666,18 +663,22 @@ mod tests {
     fn custom_definitions_are_idempotent_but_cannot_change_shape() {
         let mut state = OptionState::default().with_defaults().unwrap();
         let definition = OptionDefinition::new(
-            "testing.capture_events",
+            key("testing.capture_events"),
             OptionValue::Bool(false),
             [OptionScopeKind::Global, OptionScopeKind::Session],
-        );
+        )
+        .unwrap();
         assert!(state.define(definition.clone()).unwrap());
         assert!(!state.define(definition).unwrap());
         assert!(state
-            .define(OptionDefinition::new(
-                "testing.capture_events",
-                OptionValue::String("no".into()),
-                [OptionScopeKind::Global],
-            ))
+            .define(
+                OptionDefinition::new(
+                    key("testing.capture_events"),
+                    OptionValue::String("no".into()),
+                    [OptionScopeKind::Global],
+                )
+                .unwrap()
+            )
             .is_err());
     }
 
