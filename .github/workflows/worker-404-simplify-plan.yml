@@ -26,7 +26,85 @@ jobs:
             accept-flake-config = true
 
       - name: Apply simplification
-        run: python3 -c "import base64;exec(base64.b64decode('CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKZGVmIHJlcGxhY2Vfb25jZSh0ZXh0LCBvbGQsIG5ldywgbGFiZWwpOgogICAgY291bnQgPSB0ZXh0LmNvdW50KG9sZCkKICAgIGlmIGNvdW50ICE9IDE6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdChmIntsYWJlbH06IGV4cGVjdGVkIDEgbWF0Y2gsIGZvdW5kIHtjb3VudH0iKQogICAgcmV0dXJuIHRleHQucmVwbGFjZShvbGQsIG5ldywgMSkKCnBhdGggPSBQYXRoKCJydXN0L2NyYXRlcy9waGVuaXgtY29yZS9zcmMvbWV0YWRhdGFfcmVjb25jaWxpYXRpb24ucnMiKQp0ZXh0ID0gcGF0aC5yZWFkX3RleHQoKQp0ZXh0ID0gcmVwbGFjZV9vbmNlKAogICAgdGV4dCwKICAgICIiInB1YiBzdHJ1Y3QgTWV0YWRhdGFSZWNvbmNpbGlhdGlvblByZXZpZXcgewogICAgcHViIGdyYXBoOiBSZWNvbmNpbGlhdGlvblByZXZpZXcsCiAgICBwdWIgbWV0YWRhdGE6IENvbXBvc2l0aW9uTWV0YWRhdGFEaWZmLAogICAgcHViIHRyYW5zaXRpb25fcGxhbjogVmVjPFJlY29uY2lsaWF0aW9uQWN0aW9uPiwKfQoiIiIsCiAgICAiIiJwdWIgc3RydWN0IE1ldGFkYXRhUmVjb25jaWxpYXRpb25QcmV2aWV3IHsKICAgIHB1YiBncmFwaDogUmVjb25jaWxpYXRpb25QcmV2aWV3LAogICAgcHViIG1ldGFkYXRhOiBDb21wb3NpdGlvbk1ldGFkYXRhRGlmZiwKfQoiIiIsCiAgICAicHJldmlldyBkdXBsaWNhdGUgcGxhbiBmaWVsZCIsCikKdGV4dCA9IHJlcGxhY2Vfb25jZSgKICAgIHRleHQsCiAgICAiICAgICAgICBsZXQgZ3JhcGggPSBzZWxmLnByZXZpZXdfY2FuZGlkYXRlKGNhbmRpZGF0ZSk7XG4iLAogICAgIiAgICAgICAgbGV0IG11dCBncmFwaCA9IHNlbGYucHJldmlld19jYW5kaWRhdGUoY2FuZGlkYXRlKTtcbiIsCiAgICAibXV0YWJsZSBncmFwaCBwcmV2aWV3IiwKKQp0ZXh0ID0gcmVwbGFjZV9vbmNlKAogICAgdGV4dCwKICAgICIgICAgICAgIGxldCBtdXQgdHJhbnNpdGlvbl9wbGFuID0gZ3JhcGgudHJhbnNpdGlvbl9wbGFuLmNsb25lKCk7XG4iLAogICAgIiIsCiAgICAiZHVwbGljYXRlIHBsYW4gY2xvbmUiLAopCnRleHQgPSB0ZXh0LnJlcGxhY2UoInRyYW5zaXRpb25fcGxhbi5pdGVyKCkiLCAiZ3JhcGgudHJhbnNpdGlvbl9wbGFuLml0ZXIoKSIpCnRleHQgPSB0ZXh0LnJlcGxhY2UoInRyYW5zaXRpb25fcGxhbi5wdXNoKCIsICJncmFwaC50cmFuc2l0aW9uX3BsYW4ucHVzaCgiKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKAogICAgImxldCBhbHJlYWR5X3Jlc3RhcnRlZDogQlRyZWVTZXQ8Xz4gPSB0cmFuc2l0aW9uX3BsYW4iLAogICAgImxldCBhbHJlYWR5X3Jlc3RhcnRlZDogQlRyZWVTZXQ8Xz4gPSBncmFwaC50cmFuc2l0aW9uX3BsYW4iLAopCnRleHQgPSB0ZXh0LnJlcGxhY2UoIiAgICAgICAgdHJhbnNpdGlvbl9wbGFuLmV4dGVuZChcbiIsICIgICAgICAgIGdyYXBoLnRyYW5zaXRpb25fcGxhbi5leHRlbmQoXG4iKQp0ZXh0ID0gcmVwbGFjZV9vbmNlKAogICAgdGV4dCwKICAgICIiIiAgICAgICAgT2soTWV0YWRhdGFSZWNvbmNpbGlhdGlvblByZXZpZXcgewogICAgICAgICAgICBncmFwaCwKICAgICAgICAgICAgbWV0YWRhdGEsCiAgICAgICAgICAgIHRyYW5zaXRpb25fcGxhbiwKICAgICAgICB9KQoiIiIsCiAgICAiIiIgICAgICAgIE9rKE1ldGFkYXRhUmVjb25jaWxpYXRpb25QcmV2aWV3IHsgZ3JhcGgsIG1ldGFkYXRhIH0pCiIiLAogICAgInByZXZpZXcgY29uc3RydWN0aW9uIiwKKQp0ZXh0ID0gdGV4dC5yZXBsYWNlKCJwcmV2aWV3LnRyYW5zaXRpb25fcGxhbiIsICJwcmV2aWV3LmdyYXBoLnRyYW5zaXRpb25fcGxhbiIpCnBhdGgud3JpdGVfdGV4dCh0ZXh0KQoKcGF0aCA9IFBhdGgoInJ1c3QvY3JhdGVzL3BoZW5peC1jb3JlL3NyYy9saXZlX3JlY29uY2lsaWF0aW9uLnJzIikKdGV4dCA9IHBhdGgucmVhZF90ZXh0KCkKc3RhcnQgPSB0ZXh0LmluZGV4KCIgICAgcHViIGZuIGFjdGl2YXRlX2NhbmRpZGF0ZV9vbl9rZXJuZWxfd2l0aF9tZXRhZGF0YSgiKQplbmQgPSB0ZXh0LmluZGV4KCJcbn1cblxuZm4gdmFsaWRhdGVfbGl2ZV9yZWNvbmNpbGlhdGlvbiIsIHN0YXJ0KQpibG9jayA9IHRleHRbc3RhcnQ6ZW5kXQpjb3VudCA9IGJsb2NrLmNvdW50KCJwcmV2aWV3LnRyYW5zaXRpb25fcGxhbiIpCmlmIGNvdW50IDwgMToKICAgIHJhaXNlIFN5c3RlbUV4aXQoIm1ldGFkYXRhIGFjdGl2YXRpb246IHByZXZpZXcudHJhbnNpdGlvbl9wbGFuIG5vdCBmb3VuZCIpCmJsb2NrID0gYmxvY2sucmVwbGFjZSgicHJldmlldy50cmFuc2l0aW9uX3BsYW4iLCAicHJldmlldy5ncmFwaC50cmFuc2l0aW9uX3BsYW4iKQp0ZXh0ID0gdGV4dFs6c3RhcnRdICsgYmxvY2sgKyB0ZXh0W2VuZDpdCnBhdGgud3JpdGVfdGV4dCh0ZXh0KQoKcGF0aCA9IFBhdGgoInJ1c3QvY3JhdGVzL3BoZW5peC1jb3JlL3Rlc3RzL3Jlc291cmNlX21ldGFkYXRhX3JlY29uY2lsaWF0aW9uLnJzIikKdGV4dCA9IHBhdGgucmVhZF90ZXh0KCkKdGV4dCA9IHRleHQucmVwbGFjZSgicHJldmlldy50cmFuc2l0aW9uX3BsYW4iLCAicHJldmlldy5ncmFwaC50cmFuc2l0aW9uX3BsYW4iKQpwYXRoLndyaXRlX3RleHQodGV4dCkK'))"
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          path = Path("rust/crates/phenix-core/src/metadata_reconciliation.rs")
+          text = path.read_text()
+          text = replace_once(
+              text,
+              """pub struct MetadataReconciliationPreview {
+              pub graph: ReconciliationPreview,
+              pub metadata: CompositionMetadataDiff,
+              pub transition_plan: Vec<ReconciliationAction>,
+          }
+          """,
+              """pub struct MetadataReconciliationPreview {
+              pub graph: ReconciliationPreview,
+              pub metadata: CompositionMetadataDiff,
+          }
+          """,
+              "preview duplicate plan field",
+          )
+          text = replace_once(
+              text,
+              "        let graph = self.preview_candidate(candidate);\n",
+              "        let mut graph = self.preview_candidate(candidate);\n",
+              "mutable graph preview",
+          )
+          text = replace_once(
+              text,
+              "        let mut transition_plan = graph.transition_plan.clone();\n",
+              "",
+              "duplicate plan clone",
+          )
+          text = text.replace("transition_plan.iter()", "graph.transition_plan.iter()")
+          text = text.replace("transition_plan.push(", "graph.transition_plan.push(")
+          text = text.replace(
+              "let already_restarted: BTreeSet<_> = transition_plan",
+              "let already_restarted: BTreeSet<_> = graph.transition_plan",
+          )
+          text = text.replace("        transition_plan.extend(\n", "        graph.transition_plan.extend(\n")
+          text = replace_once(
+              text,
+              """        Ok(MetadataReconciliationPreview {
+                      graph,
+                      metadata,
+                      transition_plan,
+                  })
+          """,
+              """        Ok(MetadataReconciliationPreview { graph, metadata })
+          """,
+              "preview construction",
+          )
+          text = text.replace("preview.transition_plan", "preview.graph.transition_plan")
+          path.write_text(text)
+
+          path = Path("rust/crates/phenix-core/src/live_reconciliation.rs")
+          text = path.read_text()
+          start = text.index("    pub fn activate_candidate_on_kernel_with_metadata(")
+          end = text.index("\n}\n\nfn validate_live_reconciliation", start)
+          block = text[start:end]
+          count = block.count("preview.transition_plan")
+          if count < 1:
+              raise SystemExit("metadata activation: preview.transition_plan not found")
+          block = block.replace("preview.transition_plan", "preview.graph.transition_plan")
+          text = text[:start] + block + text[end:]
+          path.write_text(text)
+
+          path = Path("rust/crates/phenix-core/tests/resource_metadata_reconciliation.rs")
+          text = path.read_text()
+          text = text.replace("preview.transition_plan", "preview.graph.transition_plan")
+          path.write_text(text)
+          PY
 
       - name: Format and validate
         run: |
