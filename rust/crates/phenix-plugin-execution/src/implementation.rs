@@ -515,7 +515,7 @@ fn invoke_callable(
     let requested = required;
     let service = ServiceId::parse(&callable.service).map_err(|error| error.to_string())?;
     let output = host
-        .invoke_service(&service, input, &requested, None)
+        .invoke_service_abi(&service, input, &requested, None)
         .map_err(|error| error.to_string())?;
     Ok(ExecutionResponse::Invocation { output })
 }

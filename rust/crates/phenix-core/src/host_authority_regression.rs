@@ -48,7 +48,7 @@ impl PluginInstance for Delegator {
         let requested = Authority::new([capability("fs.write")]);
         for _ in 0..2 {
             if host
-                .invoke_service(&service("downstream@1"), b"", &requested, None)
+                .invoke_service_abi(&service("downstream@1"), b"", &requested, None)
                 .is_ok()
             {
                 return Err("delegated call regained denied authority".into());

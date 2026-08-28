@@ -108,7 +108,7 @@ impl PluginInstance for Layer {
             }
             Behavior::Reenter => {
                 let error = host
-                    .invoke_service(service, input, host.authority(), None)
+                    .invoke_service_abi(service, input, host.authority(), None)
                     .unwrap_err();
                 Ok(LayerResult::Handled(error.to_string().into_bytes()))
             }

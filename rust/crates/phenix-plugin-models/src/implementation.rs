@@ -217,7 +217,7 @@ impl PluginInstance for ModelRoutingPlugin {
                     options: target.options.clone(),
                 };
                 let output = host
-                    .invoke_service(
+                    .invoke_service_abi(
                         &model_inference_service(),
                         &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
                         host.authority(),

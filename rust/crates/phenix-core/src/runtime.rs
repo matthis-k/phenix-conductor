@@ -245,8 +245,8 @@ impl<'a> PluginHost<'a> {
             .map_err(|error| ComponentInvocationError::Decode(error.to_string()))
     }
 
-    #[cfg(test)]
-    pub(crate) fn invoke_service(
+    #[doc(hidden)]
+    pub fn invoke_service_abi(
         &self,
         service: &ServiceId,
         input: &[u8],
