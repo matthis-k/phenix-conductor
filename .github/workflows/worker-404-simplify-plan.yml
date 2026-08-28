@@ -86,6 +86,10 @@ jobs:
               "preview construction",
           )
           text = text.replace("preview.transition_plan", "preview.graph.transition_plan")
+          text = text.replace(
+              "preview\n            .transition_plan",
+              "preview\n            .graph\n            .transition_plan",
+          )
           path.write_text(text)
 
           path = Path("rust/crates/phenix-core/src/live_reconciliation.rs")
