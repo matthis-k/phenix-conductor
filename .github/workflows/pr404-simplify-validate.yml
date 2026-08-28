@@ -105,14 +105,22 @@ jobs:
           block = text[start:end]
           block = replace_once(block, "    service: ServiceId,\n", "", "InvocationTrace service field")
           text = text[:start] + block + text[end:]
-          text = replace_once(text, "            service: chain.service.clone(),\n", "", "InvocationTrace service init")
-          text = replace_once(
-              text,
+          impl_start = text.index("impl InvocationTrace {")
+          new_start = text.index("    fn new(", impl_start)
+          new_end = text.index("    fn enter(", new_start)
+          block = text[new_start:new_end]
+          block = replace_once(block, "            service: chain.service.clone(),\n", "", "InvocationTrace service init")
+          text = text[:new_start] + block + text[new_end:]
+          finish_start = text.index("    fn finish(self)", impl_start)
+          finish_end = text.index("\n    }\n}", finish_start) + len("\n    }\n")
+          block = text[finish_start:finish_end]
+          block = replace_once(
+              block,
               "            service: self.service,\n",
               "            service: self.planned_chain.service.clone(),\n",
               "InvocationTrace service projection",
           )
-          path.write_text(text)
+          path.write_text(text[:finish_start] + block + text[finish_end:])
 
           path = Path("rust/crates/phenix-plugin-models/src/implementation.rs")
           text = path.read_text()
