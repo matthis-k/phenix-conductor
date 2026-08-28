@@ -27,6 +27,7 @@ members = [
   "crates/phenix-plugin-session-tree",
   "crates/phenix-plugin-workspace",
   "crates/phenix-plugin-catalog",
+  "crates/phenix-sdk",
   "crates/phenix-backend",
   "crates/phenix-backend-acp",
   "crates/phenix-backend-native",
