@@ -132,13 +132,13 @@ let
                     wrapProgram "$out/bin/$program" \
                       --set PHENIX_DEFAULT_CONFIG_DIR "$out/share/phenix"
                   ''}
-                  ${pkgs.lib.optionalString (configDirectory != null || resources != [ ]) ''
+                  ${pkgs.lib.optionalString (configDirectory != null) ''
                     wrapProgram "$out/bin/$program" \
-                      --set PHENIX_CONFIG_DIR ${
-                        pkgs.lib.escapeShellArg (
-                          if configDirectory != null then toString configDirectory else "$out/share/phenix"
-                        )
-                      }
+                      --set PHENIX_CONFIG_DIR ${pkgs.lib.escapeShellArg (toString configDirectory)}
+                  ''}
+                  ${pkgs.lib.optionalString (configDirectory == null && resources != [ ]) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_CONFIG_DIR "$out/share/phenix"
                   ''}
                   ${pkgs.lib.optionalString (settings != { }) ''
                     wrapProgram "$out/bin/$program" \

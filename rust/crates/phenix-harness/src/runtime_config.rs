@@ -3,7 +3,7 @@ use phenix_plugin_catalog::{
     execution_configuration_service, model_routing_service, options_service, AgentDefinition,
     ExecutionConfigurationCommand, ExecutionConfigurationResponse, ModelCommand, ModelResponse,
     ModelTarget, OptionAssignment, OptionCommand, OptionKey, OptionResponse, OptionScope,
-    OptionSubjectId, OptionValue, OrchestrationDefinition, RoutingProfile,
+    OptionStartupPrecedence, OptionSubjectId, OptionValue, OrchestrationDefinition, RoutingProfile,
 };
 use serde::Deserialize;
 use serde_json::Value;
