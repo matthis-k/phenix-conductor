@@ -1,0 +1,408 @@
+from pathlib import Path
+
+
+def replace(path: str, old: str, new: str) -> None:
+    file = Path(path)
+    text = file.read_text()
+    if old not in text:
+        raise SystemExit(f"missing anchor in {path}: {old[:100]!r}")
+    file.write_text(text.replace(old, new, 1))
+
+
+sdk = Path("rust/crates/phenix-plugin-sdk/src/lib.rs")
+text = sdk.read_text()
+if "SDK_CONFIG_SERVICE" not in text:
+    text = text.replace(
+        "use serde::{Deserialize, Serialize};\nuse std::collections::BTreeSet;\n",
+        "use serde::{Deserialize, Serialize};\nuse std::{\n    collections::BTreeSet,\n    env, fs,\n    path::{Component, Path, PathBuf},\n};\n",
+        1,
+    )
+    text = text.replace(
+        'pub const SDK_SKILLS_SERVICE: &str = "phenix.sdk.skills@1";\n',
+        'pub const SDK_SKILLS_SERVICE: &str = "phenix.sdk.skills@1";\npub const SDK_CONFIG_SERVICE: &str = "phenix.sdk.config@1";\n',
+        1,
+    )
+    marker = "#[must_use]\npub fn sdk_session_service() -> ServiceId {"
+    config_types = r'''#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SdkConfigCommand {
+    Read { path: String },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SdkConfigResponse {
+    File { content: Vec<u8> },
+}
+
+pub struct SdkConfigInterface;
+
+impl ComponentInterface for SdkConfigInterface {
+    type Request = SdkConfigCommand;
+    type Response = SdkConfigResponse;
+
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(SDK_CONFIG_SERVICE).expect("static SDK config interface id is valid")
+    }
+}
+
+#[must_use]
+pub fn sdk_config_service() -> ServiceId {
+    ServiceId::parse(SDK_CONFIG_SERVICE).expect("static SDK config service id is valid")
+}
+
+'''
+    text = text.replace(marker, config_types + marker, 1)
+    text = text.replace(
+        "            sdk_skills_service(),\n        ]",
+        "            sdk_skills_service(),\n            sdk_config_service(),\n        ]",
+        1,
+    )
+    text = text.replace(
+        "            ComponentExport {\n                interface: SdkSkillsInterface::interface_id(),\n                priority: 100,\n                required_authority: Authority::default(),\n            },\n        ],",
+        "            ComponentExport {\n                interface: SdkSkillsInterface::interface_id(),\n                priority: 100,\n                required_authority: Authority::default(),\n            },\n            ComponentExport {\n                interface: SdkConfigInterface::interface_id(),\n                priority: 100,\n                required_authority: Authority::default(),\n            },\n        ],",
+        1,
+    )
+    text = text.replace(
+        "        SdkSkillsInterface::interface_id(),\n        ContextInterface::interface_id(),",
+        "        SdkSkillsInterface::interface_id(),\n        SdkConfigInterface::interface_id(),\n        ContextInterface::interface_id(),",
+        1,
+    )
+    text = text.replace(
+        '        SdkResourceId::parse("sdk/phenix/options").expect("static SDK resource id is valid"),\n    ]);',
+        '        SdkResourceId::parse("sdk/phenix/options").expect("static SDK resource id is valid"),\n        SdkResourceId::parse("sdk/phenix/config").expect("static SDK resource id is valid"),\n    ]);',
+        1,
+    )
+    text = text.replace(
+        "pub fn sdk_factory() -> Box<dyn PluginInstance> {\n    Box::new(SdkPlugin)\n}",
+        'pub fn sdk_factory() -> Box<dyn PluginInstance> {\n    Box::new(SdkPlugin {\n        config_root: env::var_os("PHENIX_CONFIG_DIR").map(PathBuf::from),\n    })\n}',
+        1,
+    )
+    text = text.replace("struct SdkPlugin;\n", "struct SdkPlugin {\n    config_root: Option<PathBuf>,\n}\n", 1)
+    invoke_anchor = '''        if service == &sdk_skills_service() {
+            let command: SdkSkillCommand =
+                serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            return serde_json::to_vec(&skill_command(host, command)?)
+                .map_err(|error| error.to_string());
+        }
+'''
+    invoke_config = '''        if service == &sdk_config_service() {
+            let command: SdkConfigCommand =
+                serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let root = self
+                .config_root
+                .as_deref()
+                .ok_or("PHENIX_CONFIG_DIR is not configured")?;
+            return serde_json::to_vec(&config_command(root, command)?)
+                .map_err(|error| error.to_string());
+        }
+'''
+    text = text.replace(invoke_anchor, invoke_anchor + invoke_config, 1)
+    helper = r'''fn config_command(root: &Path, command: SdkConfigCommand) -> Result<SdkConfigResponse, String> {
+    match command {
+        SdkConfigCommand::Read { path } => {
+            let path = config_path(root, &path)?;
+            let content = fs::read(&path)
+                .map_err(|error| format!("failed to read config file {}: {error}", path.display()))?;
+            Ok(SdkConfigResponse::File { content })
+        }
+    }
+}
+
+fn config_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    require_non_empty("config path", relative)?;
+    let relative = Path::new(relative);
+    if !relative
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err("config path must be relative and contain no . or .. components".into());
+    }
+    Ok(root.join(relative))
+}
+
+'''
+    text = text.replace("fn open_session(\n", helper + "fn open_session(\n", 1)
+    sdk.write_text(text)
+
+catalog = Path("rust/crates/phenix-plugin-catalog/src/lib.rs")
+text = catalog.read_text()
+if "sdk_config_service" not in text:
+    text = text.replace(
+        "    sdk_component_id, sdk_component_manifest, sdk_contribution, sdk_factory, sdk_manifest,\n    sdk_session_service, sdk_skills_service, sdk_tools_service, SdkSessionCommand,\n",
+        "    sdk_component_id, sdk_component_manifest, sdk_config_service, sdk_contribution, sdk_factory,\n    sdk_manifest, sdk_session_service, sdk_skills_service, sdk_tools_service, SdkConfigCommand,\n    SdkConfigInterface, SdkConfigResponse, SdkSessionCommand,\n",
+        1,
+    )
+    text = text.replace(
+        "    SDK_TOOLS_SERVICE,\n};",
+        "    SDK_TOOLS_SERVICE, SDK_CONFIG_SERVICE,\n};",
+        1,
+    )
+    catalog.write_text(text)
+
+harness = Path("rust/crates/phenix-harness/src/lib.rs")
+text = harness.read_text()
+if "options_component_manifest" not in text.split("use std::{", 1)[0]:
+    text = text.replace(
+        "    model_routing_component_manifest, model_routing_factory, model_routing_manifest,\n    planning_component_manifest, planning_factory, planning_manifest,\n",
+        "    model_routing_component_manifest, model_routing_factory, model_routing_manifest,\n    options_component_manifest, options_factory, options_manifest, planning_component_manifest,\n    planning_factory, planning_manifest,\n",
+        1,
+    )
+    text = text.replace(
+        "    session_component_manifest, session_factory, session_manifest, session_tree_component_manifest,\n    session_tree_factory, session_tree_manifest, workspace_component_manifest, workspace_factory,\n",
+        "    sdk_component_manifest, sdk_factory, sdk_manifest, session_component_manifest, session_factory,\n    session_manifest, session_tree_component_manifest, session_tree_factory, session_tree_manifest,\n    workspace_component_manifest, workspace_factory,\n",
+        1,
+    )
+    text = text.replace(
+        "        builder.add_embedded(debug_manifest(authority.clone()), debug_factory)?;\n        for component in [",
+        "        builder.add_embedded(debug_manifest(authority.clone()), debug_factory)?;\n        builder.add_embedded(options_manifest(), options_factory)?;\n        builder.add_embedded(sdk_manifest(authority.clone()), sdk_factory)?;\n        for component in [",
+        1,
+    )
+    text = text.replace(
+        "            debug_component_manifest(authority),\n        ] {",
+        "            debug_component_manifest(authority.clone()),\n            options_component_manifest(),\n            sdk_component_manifest(authority),\n        ] {",
+        1,
+    )
+    text = text.replace(
+        "            debug_manifest(authority),\n        ]",
+        "            debug_manifest(authority.clone()),\n            options_manifest(),\n            sdk_manifest(authority),\n        ]",
+        1,
+    )
+    text = text.replace(
+        "            debug_manifest(authority.clone()),\n            basic_model_manifest(),",
+        "            debug_manifest(authority.clone()),\n            options_manifest(),\n            sdk_manifest(authority.clone()),\n            basic_model_manifest(),",
+        1,
+    )
+    text = text.replace(
+        "        builder.add_selected(&enabled, debug_manifest(authority.clone()), debug_factory)?;\n        builder.add_selected(&enabled, basic_model_manifest(), basic_model_factory)?;",
+        "        builder.add_selected(&enabled, debug_manifest(authority.clone()), debug_factory)?;\n        builder.add_selected(&enabled, options_manifest(), options_factory)?;\n        builder.add_selected(&enabled, sdk_manifest(authority.clone()), sdk_factory)?;\n        builder.add_selected(&enabled, basic_model_manifest(), basic_model_factory)?;",
+        1,
+    )
+    text = text.replace(
+        "            debug_component_manifest(authority),\n            basic_model_component_manifest(),",
+        "            debug_component_manifest(authority.clone()),\n            options_component_manifest(),\n            sdk_component_manifest(authority),\n            basic_model_component_manifest(),",
+        1,
+    )
+    harness.write_text(text)
+
+main = Path("rust/crates/phenix-harness/src/main.rs")
+text = main.read_text()
+if "apply_config_directory" not in text:
+    old = '''    if let Some(path) = env::var_os("PHENIX_RUNTIME_CONFIG") {
+        runtime_config::apply_runtime_config(&mut harness, Path::new(&path))?;
+    }
+'''
+    new = '''    if let Some(path) = env::var_os("PHENIX_CONFIG_DIR") {
+        runtime_config::apply_config_directory(&mut harness, Path::new(&path))?;
+    } else if let Some(path) = env::var_os("PHENIX_RUNTIME_CONFIG") {
+        runtime_config::apply_runtime_config(&mut harness, Path::new(&path))?;
+    }
+'''
+    if old not in text:
+        raise SystemExit("main runtime config anchor missing")
+    main.write_text(text.replace(old, new, 1))
+
+runtime = Path("rust/crates/phenix-harness/src/runtime_config.rs")
+text = runtime.read_text()
+if "SettingsConfiguration" not in text:
+    text = text.replace(
+        "    ModelTarget, OrchestrationDefinition, RoutingProfile,\n};",
+        "    options_service, ModelTarget, OptionCommand, OptionKey, OptionResponse, OptionScope,\n    OptionSubjectId, OptionValue, OrchestrationDefinition, RoutingProfile,\n};",
+        1,
+    )
+    settings_types = r'''
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SettingsConfiguration {
+    #[serde(default)]
+    global: BTreeMap<String, SettingValue>,
+    #[serde(default)]
+    sessions: BTreeMap<String, BTreeMap<String, SettingValue>>,
+    #[serde(default)]
+    agents: BTreeMap<String, BTreeMap<String, SettingValue>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum SettingValue {
+    Bool(bool),
+    Integer(i64),
+    String(String),
+}
+
+impl From<SettingValue> for OptionValue {
+    fn from(value: SettingValue) -> Self {
+        match value {
+            SettingValue::Bool(value) => Self::Bool(value),
+            SettingValue::Integer(value) => Self::Integer(value),
+            SettingValue::String(value) => Self::String(value),
+        }
+    }
+}
+'''
+    text = text.replace("struct RuntimeModelTarget {", settings_types + "\nstruct RuntimeModelTarget {", 1)
+    config_functions = r'''pub(super) fn apply_config_directory(
+    harness: &mut PhenixHarness,
+    directory: &Path,
+) -> Result<(), Box<dyn Error>> {
+    if !directory.is_dir() {
+        return Err(format!("config directory does not exist: {}", directory.display()).into());
+    }
+
+    let runtime = directory.join("runtime.json");
+    if runtime.is_file() {
+        apply_runtime_config(harness, &runtime)?;
+    }
+
+    let settings = directory.join("settings.json");
+    if settings.is_file() {
+        apply_settings(harness, &settings)?;
+    }
+    Ok(())
+}
+
+fn apply_settings(harness: &mut PhenixHarness, path: &Path) -> Result<(), Box<dyn Error>> {
+    let bytes = fs::read(path)?;
+    let settings: SettingsConfiguration = serde_json::from_slice(&bytes)?;
+    apply_settings_configuration(harness, settings)
+}
+
+fn apply_settings_configuration(
+    harness: &mut PhenixHarness,
+    settings: SettingsConfiguration,
+) -> Result<(), Box<dyn Error>> {
+    for (key, value) in settings.global {
+        set_option(harness, key, OptionScope::Global, value)?;
+    }
+    for (session, values) in settings.sessions {
+        let session = OptionSubjectId::parse(session)?;
+        for (key, value) in values {
+            set_option(
+                harness,
+                key,
+                OptionScope::Session {
+                    session: session.clone(),
+                },
+                value,
+            )?;
+        }
+    }
+    for (agent, values) in settings.agents {
+        let agent = OptionSubjectId::parse(agent)?;
+        for (key, value) in values {
+            set_option(
+                harness,
+                key,
+                OptionScope::Agent {
+                    agent: agent.clone(),
+                },
+                value,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn set_option(
+    harness: &mut PhenixHarness,
+    key: String,
+    scope: OptionScope,
+    value: SettingValue,
+) -> Result<(), Box<dyn Error>> {
+    let key = OptionKey::parse(key)?;
+    let output = harness.invoke(
+        &options_service(),
+        &serde_json::to_vec(&OptionCommand::Set {
+            key,
+            scope,
+            value: value.into(),
+        })?,
+        &default_suite_authority(),
+        None,
+    )?;
+    match serde_json::from_slice::<OptionResponse>(&output)? {
+        OptionResponse::Updated { .. } => Ok(()),
+        _ => Err("options service rejected settings override".into()),
+    }
+}
+
+'''
+    text = text.replace("pub(super) fn apply_runtime_config(", config_functions + "pub(super) fn apply_runtime_config(", 1)
+    runtime.write_text(text)
+
+packaging = Path("modules/plugin-packaging.nix")
+text = packaging.read_text()
+if "settings ? { }," not in text:
+    text = text.replace("      layerPolicies ? [ ],\n      ...", "      layerPolicies ? [ ],\n      settings ? { },\n      ...", 1)
+    text = text.replace(
+        "      selectedIds =\n        if enabledPlugins != null then",
+        '      settingsFile = pkgs.writeText "phenix-settings.json" (builtins.toJSON settings);\n      selectedIds =\n        if enabledPlugins != null then',
+        1,
+    )
+    text = text.replace(
+        "    if plugins == [ ] && resources == [ ] && selectedIds == null && layerPolicies == [ ] then",
+        "    if plugins == [ ] && resources == [ ] && selectedIds == null && layerPolicies == [ ] && settings == { } then",
+        1,
+    )
+    text = text.replace(
+        "            ''\n              for program in phenix phenix-harness; do",
+        "            ''\n              mkdir -p \"$out/share/phenix\"\n              rm -f \"$out/share/phenix/settings.json\"\n              cp ${settingsFile} \"$out/share/phenix/settings.json\"\n\n              for program in phenix phenix-harness; do",
+        1,
+    )
+    text = text.replace(
+        '                if [ -e "$out/bin/$program" ]; then\n',
+        '                if [ -e "$out/bin/$program" ]; then\n                  wrapProgram "$out/bin/$program" \\\n                    --set PHENIX_CONFIG_DIR "$out/share/phenix"\n',
+        1,
+    )
+    text = text.replace(
+        '                    wrapProgram "$out/bin/$program" \\\n                      --set PHENIX_RUNTIME_CONFIG "$out/share/phenix/runtime.json" \\\n                      --set PHENIX_SKILL_PATH "$out/share/phenix/skills"',
+        '                    wrapProgram "$out/bin/$program" \\\n                      --set PHENIX_SKILL_PATH "$out/share/phenix/skills"',
+        1,
+    )
+    text = text.replace('        "models"\n        "planning"', '        "models"\n        "options"\n        "planning"', 1)
+    text = text.replace('        "repository-workers"\n        "session-tree"', '        "repository-workers"\n        "sdk"\n        "session-tree"', 1)
+text = text.replace("(.plugins | length == 15)", "(.plugins | length == 17)")
+packaging.write_text(text)
+
+acp = Path("modules/phenix-acp.nix")
+text = acp.read_text()
+if "share/phenix/settings.json" not in text:
+    text = text.replace(
+        "            test -f ${supportedPhenix}/share/phenix/runtime.json\n",
+        "            test -f ${supportedPhenix}/share/phenix/runtime.json\n            test -f ${supportedPhenix}/share/phenix/settings.json\n",
+        1,
+    )
+text = text.replace("(.plugins | length == 15)", "(.plugins | length == 17)")
+if "phenix.options@1" not in text:
+    text = text.replace(
+        '              and (.services | index("phenix.execution.configuration@1") != null)\n',
+        '              and (.services | index("phenix.execution.configuration@1") != null)\n              and (.services | index("phenix.options@1") != null)\n              and (.services | index("phenix.sdk.config@1") != null)\n',
+        1,
+    )
+acp.write_text(text)
+
+sdk_spec = Path("spec/plugin-sdk.md")
+text = sdk_spec.read_text()
+if "## Configuration files" not in text:
+    text += r'''
+
+## Configuration files
+
+The default `phenix` SDK exposes `phenix.sdk.config@1`. `Read` accepts a plain relative path and reads it under `PHENIX_CONFIG_DIR`. Absolute paths and `.` or `..` components are rejected.
+
+The Nix wrapper owns `PHENIX_CONFIG_DIR`. SDK code receives relative names such as `settings.json`; it does not discover host configuration directories.
+'''
+    sdk_spec.write_text(text)
+
+options_spec = Path("spec/plugin-options.md")
+text = options_spec.read_text()
+if "## Settings file" not in text:
+    text += r'''
+
+## Settings file
+
+The supported Nix wrapper writes `settings.json` under `PHENIX_CONFIG_DIR`. The file contains optional `global`, `sessions`, and `agents` maps. Values are booleans, integers, or strings and must match the registered option type.
+
+Startup loads built-in option definitions first, then applies `settings.json`. Resolution remains `agent > session > global > default`; the file only supplies scoped overrides.
+'''
+    options_spec.write_text(text)
