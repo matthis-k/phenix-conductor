@@ -46,7 +46,7 @@ mod tests {
         let component = ComponentId::parse("fixture.component").unwrap();
         let owner = PluginId::parse("fixture.missing-owner").unwrap();
 
-        let candidate = GraphReconciler::resolve_candidate(
+        let candidate = ResolvedHarness::resolve(
             [],
             [ComponentManifest {
                 id: component.clone(),
@@ -79,8 +79,7 @@ mod tests {
     fn valid_candidate_reports_the_same_diff_and_transition_plan_as_preview() {
         let active = ResolvedHarness::resolve([], [], [], &Authority::default()).unwrap();
         let reconciler = GraphReconciler::new(active);
-        let candidate =
-            GraphReconciler::resolve_candidate([], [], [], &Authority::default()).unwrap();
+        let candidate = ResolvedHarness::resolve([], [], [], &Authority::default()).unwrap();
         let expected = reconciler.preview_candidate(&candidate);
 
         assert_eq!(
