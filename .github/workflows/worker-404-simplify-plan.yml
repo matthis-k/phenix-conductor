@@ -181,6 +181,44 @@ jobs:
           )
           path.write_text(text)
 
+          path = Path("rust/crates/phenix-core/src/service_layer_dispatch_regression.rs")
+          text = path.read_text()
+          text = replace_once(text, "    Reenter,\n", "", "legacy reentry behavior")
+          text = replace_once(
+              text,
+              """            Behavior::Reenter => {
+                  let error = host
+                      .invoke_service(service, input, host.authority(), None)
+                      .unwrap_err();
+                  Ok(LayerResult::Handled(error.to_string().into_bytes()))
+              }
+          """,
+              "",
+              "legacy reentry arm",
+          )
+          text = replace_once(
+              text,
+              """#[test]
+          fn same_service_recursive_invocation_is_rejected() {
+              let mut kernel = kernel_with_layer(
+                  Behavior::Reenter,
+                  Arc::new(AtomicBool::new(false)),
+                  Authority::default(),
+              );
+              let output = kernel
+                  .invoke(&service(), b"x", &Authority::default(), None)
+                  .unwrap();
+              assert!(String::from_utf8(output)
+                  .unwrap()
+                  .contains("same-service re-entry"));
+          }
+
+          """,
+              "",
+              "legacy reentry regression",
+          )
+          path.write_text(text)
+
           Path("rust/crates/phenix-core/src/host_authority_regression.rs").write_text(r'''use phenix_core::{
               Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport,
               ComponentInterface, ComponentManifest, InterfaceId, Kernel, KernelConfig,
