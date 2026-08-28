@@ -451,7 +451,10 @@ fn skill_command(
     }
 }
 
-fn invoke_context(host: &PluginHost<'_>, command: ContextCommand) -> Result<ContextResponse, String> {
+fn invoke_context(
+    host: &PluginHost<'_>,
+    command: ContextCommand,
+) -> Result<ContextResponse, String> {
     host.invoke_import::<ContextInterface>(&sdk_component_id(), &command)
         .map_err(|error| error.to_string())
 }
