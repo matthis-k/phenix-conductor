@@ -1,0 +1,242 @@
+name: worker-404-simplify
+
+on:
+  push:
+    branches:
+      - feat/layered-service-overrides
+    paths:
+      - .github/workflows/worker-404-simplify.yml
+
+permissions:
+  contents: write
+
+jobs:
+  simplify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply simplifications
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def load(path):
+              return Path(path).read_text()
+
+          def save(path, text):
+              Path(path).write_text(text)
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          # ResolvedHarness should not store layer policy twice. KernelConfig owns it.
+          path = "rust/crates/phenix-core/src/registry.rs"
+          text = load(path)
+          old = '''    pub fn layer_policy(&self, service: &ServiceId) -> &[LayerPolicy] {
+              self.layer_policies
+                  .get(service)
+                  .map(Vec::as_slice)
+                  .unwrap_or_default()
+          }
+'''
+          new = old + '''
+          pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
+              &self.layer_policies
+          }
+'''
+          text = replace_once(text, old, new, "KernelConfig::layer_policies")
+          save(path, text)
+
+          path = "rust/crates/phenix-core/src/resolver.rs"
+          text = load(path)
+          text = replace_once(
+              text,
+              '''    kernel_config: KernelConfig,
+              component_graph: ResolvedComponentGraph,
+              layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+''',
+              '''    kernel_config: KernelConfig,
+              component_graph: ResolvedComponentGraph,
+''',
+              "ResolvedHarness layer_policies field",
+          )
+          text = replace_once(
+              text,
+              '''            kernel_config,
+              component_graph,
+              layer_policies,
+''',
+              '''            kernel_config,
+              component_graph,
+''',
+              "ResolvedHarness layer_policies init",
+          )
+          text = replace_once(
+              text,
+              '''    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
+              &self.layer_policies
+          }
+''',
+              '''    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
+              self.kernel_config.layer_policies()
+          }
+''',
+              "ResolvedHarness layer_policies getter",
+          )
+          save(path, text)
+
+          # Delete GraphReconciler forwarding constructors. ResolvedHarness is canonical.
+          path = "rust/crates/phenix-core/src/reconciliation.rs"
+          text = load(path)
+          pattern = re.compile(
+              r'''\n    pub fn resolve_candidate\(.*?\n    pub fn preview_candidate\(&self, candidate: &ResolvedHarness\) -> ReconciliationPreview \{''',
+              re.S,
+          )
+          text, count = pattern.subn(
+              '\n    pub fn preview_candidate(&self, candidate: &ResolvedHarness) -> ReconciliationPreview {',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"GraphReconciler forwarding methods: expected 1 block, found {count}")
+          text = replace_once(text, "let candidate = Self::resolve_candidate(\n", "let candidate = ResolvedHarness::resolve(\n", "reconcile resolve")
+          text = replace_once(text, "let candidate = Self::resolve_candidate_with_resources(\n", "let candidate = ResolvedHarness::resolve_with_resources(\n", "reconcile resources")
+          text = replace_once(text, "let candidate = Self::resolve_frontend_candidate(\n", "let candidate = ResolvedHarness::resolve_frontends(\n", "reconcile frontends")
+          save(path, text)
+
+          # Metadata-aware reconciliation has one authoritative transition plan.
+          path = "rust/crates/phenix-core/src/metadata_reconciliation.rs"
+          text = load(path)
+          text = replace_once(
+              text,
+              '''pub struct MetadataReconciliationPreview {
+              pub graph: ReconciliationPreview,
+              pub metadata: CompositionMetadataDiff,
+              pub transition_plan: Vec<ReconciliationAction>,
+          }
+''',
+              '''pub struct MetadataReconciliationPreview {
+              pub graph: ReconciliationPreview,
+              pub metadata: CompositionMetadataDiff,
+          }
+''',
+              "metadata preview transition plan",
+          )
+          text = replace_once(text, "        let graph = self.preview_candidate(candidate);\n", "        let mut graph = self.preview_candidate(candidate);\n", "mutable graph preview")
+          text = replace_once(text, "        let mut transition_plan = graph.transition_plan.clone();\n", "", "duplicate transition plan clone")
+          text = text.replace("transition_plan.iter()", "graph.transition_plan.iter()")
+          text = text.replace("transition_plan.push(", "graph.transition_plan.push(")
+          text = text.replace("let already_restarted: BTreeSet<_> = transition_plan", "let already_restarted: BTreeSet<_> = graph.transition_plan")
+          text = text.replace("        transition_plan.extend(\n", "        graph.transition_plan.extend(\n")
+          text = replace_once(
+              text,
+              '''        Ok(MetadataReconciliationPreview {
+              graph,
+              metadata,
+              transition_plan,
+          })
+''',
+              '''        Ok(MetadataReconciliationPreview { graph, metadata })
+''',
+              "metadata preview result",
+          )
+          text = text.replace("preview.transition_plan", "preview.graph.transition_plan")
+          save(path, text)
+
+          path = "rust/crates/phenix-core/src/live_reconciliation.rs"
+          text = load(path)
+          text = text.replace("&preview.transition_plan", "&preview.graph.transition_plan")
+          text = text.replace("result.transition_plan = preview.transition_plan;", "result.transition_plan = preview.graph.transition_plan;")
+          save(path, text)
+
+          # InvocationTrace already owns the service through its resolved chain.
+          path = "rust/crates/phenix-core/src/runtime.rs"
+          text = load(path)
+          text = replace_once(text, "    service: ServiceId,\n    planned_chain: ResolvedServiceChain,\n", "    planned_chain: ResolvedServiceChain,\n", "InvocationTrace service field")
+          text = replace_once(text, "            service: chain.service.clone(),\n            planned_chain: chain.clone(),\n", "            planned_chain: chain.clone(),\n", "InvocationTrace service init")
+          text = replace_once(text, "            service: self.service,\n", "            service: self.planned_chain.service.clone(),\n", "InvocationTrace service finish")
+          save(path, text)
+
+          # Reuse core service identity instead of redeclaring it in first-party plugins.
+          path = "rust/crates/phenix-plugin-models/src/implementation.rs"
+          text = load(path)
+          text = replace_once(
+              text,
+              "pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};\n",
+              "pub use phenix_core::{\n    model_inference_service, ModelInferenceRequest, ModelInferenceResponse, MODEL_INFERENCE_SERVICE,\n};\n",
+              "model core re-export",
+          )
+          text = replace_once(text, 'pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";\n', "", "duplicate model service constant")
+          text = replace_once(
+              text,
+              '''#[must_use]
+          pub fn model_inference_service() -> ServiceId {
+              ServiceId::parse(MODEL_INFERENCE_SERVICE).expect("static service id is valid")
+          }
+
+''',
+              "",
+              "duplicate model service helper",
+          )
+          save(path, text)
+
+          path = "rust/crates/phenix-plugin-context/src/implementation.rs"
+          text = load(path)
+          text = replace_once(
+              text,
+              '''pub use phenix_core::{
+              ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
+          };
+''',
+              '''pub use phenix_core::{
+              context_service, ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
+              CONTEXT_SERVICE,
+          };
+''',
+              "context core re-export",
+          )
+          text = replace_once(text, 'pub const CONTEXT_SERVICE: &str = "phenix.context@1";\n', "", "duplicate context service constant")
+          text = replace_once(
+              text,
+              '''#[must_use]
+          pub fn context_service() -> ServiceId {
+              ServiceId::parse(CONTEXT_SERVICE).expect("static service id is valid")
+          }
+
+''',
+              "",
+              "duplicate context service helper",
+          )
+          save(path, text)
+          PY
+
+      - name: Format Rust
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+
+      - name: Canonical maintenance
+        run: nix run .#phenix-maintenance -- fix
+
+      - name: Focused tests
+        run: cargo test --manifest-path rust/Cargo.toml -p phenix-core -p phenix-plugin-models -p phenix-plugin-context
+
+      - name: Focused clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml -p phenix-core -p phenix-plugin-models -p phenix-plugin-context --all-targets -- -D warnings
+
+      - name: Commit semantic tree
+        shell: bash
+        run: |
+          rm .github/workflows/worker-404-simplify.yml
+          git status --short
+          git config user.name "phenix-worker"
+          git config user.email "phenix-worker@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: simplify resolved composition state"
+          git push origin HEAD:feat/layered-service-overrides
