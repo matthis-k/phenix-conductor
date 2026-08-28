@@ -94,8 +94,11 @@ pub use phenix_plugin_repository_workers::{
 };
 pub use phenix_plugin_sdk::{
     sdk_component_id, sdk_component_manifest, sdk_contribution, sdk_factory, sdk_manifest,
-    sdk_session_service, SdkSessionCommand, SdkSessionInterface, SdkSessionResponse, SDK_COMPONENT,
-    SDK_PLUGIN, SDK_SESSION_SERVICE,
+    sdk_session_service, sdk_skills_service, sdk_tools_service, SdkSessionCommand,
+    SdkSessionInterface, SdkSessionResponse, SdkSkill, SdkSkillCommand, SdkSkillResponse,
+    SdkSkillsInterface, SdkSkillSummary, SdkTool, SdkToolCommand, SdkToolResponse,
+    SdkToolsInterface, SDK_COMPONENT, SDK_PLUGIN, SDK_SESSION_SERVICE, SDK_SKILLS_SERVICE,
+    SDK_TOOLS_SERVICE,
 };
 pub use phenix_plugin_session_tree::{
     session_tree_component_id, session_tree_component_manifest, session_tree_factory,
