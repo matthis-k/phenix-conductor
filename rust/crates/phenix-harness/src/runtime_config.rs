@@ -2,8 +2,8 @@ use phenix_harness::{default_suite_authority, PhenixHarness};
 use phenix_plugin_catalog::{
     execution_configuration_service, model_routing_service, options_service, AgentDefinition,
     ExecutionConfigurationCommand, ExecutionConfigurationResponse, ModelCommand, ModelResponse,
-    ModelTarget, OptionCommand, OptionKey, OptionResponse, OptionScope, OptionSubjectId,
-    OptionValue, OrchestrationDefinition, RoutingProfile,
+    ModelTarget, OptionAssignment, OptionCommand, OptionKey, OptionResponse, OptionScope,
+    OptionSubjectId, OptionValue, OrchestrationDefinition, RoutingProfile,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -103,15 +103,11 @@ pub(super) fn apply_config_directory(
     }
 
     let settings = directory.join("settings.json");
-    if settings.is_file() {
-        apply_settings(harness, &settings)?;
-    }
-    Ok(())
-}
-
-fn apply_settings(harness: &mut PhenixHarness, path: &Path) -> Result<(), Box<dyn Error>> {
-    let bytes = fs::read(path)?;
-    let settings: SettingsConfiguration = serde_json::from_slice(&bytes)?;
+    let settings = if settings.is_file() {
+        serde_json::from_slice(&fs::read(settings)?)?
+    } else {
+        SettingsConfiguration::default()
+    };
     apply_settings_configuration(harness, settings)
 }
 
@@ -119,62 +115,60 @@ fn apply_settings_configuration(
     harness: &mut PhenixHarness,
     settings: SettingsConfiguration,
 ) -> Result<(), Box<dyn Error>> {
+    let mut values = Vec::new();
     for (key, value) in settings.global {
-        set_option(harness, key, OptionScope::Global, value)?;
+        values.push(option_assignment(key, OptionScope::Global, value)?);
     }
-    for (session, values) in settings.sessions {
+    for (session, settings) in settings.sessions {
         let session = OptionSubjectId::parse(session)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-        for (key, value) in values {
-            set_option(
-                harness,
+        for (key, value) in settings {
+            values.push(option_assignment(
                 key,
                 OptionScope::Session {
                     session: session.clone(),
                 },
                 value,
-            )?;
+            )?);
         }
     }
-    for (agent, values) in settings.agents {
+    for (agent, settings) in settings.agents {
         let agent = OptionSubjectId::parse(agent)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-        for (key, value) in values {
-            set_option(
-                harness,
+        for (key, value) in settings {
+            values.push(option_assignment(
                 key,
                 OptionScope::Agent {
                     agent: agent.clone(),
                 },
                 value,
-            )?;
+            )?);
         }
     }
-    Ok(())
-}
 
-fn set_option(
-    harness: &mut PhenixHarness,
-    key: String,
-    scope: OptionScope,
-    value: SettingValue,
-) -> Result<(), Box<dyn Error>> {
-    let key = OptionKey::parse(key)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     let output = harness.invoke(
         &options_service(),
-        &serde_json::to_vec(&OptionCommand::Set {
-            key,
-            scope,
-            value: value.into(),
-        })?,
+        &serde_json::to_vec(&OptionCommand::Configure { values })?,
         &default_suite_authority(),
         None,
     )?;
     match serde_json::from_slice::<OptionResponse>(&output)? {
-        OptionResponse::Updated { .. } => Ok(()),
-        _ => Err("options service rejected settings override".into()),
+        OptionResponse::Configured { .. } => Ok(()),
+        _ => Err("options service rejected settings configuration".into()),
     }
+}
+
+fn option_assignment(
+    key: String,
+    scope: OptionScope,
+    value: SettingValue,
+) -> Result<OptionAssignment, Box<dyn Error>> {
+    Ok(OptionAssignment {
+        key: OptionKey::parse(key)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
+        scope,
+        value: value.into(),
+    })
 }
 
 pub(super) fn apply_runtime_config(

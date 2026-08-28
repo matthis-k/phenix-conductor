@@ -99,4 +99,4 @@ Other SDK modules may consume the corresponding model, tool, skill, context, and
 
 The supported Nix wrapper writes `settings.json` under `PHENIX_CONFIG_DIR`. The file contains optional `global`, `sessions`, and `agents` maps. Values are booleans, integers, or strings and must match the registered option type.
 
-Startup loads built-in option definitions first, then applies `settings.json`. Resolution remains `agent > session > global > default`; the file only supplies scoped overrides.
+Startup loads built-in option definitions first, then applies `settings.json`. Resolution remains `agent > session > global > default`; the file only supplies scoped overrides. The file is applied as one replaceable configuration snapshot, so removing an entry removes the prior file-derived value. Runtime `Set` values are a separate mutable layer and take precedence over configured values at the same scope.

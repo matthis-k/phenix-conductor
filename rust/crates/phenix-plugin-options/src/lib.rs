@@ -170,6 +170,14 @@ pub struct OptionDefinition {
     pub scopes: BTreeSet<OptionScopeKind>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OptionAssignment {
+    pub key: OptionKey,
+    pub scope: OptionScope,
+    pub value: OptionValue,
+}
+
 impl OptionDefinition {
     pub fn new(
         key: OptionKey,
@@ -219,6 +227,9 @@ pub enum OptionCommand {
     GetDefinition {
         key: OptionKey,
     },
+    Configure {
+        values: Vec<OptionAssignment>,
+    },
     Set {
         key: OptionKey,
         scope: OptionScope,
@@ -245,6 +256,9 @@ pub enum OptionResponse {
     },
     Definition {
         definition: Option<OptionDefinition>,
+    },
+    Configured {
+        count: usize,
     },
     Updated {
         key: OptionKey,
@@ -379,6 +393,8 @@ fn builtin_definition(
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 struct OptionState {
     definitions: BTreeMap<OptionKey, OptionDefinition>,
+    #[serde(default)]
+    configured_values: BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
     values: BTreeMap<String, BTreeMap<OptionKey, OptionValue>>,
 }
 
@@ -416,11 +432,49 @@ impl OptionState {
         }
     }
 
+    fn configure(&mut self, values: Vec<OptionAssignment>) -> Result<bool, String> {
+        let mut configured_values = BTreeMap::<String, BTreeMap<OptionKey, OptionValue>>::new();
+        for assignment in values {
+            self.validate_value(&assignment.key, &assignment.scope, &assignment.value)?;
+            let scope = assignment.scope.storage_key();
+            if configured_values
+                .entry(scope.clone())
+                .or_default()
+                .insert(assignment.key.clone(), assignment.value)
+                .is_some()
+            {
+                return Err(format!(
+                    "option {} is configured more than once at {scope}",
+                    assignment.key
+                ));
+            }
+        }
+        if self.configured_values == configured_values {
+            return Ok(false);
+        }
+        self.configured_values = configured_values;
+        Ok(true)
+    }
+
     fn set(
         &mut self,
         key: &OptionKey,
         scope: OptionScope,
         value: OptionValue,
+    ) -> Result<(), String> {
+        self.validate_value(key, &scope, &value)?;
+        self.values
+            .entry(scope.storage_key())
+            .or_default()
+            .insert(key.clone(), value);
+        Ok(())
+    }
+
+    fn validate_value(
+        &self,
+        key: &OptionKey,
+        scope: &OptionScope,
+        value: &OptionValue,
     ) -> Result<(), String> {
         let definition = self
             .definitions
@@ -432,15 +486,11 @@ impl OptionState {
                 scope.kind()
             ));
         }
-        if !definition.default.has_same_type(&value) {
+        if !definition.default.has_same_type(value) {
             return Err(format!(
                 "option {key} value type does not match its definition"
             ));
         }
-        self.values
-            .entry(scope.storage_key())
-            .or_default()
-            .insert(key.clone(), value);
         Ok(())
     }
 
@@ -503,7 +553,15 @@ impl OptionState {
     }
 
     fn value_at(&self, key: &OptionKey, scope: &OptionScope) -> Option<&OptionValue> {
-        self.values.get(&scope.storage_key())?.get(key)
+        let scope = scope.storage_key();
+        self.values
+            .get(&scope)
+            .and_then(|values| values.get(key))
+            .or_else(|| {
+                self.configured_values
+                    .get(&scope)
+                    .and_then(|values| values.get(key))
+            })
     }
 }
 
@@ -536,6 +594,11 @@ impl PluginInstance for OptionsPlugin {
             OptionCommand::GetDefinition { key } => OptionResponse::Definition {
                 definition: state.definitions.get(&key).cloned(),
             },
+            OptionCommand::Configure { values } => {
+                let count = values.len();
+                changed = state.configure(values)?;
+                OptionResponse::Configured { count }
+            }
             OptionCommand::Set { key, scope, value } => {
                 state.set(&key, scope.clone(), value)?;
                 changed = true;
@@ -676,6 +739,51 @@ mod tests {
         assert_eq!(resolved.value, OptionValue::String("agent".into()));
         assert_eq!(resolved.source, OptionValueSource::Agent);
         serde_json::to_vec(&state).unwrap();
+    }
+
+    #[test]
+    fn configuration_snapshot_replaces_removed_values_without_overwriting_runtime_state() {
+        let mut state = OptionState::default().with_defaults().unwrap();
+        let key = key("model.default");
+        state
+            .configure(vec![OptionAssignment {
+                key: key.clone(),
+                scope: OptionScope::Global,
+                value: OptionValue::String("configured".into()),
+            }])
+            .unwrap();
+        assert_eq!(
+            state
+                .resolve(&key, &OptionContext::default())
+                .unwrap()
+                .value,
+            OptionValue::String("configured".into())
+        );
+
+        state
+            .set(
+                &key,
+                OptionScope::Global,
+                OptionValue::String("runtime".into()),
+            )
+            .unwrap();
+        assert_eq!(
+            state
+                .resolve(&key, &OptionContext::default())
+                .unwrap()
+                .value,
+            OptionValue::String("runtime".into())
+        );
+
+        state.configure(Vec::new()).unwrap();
+        state.unset(&key, &OptionScope::Global).unwrap();
+        assert_eq!(
+            state
+                .resolve(&key, &OptionContext::default())
+                .unwrap()
+                .value,
+            OptionValue::String("default".into())
+        );
     }
 
     #[test]
