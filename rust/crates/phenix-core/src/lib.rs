@@ -27,6 +27,7 @@ mod reconciliation_inspection;
 mod registry;
 mod resolver;
 mod runtime;
+mod sdk;
 mod tasks;
 mod typed_component;
 
@@ -95,7 +96,7 @@ pub use external::{
 pub use frontend_metadata::FrontendMetadataResolutionError;
 pub use identity::{
     CapabilityId, ComponentId, ConfigurationFrontendId, EventTypeId, InterfaceId, PluginId,
-    ResourceNamespace, ServiceId, SubscriptionId,
+    ResourceNamespace, SdkNamespace, SdkResourceId, ServiceId, SubscriptionId,
 };
 pub use inspection::ResolvedHarnessInspection;
 pub use live_reconciliation::LiveReconciliationError;
@@ -129,6 +130,7 @@ pub use runtime::{
     Kernel, LayerResult, PluginHost, PluginInstance, PluginState, ServiceInvocationProvenance,
     ServiceParticipantOutcome, ServiceParticipantProvenance,
 };
+pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
 pub use tasks::{CancellationToken, TaskHandle, TaskRuntime};
 pub use typed_component::{ComponentInterface, ComponentInvocationError};
 

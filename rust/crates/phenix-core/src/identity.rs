@@ -61,6 +61,8 @@ identifier!(CapabilityId);
 identifier!(ResourceNamespace);
 identifier!(EventTypeId);
 identifier!(SubscriptionId);
+identifier!(SdkNamespace);
+identifier!(SdkResourceId);
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct InterfaceId(String);
