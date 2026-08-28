@@ -1,0 +1,226 @@
+name: PR 404 simplification validation
+
+on:
+  push:
+    branches:
+      - tmp/pr404-simplify-validated
+    paths:
+      - .github/workflows/pr404-simplify-validate.yml
+
+permissions:
+  contents: write
+
+jobs:
+  simplify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: tmp/pr404-simplify-validated
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+      - name: Apply simplifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 match, found {count}")
+              path.write_text(text.replace(old, new, 1))
+
+          registry = Path("rust/crates/phenix-core/src/registry.rs")
+          marker = '''    pub fn layer_policy(&self, service: &ServiceId) -> &[LayerPolicy] {
+              self.layer_policies
+                  .get(service)
+                  .map(Vec::as_slice)
+                  .unwrap_or_default()
+          }
+          '''
+          replace_once(
+              registry,
+              marker,
+              marker + '''
+          pub(crate) fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
+              &self.layer_policies
+          }
+          ''',
+              "KernelConfig layer policy view",
+          )
+
+          resolver = Path("rust/crates/phenix-core/src/resolver.rs")
+          replace_once(
+              resolver,
+              '''    kernel_config: KernelConfig,
+              component_graph: ResolvedComponentGraph,
+              layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+          ''',
+              '''    kernel_config: KernelConfig,
+              component_graph: ResolvedComponentGraph,
+          ''',
+              "ResolvedHarness duplicate layer policy field",
+          )
+          replace_once(
+              resolver,
+              '''            kernel_config,
+              component_graph,
+              layer_policies,
+          ''',
+              '''            kernel_config,
+              component_graph,
+          ''',
+              "ResolvedHarness duplicate layer policy init",
+          )
+          replace_once(
+              resolver,
+              '''    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
+              &self.layer_policies
+          }
+          ''',
+              '''    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
+              self.kernel_config.layer_policies()
+          }
+          ''',
+              "ResolvedHarness derived layer policy view",
+          )
+
+          reconciliation = Path("rust/crates/phenix-core/src/reconciliation.rs")
+          text = reconciliation.read_text()
+          start = text.index("    pub fn resolve_candidate(")
+          end = text.index("    pub fn preview_candidate(&self", start)
+          text = text[:start] + text[end:]
+          for old, new, label in [
+              ("let candidate = Self::resolve_candidate(\n", "let candidate = ResolvedHarness::resolve(\n", "plain reconciliation"),
+              ("let candidate = Self::resolve_candidate_with_resources(\n", "let candidate = ResolvedHarness::resolve_with_resources(\n", "resource reconciliation"),
+              ("let candidate = Self::resolve_frontend_candidate(\n", "let candidate = ResolvedHarness::resolve_frontends(\n", "frontend reconciliation"),
+          ]:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 match, found {count}")
+              text = text.replace(old, new, 1)
+          reconciliation.write_text(text)
+
+          runtime = Path("rust/crates/phenix-core/src/runtime.rs")
+          replace_once(
+              runtime,
+              '''struct InvocationTrace {
+              graph_generation: Option<GraphGenerationId>,
+              service: ServiceId,
+              planned_chain: ResolvedServiceChain,
+          ''',
+              '''struct InvocationTrace {
+              graph_generation: Option<GraphGenerationId>,
+              planned_chain: ResolvedServiceChain,
+          ''',
+              "InvocationTrace duplicate service field",
+          )
+          replace_once(
+              runtime,
+              '''        Self {
+                  graph_generation: graph_generation.cloned(),
+                  service: chain.service.clone(),
+                  planned_chain: chain.clone(),
+          ''',
+              '''        Self {
+                  graph_generation: graph_generation.cloned(),
+                  planned_chain: chain.clone(),
+          ''',
+              "InvocationTrace duplicate service init",
+          )
+          replace_once(
+              runtime,
+              "            service: self.service,\n",
+              "            service: self.planned_chain.service.clone(),\n",
+              "InvocationTrace derived service output",
+          )
+
+          models = Path("rust/crates/phenix-plugin-models/src/implementation.rs")
+          replace_once(
+              models,
+              "pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};\n",
+              '''pub use phenix_core::{
+              model_inference_service, ModelInferenceRequest, ModelInferenceResponse,
+              MODEL_INFERENCE_SERVICE,
+          };
+          ''',
+              "model primitive re-export",
+          )
+          replace_once(
+              models,
+              'pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";\n',
+              "",
+              "duplicate model service constant",
+          )
+          replace_once(
+              models,
+              '''#[must_use]
+          pub fn model_inference_service() -> ServiceId {
+              ServiceId::parse(MODEL_INFERENCE_SERVICE).expect("static service id is valid")
+          }
+
+          ''',
+              "",
+              "duplicate model service helper",
+          )
+
+          context = Path("rust/crates/phenix-plugin-context/src/implementation.rs")
+          replace_once(
+              context,
+              '''pub use phenix_core::{
+              ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
+          };
+          ''',
+              '''pub use phenix_core::{
+              context_service, ContextDescriptor, ContextResourceKind, ContextResourceRevision,
+              ContextScope, CONTEXT_SERVICE,
+          };
+          ''',
+              "context primitive re-export",
+          )
+          replace_once(
+              context,
+              'pub const CONTEXT_SERVICE: &str = "phenix.context@1";\n',
+              "",
+              "duplicate context service constant",
+          )
+          replace_once(
+              context,
+              '''#[must_use]
+          pub fn context_service() -> ServiceId {
+              ServiceId::parse(CONTEXT_SERVICE).expect("static service id is valid")
+          }
+
+          ''',
+              "",
+              "duplicate context service helper",
+          )
+          PY
+      - name: Validate simplifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix run .#phenix-maintenance -- fix
+          nix run .#phenix-maintenance -- rust-ci clippy
+          nix run .#phenix-maintenance -- rust-ci unit
+          nix run .#phenix-maintenance -- rust-ci integration
+          git diff --check
+      - name: Publish validated tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr404-simplify-validate.yml
+          git add -A
+          git config user.name "phenix-worker"
+          git config user.email "phenix-worker@users.noreply.github.com"
+          git commit -m "refactor: derive resolved composition state"
+          git push origin HEAD:tmp/pr404-simplify-validated
