@@ -114,10 +114,8 @@ fn kernel_with_persistence(persistence: impl PersistenceBackend + 'static) -> Ke
         &authority(),
     )
     .unwrap();
-    let mut kernel = Kernel::with_persistence(
-        KernelConfig::new([sessions, tree]).unwrap(),
-        persistence,
-    );
+    let mut kernel =
+        Kernel::with_persistence(KernelConfig::new([sessions, tree]).unwrap(), persistence);
     kernel.activate_resolved_harness(&resolved).unwrap();
     kernel
         .register_embedded_factory(session_plugin, session_factory)
