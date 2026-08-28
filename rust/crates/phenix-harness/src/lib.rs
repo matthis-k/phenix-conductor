@@ -178,11 +178,36 @@ impl HarnessBuilder {
     }
 
     pub fn with_selected_suite(enabled: &BTreeSet<String>) -> Result<Self, String> {
-        let available = Self::default_suite_plugin_ids()
-            .into_iter()
-            .chain(Self::basic_suite_plugin_ids())
-            .collect::<BTreeSet<_>>();
-        let unknown = enabled.difference(&available).cloned().collect::<Vec<_>>();
+        let authority = default_suite_authority();
+        let available = [
+            repository_worker_manifest(),
+            session_manifest(),
+            session_tree_manifest(),
+            artifact_manifest(),
+            cli_manifest(authority.clone()),
+            context_manifest(),
+            execution_manifest(authority.clone()),
+            language_manifest(),
+            planning_manifest(),
+            workspace_manifest(),
+            model_routing_manifest(authority.clone()),
+            job_manifest(),
+            frontend_manifest(authority.clone()),
+            hook_manifest(authority.clone()),
+            debug_manifest(authority.clone()),
+            basic_model_manifest(),
+            basic_tools_manifest(),
+            basic_skills_manifest(),
+            basic_context_manifest(),
+        ]
+        .into_iter()
+        .map(|manifest| (manifest.id.as_str().to_owned(), manifest))
+        .collect::<BTreeMap<_, _>>();
+        let unknown = enabled
+            .iter()
+            .filter(|id| !available.contains_key(*id))
+            .cloned()
+            .collect::<Vec<_>>();
         if !unknown.is_empty() {
             return Err(format!(
                 "unknown first-party plugin id(s): {}",
@@ -190,44 +215,62 @@ impl HarnessBuilder {
             ));
         }
 
+        let mut enabled = enabled.clone();
+        let mut pending = enabled.iter().cloned().collect::<Vec<_>>();
+        while let Some(plugin) = pending.pop() {
+            let manifest = available
+                .get(&plugin)
+                .expect("validated selected plugin exists in first-party catalog");
+            for dependency in &manifest.dependencies {
+                let dependency = dependency.as_str().to_owned();
+                if !available.contains_key(&dependency) {
+                    return Err(format!(
+                        "first-party plugin {plugin} depends on unavailable first-party plugin {dependency}"
+                    ));
+                }
+                if enabled.insert(dependency.clone()) {
+                    pending.push(dependency);
+                }
+            }
+        }
+
         let mut builder = Self::new();
-        let authority = default_suite_authority();
         builder.component_authority = authority.clone();
         builder.add_selected(
-            enabled,
+            &enabled,
             repository_worker_manifest(),
             repository_worker_factory,
         )?;
-        builder.add_selected(enabled, session_manifest(), session_factory)?;
-        builder.add_selected(enabled, session_tree_manifest(), session_tree_factory)?;
-        builder.add_selected(enabled, artifact_manifest(), artifact_factory)?;
-        builder.add_selected(enabled, cli_manifest(authority.clone()), cli_factory)?;
-        builder.add_selected(enabled, context_manifest(), context_factory)?;
+        builder.add_selected(&enabled, session_manifest(), session_factory)?;
+        builder.add_selected(&enabled, session_tree_manifest(), session_tree_factory)?;
+        builder.add_selected(&enabled, artifact_manifest(), artifact_factory)?;
+        builder.add_selected(&enabled, cli_manifest(authority.clone()), cli_factory)?;
+        builder.add_selected(&enabled, context_manifest(), context_factory)?;
         builder.add_selected(
-            enabled,
+            &enabled,
             execution_manifest(authority.clone()),
             execution_factory,
         )?;
-        builder.add_selected(enabled, language_manifest(), language_factory)?;
-        builder.add_selected(enabled, planning_manifest(), planning_factory)?;
-        builder.add_selected(enabled, workspace_manifest(), workspace_factory)?;
+        builder.add_selected(&enabled, language_manifest(), language_factory)?;
+        builder.add_selected(&enabled, planning_manifest(), planning_factory)?;
+        builder.add_selected(&enabled, workspace_manifest(), workspace_factory)?;
         builder.add_selected(
-            enabled,
+            &enabled,
             model_routing_manifest(authority.clone()),
             model_routing_factory,
         )?;
-        builder.add_selected(enabled, job_manifest(), job_factory)?;
+        builder.add_selected(&enabled, job_manifest(), job_factory)?;
         builder.add_selected(
-            enabled,
+            &enabled,
             frontend_manifest(authority.clone()),
             frontend_factory,
         )?;
-        builder.add_selected(enabled, hook_manifest(authority.clone()), hook_factory)?;
-        builder.add_selected(enabled, debug_manifest(authority.clone()), debug_factory)?;
-        builder.add_selected(enabled, basic_model_manifest(), basic_model_factory)?;
-        builder.add_selected(enabled, basic_tools_manifest(), basic_tools_factory)?;
-        builder.add_selected(enabled, basic_skills_manifest(), basic_skills_factory)?;
-        builder.add_selected(enabled, basic_context_manifest(), basic_context_factory)?;
+        builder.add_selected(&enabled, hook_manifest(authority.clone()), hook_factory)?;
+        builder.add_selected(&enabled, debug_manifest(authority.clone()), debug_factory)?;
+        builder.add_selected(&enabled, basic_model_manifest(), basic_model_factory)?;
+        builder.add_selected(&enabled, basic_tools_manifest(), basic_tools_factory)?;
+        builder.add_selected(&enabled, basic_skills_manifest(), basic_skills_factory)?;
+        builder.add_selected(&enabled, basic_context_manifest(), basic_context_factory)?;
         for component in [
             repository_worker_component_manifest(),
             session_component_manifest(),
