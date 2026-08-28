@@ -112,14 +112,18 @@ let
               layerPolicyJson = builtins.toJSON layerPolicies;
             in
             ''
-              mkdir -p "$out/share/phenix"
-              rm -f "$out/share/phenix/settings.json"
-              cp ${settingsFile} "$out/share/phenix/settings.json"
+              ${pkgs.lib.optionalString (resources != [ ] || settings != { }) ''
+                mkdir -p "$out/share/phenix"
+                rm -f "$out/share/phenix/settings.json"
+                cp ${settingsFile} "$out/share/phenix/settings.json"
+              ''}
 
               for program in phenix phenix-harness; do
                 if [ -e "$out/bin/$program" ]; then
-                  wrapProgram "$out/bin/$program" \
-                    --set PHENIX_CONFIG_DIR "$out/share/phenix"
+                  ${pkgs.lib.optionalString (resources != [ ] || settings != { }) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_CONFIG_DIR "$out/share/phenix"
+                  ''}
                   ${pkgs.lib.optionalString (packagedPlugins != [ ]) ''
                     wrapProgram "$out/bin/$program" \
                       --set PHENIX_PLUGIN_PACKAGES ${pkgs.lib.escapeShellArg pluginPackages}
