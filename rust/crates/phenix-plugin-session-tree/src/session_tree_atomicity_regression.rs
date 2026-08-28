@@ -341,12 +341,14 @@ fn failed_combined_child_creation_rolls_back_session_and_lineage_namespaces() {
     )
     .unwrap_err();
     assert!(error.contains("transaction assertion failed"));
+    assert!(session_exists(&mut kernel, "root"));
     assert!(!session_exists(&mut kernel, "child"));
     assert_eq!(parent(&mut kernel, "child"), None);
     assert!(children(&mut kernel, "root").is_empty());
 
     drop(kernel);
     let mut restored = kernel_with(&path);
+    assert!(session_exists(&mut restored, "root"));
     assert!(!session_exists(&mut restored, "child"));
     assert_eq!(parent(&mut restored, "child"), None);
     assert!(children(&mut restored, "root").is_empty());
