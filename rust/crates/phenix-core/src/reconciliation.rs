@@ -130,52 +130,6 @@ impl GraphReconciler {
         &self.active
     }
 
-    pub fn resolve_candidate(
-        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
-        component_manifests: impl IntoIterator<Item = ComponentManifest>,
-        contributions: impl IntoIterator<Item = ConfigContribution>,
-        authority_ceiling: &Authority,
-    ) -> Result<ResolvedHarness, ResolvedHarnessError> {
-        ResolvedHarness::resolve(
-            plugin_manifests,
-            component_manifests,
-            contributions,
-            authority_ceiling,
-        )
-    }
-
-    pub fn resolve_candidate_with_resources(
-        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
-        component_manifests: impl IntoIterator<Item = ComponentManifest>,
-        resources: impl IntoIterator<Item = SkillResourceMetadata>,
-        contributions: impl IntoIterator<Item = ConfigContribution>,
-        authority_ceiling: &Authority,
-    ) -> Result<ResolvedHarness, ResolvedHarnessError> {
-        ResolvedHarness::resolve_with_resources(
-            plugin_manifests,
-            component_manifests,
-            resources,
-            contributions,
-            authority_ceiling,
-        )
-    }
-
-    pub fn resolve_frontend_candidate(
-        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
-        component_manifests: impl IntoIterator<Item = ComponentManifest>,
-        frontend_metadata: impl IntoIterator<Item = ConfigurationFrontendMetadata>,
-        contributions: impl IntoIterator<Item = (ConfigurationFrontendId, FrontendConfigContribution)>,
-        authority_ceiling: &Authority,
-    ) -> Result<ResolvedHarness, ResolvedHarnessError> {
-        ResolvedHarness::resolve_frontends(
-            plugin_manifests,
-            component_manifests,
-            frontend_metadata,
-            contributions,
-            authority_ceiling,
-        )
-    }
-
     pub fn preview_candidate(&self, candidate: &ResolvedHarness) -> ReconciliationPreview {
         let diff = GraphDiff::between(&self.active, candidate);
         let transition_plan = transition_plan(&self.active, candidate, &diff);
@@ -205,7 +159,7 @@ impl GraphReconciler {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<ReconciliationResult, ResolvedHarnessError> {
-        let candidate = Self::resolve_candidate(
+        let candidate = ResolvedHarness::resolve(
             plugin_manifests,
             component_manifests,
             contributions,
@@ -222,7 +176,7 @@ impl GraphReconciler {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<ReconciliationResult, ResolvedHarnessError> {
-        let candidate = Self::resolve_candidate_with_resources(
+        let candidate = ResolvedHarness::resolve_with_resources(
             plugin_manifests,
             component_manifests,
             resources,
@@ -240,7 +194,7 @@ impl GraphReconciler {
         contributions: impl IntoIterator<Item = (ConfigurationFrontendId, FrontendConfigContribution)>,
         authority_ceiling: &Authority,
     ) -> Result<ReconciliationResult, ResolvedHarnessError> {
-        let candidate = Self::resolve_frontend_candidate(
+        let candidate = ResolvedHarness::resolve_frontends(
             plugin_manifests,
             component_manifests,
             frontend_metadata,

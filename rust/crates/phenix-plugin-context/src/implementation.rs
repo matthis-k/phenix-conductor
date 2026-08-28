@@ -4,13 +4,13 @@ use phenix_core::{
     PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{
-    ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
+    context_service, ContextDescriptor, ContextResourceKind, ContextResourceRevision,
+    ContextScope, CONTEXT_SERVICE,
 };
 use phenix_plugin_execution::{ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const CONTEXT_SERVICE: &str = "phenix.context@1";
 const CONTEXT_PLUGIN: &str = "phenix.context";
 const CONTEXT_NAMESPACE: &str = "phenix.context.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
@@ -154,10 +154,6 @@ pub fn context_factory() -> Box<dyn PluginInstance> {
     Box::new(ContextPlugin)
 }
 
-#[must_use]
-pub fn context_service() -> ServiceId {
-    ServiceId::parse(CONTEXT_SERVICE).expect("static service id is valid")
-}
 
 fn context_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(CONTEXT_NAMESPACE).expect("static namespace is valid")

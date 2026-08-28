@@ -292,6 +292,10 @@ impl KernelConfig {
             .unwrap_or_default()
     }
 
+    pub(crate) fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
+        &self.layer_policies
+    }
+
     pub fn resolve_chain(
         &self,
         service: &ServiceId,

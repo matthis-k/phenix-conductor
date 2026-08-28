@@ -67,7 +67,6 @@ struct PendingParticipantProvenance {
 #[derive(Clone, Debug)]
 struct InvocationTrace {
     graph_generation: Option<GraphGenerationId>,
-    service: ServiceId,
     planned_chain: ResolvedServiceChain,
     caller_authority: Authority,
     participants: Vec<PendingParticipantProvenance>,
@@ -82,7 +81,6 @@ impl InvocationTrace {
     ) -> Self {
         Self {
             graph_generation: graph_generation.cloned(),
-            service: chain.service.clone(),
             planned_chain: chain.clone(),
             caller_authority: caller_authority.clone(),
             participants: Vec::new(),
@@ -117,7 +115,7 @@ impl InvocationTrace {
         ServiceInvocationProvenance {
             graph_generation: self.graph_generation,
             policy_identity: self.planned_chain.policy_identity,
-            service: self.service,
+            service: self.planned_chain.service.clone(),
             planned_chain: self.planned_chain,
             caller_authority: self.caller_authority,
             participants: self

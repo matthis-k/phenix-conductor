@@ -2,12 +2,14 @@ use phenix_core::{
     Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
 };
-pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
+pub use phenix_core::{
+    model_inference_service, ModelInferenceRequest, ModelInferenceResponse,
+    MODEL_INFERENCE_SERVICE,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const MODEL_ROUTING_SERVICE: &str = "phenix.models.routing@1";
-pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";
 const MODEL_ROUTING_PLUGIN: &str = "phenix.models";
 const MODEL_NAMESPACE: &str = "phenix.models.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
@@ -123,10 +125,6 @@ pub fn model_routing_service() -> ServiceId {
     ServiceId::parse(MODEL_ROUTING_SERVICE).expect("static service id is valid")
 }
 
-#[must_use]
-pub fn model_inference_service() -> ServiceId {
-    ServiceId::parse(MODEL_INFERENCE_SERVICE).expect("static service id is valid")
-}
 
 fn model_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(MODEL_NAMESPACE).expect("static namespace is valid")

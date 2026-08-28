@@ -167,7 +167,6 @@ pub struct ResolvedHarness {
     configuration: ResolvedConfigContributions,
     kernel_config: KernelConfig,
     component_graph: ResolvedComponentGraph,
-    layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
 }
 
 impl ResolvedHarness {
@@ -271,7 +270,6 @@ impl ResolvedHarness {
             configuration,
             kernel_config,
             component_graph,
-            layer_policies,
         })
     }
 
@@ -342,7 +340,7 @@ impl ResolvedHarness {
     }
 
     pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
-        &self.layer_policies
+        self.kernel_config.layer_policies()
     }
 
     pub(crate) fn incorporate_semantic_metadata<T: Serialize>(&mut self, metadata: &T) {
