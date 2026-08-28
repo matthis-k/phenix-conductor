@@ -3,15 +3,75 @@ use crate::{
     session_tree_service, SessionTreeCommand, SessionTreeResponse,
 };
 use phenix_core::{
-    Authority, Kernel, KernelConfig, LocalPersistence, ResolvedHarness, ResolvedHarnessActivation,
-    SessionCommand,
+    Authority, BackendFeature, DurableSchema, Kernel, KernelConfig, LocalPersistence,
+    NamespaceTransaction, PersistenceBackend, PersistenceError, PluginId, ResolvedHarness,
+    ResolvedHarnessActivation, ResourceNamespace, SchemaMigration, SessionCommand, TransactionOp,
 };
 use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
 use std::{
+    collections::BTreeSet,
     fs,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+struct FailMultiNamespaceTransaction {
+    inner: LocalPersistence,
+}
+
+impl FailMultiNamespaceTransaction {
+    fn open(path: &PathBuf) -> Self {
+        Self {
+            inner: LocalPersistence::open(path).unwrap(),
+        }
+    }
+}
+
+impl PersistenceBackend for FailMultiNamespaceTransaction {
+    fn supported_features(&self) -> BTreeSet<BackendFeature> {
+        self.inner.supported_features()
+    }
+
+    fn register_schema(
+        &mut self,
+        owner: &PluginId,
+        schema: &DurableSchema,
+    ) -> Result<(), PersistenceError> {
+        self.inner.register_schema(owner, schema)
+    }
+
+    fn migrate_schema(
+        &mut self,
+        owner: &PluginId,
+        schema: &DurableSchema,
+        migrations: &[SchemaMigration],
+    ) -> Result<(), PersistenceError> {
+        self.inner.migrate_schema(owner, schema, migrations)
+    }
+
+    fn read(
+        &self,
+        caller: &PluginId,
+        namespace: &ResourceNamespace,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, PersistenceError> {
+        self.inner.read(caller, namespace, key)
+    }
+
+    fn transact_many(
+        &mut self,
+        transactions: &[NamespaceTransaction],
+    ) -> Result<(), PersistenceError> {
+        let mut transactions = transactions.to_vec();
+        if transactions.len() > 1 {
+            transactions[1].operations.push(TransactionOp::AssertValue {
+                key: "__injected_atomicity_failure__".into(),
+                expected: Some(b"must-exist".to_vec()),
+            });
+        }
+        self.inner.transact_many(&transactions)
+    }
+}
 
 fn authority() -> Authority {
     Authority::new(
@@ -39,7 +99,7 @@ fn temp_db() -> PathBuf {
     ))
 }
 
-fn kernel_with(path: &PathBuf) -> Kernel {
+fn kernel_with_persistence(persistence: impl PersistenceBackend + 'static) -> Kernel {
     let sessions = session_manifest();
     let tree = session_tree_manifest();
     let session_plugin = sessions.id.clone();
@@ -56,7 +116,7 @@ fn kernel_with(path: &PathBuf) -> Kernel {
     .unwrap();
     let mut kernel = Kernel::with_persistence(
         KernelConfig::new([sessions, tree]).unwrap(),
-        LocalPersistence::open(path).unwrap(),
+        persistence,
     );
     kernel.activate_resolved_harness(&resolved).unwrap();
     kernel
@@ -69,6 +129,10 @@ fn kernel_with(path: &PathBuf) -> Kernel {
     kernel
 }
 
+fn kernel_with(path: &PathBuf) -> Kernel {
+    kernel_with_persistence(LocalPersistence::open(path).unwrap())
+}
+
 fn invoke_session(kernel: &mut Kernel, command: SessionCommand) {
     kernel
         .invoke(
@@ -78,6 +142,21 @@ fn invoke_session(kernel: &mut Kernel, command: SessionCommand) {
             None,
         )
         .unwrap();
+}
+
+fn session_exists(kernel: &mut Kernel, id: &str) -> bool {
+    let output = kernel
+        .invoke(
+            &phenix_core::session_service(),
+            &serde_json::to_vec(&SessionCommand::Get { id: id.into() }).unwrap(),
+            &authority(),
+            None,
+        )
+        .unwrap();
+    matches!(
+        serde_json::from_slice::<phenix_core::SessionResponse>(&output).unwrap(),
+        phenix_core::SessionResponse::Session { session: Some(_) }
+    )
 }
 
 fn invoke_tree(
@@ -243,5 +322,35 @@ fn combined_child_session_and_lineage_operation_commits_as_one_semantic_operatio
     ));
     assert_eq!(parent(&mut restored, "child"), Some("root".into()));
     assert_eq!(children(&mut restored, "root"), vec!["child"]);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn failed_combined_child_creation_rolls_back_session_and_lineage_namespaces() {
+    let path = temp_db();
+    {
+        let mut setup = kernel_with(&path);
+        invoke_session(&mut setup, SessionCommand::Create { id: "root".into() });
+    }
+
+    let mut kernel = kernel_with_persistence(FailMultiNamespaceTransaction::open(&path));
+    let error = invoke_tree(
+        &mut kernel,
+        SessionTreeCommand::CreateChild {
+            session_id: "child".into(),
+            parent_session_id: "root".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(error.contains("transaction assertion failed"));
+    assert!(!session_exists(&mut kernel, "child"));
+    assert_eq!(parent(&mut kernel, "child"), None);
+    assert!(children(&mut kernel, "root").is_empty());
+
+    drop(kernel);
+    let mut restored = kernel_with(&path);
+    assert!(!session_exists(&mut restored, "child"));
+    assert_eq!(parent(&mut restored, "child"), None);
+    assert!(children(&mut restored, "root").is_empty());
     let _ = fs::remove_file(path);
 }
