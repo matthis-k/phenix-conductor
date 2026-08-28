@@ -64,8 +64,10 @@ let
     jobs = "phenix.jobs";
     language = "phenix.language";
     models = "phenix.models";
+    options = "phenix.options";
     planning = "phenix.planning";
     repository-workers = "phenix.repository-workers";
+    sdk = "phenix.sdk";
     session-tree = "phenix.session-tree";
     sessions = "phenix.sessions";
     workspace = "phenix.workspace";
