@@ -1,8 +1,8 @@
 use crate::{
     Authority, CompatibilityMetadata, ComponentHostKind, ComponentId, ComponentManifest,
-    ComponentRuntimeMetadata, ComponentStateClass, CompositionMetadataInput,
-    DurableMigrationMetadata, GraphReconciler, PluginExecution, PluginId, PluginManifest,
-    PluginPackageMetadata, ReloadPolicy, ResolvedHarness, ResourceNamespace,
+    ComponentRuntimeMetadata, ComponentStateClass, CompositionMetadataInput, ConfigNamespace,
+    DurableMigrationMetadata, GraphReconciler, InterfaceId, PluginExecution, PluginId,
+    PluginManifest, PluginPackageMetadata, ReloadPolicy, ResolvedHarness, ResourceNamespace,
 };
 use std::collections::BTreeSet;
 
@@ -95,6 +95,33 @@ fn component_lifecycle_metadata_changes_stable_generation_identity() {
     changed.state_class = ComponentStateClass::Durable;
     changed.reload_policy = ReloadPolicy::MigrationRequired;
 
+    assert_ne!(baseline, resolve(package(), changed));
+}
+
+#[test]
+fn component_contract_and_contribution_metadata_change_stable_generation_identity() {
+    let baseline = resolve(package(), component_metadata());
+
+    let mut changed = component_metadata();
+    changed
+        .configuration_contracts
+        .insert(ConfigNamespace::parse("fixture.config@1").unwrap());
+    assert_ne!(baseline, resolve(package(), changed));
+
+    let mut changed = component_metadata();
+    changed
+        .interposition_interfaces
+        .insert(InterfaceId::parse("fixture.interposition@1").unwrap());
+    assert_ne!(baseline, resolve(package(), changed));
+
+    let mut changed = component_metadata();
+    changed.event_contributions.insert("fixture.event".into());
+    assert_ne!(baseline, resolve(package(), changed));
+
+    let mut changed = component_metadata();
+    changed
+        .controller_contributions
+        .insert("fixture.controller".into());
     assert_ne!(baseline, resolve(package(), changed));
 }
 
