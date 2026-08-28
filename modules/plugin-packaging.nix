@@ -71,6 +71,7 @@ let
       resources ? [ ],
       enabledPlugins ? null,
       layerPolicies ? [ ],
+      settings ? { },
       ...
     }:
     let
@@ -83,6 +84,7 @@ let
       embeddedPlugins = builtins.filter isEmbedded plugins;
       packagedPlugins = builtins.filter (plugin: !isEmbedded plugin) plugins;
       selectedEmbeddedIds = map (plugin: plugin.phenixPluginId) embeddedPlugins;
+      settingsFile = pkgs.writeText "phenix-settings.json" (builtins.toJSON settings);
       selectedIds =
         if enabledPlugins != null then
           enabledPlugins
@@ -91,7 +93,7 @@ let
         else
           null;
     in
-    if plugins == [ ] && resources == [ ] && selectedIds == null && layerPolicies == [ ] then
+    if plugins == [ ] && resources == [ ] && selectedIds == null && layerPolicies == [ ] && settings == { } then
       base
     else
       pkgs.symlinkJoin {
@@ -108,8 +110,14 @@ let
               layerPolicyJson = builtins.toJSON layerPolicies;
             in
             ''
+              mkdir -p "$out/share/phenix"
+              rm -f "$out/share/phenix/settings.json"
+              cp ${settingsFile} "$out/share/phenix/settings.json"
+
               for program in phenix phenix-harness; do
                 if [ -e "$out/bin/$program" ]; then
+                  wrapProgram "$out/bin/$program" \
+                    --set PHENIX_CONFIG_DIR "$out/share/phenix"
                   ${pkgs.lib.optionalString (packagedPlugins != [ ]) ''
                     wrapProgram "$out/bin/$program" \
                       --set PHENIX_PLUGIN_PACKAGES ${pkgs.lib.escapeShellArg pluginPackages}
@@ -124,7 +132,6 @@ let
                   ''}
                   ${pkgs.lib.optionalString (resources != [ ]) ''
                     wrapProgram "$out/bin/$program" \
-                      --set PHENIX_RUNTIME_CONFIG "$out/share/phenix/runtime.json" \
                       --set PHENIX_SKILL_PATH "$out/share/phenix/skills"
                   ''}
                 fi
@@ -264,8 +271,10 @@ in
         "jobs"
         "language"
         "models"
+        "options"
         "planning"
         "repository-workers"
+        "sdk"
         "session-tree"
         "sessions"
         "workspace"
@@ -337,7 +346,7 @@ in
             test -f "${defaultComposition}/share/phenix/skills/pstack-LICENSE"
             export PHENIX_STATE_DB="$TMPDIR/composition.sqlite"
             "${defaultComposition}/bin/phenix" --list-services > "$TMPDIR/default-services.json"
-            jq -e '(.plugins | length == 15) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
+            jq -e '(.plugins | length == 17) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/external.sqlite"
             "${externalComposition}/bin/phenix" --list-services > "$TMPDIR/external-services.json"

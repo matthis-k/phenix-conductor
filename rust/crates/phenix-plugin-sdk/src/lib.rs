@@ -20,13 +20,18 @@ use phenix_plugin_options::{
 };
 use phenix_plugin_sessions::{SessionCommand, SessionInterface, SessionRecord, SessionResponse};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    env, fs,
+    path::{Component, Path, PathBuf},
+};
 
 pub const SDK_PLUGIN: &str = "phenix.sdk";
 pub const SDK_COMPONENT: &str = "phenix.sdk";
 pub const SDK_SESSION_SERVICE: &str = "phenix.sdk.sessions@1";
 pub const SDK_TOOLS_SERVICE: &str = "phenix.sdk.tools@1";
 pub const SDK_SKILLS_SERVICE: &str = "phenix.sdk.skills@1";
+pub const SDK_CONFIG_SERVICE: &str = "phenix.sdk.config@1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -141,6 +146,34 @@ impl ComponentInterface for SdkSkillsInterface {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SdkConfigCommand {
+    Read { path: String },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SdkConfigResponse {
+    File { content: Vec<u8> },
+}
+
+pub struct SdkConfigInterface;
+
+impl ComponentInterface for SdkConfigInterface {
+    type Request = SdkConfigCommand;
+    type Response = SdkConfigResponse;
+
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(SDK_CONFIG_SERVICE).expect("static SDK config interface id is valid")
+    }
+}
+
+#[must_use]
+pub fn sdk_config_service() -> ServiceId {
+    ServiceId::parse(SDK_CONFIG_SERVICE).expect("static SDK config service id is valid")
+}
+
 #[must_use]
 pub fn sdk_session_service() -> ServiceId {
     ServiceId::parse(SDK_SESSION_SERVICE).expect("static SDK session service id is valid")
@@ -172,6 +205,7 @@ pub fn sdk_manifest(maximum_authority: Authority) -> PluginManifest {
             sdk_session_service(),
             sdk_tools_service(),
             sdk_skills_service(),
+            sdk_config_service(),
         ]
         .into_iter()
         .map(|service| ServiceContribution {
@@ -218,6 +252,11 @@ pub fn sdk_component_manifest(maximum_authority: Authority) -> ComponentManifest
                 priority: 100,
                 required_authority: Authority::default(),
             },
+            ComponentExport {
+                interface: SdkConfigInterface::interface_id(),
+                priority: 100,
+                required_authority: Authority::default(),
+            },
         ],
         maximum_authority,
     }
@@ -225,7 +264,9 @@ pub fn sdk_component_manifest(maximum_authority: Authority) -> ComponentManifest
 
 #[must_use]
 pub fn sdk_factory() -> Box<dyn PluginInstance> {
-    Box::new(SdkPlugin)
+    Box::new(SdkPlugin {
+        config_root: env::var_os("PHENIX_CONFIG_DIR").map(PathBuf::from),
+    })
 }
 
 #[must_use]
@@ -239,6 +280,7 @@ pub fn sdk_contribution() -> SdkContribution {
         ModelRoutingInterface::interface_id(),
         SdkToolsInterface::interface_id(),
         SdkSkillsInterface::interface_id(),
+        SdkConfigInterface::interface_id(),
         ContextInterface::interface_id(),
         OptionsInterface::interface_id(),
     ]);
@@ -249,11 +291,14 @@ pub fn sdk_contribution() -> SdkContribution {
         SdkResourceId::parse("sdk/phenix/skills").expect("static SDK resource id is valid"),
         SdkResourceId::parse("sdk/phenix/context").expect("static SDK resource id is valid"),
         SdkResourceId::parse("sdk/phenix/options").expect("static SDK resource id is valid"),
+        SdkResourceId::parse("sdk/phenix/config").expect("static SDK resource id is valid"),
     ]);
     contribution
 }
 
-struct SdkPlugin;
+struct SdkPlugin {
+    config_root: Option<PathBuf>,
+}
 
 impl PluginInstance for SdkPlugin {
     fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
@@ -286,8 +331,42 @@ impl PluginInstance for SdkPlugin {
             return serde_json::to_vec(&skill_command(host, command)?)
                 .map_err(|error| error.to_string());
         }
+        if service == &sdk_config_service() {
+            let command: SdkConfigCommand =
+                serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let root = self
+                .config_root
+                .as_deref()
+                .ok_or("PHENIX_CONFIG_DIR is not configured")?;
+            return serde_json::to_vec(&config_command(root, command)?)
+                .map_err(|error| error.to_string());
+        }
         Err(format!("unsupported SDK service: {service}"))
     }
+}
+
+fn config_command(root: &Path, command: SdkConfigCommand) -> Result<SdkConfigResponse, String> {
+    match command {
+        SdkConfigCommand::Read { path } => {
+            let path = config_path(root, &path)?;
+            let content = fs::read(&path).map_err(|error| {
+                format!("failed to read config file {}: {error}", path.display())
+            })?;
+            Ok(SdkConfigResponse::File { content })
+        }
+    }
+}
+
+fn config_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    require_non_empty("config path", relative)?;
+    let relative = Path::new(relative);
+    if !relative
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err("config path must be relative and contain no . or .. components".into());
+    }
+    Ok(root.join(relative))
 }
 
 fn open_session(

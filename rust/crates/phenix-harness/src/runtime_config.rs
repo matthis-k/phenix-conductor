@@ -1,8 +1,9 @@
 use phenix_harness::{default_suite_authority, PhenixHarness};
 use phenix_plugin_catalog::{
-    execution_configuration_service, model_routing_service, AgentDefinition,
+    execution_configuration_service, model_routing_service, options_service, AgentDefinition,
     ExecutionConfigurationCommand, ExecutionConfigurationResponse, ModelCommand, ModelResponse,
-    ModelTarget, OrchestrationDefinition, RoutingProfile,
+    ModelTarget, OptionCommand, OptionKey, OptionResponse, OptionScope, OptionSubjectId,
+    OptionValue, OrchestrationDefinition, RoutingProfile,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -24,6 +25,35 @@ struct RuntimeRoutingProfile {
 }
 
 #[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SettingsConfiguration {
+    #[serde(default)]
+    global: BTreeMap<String, SettingValue>,
+    #[serde(default)]
+    sessions: BTreeMap<String, BTreeMap<String, SettingValue>>,
+    #[serde(default)]
+    agents: BTreeMap<String, BTreeMap<String, SettingValue>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum SettingValue {
+    Bool(bool),
+    Integer(i64),
+    String(String),
+}
+
+impl From<SettingValue> for OptionValue {
+    fn from(value: SettingValue) -> Self {
+        match value {
+            SettingValue::Bool(value) => Self::Bool(value),
+            SettingValue::Integer(value) => Self::Integer(value),
+            SettingValue::String(value) => Self::String(value),
+        }
+    }
+}
+
 struct RuntimeModelTarget {
     backend: String,
     provider: String,
@@ -56,6 +86,91 @@ impl RuntimeRoutingProfile {
                 .map(|(callable, target)| (callable, target.into_model_target()))
                 .collect(),
         }
+    }
+}
+
+pub(super) fn apply_config_directory(
+    harness: &mut PhenixHarness,
+    directory: &Path,
+) -> Result<(), Box<dyn Error>> {
+    if !directory.is_dir() {
+        return Err(format!("config directory does not exist: {}", directory.display()).into());
+    }
+
+    let runtime = directory.join("runtime.json");
+    if runtime.is_file() {
+        apply_runtime_config(harness, &runtime)?;
+    }
+
+    let settings = directory.join("settings.json");
+    if settings.is_file() {
+        apply_settings(harness, &settings)?;
+    }
+    Ok(())
+}
+
+fn apply_settings(harness: &mut PhenixHarness, path: &Path) -> Result<(), Box<dyn Error>> {
+    let bytes = fs::read(path)?;
+    let settings: SettingsConfiguration = serde_json::from_slice(&bytes)?;
+    apply_settings_configuration(harness, settings)
+}
+
+fn apply_settings_configuration(
+    harness: &mut PhenixHarness,
+    settings: SettingsConfiguration,
+) -> Result<(), Box<dyn Error>> {
+    for (key, value) in settings.global {
+        set_option(harness, key, OptionScope::Global, value)?;
+    }
+    for (session, values) in settings.sessions {
+        let session = OptionSubjectId::parse(session)?;
+        for (key, value) in values {
+            set_option(
+                harness,
+                key,
+                OptionScope::Session {
+                    session: session.clone(),
+                },
+                value,
+            )?;
+        }
+    }
+    for (agent, values) in settings.agents {
+        let agent = OptionSubjectId::parse(agent)?;
+        for (key, value) in values {
+            set_option(
+                harness,
+                key,
+                OptionScope::Agent {
+                    agent: agent.clone(),
+                },
+                value,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn set_option(
+    harness: &mut PhenixHarness,
+    key: String,
+    scope: OptionScope,
+    value: SettingValue,
+) -> Result<(), Box<dyn Error>> {
+    let key = OptionKey::parse(key)?;
+    let output = harness.invoke(
+        &options_service(),
+        &serde_json::to_vec(&OptionCommand::Set {
+            key,
+            scope,
+            value: value.into(),
+        })?,
+        &default_suite_authority(),
+        None,
+    )?;
+    match serde_json::from_slice::<OptionResponse>(&output)? {
+        OptionResponse::Updated { .. } => Ok(()),
+        _ => Err("options service rejected settings override".into()),
     }
 }
 

@@ -93,3 +93,10 @@ Other SDK modules may consume the corresponding model, tool, skill, context, and
 - identical definitions are idempotent;
 - conflicting definitions are rejected;
 - the SDK session helper changes behavior when scoped session options change.
+
+
+## Settings file
+
+The supported Nix wrapper writes `settings.json` under `PHENIX_CONFIG_DIR`. The file contains optional `global`, `sessions`, and `agents` maps. Values are booleans, integers, or strings and must match the registered option type.
+
+Startup loads built-in option definitions first, then applies `settings.json`. Resolution remains `agent > session > global > default`; the file only supplies scoped overrides.

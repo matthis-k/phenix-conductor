@@ -106,3 +106,10 @@ Removing either plugin removes its SDK contribution. A compatible replacement ca
 - the default SDK session helper honors scoped option resolution;
 - SDK tools register through execution callables;
 - SDK skills register and list through context resources.
+
+
+## Configuration files
+
+The default `phenix` SDK exposes `phenix.sdk.config@1`. `Read` accepts a plain relative path and reads it under `PHENIX_CONFIG_DIR`. Absolute paths and `.` or `..` components are rejected.
+
+The Nix wrapper owns `PHENIX_CONFIG_DIR`. SDK code receives relative names such as `settings.json`; it does not discover host configuration directories.

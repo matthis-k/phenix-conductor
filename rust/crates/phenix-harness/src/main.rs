@@ -48,7 +48,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     apply_configured_layer_policy(&mut builder)?;
     let mut harness = builder.build_with_persistence(persistence)?;
     harness.activate()?;
-    if let Some(path) = env::var_os("PHENIX_RUNTIME_CONFIG") {
+    if let Some(path) = env::var_os("PHENIX_CONFIG_DIR") {
+        runtime_config::apply_config_directory(&mut harness, Path::new(&path))?;
+    } else if let Some(path) = env::var_os("PHENIX_RUNTIME_CONFIG") {
         runtime_config::apply_runtime_config(&mut harness, Path::new(&path))?;
     }
 
