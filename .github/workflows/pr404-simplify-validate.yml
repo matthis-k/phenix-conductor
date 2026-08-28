@@ -38,8 +38,6 @@ jobs:
                   raise SystemExit(f"{label}: expected 1 match, found {count}")
               return text.replace(old, new, 1)
 
-          # KernelConfig already owns layer policies. Expose a crate-private view
-          # and derive the ResolvedHarness view instead of storing a second copy.
           path = Path("rust/crates/phenix-core/src/registry.rs")
           text = path.read_text()
           anchor = "\n    pub fn resolve_chain("
@@ -53,18 +51,26 @@ jobs:
 
           path = Path("rust/crates/phenix-core/src/resolver.rs")
           text = path.read_text()
-          text = replace_once(
-              text,
+          start = text.index("pub struct ResolvedHarness {")
+          end = text.index("\n}\n\nimpl ResolvedHarness", start)
+          block = text[start:end]
+          block = replace_once(
+              block,
               "    layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,\n",
               "",
               "ResolvedHarness duplicate layer policy field",
           )
-          text = replace_once(
-              text,
+          text = text[:start] + block + text[end:]
+          start = text.index("        Ok(Self {")
+          end = text.index("        })", start)
+          block = text[start:end]
+          block = replace_once(
+              block,
               "            layer_policies,\n",
               "",
               "ResolvedHarness duplicate layer policy init",
           )
+          text = text[:start] + block + text[end:]
           old = (
               "    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {\n"
               "        &self.layer_policies\n"
@@ -78,8 +84,6 @@ jobs:
           text = replace_once(text, old, new, "ResolvedHarness derived layer policy view")
           path.write_text(text)
 
-          # ResolvedHarness is already the canonical resolver. Remove forwarding
-          # helpers that only duplicate its three entry points.
           path = Path("rust/crates/phenix-core/src/reconciliation.rs")
           text = path.read_text()
           start = text.index("    pub fn resolve_candidate(")
@@ -93,7 +97,6 @@ jobs:
               text = replace_once(text, old, new, label)
           path.write_text(text)
 
-          # InvocationTrace already has the service identity in planned_chain.
           path = Path("rust/crates/phenix-core/src/runtime.rs")
           text = path.read_text()
           start = text.index("struct InvocationTrace {")
@@ -115,8 +118,6 @@ jobs:
           )
           path.write_text(text)
 
-          # Core owns these primitive service identities. First-party plugins
-          # should re-export them, as the sessions plugin already does.
           path = Path("rust/crates/phenix-plugin-models/src/implementation.rs")
           text = path.read_text()
           text = replace_once(
