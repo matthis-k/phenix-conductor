@@ -6,8 +6,8 @@ publish = false
 
 [dependencies]
 phenix-core = { path = "../phenix-core" }
-phenix-plugin-basic-agent = { path = "../phenix-plugin-basic-agent" }
 phenix-plugin-context = { path = "../phenix-plugin-context" }
+phenix-plugin-execution = { path = "../phenix-plugin-execution" }
 phenix-plugin-models = { path = "../phenix-plugin-models" }
 phenix-plugin-options = { path = "../phenix-plugin-options" }
 phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }
