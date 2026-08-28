@@ -62,3 +62,60 @@ new = '''    assert_eq!(
 if old not in text:
     raise SystemExit("supported suite count anchor missing")
 path.write_text(text.replace(old, new, 1))
+
+path = Path("rust/crates/phenix-plugin-sdk/src/lib.rs")
+text = path.read_text()
+old = '''        let context_manifest = context_manifest();
+        let sdk_manifest = sdk_manifest(authority.clone());
+        let manifests = vec![context_manifest.clone(), sdk_manifest.clone()];
+        let resolved = ResolvedHarness::resolve(
+            manifests.clone(),
+            [
+                context_component_manifest(),
+                sdk_component_manifest(authority.clone()),
+            ],
+            [],
+            &authority,
+        )
+        .unwrap();
+        let mut kernel = Kernel::new(KernelConfig::new(manifests).unwrap());
+        kernel
+            .register_embedded_factory(context_manifest.id, context_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(sdk_manifest.id, sdk_factory)
+            .unwrap();
+'''
+new = '''        let execution_manifest = execution_manifest(authority.clone());
+        let context_manifest = context_manifest();
+        let sdk_manifest = sdk_manifest(authority.clone());
+        let manifests = vec![
+            execution_manifest.clone(),
+            context_manifest.clone(),
+            sdk_manifest.clone(),
+        ];
+        let resolved = ResolvedHarness::resolve(
+            manifests.clone(),
+            [
+                execution_component_manifest(authority.clone()),
+                context_component_manifest(),
+                sdk_component_manifest(authority.clone()),
+            ],
+            [],
+            &authority,
+        )
+        .unwrap();
+        let mut kernel = Kernel::new(KernelConfig::new(manifests).unwrap());
+        kernel
+            .register_embedded_factory(execution_manifest.id, execution_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(context_manifest.id, context_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(sdk_manifest.id, sdk_factory)
+            .unwrap();
+'''
+if old not in text:
+    raise SystemExit("skills fixture dependency anchor missing")
+path.write_text(text.replace(old, new, 1))
