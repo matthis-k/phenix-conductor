@@ -1,0 +1,32 @@
+name: PR 407 config source SDK patch
+
+on:
+  push:
+    branches:
+      - agent/plugin-sdk-contributions
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: agent/plugin-sdk-contributions
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+      - run: python3 .github/pr407_config_source_patch.py
+      - run: cargo fmt --manifest-path rust/Cargo.toml --all
+      - run: nix run nixpkgs#nixfmt -- modules/plugin-packaging.nix
+      - run: cargo test --manifest-path rust/Cargo.toml -p phenix-plugin-options -p phenix-plugin-sdk -p phenix-harness
+      - run: nix build .#checks.x86_64-linux.phenix-plugin-packaging --no-link
+      - run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name phenix-worker
+          git config user.email phenix-worker@users.noreply.github.com
+          git add rust modules spec
+          git commit -m 'feat: expose config sources and typed settings apply'
+          git push origin HEAD:agent/plugin-sdk-contributions
