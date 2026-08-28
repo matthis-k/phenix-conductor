@@ -182,7 +182,10 @@ impl CompositionMetadataInput {
             self.configuration.push(contribution);
         }
 
-        self.resolve(authority_ceiling).map_err(Into::into)
+        let frontend_metadata: Vec<_> = metadata_by_id.into_values().collect();
+        let mut resolved = self.resolve(authority_ceiling)?;
+        resolved.incorporate_semantic_metadata(&frontend_metadata);
+        Ok(resolved)
     }
 }
 
@@ -339,6 +342,31 @@ mod tests {
             "retained frontend metadata is part of composition identity",
         );
         assert_eq!(resolved.configuration(), expected.configuration());
+    }
+
+    #[test]
+    fn frontend_metadata_change_creates_a_new_graph_generation() {
+        let baseline = CompositionMetadataInput {
+            packages: vec![package()],
+            components: vec![component_metadata()],
+            resources: Vec::new(),
+            configuration: Vec::new(),
+        }
+        .resolve_frontends([metadata()], [], &Authority::default())
+        .unwrap();
+
+        let mut changed_metadata = metadata();
+        changed_metadata.watch = false;
+        let changed = CompositionMetadataInput {
+            packages: vec![package()],
+            components: vec![component_metadata()],
+            resources: Vec::new(),
+            configuration: Vec::new(),
+        }
+        .resolve_frontends([changed_metadata], [], &Authority::default())
+        .unwrap();
+
+        assert_ne!(baseline.generation(), changed.generation());
     }
 
     #[test]
