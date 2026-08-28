@@ -32,178 +32,130 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path, old, new, label):
-              text = path.read_text()
+          def replace_once(text, old, new, label):
               count = text.count(old)
               if count != 1:
                   raise SystemExit(f"{label}: expected 1 match, found {count}")
-              path.write_text(text.replace(old, new, 1))
+              return text.replace(old, new, 1)
 
-          registry = Path("rust/crates/phenix-core/src/registry.rs")
-          marker = '''    pub fn layer_policy(&self, service: &ServiceId) -> &[LayerPolicy] {
-              self.layer_policies
-                  .get(service)
-                  .map(Vec::as_slice)
-                  .unwrap_or_default()
-          }
-          '''
-          replace_once(
-              registry,
-              marker,
-              marker + '''
-          pub(crate) fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
-              &self.layer_policies
-          }
-          ''',
-              "KernelConfig layer policy view",
+          # KernelConfig already owns layer policies. Expose a crate-private view
+          # and derive the ResolvedHarness view instead of storing a second copy.
+          path = Path("rust/crates/phenix-core/src/registry.rs")
+          text = path.read_text()
+          anchor = "\n    pub fn resolve_chain("
+          accessor = (
+              "\n    pub(crate) fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {\n"
+              "        &self.layer_policies\n"
+              "    }\n"
           )
+          text = replace_once(text, anchor, accessor + anchor, "KernelConfig layer policy view")
+          path.write_text(text)
 
-          resolver = Path("rust/crates/phenix-core/src/resolver.rs")
-          replace_once(
-              resolver,
-              '''    kernel_config: KernelConfig,
-              component_graph: ResolvedComponentGraph,
-              layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
-          ''',
-              '''    kernel_config: KernelConfig,
-              component_graph: ResolvedComponentGraph,
-          ''',
+          path = Path("rust/crates/phenix-core/src/resolver.rs")
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "    layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,\n",
+              "",
               "ResolvedHarness duplicate layer policy field",
           )
-          replace_once(
-              resolver,
-              '''            kernel_config,
-              component_graph,
-              layer_policies,
-          ''',
-              '''            kernel_config,
-              component_graph,
-          ''',
+          text = replace_once(
+              text,
+              "            layer_policies,\n",
+              "",
               "ResolvedHarness duplicate layer policy init",
           )
-          replace_once(
-              resolver,
-              '''    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
-              &self.layer_policies
-          }
-          ''',
-              '''    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {
-              self.kernel_config.layer_policies()
-          }
-          ''',
-              "ResolvedHarness derived layer policy view",
+          old = (
+              "    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {\n"
+              "        &self.layer_policies\n"
+              "    }\n"
           )
+          new = (
+              "    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {\n"
+              "        self.kernel_config.layer_policies()\n"
+              "    }\n"
+          )
+          text = replace_once(text, old, new, "ResolvedHarness derived layer policy view")
+          path.write_text(text)
 
-          reconciliation = Path("rust/crates/phenix-core/src/reconciliation.rs")
-          text = reconciliation.read_text()
+          # ResolvedHarness is already the canonical resolver. Remove forwarding
+          # helpers that only duplicate its three entry points.
+          path = Path("rust/crates/phenix-core/src/reconciliation.rs")
+          text = path.read_text()
           start = text.index("    pub fn resolve_candidate(")
           end = text.index("    pub fn preview_candidate(&self", start)
           text = text[:start] + text[end:]
           for old, new, label in [
-              ("let candidate = Self::resolve_candidate(\n", "let candidate = ResolvedHarness::resolve(\n", "plain reconciliation"),
-              ("let candidate = Self::resolve_candidate_with_resources(\n", "let candidate = ResolvedHarness::resolve_with_resources(\n", "resource reconciliation"),
-              ("let candidate = Self::resolve_frontend_candidate(\n", "let candidate = ResolvedHarness::resolve_frontends(\n", "frontend reconciliation"),
+              ("Self::resolve_candidate(", "ResolvedHarness::resolve(", "plain reconciliation"),
+              ("Self::resolve_candidate_with_resources(", "ResolvedHarness::resolve_with_resources(", "resource reconciliation"),
+              ("Self::resolve_frontend_candidate(", "ResolvedHarness::resolve_frontends(", "frontend reconciliation"),
           ]:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected 1 match, found {count}")
-              text = text.replace(old, new, 1)
-          reconciliation.write_text(text)
+              text = replace_once(text, old, new, label)
+          path.write_text(text)
 
-          runtime = Path("rust/crates/phenix-core/src/runtime.rs")
-          replace_once(
-              runtime,
-              '''struct InvocationTrace {
-              graph_generation: Option<GraphGenerationId>,
-              service: ServiceId,
-              planned_chain: ResolvedServiceChain,
-          ''',
-              '''struct InvocationTrace {
-              graph_generation: Option<GraphGenerationId>,
-              planned_chain: ResolvedServiceChain,
-          ''',
-              "InvocationTrace duplicate service field",
+          # InvocationTrace already has the service identity in planned_chain.
+          path = Path("rust/crates/phenix-core/src/runtime.rs")
+          text = path.read_text()
+          start = text.index("struct InvocationTrace {")
+          end = text.index("\n}\n", start)
+          block = text[start:end]
+          block = replace_once(block, "    service: ServiceId,\n", "", "InvocationTrace service field")
+          text = text[:start] + block + text[end:]
+          text = replace_once(
+              text,
+              "            service: chain.service.clone(),\n",
+              "",
+              "InvocationTrace service init",
           )
-          replace_once(
-              runtime,
-              '''        Self {
-                  graph_generation: graph_generation.cloned(),
-                  service: chain.service.clone(),
-                  planned_chain: chain.clone(),
-          ''',
-              '''        Self {
-                  graph_generation: graph_generation.cloned(),
-                  planned_chain: chain.clone(),
-          ''',
-              "InvocationTrace duplicate service init",
-          )
-          replace_once(
-              runtime,
+          text = replace_once(
+              text,
               "            service: self.service,\n",
               "            service: self.planned_chain.service.clone(),\n",
-              "InvocationTrace derived service output",
+              "InvocationTrace service projection",
           )
+          path.write_text(text)
 
-          models = Path("rust/crates/phenix-plugin-models/src/implementation.rs")
-          replace_once(
-              models,
+          # Core owns these primitive service identities. First-party plugins
+          # should re-export them, as the sessions plugin already does.
+          path = Path("rust/crates/phenix-plugin-models/src/implementation.rs")
+          text = path.read_text()
+          text = replace_once(
+              text,
               "pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};\n",
-              '''pub use phenix_core::{
-              model_inference_service, ModelInferenceRequest, ModelInferenceResponse,
-              MODEL_INFERENCE_SERVICE,
-          };
-          ''',
+              "pub use phenix_core::{\n    model_inference_service, ModelInferenceRequest, ModelInferenceResponse,\n    MODEL_INFERENCE_SERVICE,\n};\n",
               "model primitive re-export",
           )
-          replace_once(
-              models,
+          text = replace_once(
+              text,
               'pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";\n',
               "",
               "duplicate model service constant",
           )
-          replace_once(
-              models,
-              '''#[must_use]
-          pub fn model_inference_service() -> ServiceId {
-              ServiceId::parse(MODEL_INFERENCE_SERVICE).expect("static service id is valid")
-          }
+          helper = "#[must_use]\npub fn model_inference_service() -> ServiceId {"
+          start = text.index(helper)
+          end = text.index("\n}\n", start) + len("\n}\n")
+          text = text[:start] + text[end:]
+          path.write_text(text)
 
-          ''',
-              "",
-              "duplicate model service helper",
-          )
-
-          context = Path("rust/crates/phenix-plugin-context/src/implementation.rs")
-          replace_once(
-              context,
-              '''pub use phenix_core::{
-              ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
-          };
-          ''',
-              '''pub use phenix_core::{
-              context_service, ContextDescriptor, ContextResourceKind, ContextResourceRevision,
-              ContextScope, CONTEXT_SERVICE,
-          };
-          ''',
+          path = Path("rust/crates/phenix-plugin-context/src/implementation.rs")
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "pub use phenix_core::{\n    ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,\n};\n",
+              "pub use phenix_core::{\n    context_service, ContextDescriptor, ContextResourceKind, ContextResourceRevision,\n    ContextScope, CONTEXT_SERVICE,\n};\n",
               "context primitive re-export",
           )
-          replace_once(
-              context,
+          text = replace_once(
+              text,
               'pub const CONTEXT_SERVICE: &str = "phenix.context@1";\n',
               "",
               "duplicate context service constant",
           )
-          replace_once(
-              context,
-              '''#[must_use]
-          pub fn context_service() -> ServiceId {
-              ServiceId::parse(CONTEXT_SERVICE).expect("static service id is valid")
-          }
-
-          ''',
-              "",
-              "duplicate context service helper",
-          )
+          helper = "#[must_use]\npub fn context_service() -> ServiceId {"
+          start = text.index(helper)
+          end = text.index("\n}\n", start) + len("\n}\n")
+          text = text[:start] + text[end:]
+          path.write_text(text)
           PY
       - name: Validate simplifications
         shell: bash
