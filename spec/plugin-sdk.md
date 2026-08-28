@@ -37,7 +37,7 @@ The resolved SDK set is derived from the selected plugins, components, and contr
 
 ## Default Phenix SDK
 
-`phenix-plugin-sdk` is an ordinary userspace plugin that contributes the `phenix` namespace. It provides typed bindings for:
+`phenix-plugin-sdk` is an ordinary userspace plugin that contributes the `phenix` namespace. It provides typed modules for:
 
 ```text
 phenix.sessions
@@ -48,16 +48,18 @@ phenix.context
 phenix.options
 ```
 
-Models, tools, skills, context, and options bind to their ordinary typed plugin interfaces. The SDK does not duplicate those service contracts.
+Models, context, and options expose their ordinary typed plugin interfaces directly. Tools wrap execution callables. Skills wrap context resources whose kind is `skill`. These wrappers add SDK ergonomics without creating parallel durable state or provider registries.
 
-Sessions add one higher-level typed helper, `phenix.sdk.sessions@1`. `Open` looks up the requested session and resolves scoped options before calling the ordinary session interface:
+Sessions add the typed helper `phenix.sdk.sessions@1`. `Open` looks up the requested session and resolves scoped options before calling the ordinary session interface:
 
 ```text
 session.reuse_existing
 session.auto_create
 ```
 
-The options context includes the requested session and optional agent. Normal option precedence therefore applies to SDK behavior without adding session policy to the sessions plugin.
+The options context includes the requested session and optional agent. Normal option precedence therefore changes SDK behavior without adding session policy to the sessions plugin.
+
+`phenix.sdk.tools@1` maps tool registration and invocation to the execution plugin's callable contract. `phenix.sdk.skills@1` maps skill registration, lookup, and listing to the context plugin's resource contract.
 
 The SDK contribution also names opaque resources for each default module so language-specific bindings or helper packages can be attached without changing core.
 
@@ -66,8 +68,10 @@ A testing plugin can independently contribute a `testing` namespace with test in
 ```text
 phenix SDK plugin
   -> namespace phenix
-  -> standard Phenix interfaces/resources
-  -> session helper -> options + sessions
+  -> sessions -> options + sessions
+  -> tools -> execution callables
+  -> skills -> context resources
+  -> models/context/options -> existing interfaces
 
 testing plugin
   -> namespace testing
@@ -88,6 +92,7 @@ Removing either plugin removes its SDK contribution. A compatible replacement ca
 - Zero-plugin composition has no SDK namespaces.
 - The Phenix SDK can be replaced or omitted.
 - SDK convenience behavior reads userspace options rather than adding hidden core policy.
+- SDK wrappers reuse product-owned state instead of storing duplicate tool or skill state.
 
 ## Required regressions
 
@@ -98,4 +103,6 @@ Removing either plugin removes its SDK contribution. A compatible replacement ca
 - an unselected provider fails;
 - empty composition resolves to no SDK namespaces;
 - the default Phenix SDK advertises sessions, models, tools, skills, context, and options;
-- the default SDK session helper honors scoped option resolution.
+- the default SDK session helper honors scoped option resolution;
+- SDK tools register through execution callables;
+- SDK skills register and list through context resources.
