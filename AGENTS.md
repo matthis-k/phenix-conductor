@@ -33,7 +33,10 @@ The supported product path is a configured conductor plus selected plugins throu
 - Remove superseded APIs and compatibility paths instead of maintaining parallel versions.
 - Prefer an existing platform or library abstraction when it expresses the required semantics.
 - Keep semantic names even when using a library type internally.
-- Make invalid runtime states difficult or impossible to represent.
+- Make invalid states unrepresentable. Prefer enums, newtypes, non-zero types, ownership, and constructors over correlated strings, booleans, options, or later checks.
+- Parse, don't validate. Convert external, configuration, and wire inputs into invariant-bearing types at the boundary. Once parsed, internal code assumes local invariants. Reserve resolution checks for facts that depend on other runtime state.
+- Use guard clauses and early returns for errors, unsupported cases, and exceptional branches. Keep the success path shallow and linear.
+- Keep the common success path short. Derive state where possible; remove intermediate representations or branches that exist only to support validation.
 - Preserve typed errors at subsystem boundaries. Do not collapse actionable failures into generic exit states.
 - Add focused regression tests for behavioral fixes and integration tests for cross-boundary behavior.
 - Keep implementation-specific invariants close to the code and tests that enforce them instead of creating speculative documents.
