@@ -40,6 +40,8 @@ pub enum ResourceChangeKind {
     Added,
     Removed,
     ContentChanged,
+    Reconfigured,
+    Upgraded,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -477,13 +479,22 @@ fn resource_changes(previous: &ResolvedHarness, next: &ResolvedHarness) -> Vec<R
                 kind: ResourceChangeKind::Removed,
                 invalidation_targets: resource.invalidation_targets.clone(),
             }),
-            (Some(previous), Some(next)) if previous.content_identity != next.content_identity => {
+            (Some(previous), Some(next)) if previous != next => {
+                let kind = if previous.content_identity != next.content_identity {
+                    ResourceChangeKind::ContentChanged
+                } else if previous.version != next.version {
+                    ResourceChangeKind::Upgraded
+                } else {
+                    ResourceChangeKind::Reconfigured
+                };
                 Some(ResourceChange {
                     resource: id.to_owned(),
-                    kind: ResourceChangeKind::ContentChanged,
+                    kind,
                     invalidation_targets: previous
-                        .invalidation_for_change(next)
-                        .expect("resolved resources remain valid during diff"),
+                        .invalidation_targets
+                        .union(&next.invalidation_targets)
+                        .cloned()
+                        .collect(),
                 })
             }
             _ => None,
@@ -754,6 +765,74 @@ mod tests {
             vec![ResourceChange {
                 resource: "review-skill".into(),
                 kind: ResourceChangeKind::ContentChanged,
+                invalidation_targets: BTreeSet::from(["skill-index".into()]),
+            }]
+        );
+        assert_eq!(
+            result.transition_plan,
+            vec![ReconciliationAction::InvalidateResourceDerivedState {
+                resource: "review-skill".into(),
+                targets: BTreeSet::from(["skill-index".into()]),
+            }]
+        );
+    }
+
+    #[test]
+    fn skill_version_change_is_an_explicit_upgrade() {
+        let initial = ResolvedHarness::resolve_with_resources(
+            [],
+            [],
+            [resource("sha256:one")],
+            [],
+            &Authority::default(),
+        )
+        .unwrap();
+        let mut upgraded = resource("sha256:one");
+        upgraded.version = 2;
+        let mut reconciler = GraphReconciler::new(initial);
+        let result = reconciler
+            .reconcile_with_resources([], [], [upgraded], [], &Authority::default())
+            .unwrap();
+
+        assert_eq!(
+            result.diff.resources,
+            vec![ResourceChange {
+                resource: "review-skill".into(),
+                kind: ResourceChangeKind::Upgraded,
+                invalidation_targets: BTreeSet::from(["skill-index".into()]),
+            }]
+        );
+        assert_eq!(
+            result.transition_plan,
+            vec![ReconciliationAction::InvalidateResourceDerivedState {
+                resource: "review-skill".into(),
+                targets: BTreeSet::from(["skill-index".into()]),
+            }]
+        );
+    }
+
+    #[test]
+    fn skill_metadata_change_is_an_explicit_reconfiguration() {
+        let initial = ResolvedHarness::resolve_with_resources(
+            [],
+            [],
+            [resource("sha256:one")],
+            [],
+            &Authority::default(),
+        )
+        .unwrap();
+        let mut reconfigured = resource("sha256:one");
+        reconfigured.priority = 10;
+        let mut reconciler = GraphReconciler::new(initial);
+        let result = reconciler
+            .reconcile_with_resources([], [], [reconfigured], [], &Authority::default())
+            .unwrap();
+
+        assert_eq!(
+            result.diff.resources,
+            vec![ResourceChange {
+                resource: "review-skill".into(),
+                kind: ResourceChangeKind::Reconfigured,
                 invalidation_targets: BTreeSet::from(["skill-index".into()]),
             }]
         );
