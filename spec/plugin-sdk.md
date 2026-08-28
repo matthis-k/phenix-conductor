@@ -35,18 +35,39 @@ Source order does not affect the result. SDK metadata grants no authority and do
 
 The resolved SDK set is derived from the selected plugins, components, and contribution metadata. It is not stored as a second runtime registry.
 
-## Phenix SDK
+## Default Phenix SDK
 
-The normal Phenix SDK can be an ordinary plugin that contributes the `phenix` namespace and wraps the standard Phenix plugin interfaces.
-
-Core does not need session, agent, model, tool, or other Phenix SDK methods.
-
-A testing plugin can independently contribute a `testing` namespace. It may expose typed testing interfaces, client helper resources, or both.
+`phenix-plugin-sdk` is an ordinary userspace plugin that contributes the `phenix` namespace. It provides typed bindings for:
 
 ```text
-phenix-sdk plugin
+phenix.sessions
+phenix.models
+phenix.tools
+phenix.skills
+phenix.context
+phenix.options
+```
+
+Models, tools, skills, context, and options bind to their ordinary typed plugin interfaces. The SDK does not duplicate those service contracts.
+
+Sessions add one higher-level typed helper, `phenix.sdk.sessions@1`. `Open` looks up the requested session and resolves scoped options before calling the ordinary session interface:
+
+```text
+session.reuse_existing
+session.auto_create
+```
+
+The options context includes the requested session and optional agent. Normal option precedence therefore applies to SDK behavior without adding session policy to the sessions plugin.
+
+The SDK contribution also names opaque resources for each default module so language-specific bindings or helper packages can be attached without changing core.
+
+A testing plugin can independently contribute a `testing` namespace with test interfaces and helper resources.
+
+```text
+phenix SDK plugin
   -> namespace phenix
   -> standard Phenix interfaces/resources
+  -> session helper -> options + sessions
 
 testing plugin
   -> namespace testing
@@ -66,6 +87,7 @@ Removing either plugin removes its SDK contribution. A compatible replacement ca
 - Resource-only plugins may provide client-only SDK helpers.
 - Zero-plugin composition has no SDK namespaces.
 - The Phenix SDK can be replaced or omitted.
+- SDK convenience behavior reads userspace options rather than adding hidden core policy.
 
 ## Required regressions
 
@@ -74,4 +96,6 @@ Removing either plugin removes its SDK contribution. A compatible replacement ca
 - a contribution cannot reference an unavailable interface;
 - duplicate namespace ownership fails;
 - an unselected provider fails;
-- empty composition resolves to no SDK namespaces.
+- empty composition resolves to no SDK namespaces;
+- the default Phenix SDK advertises sessions, models, tools, skills, context, and options;
+- the default SDK session helper honors scoped option resolution.
