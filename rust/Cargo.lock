@@ -1611,8 +1611,10 @@ dependencies = [
  "phenix-plugin-jobs",
  "phenix-plugin-language",
  "phenix-plugin-models",
+ "phenix-plugin-options",
  "phenix-plugin-planning",
  "phenix-plugin-repository-workers",
+ "phenix-plugin-sdk",
  "phenix-plugin-session-tree",
  "phenix-plugin-sessions",
  "phenix-plugin-workspace",
@@ -1720,6 +1722,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-plugin-options"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "phenix-plugin-planning"
 version = "0.1.0"
 dependencies = [
@@ -1737,6 +1748,20 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-sdk"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-context",
+ "phenix-plugin-execution",
+ "phenix-plugin-models",
+ "phenix-plugin-options",
+ "phenix-plugin-sessions",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
