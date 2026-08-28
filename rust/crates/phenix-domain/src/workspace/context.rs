@@ -1,92 +1,14 @@
 use super::PlanId;
 use crate::{ConfigRevisionId, DecisionId, ExecutionId, ObjectiveId, WorkspaceId};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ContextResourceId(String);
-
-impl ContextResourceId {
-    pub fn parse(value: impl Into<String>) -> Result<Self, crate::InvalidId> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            Err(crate::InvalidId)
-        } else {
-            Ok(Self(value))
-        }
-    }
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-impl Display for ContextResourceId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ContextRevision(String);
-impl ContextRevision {
-    pub fn parse(value: impl Into<String>) -> Result<Self, crate::InvalidId> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            Err(crate::InvalidId)
-        } else {
-            Ok(Self(value))
-        }
-    }
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-impl Display for ContextRevision {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct FileObservationId(String);
-impl FileObservationId {
-    pub fn parse(value: impl Into<String>) -> Result<Self, crate::InvalidId> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            Err(crate::InvalidId)
-        } else {
-            Ok(Self(value))
-        }
-    }
-}
-impl Display for FileObservationId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct LanguageObservationId(String);
-impl LanguageObservationId {
-    pub fn parse(value: impl Into<String>) -> Result<Self, crate::InvalidId> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            Err(crate::InvalidId)
-        } else {
-            Ok(Self(value))
-        }
-    }
-}
-impl Display for LanguageObservationId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+domain_id_type!(ContextResourceId);
+domain_id_type!(ContextRevision);
+domain_id_type!(FileObservationId);
+domain_id_type!(LanguageObservationId);
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
@@ -206,15 +128,17 @@ impl ContextCatalog {
         let id = revision.descriptor.id.clone();
         let descriptor_revision = revision.descriptor.revision.clone();
         let key = (id.clone(), descriptor_revision.clone());
-        if let Some(existing) = self.revisions.get(&key) {
-            if existing != &revision {
+        match self.revisions.entry(key) {
+            Entry::Occupied(entry) if entry.get() != &revision => {
                 return Err(ContextCatalogError::ConflictingRevision {
                     id,
                     revision: descriptor_revision,
                 });
             }
-        } else {
-            self.revisions.insert(key, revision);
+            Entry::Occupied(_) => {}
+            Entry::Vacant(entry) => {
+                entry.insert(revision);
+            }
         }
         self.current.insert(id, descriptor_revision);
         Ok(())
@@ -275,4 +199,17 @@ pub struct ContextInjection {
     pub reason: String,
     pub lifetime: ContextInjectionLifetime,
     pub content_identity: ContextRevision,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_ids_reject_blank_wire_values() {
+        assert!(serde_json::from_str::<ContextResourceId>("\"\"").is_err());
+        assert!(serde_json::from_str::<ContextRevision>("\"  \"").is_err());
+        assert!(serde_json::from_str::<FileObservationId>("\"\n\"").is_err());
+        assert!(serde_json::from_str::<LanguageObservationId>("\"\t\"").is_err());
+    }
 }

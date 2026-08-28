@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-pub use phenix_core::session_service;
+pub use phenix_core::{session_service, CallableId, ModelId, RoutingProfileId};
 pub use phenix_plugin_artifacts::{
     artifact_component_id, artifact_component_manifest, artifact_factory, artifact_manifest,
     artifact_service, ArtifactCommand, ArtifactInterface, ArtifactProvenance, ArtifactRecord,

@@ -1,9 +1,8 @@
 use crate::{
-    AttemptGroup, ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionId,
-    ExecutionReadSet, ExecutionSummary, ExecutionTarget, ExecutionTerminationCause,
-    ExecutionWorkspaceValidity, FileVersion, ModelTarget, OrchestrationDefinition,
-    OrchestrationFailureDecisionRecord, OrchestrationNodeId, SessionSummary, WorkspaceDescriptor,
-    WorkspaceId,
+    ConfigRevisionId, ExecutionAuthority, ExecutionEvent, ExecutionId, ExecutionReadSet,
+    ExecutionSummary, ExecutionTarget, ExecutionTerminationCause, ExecutionWorkspaceValidity,
+    FileVersion, ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord,
+    OrchestrationNodeId, SessionSummary, WorkspaceDescriptor, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,8 +21,6 @@ pub struct SessionDebugBundle {
     pub executions: Vec<ExecutionSummary>,
     #[serde(default)]
     pub events: Vec<ExecutionEvent>,
-    #[serde(default)]
-    pub attempt_groups: Vec<AttemptGroup>,
     #[serde(default)]
     pub conversation: Vec<DebugConversationMessage>,
     #[serde(default)]
@@ -105,7 +102,6 @@ impl SessionDebugBundle {
             workspace,
             executions: Vec::new(),
             events: Vec::new(),
-            attempt_groups: Vec::new(),
             conversation: Vec::new(),
             orchestrations: Vec::new(),
             resolved_routing: Vec::new(),

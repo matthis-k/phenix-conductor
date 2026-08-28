@@ -58,12 +58,6 @@
           label = "phenix-backend-acp / tool_bridge";
         }
         {
-          id = "phenix-acp-repeated-prompts";
-          package = "phenix-acp";
-          test = "repeated_prompts";
-          label = "phenix-acp / repeated_prompts";
-        }
-        {
           id = "phenix-acp-client-contract-adapter";
           package = "phenix-acp";
           test = "client_contract_adapter";

@@ -361,13 +361,7 @@ mod tests {
         let path = temp_db("sessions");
         {
             let mut kernel = kernel_with(&path);
-            invoke(
-                &mut kernel,
-                &SessionCommand::Create {
-                    id: "root".into(),
-                },
-            )
-            .unwrap();
+            invoke(&mut kernel, &SessionCommand::Create { id: "root".into() }).unwrap();
             for (kind, content) in [
                 (SessionInputKind::Root, b"system".to_vec()),
                 (SessionInputKind::User, b"hello".to_vec()),
@@ -392,11 +386,7 @@ mod tests {
             }
         );
         assert_eq!(
-            invoke(
-                &mut restored,
-                &SessionCommand::Inputs { id: "root".into() },
-            )
-            .unwrap(),
+            invoke(&mut restored, &SessionCommand::Inputs { id: "root".into() },).unwrap(),
             SessionResponse::Inputs {
                 inputs: vec![
                     SessionInput {

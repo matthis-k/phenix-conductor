@@ -687,13 +687,8 @@ mod tests {
         let manifest = execution_manifest(caller_authority());
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
-        let resolved = ResolvedHarness::resolve(
-            [manifest.clone()],
-            [],
-            [],
-            &caller_authority(),
-        )
-        .unwrap();
+        let resolved =
+            ResolvedHarness::resolve([manifest.clone()], [], [], &caller_authority()).unwrap();
         let mut kernel =
             Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
         kernel.activate_resolved_harness(&resolved).unwrap();
@@ -753,7 +748,10 @@ mod tests {
             let mut kernel = kernel_with(&path);
             let root = create(&mut kernel, "root", authority(&["fs.read"]));
             assert_eq!(root.authority, authority(&["fs.read"]));
-            assert_eq!(root.graph_generation, kernel.graph_generation().unwrap().as_str());
+            assert_eq!(
+                root.graph_generation,
+                kernel.graph_generation().unwrap().as_str()
+            );
             let child = match invoke(
                 &mut kernel,
                 &ExecutionCommand::DelegateExecution {

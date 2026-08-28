@@ -55,25 +55,34 @@ pub struct ToolProvision {
 /// private so an empty surface cannot claim a presentation and a populated
 /// surface cannot bypass conductor-owned negotiation.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PreparedToolSurface {
-    presentation: Option<ToolPresentation>,
-    callables: Vec<CallableDescriptor>,
+pub enum PreparedToolSurface {
+    Empty,
+    Hosted {
+        presentation: ToolPresentation,
+        callables: Vec<CallableDescriptor>,
+    },
 }
 
 impl PreparedToolSurface {
     #[must_use]
     pub fn presentation(&self) -> Option<ToolPresentation> {
-        self.presentation
+        match self {
+            Self::Empty => None,
+            Self::Hosted { presentation, .. } => Some(*presentation),
+        }
     }
 
     #[must_use]
     pub fn callables(&self) -> &[CallableDescriptor] {
-        &self.callables
+        match self {
+            Self::Empty => &[],
+            Self::Hosted { callables, .. } => callables,
+        }
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.callables.is_empty()
+        matches!(self, Self::Empty)
     }
 }
 
@@ -83,16 +92,13 @@ impl ToolProvision {
         capabilities: &BackendCapabilities,
     ) -> Result<PreparedToolSurface, BackendError> {
         if self.callables.is_empty() {
-            return Ok(PreparedToolSurface {
-                presentation: None,
-                callables: self.callables,
-            });
+            return Ok(PreparedToolSurface::Empty);
         }
         let presentation = capabilities.preferred_tool_presentation().ok_or_else(|| {
             BackendError::Unsupported("backend cannot host conductor-provisioned tools".to_owned())
         })?;
-        Ok(PreparedToolSurface {
-            presentation: Some(presentation),
+        Ok(PreparedToolSurface::Hosted {
+            presentation,
             callables: self.callables,
         })
     }

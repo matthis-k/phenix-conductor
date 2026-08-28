@@ -26,18 +26,6 @@ pub struct LanguagePosition {
     pub character: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct LanguageRange {
-    pub start: LanguagePosition,
-    pub end: LanguagePosition,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct LanguageLocation {
-    pub document: PathBuf,
-    pub range: LanguageRange,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum LanguageOperation {
@@ -120,23 +108,23 @@ impl From<LanguageObservation> for LanguageObservationInput {
 impl LanguageObservationInput {
     #[must_use]
     pub fn is_workspace_backed(&self) -> bool {
-        !self.result.documents.is_empty()
-            && self.result.documents.iter().all(|document| {
-                document.provenance == LanguageDocumentProvenance::WorkspaceBacked
-                    && document.workspace_version.is_some()
-            })
+        documents_are_workspace_backed(&self.result.documents)
     }
 }
 
 impl LanguageObservation {
     #[must_use]
     pub fn is_workspace_backed(&self) -> bool {
-        !self.result.documents.is_empty()
-            && self.result.documents.iter().all(|document| {
-                document.provenance == LanguageDocumentProvenance::WorkspaceBacked
-                    && document.workspace_version.is_some()
-            })
+        documents_are_workspace_backed(&self.result.documents)
     }
+}
+
+fn documents_are_workspace_backed(documents: &[LanguageDocumentIdentity]) -> bool {
+    !documents.is_empty()
+        && documents.iter().all(|document| {
+            document.provenance == LanguageDocumentProvenance::WorkspaceBacked
+                && document.workspace_version.is_some()
+        })
 }
 
 #[cfg(test)]

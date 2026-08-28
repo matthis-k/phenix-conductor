@@ -204,30 +204,34 @@ impl CompositionMetadataInput {
 
         let mut resource_owners = BTreeMap::<String, PluginId>::new();
         for package in packages.values() {
-            if let Some(resource) = package
-                .packaged_resources
-                .intersection(&package.packaged_skills)
-                .next()
+            if let Some(skill) = package
+                .packaged_skills
+                .iter()
+                .find(|skill| package.packaged_resources.contains(skill.as_str()))
             {
                 return Err(MetadataResolutionError::AmbiguousPackagedResourceKind {
-                    resource: resource.clone(),
+                    resource: skill.to_string(),
                     plugin: package.manifest.id.clone(),
                 });
             }
-            for resource in package
-                .packaged_resources
-                .iter()
-                .chain(package.packaged_skills.iter())
-            {
+
+            let mut register_owner = |resource: String| {
                 if let Some(first) =
                     resource_owners.insert(resource.clone(), package.manifest.id.clone())
                 {
                     return Err(MetadataResolutionError::ResourceOwnedByMultiplePackages {
-                        resource: resource.clone(),
+                        resource,
                         first,
                         second: package.manifest.id.clone(),
                     });
                 }
+                Ok(())
+            };
+            for resource in &package.packaged_resources {
+                register_owner(resource.clone())?;
+            }
+            for skill in &package.packaged_skills {
+                register_owner(skill.to_string())?;
             }
         }
 
@@ -284,7 +288,7 @@ mod tests {
     use super::*;
     use crate::{
         CompatibilityMetadata, ComponentHostKind, ComponentManifest, ComponentStateClass,
-        PluginExecution, PluginManifest, ReloadPolicy,
+        PluginExecution, PluginManifest, ReloadPolicy, SkillId,
     };
     use std::collections::BTreeSet;
 
@@ -590,7 +594,9 @@ mod tests {
         );
 
         let mut owner = package();
-        owner.packaged_skills.insert("fixture.skill".into());
+        owner
+            .packaged_skills
+            .insert(SkillId::parse("fixture.skill").unwrap());
         let missing = CompositionMetadataInput {
             packages: vec![owner],
             components: vec![component_metadata()],
@@ -612,7 +618,9 @@ mod tests {
     fn package_cannot_classify_one_identity_as_both_skill_and_resource() {
         let mut owner = package();
         owner.packaged_resources.insert("fixture.shared".into());
-        owner.packaged_skills.insert("fixture.shared".into());
+        owner
+            .packaged_skills
+            .insert(SkillId::parse("fixture.shared").unwrap());
 
         assert_eq!(
             CompositionMetadataInput {

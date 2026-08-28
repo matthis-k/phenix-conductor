@@ -6,7 +6,9 @@ use phenix_core::{
 pub use phenix_core::{
     ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
 };
-use phenix_plugin_execution::{ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState};
+use phenix_plugin_execution::{
+    ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

@@ -1,6 +1,7 @@
 use crate::{
-    CapabilityId, ComponentId, ComponentManifest, ConfigNamespace, ConfigurationFrontendId,
-    InterfaceId, PluginExecution, PluginId, PluginManifest, ResourceNamespace,
+    CallableId, CapabilityId, ComponentId, ComponentManifest, ConfigNamespace,
+    ConfigurationFrontendId, EventTypeId, InterfaceId, PluginExecution, PluginId, PluginManifest,
+    ResourceNamespace, SkillId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -53,7 +54,7 @@ pub struct PluginPackageMetadata {
     pub manifest: PluginManifest,
     pub packaged_components: BTreeSet<ComponentId>,
     pub packaged_resources: BTreeSet<String>,
-    pub packaged_skills: BTreeSet<String>,
+    pub packaged_skills: BTreeSet<SkillId>,
     pub compatibility: CompatibilityMetadata,
     pub durable_namespaces: BTreeSet<ResourceNamespace>,
     pub migrations: Vec<DurableMigrationMetadata>,
@@ -72,7 +73,7 @@ pub struct ComponentRuntimeMetadata {
     pub state_class: ComponentStateClass,
     pub reload_policy: ReloadPolicy,
     pub interposition_interfaces: BTreeSet<InterfaceId>,
-    pub event_contributions: BTreeSet<String>,
+    pub event_contributions: BTreeSet<EventTypeId>,
     pub controller_contributions: BTreeSet<String>,
 }
 
@@ -86,7 +87,7 @@ pub struct SkillResourceMetadata {
     pub triggers: BTreeSet<String>,
     pub scope: String,
     pub priority: i32,
-    pub required_tools: BTreeSet<String>,
+    pub required_tools: BTreeSet<CallableId>,
     pub required_interfaces: BTreeSet<InterfaceId>,
     pub required_capabilities: BTreeSet<CapabilityId>,
     pub compatibility: CompatibilityMetadata,
@@ -109,9 +110,7 @@ pub enum CompositionMetadataError {
     MissingComponentHost,
     ResourceOnlyPackageHasComponents,
     EmptyPackagedResource,
-    EmptyPackagedSkill,
     RequestedCapabilityExceedsMaximum(CapabilityId),
-    EmptyEventContribution,
     EmptyControllerContribution,
     MissingIdentity,
     MissingContentIdentity,
@@ -119,7 +118,6 @@ pub enum CompositionMetadataError {
     EmptyDependency,
     EmptyConflict,
     EmptyTrigger,
-    EmptyRequiredTool,
     EmptyInvalidationTarget,
     ResourceIdentityMismatch {
         current: String,
@@ -176,9 +174,6 @@ impl PluginPackageMetadata {
         if self.packaged_resources.iter().any(String::is_empty) {
             return Err(CompositionMetadataError::EmptyPackagedResource);
         }
-        if self.packaged_skills.iter().any(String::is_empty) {
-            return Err(CompositionMetadataError::EmptyPackagedSkill);
-        }
         for namespace in &self.durable_namespaces {
             if !self.manifest.resource_namespaces.contains(namespace) {
                 return Err(
@@ -219,9 +214,6 @@ impl ComponentRuntimeMetadata {
                     capability.clone(),
                 ));
             }
-        }
-        if self.event_contributions.iter().any(String::is_empty) {
-            return Err(CompositionMetadataError::EmptyEventContribution);
         }
         if self.controller_contributions.iter().any(String::is_empty) {
             return Err(CompositionMetadataError::EmptyControllerContribution);
@@ -271,9 +263,6 @@ impl SkillResourceMetadata {
         }
         if self.triggers.iter().any(String::is_empty) {
             return Err(CompositionMetadataError::EmptyTrigger);
-        }
-        if self.required_tools.iter().any(String::is_empty) {
-            return Err(CompositionMetadataError::EmptyRequiredTool);
         }
         if self.invalidation_targets.iter().any(String::is_empty) {
             return Err(CompositionMetadataError::EmptyInvalidationTarget);
@@ -388,7 +377,7 @@ mod tests {
             triggers: BTreeSet::from(["review".into()]),
             scope: "execution".into(),
             priority: 0,
-            required_tools: BTreeSet::from(["read".into()]),
+            required_tools: BTreeSet::from([CallableId::parse("read").unwrap()]),
             required_interfaces: BTreeSet::new(),
             required_capabilities: BTreeSet::new(),
             compatibility: CompatibilityMetadata {
@@ -488,19 +477,12 @@ mod tests {
     }
 
     #[test]
-    fn plugin_package_metadata_rejects_empty_resource_and_skill_identities() {
+    fn plugin_package_metadata_rejects_empty_resource_identity() {
         let mut metadata = package_metadata(PluginExecution::Embedded);
         metadata.packaged_resources.insert(String::new());
         assert_eq!(
             metadata.validate_pre_activation(),
             Err(CompositionMetadataError::EmptyPackagedResource)
-        );
-
-        let mut metadata = package_metadata(PluginExecution::Embedded);
-        metadata.packaged_skills.insert(String::new());
-        assert_eq!(
-            metadata.validate_pre_activation(),
-            Err(CompositionMetadataError::EmptyPackagedSkill)
         );
     }
 
@@ -550,14 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn component_metadata_rejects_empty_event_and_controller_identities() {
-        let mut metadata = component_metadata(Vec::new(), Vec::new());
-        metadata.event_contributions.insert(String::new());
-        assert_eq!(
-            metadata.validate_pre_activation(),
-            Err(CompositionMetadataError::EmptyEventContribution)
-        );
-
+    fn component_metadata_rejects_empty_controller_identity() {
         let mut metadata = component_metadata(Vec::new(), Vec::new());
         metadata.controller_contributions.insert(String::new());
         assert_eq!(

@@ -1,24 +1,30 @@
-use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt::{self, Display, Formatter};
+use serde::{Deserialize, Serialize};
+use std::{
+    fmt::{self, Display, Formatter},
+    str::FromStr,
+};
+
+fn validate_identifier(value: &str) -> Result<(), &'static str> {
+    if value.is_empty() {
+        return Err("identifier must not be empty");
+    }
+    if !value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/' | b':' | b'@')
+    }) {
+        return Err("identifier contains unsupported characters");
+    }
+    Ok(())
+}
 
 macro_rules! identifier {
     ($name:ident) => {
-        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+        #[serde(try_from = "String")]
         pub struct $name(String);
 
         impl $name {
             pub fn parse(value: impl Into<String>) -> Result<Self, &'static str> {
-                let value = value.into();
-                if value.is_empty() {
-                    return Err("identifier must not be empty");
-                }
-                if !value.bytes().all(|byte| {
-                    byte.is_ascii_alphanumeric()
-                        || matches!(byte, b'.' | b'_' | b'-' | b'/' | b':' | b'@')
-                }) {
-                    return Err("identifier contains unsupported characters");
-                }
-                Ok(Self(value))
+                value.into().try_into()
             }
 
             pub fn as_str(&self) -> &str {
@@ -26,28 +32,32 @@ macro_rules! identifier {
             }
         }
 
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                self.as_str()
+            }
+        }
+
         impl Display for $name {
             fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.0)
+                f.write_str(self.as_str())
             }
         }
 
-        impl Serialize for $name {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                serializer.serialize_str(self.as_str())
+        impl FromStr for $name {
+            type Err = &'static str;
+
+            fn from_str(value: &str) -> Result<Self, Self::Err> {
+                value.to_owned().try_into()
             }
         }
 
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                let value = String::deserialize(deserializer)?;
-                Self::parse(value).map_err(D::Error::custom)
+        impl TryFrom<String> for $name {
+            type Error = &'static str;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                validate_identifier(&value)?;
+                Ok(Self(value))
             }
         }
     };
@@ -61,21 +71,50 @@ identifier!(CapabilityId);
 identifier!(ResourceNamespace);
 identifier!(EventTypeId);
 identifier!(SubscriptionId);
+identifier!(CallableId);
+identifier!(ModelId);
+identifier!(RoutingProfileId);
+identifier!(SkillId);
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct InterfaceId(String);
 
 impl InterfaceId {
     pub fn parse(value: impl Into<String>) -> Result<Self, &'static str> {
-        let value = value.into();
-        if value.is_empty() {
-            return Err("interface identifier must not be empty");
-        }
-        if !value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/' | b':' | b'@')
-        }) {
-            return Err("interface identifier contains unsupported characters");
-        }
+        value.into().try_into()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for InterfaceId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Display for InterfaceId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for InterfaceId {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value.to_owned().try_into()
+    }
+}
+
+impl TryFrom<String> for InterfaceId {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        validate_identifier(&value)?;
         let (identity, version) = value
             .rsplit_once('@')
             .ok_or("interface identifier must include an @version suffix")?;
@@ -92,35 +131,6 @@ impl InterfaceId {
             return Err("interface identifier version must be a positive integer");
         }
         Ok(Self(value))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for InterfaceId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl Serialize for InterfaceId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for InterfaceId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(value).map_err(D::Error::custom)
     }
 }
 
@@ -159,6 +169,8 @@ mod tests {
     fn deserialization_preserves_identifier_validation() {
         assert!(serde_json::from_str::<PluginId>("\"has space\"").is_err());
         assert!(serde_json::from_str::<PluginId>("\"\"").is_err());
+        assert!(serde_json::from_str::<CallableId>("\"has space\"").is_err());
+        assert!(serde_json::from_str::<ModelId>("\"\"").is_err());
         assert!(serde_json::from_str::<InterfaceId>("\"unversioned\"").is_err());
         assert!(serde_json::from_str::<InterfaceId>("\"phenix.models@inference@1\"").is_err());
         assert!(serde_json::from_str::<InterfaceId>("\"phenix.models.inference@0\"").is_err());

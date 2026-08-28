@@ -40,12 +40,6 @@ pub struct ObjectiveRecord {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ObjectiveCriterionEvidence {
-    pub criterion_id: ObjectiveCriterionId,
-    pub evidence_ref: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ObjectiveTransitionCause {
     UserIntent,
@@ -72,20 +66,11 @@ pub struct ExecutionObjectiveAssignment {
 }
 
 impl ObjectiveRecord {
-    pub fn required_criteria(&self) -> impl Iterator<Item = &ObjectiveCriterion> {
-        self.criteria.iter().filter(|criterion| criterion.required)
-    }
-
     #[must_use]
     pub fn parent(&self) -> Option<&ObjectiveId> {
         match &self.origin {
             ObjectiveOrigin::Root => None,
             ObjectiveOrigin::Derived { parent } => Some(parent),
         }
-    }
-
-    #[must_use]
-    pub fn is_enacted(&self) -> bool {
-        self.state != ObjectiveState::Draft
     }
 }

@@ -1,9 +1,12 @@
 use crate::{Authority, ConfigurationFrontendId};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    str::FromStr,
+};
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(try_from = "String")]
 pub struct ConfigNamespace(String);
 
 impl ConfigNamespace {
@@ -22,6 +25,22 @@ impl ConfigNamespace {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl FromStr for ConfigNamespace {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
+    }
+}
+
+impl TryFrom<String> for ConfigNamespace {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(value)
     }
 }
 
@@ -168,14 +187,6 @@ pub struct ResolvedConfigContributions {
 }
 
 impl ResolvedConfigContributions {
-    pub fn resolve(
-        contributions: impl IntoIterator<Item = ConfigContribution>,
-        authority_ceiling: &Authority,
-    ) -> Self {
-        Self::try_resolve(contributions, authority_ceiling)
-            .expect("configuration contributions are unambiguous")
-    }
-
     pub fn try_resolve(
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
@@ -230,14 +241,15 @@ impl ResolvedConfigContributions {
             );
             let precedence = contribution.precedence;
             let granted_authority = authority_ceiling.attenuate(&contribution.requested_authority);
+            let attribution = ConfigContributionAttribution {
+                source: contribution.source,
+                requested_authority: contribution.requested_authority,
+            };
             let candidate = ResolvedConfigContribution {
                 namespace: contribution.namespace,
                 contract_version: contribution.contract_version,
                 value: contribution.value,
-                attributions: vec![ConfigContributionAttribution {
-                    source: contribution.source,
-                    requested_authority: contribution.requested_authority,
-                }],
+                attributions: vec![attribution.clone()],
                 granted_authority,
             };
             match resolved.get_mut(&key) {
@@ -258,11 +270,6 @@ impl ResolvedConfigContributions {
                             precedence,
                         });
                     }
-                    let attribution = candidate
-                        .attributions
-                        .into_iter()
-                        .next()
-                        .expect("candidate has one attribution");
                     if !existing.attributions.contains(&attribution) {
                         existing.attributions.push(attribution);
                         existing.attributions.sort_by(|left, right| {
@@ -334,6 +341,13 @@ mod tests {
         CapabilityId::parse(value).unwrap()
     }
 
+    fn resolve(
+        contributions: impl IntoIterator<Item = ConfigContribution>,
+        authority_ceiling: &Authority,
+    ) -> ResolvedConfigContributions {
+        ResolvedConfigContributions::try_resolve(contributions, authority_ceiling).unwrap()
+    }
+
     fn contribution(
         frontend: &str,
         source_identity: &str,
@@ -383,9 +397,21 @@ mod tests {
     }
 
     #[test]
+    fn namespace_deserialization_preserves_parser_invariants() {
+        assert!(serde_json::from_str::<ConfigNamespace>("\"\"").is_err());
+        assert!(serde_json::from_str::<ConfigNamespace>("\"has space\"").is_err());
+        assert_eq!(
+            serde_json::from_str::<ConfigNamespace>("\"acme.engineering@1\"")
+                .unwrap()
+                .as_str(),
+            "acme.engineering@1"
+        );
+    }
+
+    #[test]
     fn equivalent_frontends_have_the_same_semantic_payload() {
         let authority = Authority::new([cap("workspace.read")]);
-        let nix = ResolvedConfigContributions::resolve(
+        let nix = resolve(
             [contribution(
                 "phenix-config-nix",
                 "flake:acme",
@@ -395,7 +421,7 @@ mod tests {
             )],
             &authority,
         );
-        let lua = ResolvedConfigContributions::resolve(
+        let lua = resolve(
             [contribution(
                 "phenix-config-lua",
                 "file:phenix.lua",
@@ -428,8 +454,8 @@ mod tests {
             authority.clone(),
         );
 
-        let first = ResolvedConfigContributions::resolve([nix.clone(), lua.clone()], &authority);
-        let second = ResolvedConfigContributions::resolve([lua, nix], &authority);
+        let first = resolve([nix.clone(), lua.clone()], &authority);
+        let second = resolve([lua, nix], &authority);
 
         assert_eq!(first, second);
         let attributions = &first.entries()[0].attributions;
@@ -450,7 +476,7 @@ mod tests {
     fn frontend_authority_requests_are_always_attenuated_by_resolver_policy() {
         let read = cap("workspace.read");
         let write = cap("workspace.write");
-        let resolved = ResolvedConfigContributions::resolve(
+        let resolved = resolve(
             [contribution(
                 "phenix-config-ipc",
                 "socket:control",
@@ -484,8 +510,8 @@ mod tests {
             20,
             Authority::default(),
         );
-        let first = ResolvedConfigContributions::resolve([low.clone(), high.clone()], &authority);
-        let second = ResolvedConfigContributions::resolve([high, low], &authority);
+        let first = resolve([low.clone(), high.clone()], &authority);
+        let second = resolve([high, low], &authority);
 
         assert_eq!(first, second);
         assert_eq!(first.entries().len(), 1);

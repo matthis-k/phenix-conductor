@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fmt::{self, Display, Formatter};
+use std::str::FromStr;
 
 /// Canonical frontend/service request accepted by the supported Harness process.
 ///
@@ -81,17 +82,12 @@ impl Display for InvalidFrontendServiceProviderId {
 impl std::error::Error for InvalidFrontendServiceProviderId {}
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(try_from = "String")]
 pub struct FrontendServiceProviderId(String);
 
 impl FrontendServiceProviderId {
     pub fn parse(value: impl Into<String>) -> Result<Self, InvalidFrontendServiceProviderId> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            Err(InvalidFrontendServiceProviderId)
-        } else {
-            Ok(Self(value))
-        }
+        value.into().try_into()
     }
 
     #[must_use]
@@ -100,9 +96,34 @@ impl FrontendServiceProviderId {
     }
 }
 
+impl AsRef<str> for FrontendServiceProviderId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl Display for FrontendServiceProviderId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for FrontendServiceProviderId {
+    type Err = InvalidFrontendServiceProviderId;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value.to_owned().try_into()
+    }
+}
+
+impl TryFrom<String> for FrontendServiceProviderId {
+    type Error = InvalidFrontendServiceProviderId;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.trim().is_empty() {
+            return Err(InvalidFrontendServiceProviderId);
+        }
+        Ok(Self(value))
     }
 }
 
@@ -577,6 +598,12 @@ mod tests {
         let value = serde_json::to_value(ErrorCode::ExecutionProviderFailure)
             .expect("serialize error code");
         assert_eq!(value, "execution_provider_failure");
+    }
+
+    #[test]
+    fn frontend_provider_ids_reject_blank_wire_values() {
+        assert!(serde_json::from_str::<FrontendServiceProviderId>("\"\"").is_err());
+        assert!(serde_json::from_str::<FrontendServiceProviderId>("\"  \"").is_err());
     }
 
     fn frontend_provider() -> FrontendServiceProviderDescriptor {

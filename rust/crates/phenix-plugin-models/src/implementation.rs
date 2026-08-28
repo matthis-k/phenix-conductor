@@ -1,6 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CallableId, CapabilityId, DurableSchema, ModelId, PluginExecution, PluginHost,
+    PluginId, PluginInstance, PluginManifest, ResourceNamespace, RoutingProfileId,
+    ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
 use serde::{Deserialize, Serialize};
@@ -17,24 +18,24 @@ const PROFILE_INDEX: &str = "index/profiles";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelTarget {
-    pub provider_plugin: String,
-    pub model: String,
+    pub provider_plugin: PluginId,
+    pub model: ModelId,
     #[serde(default)]
     pub options: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoutingProfile {
-    pub id: String,
+    pub id: RoutingProfileId,
     pub default_target: ModelTarget,
     #[serde(default)]
-    pub callable_targets: BTreeMap<String, ModelTarget>,
+    pub callable_targets: BTreeMap<CallableId, ModelTarget>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoutingProfileDescriptor {
-    pub id: String,
-    pub providers: Vec<String>,
+    pub id: RoutingProfileId,
+    pub providers: Vec<PluginId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -44,20 +45,20 @@ pub enum ModelCommand {
         profile: RoutingProfile,
     },
     GetProfile {
-        id: String,
+        id: RoutingProfileId,
     },
     ListProfiles,
     SetProviderAuthenticated {
-        provider_plugin: String,
+        provider_plugin: PluginId,
         authenticated: bool,
     },
     Resolve {
-        profile_id: String,
-        callable_id: Option<String>,
+        profile_id: RoutingProfileId,
+        callable_id: Option<CallableId>,
     },
     Invoke {
-        profile_id: String,
-        callable_id: Option<String>,
+        profile_id: RoutingProfileId,
+        callable_id: Option<CallableId>,
         input: Vec<u8>,
     },
 }
@@ -72,7 +73,7 @@ pub enum ModelResponse {
         profiles: Vec<RoutingProfileDescriptor>,
     },
     Authentication {
-        provider_plugin: String,
+        provider_plugin: PluginId,
         authenticated: bool,
     },
     Target {
@@ -160,18 +161,14 @@ impl PluginInstance for ModelRoutingPlugin {
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = match command {
             ModelCommand::RegisterProfile { profile } => {
-                validate_profile(&profile)?;
                 insert_profile(host, &profile)?;
                 ModelResponse::Profile {
                     profile: Some(profile),
                 }
             }
-            ModelCommand::GetProfile { id } => {
-                validate_identity("routing profile id", &id)?;
-                ModelResponse::Profile {
-                    profile: read_profile(host, &id)?,
-                }
-            }
+            ModelCommand::GetProfile { id } => ModelResponse::Profile {
+                profile: read_profile(host, &id)?,
+            },
             ModelCommand::ListProfiles => ModelResponse::Profiles {
                 profiles: load_profiles(host)?
                     .into_iter()
@@ -182,12 +179,10 @@ impl PluginInstance for ModelRoutingPlugin {
                 provider_plugin,
                 authenticated,
             } => {
-                let plugin =
-                    PluginId::parse(provider_plugin.clone()).map_err(|error| error.to_string())?;
                 if authenticated {
-                    self.authenticated.insert(plugin);
+                    self.authenticated.insert(provider_plugin.clone());
                 } else {
-                    self.authenticated.remove(&plugin);
+                    self.authenticated.remove(&provider_plugin);
                 }
                 ModelResponse::Authentication {
                     provider_plugin,
@@ -198,21 +193,22 @@ impl PluginInstance for ModelRoutingPlugin {
                 profile_id,
                 callable_id,
             } => ModelResponse::Target {
-                target: resolve_target(host, &profile_id, callable_id.as_deref())?,
+                target: resolve_target(host, &profile_id, callable_id.as_ref())?,
             },
             ModelCommand::Invoke {
                 profile_id,
                 callable_id,
                 input,
             } => {
-                let target = resolve_target(host, &profile_id, callable_id.as_deref())?;
-                let provider = PluginId::parse(target.provider_plugin.clone())
-                    .map_err(|error| error.to_string())?;
-                if !self.authenticated.contains(&provider) {
-                    return Err(format!("provider authentication required: {provider}"));
+                let target = resolve_target(host, &profile_id, callable_id.as_ref())?;
+                if !self.authenticated.contains(&target.provider_plugin) {
+                    return Err(format!(
+                        "provider authentication required: {}",
+                        target.provider_plugin
+                    ));
                 }
                 let request = ModelInferenceRequest {
-                    model: target.model.clone(),
+                    model: target.model.as_str().to_owned(),
                     input,
                     options: target.options.clone(),
                 };
@@ -221,7 +217,7 @@ impl PluginInstance for ModelRoutingPlugin {
                         &model_inference_service(),
                         &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
                         host.authority(),
-                        Some(&provider),
+                        Some(&target.provider_plugin),
                     )
                     .map_err(|error| error.to_string())?;
                 let response: ModelInferenceResponse =
@@ -230,29 +226,6 @@ impl PluginInstance for ModelRoutingPlugin {
             }
         };
         serde_json::to_vec(&response).map_err(|error| error.to_string())
-    }
-}
-
-fn validate_profile(profile: &RoutingProfile) -> Result<(), String> {
-    validate_identity("routing profile id", &profile.id)?;
-    validate_target(&profile.default_target)?;
-    for (callable, target) in &profile.callable_targets {
-        validate_identity("callable id", callable)?;
-        validate_target(target)?;
-    }
-    Ok(())
-}
-
-fn validate_target(target: &ModelTarget) -> Result<(), String> {
-    PluginId::parse(target.provider_plugin.clone()).map_err(|error| error.to_string())?;
-    validate_identity("model id", &target.model)
-}
-
-fn validate_identity(label: &str, value: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        Err(format!("{label} must not be empty"))
-    } else {
-        Ok(())
     }
 }
 
@@ -272,10 +245,9 @@ fn descriptor(profile: &RoutingProfile) -> RoutingProfileDescriptor {
 
 fn resolve_target(
     host: &PluginHost<'_>,
-    profile_id: &str,
-    callable_id: Option<&str>,
+    profile_id: &RoutingProfileId,
+    callable_id: Option<&CallableId>,
 ) -> Result<ModelTarget, String> {
-    validate_identity("routing profile id", profile_id)?;
     let profile = read_profile(host, profile_id)?
         .ok_or_else(|| format!("unknown routing profile: {profile_id}"))?;
     Ok(callable_id
@@ -287,12 +259,12 @@ fn resolve_target(
 fn insert_profile(host: &PluginHost<'_>, profile: &RoutingProfile) -> Result<(), String> {
     let key = profile_key(&profile.id);
     let old_index = read_raw(host, PROFILE_INDEX)?;
-    let mut ids: Vec<String> = old_index
+    let mut ids: Vec<RoutingProfileId> = old_index
         .as_deref()
         .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
         .transpose()?
         .unwrap_or_default();
-    if ids.iter().any(|id| id == &profile.id) || read_raw(host, &key)?.is_some() {
+    if ids.contains(&profile.id) || read_raw(host, &key)?.is_some() {
         return Err(format!(
             "routing profile already registered: {}",
             profile.id
@@ -324,14 +296,17 @@ fn insert_profile(host: &PluginHost<'_>, profile: &RoutingProfile) -> Result<(),
     .map_err(|error| error.to_string())
 }
 
-fn read_profile(host: &PluginHost<'_>, id: &str) -> Result<Option<RoutingProfile>, String> {
+fn read_profile(
+    host: &PluginHost<'_>,
+    id: &RoutingProfileId,
+) -> Result<Option<RoutingProfile>, String> {
     read_raw(host, &profile_key(id))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
 fn load_profiles(host: &PluginHost<'_>) -> Result<Vec<RoutingProfile>, String> {
-    let ids: Vec<String> = read_raw(host, PROFILE_INDEX)?
+    let ids: Vec<RoutingProfileId> = read_raw(host, PROFILE_INDEX)?
         .as_deref()
         .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
         .transpose()?
@@ -346,7 +321,7 @@ fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String>
         .map_err(|error| error.to_string())
 }
 
-fn profile_key(id: &str) -> String {
+fn profile_key(id: &RoutingProfileId) -> String {
     format!("profile/{id}")
 }
 
@@ -373,8 +348,8 @@ mod tests {
 
     fn target(provider: &str, model: &str) -> ModelTarget {
         ModelTarget {
-            provider_plugin: provider.into(),
-            model: model.into(),
+            provider_plugin: PluginId::parse(provider).unwrap(),
+            model: ModelId::parse(model).unwrap(),
             options: BTreeMap::new(),
         }
     }
@@ -409,13 +384,34 @@ mod tests {
     }
 
     #[test]
+    fn routing_wire_ids_are_rejected_before_runtime_validation() {
+        assert!(serde_json::from_value::<ModelCommand>(serde_json::json!({
+            "operation": "get_profile",
+            "id": "   "
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<ModelTarget>(serde_json::json!({
+            "provider_plugin": "provider.default",
+            "model": "",
+            "options": {}
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<ModelTarget>(serde_json::json!({
+            "provider_plugin": "has space",
+            "model": "fixture",
+            "options": {}
+        }))
+        .is_err());
+    }
+
+    #[test]
     fn routing_profiles_are_immutable_durable_and_callable_specific() {
         let path = temp_db("model-routing");
         let profile = RoutingProfile {
-            id: "default".into(),
+            id: RoutingProfileId::parse("default").unwrap(),
             default_target: target("provider.default", "root"),
             callable_targets: BTreeMap::from([(
-                "agent.scout".into(),
+                CallableId::parse("agent.scout").unwrap(),
                 target("provider.scout", "scout"),
             )]),
         };
@@ -441,8 +437,8 @@ mod tests {
         let response = invoke(
             &mut restored,
             ModelCommand::Resolve {
-                profile_id: "default".into(),
-                callable_id: Some("agent.scout".into()),
+                profile_id: RoutingProfileId::parse("default").unwrap(),
+                callable_id: Some(CallableId::parse("agent.scout").unwrap()),
             },
         )
         .unwrap();
@@ -463,7 +459,7 @@ mod tests {
             invoke(
                 &mut kernel,
                 ModelCommand::SetProviderAuthenticated {
-                    provider_plugin: "provider.default".into(),
+                    provider_plugin: PluginId::parse("provider.default").unwrap(),
                     authenticated: true,
                 },
             )
@@ -473,7 +469,7 @@ mod tests {
         let response = invoke(
             &mut restored,
             ModelCommand::SetProviderAuthenticated {
-                provider_plugin: "provider.default".into(),
+                provider_plugin: PluginId::parse("provider.default").unwrap(),
                 authenticated: false,
             },
         )
@@ -481,7 +477,7 @@ mod tests {
         assert_eq!(
             response,
             ModelResponse::Authentication {
-                provider_plugin: "provider.default".into(),
+                provider_plugin: PluginId::parse("provider.default").unwrap(),
                 authenticated: false
             }
         );

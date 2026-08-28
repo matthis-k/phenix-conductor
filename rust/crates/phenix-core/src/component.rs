@@ -1,6 +1,6 @@
 use crate::{
-    Authority, ComponentId, ComponentManifest, InterfaceId, PluginExecution, PluginId,
-    PluginManifest,
+    Authority, ComponentExport, ComponentId, ComponentManifest, InterfaceId, PluginExecution,
+    PluginId, PluginManifest,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -198,19 +198,21 @@ impl ResolvedComponentGraph {
             }
         }
 
-        let mut exporters: BTreeMap<InterfaceId, Vec<(&ComponentManifest, i32)>> = BTreeMap::new();
+        let mut exporters: BTreeMap<InterfaceId, Vec<(&ComponentManifest, &ComponentExport)>> =
+            BTreeMap::new();
         for manifest in components.values() {
             for export in &manifest.exports {
                 exporters
                     .entry(export.interface.clone())
                     .or_default()
-                    .push((manifest, export.priority));
+                    .push((manifest, export));
             }
         }
         for candidates in exporters.values_mut() {
-            candidates.sort_by(|(left, left_priority), (right, right_priority)| {
-                right_priority
-                    .cmp(left_priority)
+            candidates.sort_by(|(left, left_export), (right, right_export)| {
+                right_export
+                    .priority
+                    .cmp(&left_export.priority)
                     .then_with(|| left.id.cmp(&right.id))
             });
         }
@@ -224,13 +226,8 @@ impl ResolvedComponentGraph {
             let mut imports = Vec::with_capacity(manifest.imports.len());
             for import in &manifest.imports {
                 let selected = exporters.get(&import.interface).and_then(|candidates| {
-                    candidates.iter().find_map(|(candidate, _)| {
+                    candidates.iter().find_map(|(candidate, export)| {
                         let exporter_owner = &plugins[&candidate.owner];
-                        let export = candidate
-                            .exports
-                            .iter()
-                            .find(|export| export.interface == import.interface)
-                            .expect("candidate component exports requested interface");
                         let effective_authority = component_authority
                             .attenuate(&import.authority)
                             .attenuate(&exporter_owner.maximum_authority)

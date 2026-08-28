@@ -1,61 +1,12 @@
-use crate::{InvalidId, WorkspaceId};
+use crate::WorkspaceId;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap};
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct LanguageServiceKind(String);
-
-impl LanguageServiceKind {
-    pub fn parse(value: impl Into<String>) -> Result<Self, InvalidId> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            Err(InvalidId)
-        } else {
-            Ok(Self(value))
-        }
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for LanguageServiceKind {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct LanguageProviderId(String);
-
-impl LanguageProviderId {
-    pub fn parse(value: impl Into<String>) -> Result<Self, InvalidId> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            Err(InvalidId)
-        } else {
-            Ok(Self(value))
-        }
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for LanguageProviderId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+domain_id_type!(LanguageServiceKind);
+domain_id_type!(LanguageProviderId);
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LanguageProviderCapabilities {
@@ -115,10 +66,13 @@ impl LanguageServiceConfiguration {
         definition: ManagedLanguageProviderDefinition,
     ) -> Result<(), LanguageServiceError> {
         let key = (definition.service.clone(), definition.provider.clone());
-        if self.managed.insert(key, definition).is_some() {
-            return Err(LanguageServiceError::DuplicateManagedProvider);
+        match self.managed.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(definition);
+                Ok(())
+            }
+            Entry::Occupied(_) => Err(LanguageServiceError::DuplicateManagedProvider),
         }
-        Ok(())
     }
 
     pub fn set_requirement(&mut self, requirement: LanguageServiceRequirement) {
@@ -393,6 +347,36 @@ mod tests {
         }
     }
 
+    fn managed(command: &str) -> ManagedLanguageProviderDefinition {
+        ManagedLanguageProviderDefinition {
+            service: kind(),
+            provider: provider("managed"),
+            command: PathBuf::from(command),
+            args: Vec::new(),
+            capabilities: capable(),
+        }
+    }
+
+    #[test]
+    fn language_ids_reject_blank_wire_values() {
+        assert!(serde_json::from_str::<LanguageServiceKind>("\"\"").is_err());
+        assert!(serde_json::from_str::<LanguageProviderId>("\"  \"").is_err());
+    }
+
+    #[test]
+    fn duplicate_managed_provider_does_not_replace_existing_definition() {
+        let mut configuration = LanguageServiceConfiguration::default();
+        configuration.register_managed(managed("first")).unwrap();
+        assert_eq!(
+            configuration.register_managed(managed("second")),
+            Err(LanguageServiceError::DuplicateManagedProvider)
+        );
+        assert_eq!(
+            configuration.managed_for(&kind())[0].command,
+            PathBuf::from("first")
+        );
+    }
+
     #[test]
     fn capability_satisfaction_requires_every_requested_behavior() {
         let available = capable();
@@ -438,13 +422,7 @@ mod tests {
         let workspace = WorkspaceId::parse("workspace:test").unwrap();
         let mut configuration = LanguageServiceConfiguration::default();
         configuration
-            .register_managed(ManagedLanguageProviderDefinition {
-                service: kind(),
-                provider: provider("managed"),
-                command: PathBuf::from("rust-analyzer"),
-                args: Vec::new(),
-                capabilities: capable(),
-            })
+            .register_managed(managed("rust-analyzer"))
             .unwrap();
         configuration.set_requirement(LanguageServiceRequirement {
             service: kind(),
@@ -537,13 +515,7 @@ mod tests {
         let workspace = WorkspaceId::parse("workspace:test").unwrap();
         let mut configuration = LanguageServiceConfiguration::default();
         configuration
-            .register_managed(ManagedLanguageProviderDefinition {
-                service: kind(),
-                provider: provider("managed"),
-                command: PathBuf::from("rust-analyzer"),
-                args: Vec::new(),
-                capabilities: capable(),
-            })
+            .register_managed(managed("rust-analyzer"))
             .unwrap();
         let mut manager = LanguageServiceManager::default();
         manager.reconcile(
@@ -572,15 +544,9 @@ mod tests {
     fn managed_definition_and_requirement_change_semantic_manifest() {
         let mut configuration = LanguageServiceConfiguration::default();
         let before = configuration.semantic_manifest();
-        configuration
-            .register_managed(ManagedLanguageProviderDefinition {
-                service: kind(),
-                provider: provider("managed"),
-                command: PathBuf::from("rust-analyzer"),
-                args: vec!["--stdio".to_owned()],
-                capabilities: capable(),
-            })
-            .unwrap();
+        let mut definition = managed("rust-analyzer");
+        definition.args = vec!["--stdio".to_owned()];
+        configuration.register_managed(definition).unwrap();
         configuration.set_requirement(LanguageServiceRequirement {
             service: kind(),
             required_capabilities: capable(),

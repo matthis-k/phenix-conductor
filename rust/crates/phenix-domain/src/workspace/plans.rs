@@ -1,43 +1,9 @@
-#[path = "context.rs"]
-mod context;
-pub use context::*;
-
-use crate::{ExecutionId, InvalidId, ObjectiveId, WorkspaceId};
+use crate::{ExecutionId, ObjectiveId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::fmt::{self, Display, Formatter};
 
-macro_rules! plan_id_type {
-    ($name:ident) => {
-        #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn parse(value: impl Into<String>) -> Result<Self, InvalidId> {
-                let value = value.into();
-                if value.trim().is_empty() {
-                    Err(InvalidId)
-                } else {
-                    Ok(Self(value))
-                }
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl Display for $name {
-            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.0)
-            }
-        }
-    };
-}
-
-plan_id_type!(PlanId);
-plan_id_type!(PlanStepId);
+domain_id_type!(PlanId);
+domain_id_type!(PlanStepId);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -136,6 +102,8 @@ mod tests {
     fn plan_ids_reject_empty_values() {
         assert!(PlanId::parse(" ").is_err());
         assert!(PlanStepId::parse("").is_err());
+        assert!(serde_json::from_str::<PlanId>("\" \"").is_err());
+        assert!(serde_json::from_str::<PlanStepId>("\"\"").is_err());
     }
 
     #[test]

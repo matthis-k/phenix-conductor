@@ -1,6 +1,6 @@
 use phenix_core::{
-    Authority, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ServiceContribution, ServiceId,
+    Authority, ModelId, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    RoutingProfileId, ServiceContribution, ServiceId,
 };
 use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};
 use phenix_plugin_catalog::{
@@ -259,10 +259,10 @@ fn supported_harness_routes_model_inference_and_tool_calls_through_plugins() {
     harness.activate().unwrap();
 
     let profile = RoutingProfile {
-        id: "parity".into(),
+        id: RoutingProfileId::parse("parity").unwrap(),
         default_target: ModelTarget {
-            provider_plugin: provider.into(),
-            model: "fixture-model".into(),
+            provider_plugin: PluginId::parse(provider).unwrap(),
+            model: ModelId::parse("fixture-model").unwrap(),
             options: BTreeMap::new(),
         },
         callable_targets: BTreeMap::new(),
@@ -277,7 +277,7 @@ fn supported_harness_routes_model_inference_and_tool_calls_through_plugins() {
         )
         .unwrap();
     let authenticate = serde_json::to_vec(&ModelCommand::SetProviderAuthenticated {
-        provider_plugin: provider.into(),
+        provider_plugin: PluginId::parse(provider).unwrap(),
         authenticated: true,
     })
     .unwrap();
@@ -290,7 +290,7 @@ fn supported_harness_routes_model_inference_and_tool_calls_through_plugins() {
         )
         .unwrap();
     let model = serde_json::to_vec(&ModelCommand::Invoke {
-        profile_id: "parity".into(),
+        profile_id: RoutingProfileId::parse("parity").unwrap(),
         callable_id: None,
         input: b"hello".to_vec(),
     })
@@ -306,8 +306,8 @@ fn supported_harness_routes_model_inference_and_tool_calls_through_plugins() {
     let output: ModelResponse = serde_json::from_slice(&output).unwrap();
     match output {
         ModelResponse::Inference { target, response } => {
-            assert_eq!(target.provider_plugin, provider);
-            assert_eq!(target.model, "fixture-model");
+            assert_eq!(target.provider_plugin.as_str(), provider);
+            assert_eq!(target.model.as_str(), "fixture-model");
             assert_eq!(response.output, b"answer:hello");
             assert_eq!(response.provider_metadata["model"], "fixture-model");
         }

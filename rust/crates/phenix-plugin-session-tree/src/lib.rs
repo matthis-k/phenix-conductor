@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 mod component;
-mod implementation {
-    include!("implementation.rs");
-}
+mod implementation;
 mod interface;
 pub use component::*;
 pub use implementation::*;

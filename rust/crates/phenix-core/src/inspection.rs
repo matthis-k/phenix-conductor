@@ -144,9 +144,9 @@ impl ResolvedHarnessInspection {
 mod tests {
     use super::*;
     use crate::{
-        CapabilityId, CompatibilityMetadata, ComponentExport, ComponentHostKind, ComponentImport,
-        ComponentStateClass, CompositionMetadataInput, ConfigNamespace, ConfigurationFrontendId,
-        PluginId, ReloadPolicy,
+        CallableId, CapabilityId, CompatibilityMetadata, ComponentExport, ComponentHostKind,
+        ComponentImport, ComponentStateClass, CompositionMetadataInput, ConfigNamespace,
+        ConfigurationFrontendId, PluginId, ReloadPolicy,
     };
     use std::collections::BTreeSet;
 
@@ -184,7 +184,7 @@ mod tests {
             triggers: BTreeSet::from(["fixture".into()]),
             scope: "execution".into(),
             priority: 1,
-            required_tools: BTreeSet::from(["read".into()]),
+            required_tools: BTreeSet::from([CallableId::parse("read").unwrap()]),
             required_interfaces: BTreeSet::new(),
             required_capabilities: BTreeSet::new(),
             compatibility: CompatibilityMetadata {

@@ -3,10 +3,10 @@
 mod component;
 mod configuration;
 #[cfg(test)]
+mod configuration_regression;
+#[cfg(test)]
 mod generation_regression;
-mod implementation {
-    include!("implementation.rs");
-}
+mod implementation;
 
 pub use component::*;
 pub use configuration::{
