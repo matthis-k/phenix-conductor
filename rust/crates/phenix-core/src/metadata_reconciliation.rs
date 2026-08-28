@@ -578,7 +578,7 @@ mod tests {
             .preview_candidate_with_metadata(&active_metadata, &candidate, &candidate_metadata)
             .unwrap();
 
-        assert!(preview.graph.diff.resources.is_empty());
+        assert_eq!(preview.graph.diff.resources.len(), 1);
         assert_eq!(
             preview.metadata.resources,
             vec![ResourceMetadataChange {
