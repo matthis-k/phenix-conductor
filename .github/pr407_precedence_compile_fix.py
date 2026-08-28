@@ -32,3 +32,15 @@ new = '''        let precedence = match env::var("PHENIX_SETTINGS_PRECEDENCE") {
 if old not in text:
     raise SystemExit("precedence match anchor missing")
 path.write_text(text.replace(old, new, 1))
+
+path = Path("rust/crates/phenix-harness/src/lib.rs")
+text = path.read_text()
+old = "        assert_eq!(harness.kernel().config().manifests().count(), 15);\n"
+new = '''        assert_eq!(
+            harness.kernel().config().manifests().count(),
+            HarnessBuilder::default_suite_plugin_ids().len()
+        );
+'''
+if old not in text:
+    raise SystemExit("default suite count anchor missing")
+path.write_text(text.replace(old, new, 1))
