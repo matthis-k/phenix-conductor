@@ -213,26 +213,49 @@ pub struct ResolvedOption {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OptionCommand {
-    Define { definition: OptionDefinition },
-    GetDefinition { key: OptionKey },
+    Define {
+        definition: OptionDefinition,
+    },
+    GetDefinition {
+        key: OptionKey,
+    },
     Set {
         key: OptionKey,
         scope: OptionScope,
         value: OptionValue,
     },
-    Unset { key: OptionKey, scope: OptionScope },
-    Resolve { key: OptionKey, context: OptionContext },
-    List { context: OptionContext },
+    Unset {
+        key: OptionKey,
+        scope: OptionScope,
+    },
+    Resolve {
+        key: OptionKey,
+        context: OptionContext,
+    },
+    List {
+        context: OptionContext,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OptionResponse {
-    Defined { definition: OptionDefinition },
-    Definition { definition: Option<OptionDefinition> },
-    Updated { key: OptionKey, scope: OptionScope },
-    Value { option: ResolvedOption },
-    Options { options: Vec<ResolvedOption> },
+    Defined {
+        definition: OptionDefinition,
+    },
+    Definition {
+        definition: Option<OptionDefinition>,
+    },
+    Updated {
+        key: OptionKey,
+        scope: OptionScope,
+    },
+    Value {
+        option: ResolvedOption,
+    },
+    Options {
+        options: Vec<ResolvedOption>,
+    },
 }
 
 pub struct OptionsInterface;
@@ -382,7 +405,10 @@ impl OptionState {
         definition.validate()?;
         match self.definitions.get(&definition.key) {
             Some(existing) if existing == &definition => Ok(false),
-            Some(_) => Err(format!("option {} is already defined differently", definition.key)),
+            Some(_) => Err(format!(
+                "option {} is already defined differently",
+                definition.key
+            )),
             None => {
                 self.definitions.insert(definition.key.clone(), definition);
                 Ok(true)
@@ -390,16 +416,26 @@ impl OptionState {
         }
     }
 
-    fn set(&mut self, key: &OptionKey, scope: OptionScope, value: OptionValue) -> Result<(), String> {
+    fn set(
+        &mut self,
+        key: &OptionKey,
+        scope: OptionScope,
+        value: OptionValue,
+    ) -> Result<(), String> {
         let definition = self
             .definitions
             .get(key)
             .ok_or_else(|| format!("unknown option: {key}"))?;
         if !definition.scopes.contains(&scope.kind()) {
-            return Err(format!("option {key} cannot be set at {:?} scope", scope.kind()));
+            return Err(format!(
+                "option {key} cannot be set at {:?} scope",
+                scope.kind()
+            ));
         }
         if !definition.default.has_same_type(&value) {
-            return Err(format!("option {key} value type does not match its definition"));
+            return Err(format!(
+                "option {key} value type does not match its definition"
+            ));
         }
         self.values
             .entry(scope.storage_key())
@@ -607,7 +643,11 @@ mod tests {
         );
 
         state
-            .set(&key, OptionScope::Global, OptionValue::String("global".into()))
+            .set(
+                &key,
+                OptionScope::Global,
+                OptionValue::String("global".into()),
+            )
             .unwrap();
         state
             .set(
