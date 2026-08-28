@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{
-    Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest,
-    InterfaceId, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    SdkContribution, SdkNamespace, SdkResourceId, ServiceContribution, ServiceId, ServiceRole,
+    Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
+    ComponentManifest, InterfaceId, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, SdkContribution, SdkNamespace, SdkResourceId, ServiceContribution, ServiceId,
+    ServiceRole,
 };
 use phenix_plugin_basic_agent::{BasicSkillsInterface, BasicToolsInterface};
 use phenix_plugin_context::ContextInterface;
@@ -169,7 +170,10 @@ fn open_session(
     }
     let context = option_context(&id, agent)?;
     let existing = match host
-        .invoke_import::<SessionInterface>(&sdk_component_id(), &SessionCommand::Get { id: id.clone() })
+        .invoke_import::<SessionInterface>(
+            &sdk_component_id(),
+            &SessionCommand::Get { id: id.clone() },
+        )
         .map_err(|error| error.to_string())?
     {
         SessionResponse::Session { session } => session,
@@ -183,11 +187,15 @@ fn open_session(
                 created: false,
             });
         }
-        return Err(format!("session already exists and reuse is disabled: {id}"));
+        return Err(format!(
+            "session already exists and reuse is disabled: {id}"
+        ));
     }
 
     if !resolve_bool(host, "session.auto_create", &context)? {
-        return Err(format!("session does not exist and auto-create is disabled: {id}"));
+        return Err(format!(
+            "session does not exist and auto-create is disabled: {id}"
+        ));
     }
 
     match host
@@ -212,11 +220,7 @@ fn option_context(id: &str, agent: Option<String>) -> Result<OptionContext, Stri
     })
 }
 
-fn resolve_bool(
-    host: &PluginHost<'_>,
-    key: &str,
-    context: &OptionContext,
-) -> Result<bool, String> {
+fn resolve_bool(host: &PluginHost<'_>, key: &str, context: &OptionContext) -> Result<bool, String> {
     let key = OptionKey::parse(key).expect("static SDK option key is valid");
     let response = host
         .invoke_import::<OptionsInterface>(
@@ -239,7 +243,9 @@ fn resolve_bool(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{CapabilityId, Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
+    use phenix_core::{
+        CapabilityId, Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation,
+    };
     use phenix_plugin_options::{
         options_component_manifest, options_factory, options_manifest, options_service, OptionScope,
     };
@@ -320,8 +326,14 @@ mod tests {
             serde_json::from_slice::<SdkSessionResponse>(&output).unwrap()
         };
 
-        assert!(matches!(open(&mut kernel), SdkSessionResponse::Opened { created: true, .. }));
-        assert!(matches!(open(&mut kernel), SdkSessionResponse::Opened { created: false, .. }));
+        assert!(matches!(
+            open(&mut kernel),
+            SdkSessionResponse::Opened { created: true, .. }
+        ));
+        assert!(matches!(
+            open(&mut kernel),
+            SdkSessionResponse::Opened { created: false, .. }
+        ));
 
         kernel
             .invoke(
