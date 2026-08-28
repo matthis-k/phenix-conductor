@@ -64,10 +64,10 @@ impl PluginInstance for ExecutionPackagePlugin {
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
         if service == &configuration::execution_configuration_service() {
-            self.configuration.invoke(service, input, host)
-        } else {
-            self.execution.invoke(service, input, host)
+            return self.configuration.invoke(service, input, host);
         }
+
+        self.execution.invoke(service, input, host)
     }
 
     fn stop(&mut self) -> Result<(), String> {
