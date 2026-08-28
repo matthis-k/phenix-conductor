@@ -7,7 +7,7 @@ use phenix_plugin_catalog::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::{collections::BTreeMap, error::Error, fs, path::Path};
+use std::{collections::BTreeMap, error::Error, fs, io, path::Path};
 
 #[derive(Debug, Deserialize)]
 struct RuntimeConfiguration {
@@ -24,7 +24,7 @@ struct RuntimeRoutingProfile {
     callable_targets: BTreeMap<String, RuntimeModelTarget>,
 }
 
-#[derive(Debug, Deserialize, Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SettingsConfiguration {
     #[serde(default)]
@@ -53,6 +53,7 @@ impl From<SettingValue> for OptionValue {
     }
 }
 
+#[derive(Debug, Deserialize)]
 struct RuntimeModelTarget {
     backend: String,
     provider: String,
@@ -122,7 +123,8 @@ fn apply_settings_configuration(
         set_option(harness, key, OptionScope::Global, value)?;
     }
     for (session, values) in settings.sessions {
-        let session = OptionSubjectId::parse(session)?;
+        let session = OptionSubjectId::parse(session)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         for (key, value) in values {
             set_option(
                 harness,
@@ -135,7 +137,8 @@ fn apply_settings_configuration(
         }
     }
     for (agent, values) in settings.agents {
-        let agent = OptionSubjectId::parse(agent)?;
+        let agent = OptionSubjectId::parse(agent)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         for (key, value) in values {
             set_option(
                 harness,
@@ -156,7 +159,8 @@ fn set_option(
     scope: OptionScope,
     value: SettingValue,
 ) -> Result<(), Box<dyn Error>> {
-    let key = OptionKey::parse(key)?;
+    let key = OptionKey::parse(key)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     let output = harness.invoke(
         &options_service(),
         &serde_json::to_vec(&OptionCommand::Set {
