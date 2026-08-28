@@ -1,0 +1,29 @@
+name: PR 407 lock refresh
+
+on:
+  push:
+    branches:
+      - agent/plugin-sdk-contributions
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: agent/plugin-sdk-contributions
+      - name: Refresh Cargo lock
+        run: cargo metadata --manifest-path rust/Cargo.toml --format-version 1 >/dev/null
+      - name: Commit lock
+        run: |
+          if git diff --quiet -- rust/Cargo.lock; then
+            exit 0
+          fi
+          git config user.name phenix-worker
+          git config user.email phenix-worker@users.noreply.github.com
+          git add rust/Cargo.lock
+          git commit -m 'chore: refresh Cargo lock'
+          git push origin HEAD:agent/plugin-sdk-contributions
