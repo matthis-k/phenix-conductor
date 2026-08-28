@@ -71,6 +71,13 @@ pub use phenix_plugin_models::{
     ModelTarget, RoutingProfile, RoutingProfileDescriptor, MODEL_INFERENCE_SERVICE,
     MODEL_ROUTING_SERVICE,
 };
+pub use phenix_plugin_options::{
+    default_option_definitions, options_component_id, options_component_manifest, options_factory,
+    options_manifest, options_service, OptionAssignment, OptionCommand, OptionContext,
+    OptionDefinition, OptionKey, OptionResponse, OptionScope, OptionScopeKind,
+    OptionStartupPrecedence, OptionSubjectId, OptionValue, OptionValueLayer, OptionValueSource,
+    OptionsInterface, ResolvedOption, OPTIONS_COMPONENT, OPTIONS_PLUGIN, OPTIONS_SERVICE,
+};
 pub use phenix_plugin_planning::{
     planning_component_id, planning_component_manifest, planning_factory, planning_manifest,
     planning_service, DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord,
@@ -85,6 +92,14 @@ pub use phenix_plugin_repository_workers::{
     RepositoryPullRequestState, RepositorySelectionReason, RepositoryValidation,
     RepositoryWorkPriority, RepositoryWorkSelection, RepositoryWorkSnapshot,
     RepositoryWorkerInterface, RepositoryWorkerQueue, REPOSITORY_WORK_QUEUE_SERVICE,
+};
+pub use phenix_plugin_sdk::{
+    sdk_component_id, sdk_component_manifest, sdk_config_service, sdk_contribution, sdk_factory,
+    sdk_manifest, sdk_session_service, sdk_skills_service, sdk_tools_service, SdkConfigCommand,
+    SdkConfigInterface, SdkConfigPath, SdkConfigResponse, SdkSessionCommand, SdkSessionInterface,
+    SdkSessionResponse, SdkSkill, SdkSkillCommand, SdkSkillResponse, SdkSkillSummary,
+    SdkSkillsInterface, SdkTool, SdkToolCommand, SdkToolResponse, SdkToolsInterface, SDK_COMPONENT,
+    SDK_CONFIG_SERVICE, SDK_PLUGIN, SDK_SESSION_SERVICE, SDK_SKILLS_SERVICE, SDK_TOOLS_SERVICE,
 };
 pub use phenix_plugin_session_tree::{
     session_tree_component_id, session_tree_component_manifest, session_tree_factory,

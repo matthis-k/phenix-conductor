@@ -7,6 +7,7 @@ use phenix_core::{
     ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_harness::{default_suite_authority, HarnessBuilder};
+use phenix_plugin_catalog::OptionStartupPrecedence;
 use serde_json::{json, Map, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -48,8 +49,31 @@ fn run() -> Result<(), Box<dyn Error>> {
     apply_configured_layer_policy(&mut builder)?;
     let mut harness = builder.build_with_persistence(persistence)?;
     harness.activate()?;
-    if let Some(path) = env::var_os("PHENIX_RUNTIME_CONFIG") {
-        runtime_config::apply_runtime_config(&mut harness, Path::new(&path))?;
+    if let Some(path) = env::var_os("PHENIX_DEFAULT_CONFIG_DIR") {
+        runtime_config::apply_default_config_directory(&mut harness, Path::new(&path))?;
+    }
+    let config_directory = env::var_os("PHENIX_CONFIG_DIR").map(PathBuf::from);
+    let nix_settings = env::var_os("PHENIX_NIX_SETTINGS").map(PathBuf::from);
+    if config_directory.is_some() || nix_settings.is_some() {
+        let precedence = match env::var("PHENIX_SETTINGS_PRECEDENCE") {
+            Ok(value) if value == "file" => OptionStartupPrecedence::File,
+            Ok(value) if value == "nix" => OptionStartupPrecedence::Nix,
+            Err(env::VarError::NotPresent) => OptionStartupPrecedence::Nix,
+            Ok(value) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid PHENIX_SETTINGS_PRECEDENCE: {value}"),
+                )
+                .into())
+            }
+            Err(error) => return Err(error.into()),
+        };
+        runtime_config::apply_startup_settings(
+            &mut harness,
+            config_directory.as_deref(),
+            nix_settings.as_deref(),
+            precedence,
+        )?;
     }
 
     if env::args().any(|argument| argument == "--list-services") {

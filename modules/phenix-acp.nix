@@ -87,12 +87,14 @@
             export PHENIX_STATE_DB="$TMPDIR/harness.sqlite"
             phenix --list-services > "$TMPDIR/services.json"
             jq -e '
-              (.plugins | length == 15)
+              (.plugins | length == 17)
               and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0)
               and (.services | index("phenix.sessions@1") != null)
               and (.services | index("phenix.context@1") != null)
               and (.services | index("phenix.execution@1") != null)
               and (.services | index("phenix.execution.configuration@1") != null)
+              and (.services | index("phenix.options@1") != null)
+              and (.services | index("phenix.sdk.config@1") != null)
               and (.services | index("phenix.repository.worker-queue@1") != null)
             ' "$TMPDIR/services.json" >/dev/null
 

@@ -71,6 +71,8 @@ identifier!(CapabilityId);
 identifier!(ResourceNamespace);
 identifier!(EventTypeId);
 identifier!(SubscriptionId);
+identifier!(SdkNamespace);
+identifier!(SdkResourceId);
 identifier!(CallableId);
 identifier!(ModelId);
 identifier!(RoutingProfileId);

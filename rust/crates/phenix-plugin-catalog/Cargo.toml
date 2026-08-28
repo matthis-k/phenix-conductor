@@ -17,8 +17,10 @@ phenix-plugin-hooks = { path = "../phenix-plugin-hooks" }
 phenix-plugin-jobs = { path = "../phenix-plugin-jobs" }
 phenix-plugin-language = { path = "../phenix-plugin-language" }
 phenix-plugin-models = { path = "../phenix-plugin-models" }
+phenix-plugin-options = { path = "../phenix-plugin-options" }
 phenix-plugin-planning = { path = "../phenix-plugin-planning" }
 phenix-plugin-repository-workers = { path = "../phenix-plugin-repository-workers" }
+phenix-plugin-sdk = { path = "../phenix-plugin-sdk" }
 phenix-plugin-session-tree = { path = "../phenix-plugin-session-tree" }
 phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }
 phenix-plugin-workspace = { path = "../phenix-plugin-workspace" }
