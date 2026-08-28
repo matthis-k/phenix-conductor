@@ -48,7 +48,7 @@ pub enum ConfigSourceClass {
     EnvironmentBinding,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ConfigurationFrontendMetadata {
     pub id: ConfigurationFrontendId,
     pub version: u64,
