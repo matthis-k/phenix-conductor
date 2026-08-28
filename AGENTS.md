@@ -42,6 +42,18 @@ The supported product path is a configured conductor plus selected plugins throu
 - Keep implementation-specific invariants close to the code and tests that enforce them instead of creating speculative documents.
 - Keep plugin dependencies explicit. A plugin may depend on another plugin when the service dependency is real, but it must not load unrelated first-party implementations.
 
+## Rust implementation discipline
+
+Use Canonical's Rust best practices as the default style reference when they do not conflict with repository-specific architecture or established local conventions.
+
+- Use exhaustive pattern matching on internal enums and relevant structs when new variants or fields must force a compiler error at each decision point.
+- Keep foreign serialization shapes at the boundary. Deserialize into boundary types, then parse or convert into internal domain types. External formats must not dictate core representation.
+- Keep production code panic-free for user, configuration, network, persistence, and runtime failures. Prefer invariant-bearing types, `?`, and typed errors. Use `expect` only for programmer-proven invariants and state the invariant in the message.
+- Scope mutability to construction or the smallest block that needs it. Prefer expressions and block return values over unassigned `let` declarations and mutation used only to shuttle a value between branches.
+- Keep generic bounds and lifetime parameters no broader than required. Hide incidental generic parameters with ordinary Rust API patterns when that makes the call site simpler.
+- For `Result<()>` success paths, propagate fallible work with `?` and use an explicit `Ok(())` when it makes the no-information success case clear.
+- Keep helper and boundary-only types in the narrowest useful scope. Promote them only when multiple callers share the same concept.
+
 ## Testing discipline
 
 Tests validate behavior, not declarations.
