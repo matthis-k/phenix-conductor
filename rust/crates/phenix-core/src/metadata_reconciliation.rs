@@ -342,12 +342,7 @@ fn apply_reload_policies(
     Ok(())
 }
 
-fn metadata_changes<'a, K, V, I, J, G, F, C>(
-    previous: I,
-    next: J,
-    classify: G,
-    make: F,
-) -> Vec<C>
+fn metadata_changes<'a, K, V, I, J, G, F, C>(previous: I, next: J, classify: G, make: F) -> Vec<C>
 where
     K: Clone + Ord + 'a,
     V: PartialEq + 'a,
