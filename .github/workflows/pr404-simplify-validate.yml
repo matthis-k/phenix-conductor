@@ -169,3 +169,5 @@ jobs:
           git config user.email "phenix-worker@users.noreply.github.com"
           git commit -m "refactor: derive resolved composition state"
           git push origin HEAD:tmp/pr404-simplify-validated
+
+# retry after migrating inspection tests to the canonical resolver
