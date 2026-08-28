@@ -387,3 +387,299 @@ impl<'host, 'runtime> Session<'host, 'runtime> {
         self.sessions.find(self.id().to_owned())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{sdk_component_manifest, sdk_factory, sdk_manifest};
+    use phenix_core::{
+        CapabilityId, ComponentExport, ComponentImport, ComponentManifest, InterfaceId, Kernel,
+        KernelConfig, PluginExecution, PluginInstance, PluginManifest, ResolvedHarness,
+        ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
+    };
+    use phenix_plugin_options::{options_component_manifest, options_factory, options_manifest};
+    use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
+    use serde::{Deserialize, Serialize};
+
+    const ECHO_PLUGIN: &str = "fixture.echo";
+    const ECHO_COMPONENT: &str = "fixture.echo";
+    const ECHO_SERVICE: &str = "fixture.echo@1";
+    const CONSUMER_PLUGIN: &str = "fixture.consumer";
+    const CONSUMER_COMPONENT: &str = "fixture.consumer";
+    const CONSUMER_SERVICE: &str = "fixture.consumer.run@1";
+
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    struct EchoRequest {
+        value: String,
+    }
+
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    struct EchoResponse {
+        value: String,
+    }
+
+    struct EchoInterface;
+
+    impl ComponentInterface for EchoInterface {
+        type Request = EchoRequest;
+        type Response = EchoResponse;
+
+        fn interface_id() -> InterfaceId {
+            InterfaceId::parse(ECHO_SERVICE).unwrap()
+        }
+    }
+
+    struct EchoSdk;
+
+    impl SdkContract for EchoSdk {
+        type Interface = EchoInterface;
+    }
+
+    struct EchoPlugin;
+
+    impl PluginInstance for EchoPlugin {
+        fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn invoke(
+            &mut self,
+            service: &ServiceId,
+            input: &[u8],
+            _host: &PluginHost<'_>,
+        ) -> Result<Vec<u8>, String> {
+            if service != &echo_service() {
+                return Err(format!("unsupported echo service: {service}"));
+            }
+            let request: EchoRequest =
+                serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            serde_json::to_vec(&EchoResponse {
+                value: request.value,
+            })
+            .map_err(|error| error.to_string())
+        }
+    }
+
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    struct ConsumerOutput {
+        plugin: String,
+        settings: String,
+        state: u32,
+        session: String,
+        echo: String,
+        has_persistence_authority: bool,
+    }
+
+    struct ConsumerPlugin;
+
+    impl PluginInstance for ConsumerPlugin {
+        fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn invoke(
+            &mut self,
+            service: &ServiceId,
+            _input: &[u8],
+            host: &PluginHost<'_>,
+        ) -> Result<Vec<u8>, String> {
+            if service != &consumer_service() {
+                return Err(format!("unsupported consumer service: {service}"));
+            }
+
+            let context = PluginContext::phenix(
+                host,
+                consumer_component_id(),
+                "configured".to_owned(),
+                7_u32,
+            );
+            let PluginContext {
+                sdk, plugin, call, ..
+            } = context;
+
+            let opened = sdk.sessions.open("root").map_err(|error| error.to_string())?;
+            let found = sdk
+                .sessions
+                .iter()
+                .map_err(|error| error.to_string())?
+                .find(|session| session.id() == opened.id())
+                .ok_or("session missing from SDK iterator")?;
+            let refreshed = found
+                .refresh()
+                .map_err(|error| error.to_string())?
+                .ok_or("session disappeared while refreshing SDK object")?;
+
+            let echo = SdkObject::new("echo", sdk.require::<EchoSdk>());
+            let echo = echo
+                .client()
+                .invoke(&EchoRequest {
+                    value: refreshed.id().to_owned(),
+                })
+                .map_err(|error| error.to_string())?;
+
+            serde_json::to_vec(&ConsumerOutput {
+                plugin: plugin.id.as_str().to_owned(),
+                settings: plugin.settings,
+                state: plugin.state,
+                session: refreshed.id().to_owned(),
+                echo: echo.value,
+                has_persistence_authority: call
+                    .authority
+                    .permits(&CapabilityId::parse("kernel.persistence.read").unwrap()),
+            })
+            .map_err(|error| error.to_string())
+        }
+    }
+
+    fn authority() -> Authority {
+        Authority::new([
+            CapabilityId::parse("kernel.persistence.schema").unwrap(),
+            CapabilityId::parse("kernel.persistence.read").unwrap(),
+            CapabilityId::parse("kernel.persistence.write").unwrap(),
+        ])
+    }
+
+    fn echo_service() -> ServiceId {
+        ServiceId::parse(ECHO_SERVICE).unwrap()
+    }
+
+    fn consumer_service() -> ServiceId {
+        ServiceId::parse(CONSUMER_SERVICE).unwrap()
+    }
+
+    fn consumer_component_id() -> ComponentId {
+        ComponentId::parse(CONSUMER_COMPONENT).unwrap()
+    }
+
+    fn echo_manifest() -> PluginManifest {
+        PluginManifest {
+            id: PluginId::parse(ECHO_PLUGIN).unwrap(),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: vec![ServiceContribution {
+                role: ServiceRole::Terminal,
+                service: echo_service(),
+                priority: 100,
+                required_authority: Authority::default(),
+            }],
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    fn echo_component_manifest() -> ComponentManifest {
+        ComponentManifest {
+            id: ComponentId::parse(ECHO_COMPONENT).unwrap(),
+            owner: PluginId::parse(ECHO_PLUGIN).unwrap(),
+            imports: Vec::new(),
+            exports: vec![ComponentExport {
+                interface: EchoInterface::interface_id(),
+                priority: 100,
+                required_authority: Authority::default(),
+            }],
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    fn consumer_manifest(authority: Authority) -> PluginManifest {
+        PluginManifest {
+            id: PluginId::parse(CONSUMER_PLUGIN).unwrap(),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: vec![ServiceContribution {
+                role: ServiceRole::Terminal,
+                service: consumer_service(),
+                priority: 100,
+                required_authority: authority.clone(),
+            }],
+            resource_namespaces: Vec::new(),
+            maximum_authority: authority,
+        }
+    }
+
+    fn consumer_component_manifest(authority: Authority) -> ComponentManifest {
+        let required = |interface| ComponentImport {
+            interface,
+            required: true,
+            authority: authority.clone(),
+        };
+        ComponentManifest {
+            id: consumer_component_id(),
+            owner: PluginId::parse(CONSUMER_PLUGIN).unwrap(),
+            imports: vec![
+                required(SdkSessionInterface::interface_id()),
+                required(SessionInterface::interface_id()),
+                required(EchoInterface::interface_id()),
+            ],
+            exports: Vec::new(),
+            maximum_authority: authority,
+        }
+    }
+
+    #[test]
+    fn context_sdk_and_provider_owned_objects_remain_kernel_mediated() {
+        let authority = authority();
+        let session = session_manifest();
+        let options = options_manifest();
+        let sdk = sdk_manifest(authority.clone());
+        let echo = echo_manifest();
+        let consumer = consumer_manifest(authority.clone());
+        let manifests = vec![
+            session.clone(),
+            options.clone(),
+            sdk.clone(),
+            echo.clone(),
+            consumer.clone(),
+        ];
+        let resolved = ResolvedHarness::resolve(
+            manifests.clone(),
+            [
+                session_component_manifest(),
+                options_component_manifest(),
+                sdk_component_manifest(authority.clone()),
+                echo_component_manifest(),
+                consumer_component_manifest(authority.clone()),
+            ],
+            [],
+            &authority,
+        )
+        .unwrap();
+        let mut kernel = Kernel::new(KernelConfig::new(manifests).unwrap());
+        kernel
+            .register_embedded_factory(session.id, session_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(options.id, options_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(sdk.id, sdk_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(echo.id, || Box::new(EchoPlugin))
+            .unwrap();
+        kernel
+            .register_embedded_factory(consumer.id, || Box::new(ConsumerPlugin))
+            .unwrap();
+        kernel.activate_resolved_harness(&resolved).unwrap();
+        kernel.activate_all().unwrap();
+
+        let output = kernel
+            .invoke(&consumer_service(), &[], &authority, None)
+            .unwrap();
+        let output: ConsumerOutput = serde_json::from_slice(&output).unwrap();
+
+        assert_eq!(
+            output,
+            ConsumerOutput {
+                plugin: CONSUMER_PLUGIN.into(),
+                settings: "configured".into(),
+                state: 7,
+                session: "root".into(),
+                echo: "root".into(),
+                has_persistence_authority: true,
+            }
+        );
+    }
+}
