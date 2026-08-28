@@ -10,6 +10,7 @@ pub enum MetadataChangeKind {
     Added,
     Removed,
     Reconfigured,
+    Upgraded,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,11 +31,18 @@ pub struct FrontendMetadataChange {
     pub kind: MetadataChangeKind,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourceMetadataChange {
+    pub resource: String,
+    pub kind: MetadataChangeKind,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CompositionMetadataDiff {
     pub packages: Vec<PackageMetadataChange>,
     pub components: Vec<ComponentMetadataChange>,
     pub frontends: Vec<FrontendMetadataChange>,
+    pub resources: Vec<ResourceMetadataChange>,
 }
 
 impl CompositionMetadataDiff {
@@ -51,6 +59,13 @@ impl CompositionMetadataDiff {
                 next.packages()
                     .iter()
                     .map(|value| (&value.manifest.id, value)),
+                |previous, next| {
+                    if previous.manifest.version != next.manifest.version {
+                        MetadataChangeKind::Upgraded
+                    } else {
+                        MetadataChangeKind::Reconfigured
+                    }
+                },
                 |plugin, kind| PackageMetadataChange {
                     plugin: plugin.clone(),
                     kind,
@@ -64,6 +79,13 @@ impl CompositionMetadataDiff {
                 next.components()
                     .iter()
                     .map(|value| (&value.manifest.id, value)),
+                |previous, next| {
+                    if previous.version != next.version {
+                        MetadataChangeKind::Upgraded
+                    } else {
+                        MetadataChangeKind::Reconfigured
+                    }
+                },
                 |component, kind| ComponentMetadataChange {
                     component: component.clone(),
                     kind,
@@ -72,8 +94,35 @@ impl CompositionMetadataDiff {
             frontends: metadata_changes(
                 previous.frontends().iter().map(|value| (&value.id, value)),
                 next.frontends().iter().map(|value| (&value.id, value)),
+                |previous, next| {
+                    if previous.version != next.version {
+                        MetadataChangeKind::Upgraded
+                    } else {
+                        MetadataChangeKind::Reconfigured
+                    }
+                },
                 |frontend, kind| FrontendMetadataChange {
                     frontend: frontend.clone(),
+                    kind,
+                },
+            ),
+            resources: metadata_changes(
+                previous
+                    .resources()
+                    .iter()
+                    .map(|value| (&value.identity, value)),
+                next.resources()
+                    .iter()
+                    .map(|value| (&value.identity, value)),
+                |previous, next| {
+                    if previous.version != next.version {
+                        MetadataChangeKind::Upgraded
+                    } else {
+                        MetadataChangeKind::Reconfigured
+                    }
+                },
+                |resource, kind| ResourceMetadataChange {
+                    resource: resource.clone(),
                     kind,
                 },
             ),
@@ -81,7 +130,10 @@ impl CompositionMetadataDiff {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.packages.is_empty() && self.components.is_empty() && self.frontends.is_empty()
+        self.packages.is_empty()
+            && self.components.is_empty()
+            && self.frontends.is_empty()
+            && self.resources.is_empty()
     }
 }
 
@@ -136,8 +188,10 @@ impl GraphReconciler {
         let mut restart = BTreeSet::new();
 
         for change in &metadata.components {
-            if change.kind == MetadataChangeKind::Reconfigured
-                && component_survives(self.active(), candidate, &change.component)
+            if matches!(
+                change.kind,
+                MetadataChangeKind::Reconfigured | MetadataChangeKind::Upgraded
+            ) && component_survives(self.active(), candidate, &change.component)
             {
                 apply_component_reload_policy(
                     active_metadata,
@@ -182,6 +236,29 @@ impl GraphReconciler {
                     }
                 }
             }
+        }
+
+        for change in &metadata.resources {
+            let targets = resource_invalidation_targets(
+                active_metadata,
+                candidate_metadata,
+                &change.resource,
+            );
+            if targets.is_empty()
+                || transition_plan.iter().any(|action| {
+                    matches!(
+                        action,
+                        ReconciliationAction::InvalidateResourceDerivedState { resource, .. }
+                            if resource == &change.resource
+                    )
+                })
+            {
+                continue;
+            }
+            transition_plan.push(ReconciliationAction::InvalidateResourceDerivedState {
+                resource: change.resource.clone(),
+                targets,
+            });
         }
 
         let already_restarted: BTreeSet<_> = transition_plan
@@ -265,12 +342,18 @@ fn apply_reload_policies(
     Ok(())
 }
 
-fn metadata_changes<'a, K, V, I, J, F, C>(previous: I, next: J, make: F) -> Vec<C>
+fn metadata_changes<'a, K, V, I, J, G, F, C>(
+    previous: I,
+    next: J,
+    classify: G,
+    make: F,
+) -> Vec<C>
 where
     K: Clone + Ord + 'a,
     V: PartialEq + 'a,
     I: IntoIterator<Item = (&'a K, &'a V)>,
     J: IntoIterator<Item = (&'a K, &'a V)>,
+    G: Fn(&V, &V) -> MetadataChangeKind,
     F: Fn(&K, MetadataChangeKind) -> C,
 {
     let previous: BTreeMap<_, _> = previous.into_iter().collect();
@@ -282,7 +365,7 @@ where
             (None, Some(_)) => Some(make(key, MetadataChangeKind::Added)),
             (Some(_), None) => Some(make(key, MetadataChangeKind::Removed)),
             (Some(previous), Some(next)) if previous != next => {
-                Some(make(key, MetadataChangeKind::Reconfigured))
+                Some(make(key, classify(previous, next)))
             }
             _ => None,
         })
@@ -329,13 +412,27 @@ fn packages_declaring_frontend(
         .collect()
 }
 
+fn resource_invalidation_targets(
+    previous: &ResolvedCompositionMetadata,
+    next: &ResolvedCompositionMetadata,
+    resource: &str,
+) -> BTreeSet<String> {
+    previous
+        .resources()
+        .iter()
+        .chain(next.resources().iter())
+        .filter(|metadata| metadata.identity == resource)
+        .flat_map(|metadata| metadata.invalidation_targets.iter().cloned())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         Authority, CompatibilityMetadata, ComponentHostKind, ComponentManifest,
         ComponentRuntimeMetadata, ComponentStateClass, CompositionMetadataInput, PluginExecution,
-        PluginManifest, PluginPackageMetadata, ReloadPolicy,
+        PluginManifest, PluginPackageMetadata, ReloadPolicy, SkillResourceMetadata,
     };
 
     fn fixture() -> CompositionMetadataInput {
@@ -387,6 +484,28 @@ mod tests {
         }
     }
 
+    fn resource() -> SkillResourceMetadata {
+        SkillResourceMetadata {
+            identity: "fixture.skill".into(),
+            version: 1,
+            content_identity: "sha256:fixture".into(),
+            dependencies: BTreeSet::new(),
+            conflicts: BTreeSet::new(),
+            triggers: BTreeSet::from(["review".into()]),
+            scope: "execution".into(),
+            priority: 0,
+            required_tools: BTreeSet::new(),
+            required_interfaces: BTreeSet::new(),
+            required_capabilities: BTreeSet::new(),
+            compatibility: CompatibilityMetadata {
+                minimum_kernel_version: 1,
+                maximum_kernel_version: None,
+            },
+            invalidation_targets: BTreeSet::from(["skill-index".into()]),
+            reload_policy: ReloadPolicy::Restart,
+        }
+    }
+
     #[test]
     fn package_restart_policy_produces_an_explicit_restart_plan() {
         let mut active_input = fixture();
@@ -413,6 +532,71 @@ mod tests {
         assert!(preview
             .transition_plan
             .contains(&ReconciliationAction::RestartComponent(component)));
+    }
+
+    #[test]
+    fn component_version_change_is_classified_as_an_upgrade() {
+        let active_input = fixture();
+        let mut candidate_input = fixture();
+        candidate_input.components[0].version = 2;
+        let (active, active_metadata) = active_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let (candidate, candidate_metadata) = candidate_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let component = ComponentId::parse("fixture.component").unwrap();
+        let reconciler = GraphReconciler::new(active);
+
+        let preview = reconciler
+            .preview_candidate_with_metadata(&active_metadata, &candidate, &candidate_metadata)
+            .unwrap();
+
+        assert_eq!(
+            preview.metadata.components,
+            vec![ComponentMetadataChange {
+                component: component.clone(),
+                kind: MetadataChangeKind::Upgraded,
+            }]
+        );
+        assert!(preview
+            .transition_plan
+            .contains(&ReconciliationAction::RestartComponent(component)));
+    }
+
+    #[test]
+    fn resource_metadata_upgrade_is_inspectable_and_invalidates_derived_state() {
+        let mut active_input = fixture();
+        active_input.resources.push(resource());
+        let mut candidate_input = active_input.clone();
+        candidate_input.resources[0].version = 2;
+        candidate_input.resources[0].priority = 10;
+        let (active, active_metadata) = active_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let (candidate, candidate_metadata) = candidate_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let reconciler = GraphReconciler::new(active);
+
+        let preview = reconciler
+            .preview_candidate_with_metadata(&active_metadata, &candidate, &candidate_metadata)
+            .unwrap();
+
+        assert!(preview.graph.diff.resources.is_empty());
+        assert_eq!(
+            preview.metadata.resources,
+            vec![ResourceMetadataChange {
+                resource: "fixture.skill".into(),
+                kind: MetadataChangeKind::Upgraded,
+            }]
+        );
+        assert!(preview.transition_plan.contains(
+            &ReconciliationAction::InvalidateResourceDerivedState {
+                resource: "fixture.skill".into(),
+                targets: BTreeSet::from(["skill-index".into()]),
+            }
+        ));
     }
 
     #[test]
