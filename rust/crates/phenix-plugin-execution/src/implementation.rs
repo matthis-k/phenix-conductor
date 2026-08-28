@@ -502,6 +502,16 @@ fn invoke_callable(
 ) -> Result<ExecutionResponse, String> {
     let (_, state) = read_state(host)?;
     let execution = active_execution(&state, execution_id)?;
+    let active_generation = host
+        .graph_generation()
+        .ok_or_else(|| "callable invocation requires an active graph generation".to_owned())?;
+    if execution.graph_generation != active_generation.as_str() {
+        return Err(format!(
+            "execution {execution_id} is pinned to graph generation {}, but active generation is {}",
+            execution.graph_generation,
+            active_generation.as_str()
+        ));
+    }
     let callable = state
         .callables
         .get(callable_id)

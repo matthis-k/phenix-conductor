@@ -112,6 +112,14 @@ fn restored_execution_lineage_stays_pinned_when_the_runtime_generation_changes()
             },
         ));
         old_generation = root.graph_generation.clone();
+        invoke(
+            &mut kernel,
+            &ExecutionCommand::RegisterCallable {
+                id: "fixture.callable".into(),
+                service: "fixture.echo@1".into(),
+                required_authority: ExecutionAuthority::new(["fs.read"]),
+            },
+        );
         let initial_task = task(invoke(
             &mut kernel,
             &ExecutionCommand::CreateTask {
@@ -139,6 +147,23 @@ fn restored_execution_lineage_stays_pinned_when_the_runtime_generation_changes()
         other => panic!("unexpected restored execution response: {other:?}"),
     };
     assert_eq!(restored.graph_generation, old_generation);
+
+    let error = kernel
+        .invoke(
+            &execution_service(),
+            &serde_json::to_vec(&ExecutionCommand::InvokeCallable {
+                execution_id: "root".into(),
+                callable_id: "fixture.callable".into(),
+                input: Vec::new(),
+            })
+            .unwrap(),
+            &caller_authority(),
+            None,
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains(&format!(
+        "execution root is pinned to graph generation {old_generation}, but active generation is {active_generation}"
+    )));
 
     let delegated = execution(invoke(
         &mut kernel,
