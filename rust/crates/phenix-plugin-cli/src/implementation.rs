@@ -1,4 +1,4 @@
-use crate::{workspace_service, WorkspaceCommand, WorkspaceResponse};
+use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
 use phenix_core::{
     Authority, CapabilityId, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
     ServiceContribution, ServiceId,
@@ -88,6 +88,7 @@ pub fn cli_auth_state_service() -> ServiceId {
 
 fn contribution(service: ServiceId) -> ServiceContribution {
     ServiceContribution {
+        role: phenix_core::ServiceRole::Terminal,
         service,
         priority: 100,
         required_authority: Authority::default(),
@@ -138,13 +139,11 @@ struct CliPlugin;
 
 impl CliPlugin {
     fn shell(host: &PluginHost<'_>, command: String) -> Result<WorkspaceResponse, String> {
-        let request = serde_json::to_vec(&WorkspaceCommand::Shell { command })
-            .map_err(|error| error.to_string())?;
-        let authority = Authority::new([capability(WORKSPACE_SHELL)]);
-        let output = host
-            .invoke_service(&workspace_service(), &request, &authority, None)
-            .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        host.invoke_import::<WorkspaceInterface>(
+            &crate::cli_component_id(),
+            &WorkspaceCommand::Shell { command },
+        )
+        .map_err(|error| error.to_string())
     }
 
     fn discover(host: &PluginHost<'_>, name: &str) -> Result<CliDescriptor, String> {
@@ -255,8 +254,8 @@ impl PluginInstance for CliPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig};
-    use phenix_plugin_workspace::{workspace_factory_for, workspace_manifest};
+    use phenix_core::{Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
+    use phenix_plugin_workspace::{workspace_component_manifest, workspace_factory_for, workspace_manifest};
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
@@ -277,9 +276,20 @@ mod tests {
         let root = temp_workspace();
         let workspace = workspace_manifest();
         let workspace_id = workspace.id.clone();
-        let cli = cli_manifest(authority);
+        let cli = cli_manifest(authority.clone());
         let cli_id = cli.id.clone();
+        let resolved = ResolvedHarness::resolve(
+            [workspace.clone(), cli.clone()],
+            [
+                workspace_component_manifest(),
+                crate::cli_component_manifest(authority.clone()),
+            ],
+            [],
+            &authority,
+        )
+        .unwrap();
         let mut kernel = Kernel::new(KernelConfig::new([workspace, cli]).unwrap());
+        kernel.activate_resolved_harness(&resolved).unwrap();
         kernel
             .register_embedded_factory(workspace_id, move || workspace_factory_for(root.clone()))
             .unwrap();

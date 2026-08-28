@@ -1,8 +1,12 @@
-use crate::{Authority, PluginExecution, PluginId, PluginManifest, ResourceNamespace, ServiceId};
+use crate::{
+    Authority, ComponentGraphError, PluginExecution, PluginId, PluginManifest, ResourceNamespace,
+    ServiceId, ServiceRole,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,6 +29,22 @@ pub enum KernelError {
         service: ServiceId,
         plugin: PluginId,
     },
+    DuplicateLayerPolicy {
+        service: ServiceId,
+        plugin: PluginId,
+    },
+    RequiredLayerUnavailable {
+        service: ServiceId,
+        plugin: PluginId,
+    },
+    ContinuationUnavailable,
+    ContinuationAlreadyUsed(ServiceId),
+    CausalServiceReentry(ServiceId),
+    ServiceDenied {
+        plugin: PluginId,
+        service: ServiceId,
+        message: String,
+    },
     PluginNotActive(PluginId),
     HostOperationDenied {
         plugin: PluginId,
@@ -36,11 +56,17 @@ pub enum KernelError {
     },
     EmbeddedFactoryMissing(PluginId),
     WrongExecutionKind(PluginId),
+    ComponentGraph(ComponentGraphError),
     ExternalHostUnavailable(PluginId),
     PluginStart {
         plugin: PluginId,
         message: String,
     },
+    PluginStop {
+        plugin: PluginId,
+        message: String,
+    },
+    PartiallyActiveRuntime,
     ServiceInvoke {
         plugin: PluginId,
         service: ServiceId,
@@ -77,6 +103,28 @@ impl Display for KernelError {
                 f,
                 "bound provider {plugin} is unavailable for service {service}"
             ),
+            Self::DuplicateLayerPolicy { service, plugin } => write!(
+                f,
+                "layer policy lists plugin {plugin} more than once for service {service}"
+            ),
+            Self::RequiredLayerUnavailable { service, plugin } => write!(
+                f,
+                "required layer {plugin} is unavailable for service {service}"
+            ),
+            Self::ContinuationUnavailable => {
+                f.write_str("service continuation is unavailable outside a layer")
+            }
+            Self::ContinuationAlreadyUsed(service) => {
+                write!(f, "service continuation was already consumed for {service}")
+            }
+            Self::CausalServiceReentry(service) => {
+                write!(f, "causal same-service re-entry is denied for {service}")
+            }
+            Self::ServiceDenied {
+                plugin,
+                service,
+                message,
+            } => write!(f, "plugin {plugin} denied service {service}: {message}"),
             Self::PluginNotActive(plugin) => write!(f, "plugin is not active: {plugin}"),
             Self::HostOperationDenied { plugin, operation } => {
                 write!(
@@ -94,12 +142,19 @@ impl Display for KernelError {
                 f,
                 "plugin execution kind does not match requested host: {plugin}"
             ),
+            Self::ComponentGraph(error) => write!(f, "component graph resolution failed: {error}"),
             Self::ExternalHostUnavailable(plugin) => {
                 write!(f, "external plugin host is not implemented for {plugin}")
             }
             Self::PluginStart { plugin, message } => {
                 write!(f, "plugin {plugin} failed to start: {message}")
             }
+            Self::PluginStop { plugin, message } => {
+                write!(f, "plugin {plugin} failed to stop: {message}")
+            }
+            Self::PartiallyActiveRuntime => f.write_str(
+                "development reconciliation requires a fully active or fully inactive runtime",
+            ),
             Self::ServiceInvoke {
                 plugin,
                 service,
@@ -111,6 +166,27 @@ impl Display for KernelError {
 
 impl Error for KernelError {}
 
+impl From<ComponentGraphError> for KernelError {
+    fn from(error: ComponentGraphError) -> Self {
+        Self::ComponentGraph(error)
+    }
+}
+
+static NEXT_POLICY_IDENTITY: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct KernelPolicyIdentity(u64);
+
+impl KernelPolicyIdentity {
+    fn fresh() -> Self {
+        Self(NEXT_POLICY_IDENTITY.fetch_add(1, Ordering::Relaxed))
+    }
+
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderBinding {
     pub service: ServiceId,
@@ -118,11 +194,29 @@ pub struct ProviderBinding {
     pub priority: i32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedServiceChain {
+    pub policy_identity: KernelPolicyIdentity,
+    pub service: ServiceId,
+    pub layers: Vec<ProviderBinding>,
+    pub terminal: ProviderBinding,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LayerPolicy {
+    pub plugin: PluginId,
+    pub priority: i32,
+    pub required: bool,
+    pub enabled: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct KernelConfig {
     manifests: BTreeMap<PluginId, PluginManifest>,
     activation_order: Vec<PluginId>,
     namespace_owners: BTreeMap<ResourceNamespace, PluginId>,
+    layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+    policy_identity: KernelPolicyIdentity,
 }
 
 impl KernelConfig {
@@ -143,6 +237,8 @@ impl KernelConfig {
             manifests: indexed,
             activation_order,
             namespace_owners,
+            layer_policies: BTreeMap::new(),
+            policy_identity: KernelPolicyIdentity::fresh(),
         })
     }
 
@@ -166,24 +262,54 @@ impl KernelConfig {
         self.namespace_owners.get(namespace)
     }
 
-    pub fn resolve(
+    pub fn with_layer_policy(
+        mut self,
+        service: ServiceId,
+        layers: Vec<LayerPolicy>,
+    ) -> Result<Self, KernelError> {
+        let mut seen = BTreeSet::new();
+        for layer in &layers {
+            if !seen.insert(layer.plugin.clone()) {
+                return Err(KernelError::DuplicateLayerPolicy {
+                    service,
+                    plugin: layer.plugin.clone(),
+                });
+            }
+        }
+        self.layer_policies.insert(service, layers);
+        self.policy_identity = KernelPolicyIdentity::fresh();
+        Ok(self)
+    }
+
+    pub fn policy_identity(&self) -> KernelPolicyIdentity {
+        self.policy_identity
+    }
+
+    pub fn layer_policy(&self, service: &ServiceId) -> &[LayerPolicy] {
+        self.layer_policies
+            .get(service)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    pub fn resolve_chain(
         &self,
         service: &ServiceId,
         caller_authority: &Authority,
         binding: Option<&PluginId>,
-    ) -> Result<ProviderBinding, KernelError> {
-        let mut candidates = Vec::new();
+    ) -> Result<ResolvedServiceChain, KernelError> {
+        let mut terminals = Vec::new();
 
         for manifest in self.manifests.values() {
-            if binding.is_some_and(|bound| bound != &manifest.id) {
-                continue;
-            }
             for contribution in &manifest.services {
-                if &contribution.service != service {
+                if contribution.role != ServiceRole::Terminal
+                    || &contribution.service != service
+                    || !caller_authority.permits_all(&contribution.required_authority)
+                {
                     continue;
                 }
-                if caller_authority.permits_all(&contribution.required_authority) {
-                    candidates.push(ProviderBinding {
+                if binding.is_none_or(|bound| bound == &manifest.id) {
+                    terminals.push(ProviderBinding {
                         service: service.clone(),
                         plugin: manifest.id.clone(),
                         priority: contribution.priority,
@@ -192,25 +318,130 @@ impl KernelConfig {
             }
         }
 
-        candidates.sort_by(|left, right| {
+        let layers = self.resolve_layers(service, caller_authority)?;
+
+        let order = |left: &ProviderBinding, right: &ProviderBinding| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.plugin.cmp(&right.plugin))
+        };
+        terminals.sort_by(order);
+
+        let terminal = if let Some(terminal) = terminals.into_iter().next() {
+            terminal
+        } else if let Some(plugin) = binding {
+            return Err(KernelError::BoundProviderUnavailable {
+                service: service.clone(),
+                plugin: plugin.clone(),
+            });
+        } else {
+            return Err(KernelError::NoEligibleProvider(service.clone()));
+        };
+
+        Ok(ResolvedServiceChain {
+            policy_identity: self.policy_identity,
+            service: service.clone(),
+            layers,
+            terminal,
+        })
+    }
+
+    /// Resolve interposition around one exact graph-selected component endpoint.
+    /// Terminal selection is already complete in the component graph; the service
+    /// registry contributes only explicitly configured layers.
+    pub fn resolve_component_chain(
+        &self,
+        service: &ServiceId,
+        caller_authority: &Authority,
+        terminal_plugin: &PluginId,
+    ) -> Result<ResolvedServiceChain, KernelError> {
+        let terminal_manifest = self
+            .manifests
+            .get(terminal_plugin)
+            .ok_or_else(|| KernelError::UnknownPlugin(terminal_plugin.clone()))?;
+        if matches!(terminal_manifest.execution, PluginExecution::ResourceOnly) {
+            return Err(KernelError::WrongExecutionKind(terminal_plugin.clone()));
+        }
+        Ok(ResolvedServiceChain {
+            policy_identity: self.policy_identity,
+            service: service.clone(),
+            layers: self.resolve_layers(service, caller_authority)?,
+            terminal: ProviderBinding {
+                service: service.clone(),
+                plugin: terminal_plugin.clone(),
+                priority: 0,
+            },
+        })
+    }
+
+    fn resolve_layers(
+        &self,
+        service: &ServiceId,
+        caller_authority: &Authority,
+    ) -> Result<Vec<ProviderBinding>, KernelError> {
+        let mut layers = Vec::new();
+        for policy in self.layer_policy(service) {
+            if !policy.enabled {
+                if policy.required {
+                    return Err(KernelError::RequiredLayerUnavailable {
+                        service: service.clone(),
+                        plugin: policy.plugin.clone(),
+                    });
+                }
+                continue;
+            }
+            let contribution = self.manifests.get(&policy.plugin).and_then(|manifest| {
+                manifest.services.iter().find(|contribution| {
+                    contribution.role == ServiceRole::Layer && &contribution.service == service
+                })
+            });
+            match contribution {
+                Some(contribution)
+                    if caller_authority.permits_all(&contribution.required_authority) =>
+                {
+                    layers.push(ProviderBinding {
+                        service: service.clone(),
+                        plugin: policy.plugin.clone(),
+                        priority: policy.priority,
+                    });
+                }
+                _ if policy.required => {
+                    return Err(KernelError::RequiredLayerUnavailable {
+                        service: service.clone(),
+                        plugin: policy.plugin.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+        layers.sort_by(|left, right| {
             right
                 .priority
                 .cmp(&left.priority)
                 .then_with(|| left.plugin.cmp(&right.plugin))
         });
+        Ok(layers)
+    }
 
-        if let Some(candidate) = candidates.into_iter().next() {
-            return Ok(candidate);
-        }
+    pub fn resolve_bound_chain(
+        &self,
+        service: &ServiceId,
+        caller_authority: &Authority,
+        binding: &PluginId,
+    ) -> Result<ResolvedServiceChain, KernelError> {
+        self.resolve_chain(service, caller_authority, Some(binding))
+    }
 
-        if let Some(plugin) = binding {
-            return Err(KernelError::BoundProviderUnavailable {
-                service: service.clone(),
-                plugin: plugin.clone(),
-            });
-        }
-
-        Err(KernelError::NoEligibleProvider(service.clone()))
+    pub fn resolve(
+        &self,
+        service: &ServiceId,
+        caller_authority: &Authority,
+        binding: Option<&PluginId>,
+    ) -> Result<ProviderBinding, KernelError> {
+        Ok(self
+            .resolve_chain(service, caller_authority, binding)?
+            .terminal)
     }
 
     pub fn can_execute(&self, plugin: &PluginId) -> Result<bool, KernelError> {
@@ -312,7 +543,7 @@ fn dependency_order(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CapabilityId, ServiceContribution};
+    use crate::{CapabilityId, ServiceContribution, ServiceRole};
 
     fn plugin(value: &str) -> PluginId {
         PluginId::parse(value).unwrap()
@@ -333,6 +564,7 @@ mod tests {
             execution: PluginExecution::Embedded,
             dependencies: Vec::new(),
             services: vec![ServiceContribution {
+                role: crate::ServiceRole::Terminal,
                 service: service("demo.service@1"),
                 priority,
                 required_authority: required,
@@ -368,6 +600,204 @@ mod tests {
                 .plugin,
             plugin("a-provider")
         );
+    }
+
+    #[test]
+    fn service_chain_orders_layers_before_one_terminal() {
+        let mut lower = manifest("z-layer", 10, Authority::default());
+        lower.services[0].role = ServiceRole::Layer;
+        let mut equal = manifest("a-layer", 10, Authority::default());
+        equal.services[0].role = ServiceRole::Layer;
+        let mut higher = manifest("higher-layer", 20, Authority::default());
+        higher.services[0].role = ServiceRole::Layer;
+        let terminal = manifest("terminal", 1, Authority::default());
+        let config = KernelConfig::new([lower, equal, higher, terminal])
+            .unwrap()
+            .with_layer_policy(
+                service("demo.service@1"),
+                vec![
+                    LayerPolicy {
+                        plugin: plugin("z-layer"),
+                        priority: 10,
+                        required: false,
+                        enabled: true,
+                    },
+                    LayerPolicy {
+                        plugin: plugin("a-layer"),
+                        priority: 10,
+                        required: false,
+                        enabled: true,
+                    },
+                    LayerPolicy {
+                        plugin: plugin("higher-layer"),
+                        priority: 20,
+                        required: false,
+                        enabled: true,
+                    },
+                ],
+            )
+            .unwrap();
+
+        let chain = config
+            .resolve_chain(&service("demo.service@1"), &Authority::default(), None)
+            .unwrap();
+        assert_eq!(
+            chain
+                .layers
+                .iter()
+                .map(|binding| binding.plugin.clone())
+                .collect::<Vec<_>>(),
+            vec![plugin("higher-layer"), plugin("a-layer"), plugin("z-layer")]
+        );
+        assert_eq!(chain.terminal.plugin, plugin("terminal"));
+        assert_eq!(
+            config
+                .resolve(&service("demo.service@1"), &Authority::default(), None)
+                .unwrap()
+                .plugin,
+            plugin("terminal")
+        );
+    }
+
+    #[test]
+    fn explicit_terminal_binding_preserves_layers() {
+        let mut layer = manifest("layer", 100, Authority::default());
+        layer.services[0].role = ServiceRole::Layer;
+        let preferred = manifest("preferred", 1, Authority::default());
+        let alternate = manifest("alternate", 50, Authority::default());
+        let config = KernelConfig::new([layer, preferred, alternate])
+            .unwrap()
+            .with_layer_policy(
+                service("demo.service@1"),
+                vec![LayerPolicy {
+                    plugin: plugin("layer"),
+                    priority: 100,
+                    required: false,
+                    enabled: true,
+                }],
+            )
+            .unwrap();
+        let chain = config
+            .resolve_chain(
+                &service("demo.service@1"),
+                &Authority::default(),
+                Some(&plugin("preferred")),
+            )
+            .unwrap();
+        assert_eq!(chain.layers.len(), 1);
+        assert_eq!(chain.layers[0].plugin, plugin("layer"));
+        assert_eq!(chain.terminal.plugin, plugin("preferred"));
+    }
+
+    #[test]
+    fn unauthorized_layers_are_excluded_before_chain_resolution() {
+        let read = capability("fs.read");
+        let write = capability("fs.write");
+        let mut allowed = manifest("allowed-layer", 1, Authority::new([read.clone()]));
+        allowed.services[0].role = ServiceRole::Layer;
+        let mut forbidden = manifest("forbidden-layer", 100, Authority::new([write]));
+        forbidden.services[0].role = ServiceRole::Layer;
+        let terminal = manifest("terminal", 1, Authority::default());
+        let config = KernelConfig::new([allowed, forbidden, terminal])
+            .unwrap()
+            .with_layer_policy(
+                service("demo.service@1"),
+                vec![
+                    LayerPolicy {
+                        plugin: plugin("forbidden-layer"),
+                        priority: 100,
+                        required: false,
+                        enabled: true,
+                    },
+                    LayerPolicy {
+                        plugin: plugin("allowed-layer"),
+                        priority: 1,
+                        required: false,
+                        enabled: true,
+                    },
+                ],
+            )
+            .unwrap();
+        let chain = config
+            .resolve_chain(&service("demo.service@1"), &Authority::new([read]), None)
+            .unwrap();
+        assert_eq!(chain.layers.len(), 1);
+        assert_eq!(chain.layers[0].plugin, plugin("allowed-layer"));
+    }
+
+    #[test]
+    fn unconfigured_layer_is_not_self_enabled() {
+        let mut layer = manifest("layer", 100, Authority::default());
+        layer.services[0].role = ServiceRole::Layer;
+        let terminal = manifest("terminal", 1, Authority::default());
+        let config = KernelConfig::new([layer, terminal]).unwrap();
+        let chain = config
+            .resolve_chain(&service("demo.service@1"), &Authority::default(), None)
+            .unwrap();
+        assert!(chain.layers.is_empty());
+    }
+
+    #[test]
+    fn optional_missing_layer_is_skipped_but_required_missing_layer_fails_closed() {
+        let terminal = manifest("terminal", 1, Authority::default());
+        let optional = KernelConfig::new([terminal.clone()])
+            .unwrap()
+            .with_layer_policy(
+                service("demo.service@1"),
+                vec![LayerPolicy {
+                    plugin: plugin("missing"),
+                    priority: 1,
+                    required: false,
+                    enabled: true,
+                }],
+            )
+            .unwrap();
+        assert!(optional
+            .resolve_chain(&service("demo.service@1"), &Authority::default(), None)
+            .unwrap()
+            .layers
+            .is_empty());
+
+        let required = KernelConfig::new([terminal])
+            .unwrap()
+            .with_layer_policy(
+                service("demo.service@1"),
+                vec![LayerPolicy {
+                    plugin: plugin("missing"),
+                    priority: 1,
+                    required: true,
+                    enabled: true,
+                }],
+            )
+            .unwrap();
+        assert!(matches!(
+            required.resolve_chain(&service("demo.service@1"), &Authority::default(), None),
+            Err(KernelError::RequiredLayerUnavailable { .. })
+        ));
+    }
+
+    #[test]
+    fn required_unauthorized_or_disabled_layer_fails_closed() {
+        let write = capability("fs.write");
+        let mut layer = manifest("layer", 100, Authority::new([write]));
+        layer.services[0].role = ServiceRole::Layer;
+        let terminal = manifest("terminal", 1, Authority::default());
+        let config = KernelConfig::new([layer, terminal])
+            .unwrap()
+            .with_layer_policy(
+                service("demo.service@1"),
+                vec![LayerPolicy {
+                    plugin: plugin("layer"),
+                    priority: 1,
+                    required: true,
+                    enabled: true,
+                }],
+            )
+            .unwrap();
+        assert!(matches!(
+            config.resolve_chain(&service("demo.service@1"), &Authority::default(), None),
+            Err(KernelError::RequiredLayerUnavailable { .. })
+        ));
     }
 
     #[test]
@@ -441,6 +871,7 @@ mod tests {
 
         let mut invalid = PluginManifest::resource_only(id.clone());
         invalid.services.push(ServiceContribution {
+            role: crate::ServiceRole::Terminal,
             service: service("demo.service@1"),
             priority: 0,
             required_authority: Authority::default(),

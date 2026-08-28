@@ -9,7 +9,7 @@ use phenix_plugin_catalog::{
     ModelInferenceResponse, ModelResponse, ModelTarget, RoutingProfile,
 };
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn invoke(harness: &mut PhenixHarness, service: &str, input: Value) -> Value {
     let service = ServiceId::parse(service).unwrap();
@@ -31,6 +31,7 @@ fn fixture_manifest(id: &str, service: ServiceId) -> PluginManifest {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: phenix_core::ServiceRole::Terminal,
             service,
             priority: 100,
             required_authority: Authority::default(),
@@ -93,7 +94,7 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
 
     assert_eq!(
         harness.kernel().config().manifests().count(),
-        14,
+        15,
         "the supported Harness owns the complete first-party suite",
     );
 
@@ -110,6 +111,36 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
         json!({"operation": "list"}),
     );
     assert_eq!(sessions["result"], "sessions");
+
+    invoke(
+        &mut harness,
+        "phenix.sessions@1",
+        json!({"operation": "create", "id": "root"}),
+    );
+    invoke(
+        &mut harness,
+        "phenix.sessions@1",
+        json!({"operation": "create", "id": "child"}),
+    );
+    let lineage = invoke(
+        &mut harness,
+        "phenix.session-tree@1",
+        json!({
+            "operation": "link",
+            "session_id": "child",
+            "parent_session_id": "root"
+        }),
+    );
+    assert_eq!(lineage["result"], "lineage");
+    assert_eq!(lineage["lineage"]["session_id"], "child");
+    assert_eq!(lineage["lineage"]["parent_session_id"], "root");
+    let parent = invoke(
+        &mut harness,
+        "phenix.session-tree@1",
+        json!({"operation": "parent", "session_id": "child"}),
+    );
+    assert_eq!(parent["result"], "parent");
+    assert_eq!(parent["parent_session_id"], "root");
 
     let artifact = invoke(
         &mut harness,
@@ -331,4 +362,51 @@ fn supported_harness_routes_model_inference_and_tool_calls_through_plugins() {
         }
         other => panic!("unexpected execution response: {other:?}"),
     }
+}
+
+#[test]
+fn hook_behavior_is_omittable_and_replaceable_through_harness_composition() {
+    let hook_service = ServiceId::parse("phenix.hooks@1").unwrap();
+    let mut selected = HarnessBuilder::default_suite_plugin_ids();
+    assert!(selected.remove("phenix.hooks"));
+
+    let mut without_hooks = HarnessBuilder::with_selected_suite(&selected)
+        .unwrap()
+        .build()
+        .unwrap();
+    without_hooks.activate().unwrap();
+    let error = without_hooks
+        .invoke(
+            &hook_service,
+            &serde_json::to_vec(&json!({"operation": "get_configuration", "revision": "missing"}))
+                .unwrap(),
+            &default_suite_authority(),
+            None,
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("no eligible provider"));
+
+    let mut replacement_builder = HarnessBuilder::with_selected_suite(&selected).unwrap();
+    replacement_builder
+        .add_embedded(
+            fixture_manifest("fixture.hooks", hook_service.clone()),
+            || Box::new(EchoTool),
+        )
+        .unwrap();
+    let mut replacement = replacement_builder.build().unwrap();
+    replacement.activate().unwrap();
+    let request = json!({"replacement": true});
+    assert_eq!(
+        invoke(&mut replacement, "phenix.hooks@1", request.clone()),
+        request
+    );
+
+    let plugins = replacement
+        .kernel()
+        .config()
+        .manifests()
+        .map(|manifest| manifest.id.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    assert!(!plugins.contains("phenix.hooks"));
+    assert!(plugins.contains("fixture.hooks"));
 }

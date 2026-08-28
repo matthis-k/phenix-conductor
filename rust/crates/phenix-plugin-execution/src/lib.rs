@@ -1,10 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod component;
 mod configuration;
+#[cfg(test)]
+mod generation_regression;
 mod implementation {
     include!("implementation.rs");
 }
 
+pub use component::*;
 pub use configuration::{
     execution_configuration_service, AgentDefinition, CallablePolicy,
     ExecutionConfigurationCommand, ExecutionConfigurationResponse, OrchestrationDefinition,
@@ -23,6 +27,7 @@ use phenix_core::{
 pub fn execution_manifest(maximum_authority: Authority) -> PluginManifest {
     let mut manifest = implementation::execution_manifest(maximum_authority);
     manifest.services.push(ServiceContribution {
+        role: phenix_core::ServiceRole::Terminal,
         service: configuration::execution_configuration_service(),
         priority: 100,
         required_authority: Authority::default(),

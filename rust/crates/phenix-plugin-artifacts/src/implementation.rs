@@ -135,6 +135,7 @@ pub fn artifact_manifest() -> PluginManifest {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: phenix_core::ServiceRole::Terminal,
             service: artifact_service(),
             priority: 100,
             required_authority: Authority::default(),

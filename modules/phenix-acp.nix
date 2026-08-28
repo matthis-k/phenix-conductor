@@ -87,7 +87,8 @@
             export PHENIX_STATE_DB="$TMPDIR/harness.sqlite"
             phenix --list-services > "$TMPDIR/services.json"
             jq -e '
-              (.plugins | length == 14)
+              (.plugins | length == 15)
+              and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0)
               and (.services | index("phenix.sessions@1") != null)
               and (.services | index("phenix.context@1") != null)
               and (.services | index("phenix.execution@1") != null)
@@ -95,7 +96,7 @@
               and (.services | index("phenix.repository.worker-queue@1") != null)
             ' "$TMPDIR/services.json" >/dev/null
 
-            printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"create","id":"product-smoke","parent":null}}' \
+            printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"create","id":"product-smoke"}}' \
               | phenix > "$TMPDIR/create.json"
             cat "$TMPDIR/create.json"
             jq -e '

@@ -51,6 +51,10 @@ let
 
   pluginIds = {
     artifacts = "phenix.artifacts";
+    basic-context = "phenix.basic-context";
+    basic-model = "phenix.basic-model";
+    basic-skills = "phenix.basic-skills";
+    basic-tools = "phenix.basic-tools";
     cli = "phenix.cli";
     context = "phenix.context";
     debug = "phenix.debug";
@@ -62,11 +66,22 @@ let
     models = "phenix.models";
     planning = "phenix.planning";
     repository-workers = "phenix.repository-workers";
+    session-tree = "phenix.session-tree";
     sessions = "phenix.sessions";
     workspace = "phenix.workspace";
   };
 
-  pluginCrates = builtins.mapAttrs (name: _: "phenix-plugin-${name}") pluginIds;
+  basicPluginNames = [
+    "basic-context"
+    "basic-model"
+    "basic-skills"
+    "basic-tools"
+  ];
+
+  pluginCrates = builtins.mapAttrs (
+    name: _:
+    if builtins.elem name basicPluginNames then "phenix-plugin-basic-agent" else "phenix-plugin-${name}"
+  ) pluginIds;
 
   pluginSets = builtins.listToAttrs (
     map (

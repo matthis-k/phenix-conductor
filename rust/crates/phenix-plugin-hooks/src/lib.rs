@@ -1,9 +1,12 @@
 #![forbid(unsafe_code)]
-use phenix_plugin_context::{
-    context_service, ContextCommand, ContextInjectionLifetime, ContextInjectionRequester,
-};
-use phenix_plugin_execution::{execution_service, ExecutionCommand, ExecutionResponse};
+use phenix_plugin_context::{ContextCommand, ContextInjectionLifetime, ContextInjectionRequester};
+use phenix_plugin_execution::{ExecutionCommand, ExecutionResponse};
+mod component;
 mod implementation {
     include!("implementation.rs");
 }
+pub use component::*;
 pub use implementation::*;
+
+#[cfg(test)]
+mod ownership_regression;

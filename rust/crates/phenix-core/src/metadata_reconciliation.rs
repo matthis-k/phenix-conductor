@@ -1,0 +1,519 @@
+use crate::{
+    ComponentId, ConfigurationFrontendId, GraphGenerationId, GraphReconciler, PluginId,
+    ReconciliationAction, ReconciliationPreview, ReloadPolicy, ResolvedCompositionMetadata,
+    ResolvedHarness,
+};
+use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MetadataChangeKind {
+    Added,
+    Removed,
+    Reconfigured,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackageMetadataChange {
+    pub plugin: PluginId,
+    pub kind: MetadataChangeKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComponentMetadataChange {
+    pub component: ComponentId,
+    pub kind: MetadataChangeKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FrontendMetadataChange {
+    pub frontend: ConfigurationFrontendId,
+    pub kind: MetadataChangeKind,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CompositionMetadataDiff {
+    pub packages: Vec<PackageMetadataChange>,
+    pub components: Vec<ComponentMetadataChange>,
+    pub frontends: Vec<FrontendMetadataChange>,
+}
+
+impl CompositionMetadataDiff {
+    pub fn between(
+        previous: &ResolvedCompositionMetadata,
+        next: &ResolvedCompositionMetadata,
+    ) -> Self {
+        Self {
+            packages: metadata_changes(
+                previous
+                    .packages()
+                    .iter()
+                    .map(|value| (&value.manifest.id, value)),
+                next.packages()
+                    .iter()
+                    .map(|value| (&value.manifest.id, value)),
+                |plugin, kind| PackageMetadataChange {
+                    plugin: plugin.clone(),
+                    kind,
+                },
+            ),
+            components: metadata_changes(
+                previous
+                    .components()
+                    .iter()
+                    .map(|value| (&value.manifest.id, value)),
+                next.components()
+                    .iter()
+                    .map(|value| (&value.manifest.id, value)),
+                |component, kind| ComponentMetadataChange {
+                    component: component.clone(),
+                    kind,
+                },
+            ),
+            frontends: metadata_changes(
+                previous.frontends().iter().map(|value| (&value.id, value)),
+                next.frontends().iter().map(|value| (&value.id, value)),
+                |frontend, kind| FrontendMetadataChange {
+                    frontend: frontend.clone(),
+                    kind,
+                },
+            ),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.packages.is_empty() && self.components.is_empty() && self.frontends.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MetadataReconciliationError {
+    ActiveGenerationMismatch {
+        graph: GraphGenerationId,
+        metadata: GraphGenerationId,
+    },
+    CandidateGenerationMismatch {
+        graph: GraphGenerationId,
+        metadata: GraphGenerationId,
+    },
+    DrainRequired {
+        component: ComponentId,
+    },
+    MigrationRequired {
+        component: ComponentId,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetadataReconciliationPreview {
+    pub graph: ReconciliationPreview,
+    pub metadata: CompositionMetadataDiff,
+    pub transition_plan: Vec<ReconciliationAction>,
+}
+
+impl GraphReconciler {
+    pub fn preview_candidate_with_metadata(
+        &self,
+        active_metadata: &ResolvedCompositionMetadata,
+        candidate: &ResolvedHarness,
+        candidate_metadata: &ResolvedCompositionMetadata,
+    ) -> Result<MetadataReconciliationPreview, MetadataReconciliationError> {
+        if active_metadata.generation() != self.active().generation() {
+            return Err(MetadataReconciliationError::ActiveGenerationMismatch {
+                graph: self.active().generation().clone(),
+                metadata: active_metadata.generation().clone(),
+            });
+        }
+        if candidate_metadata.generation() != candidate.generation() {
+            return Err(MetadataReconciliationError::CandidateGenerationMismatch {
+                graph: candidate.generation().clone(),
+                metadata: candidate_metadata.generation().clone(),
+            });
+        }
+
+        let graph = self.preview_candidate(candidate);
+        let metadata = CompositionMetadataDiff::between(active_metadata, candidate_metadata);
+        let mut transition_plan = graph.transition_plan.clone();
+        let mut restart = BTreeSet::new();
+
+        for change in &metadata.components {
+            if change.kind == MetadataChangeKind::Reconfigured
+                && component_survives(self.active(), candidate, &change.component)
+            {
+                apply_component_reload_policy(
+                    active_metadata,
+                    candidate_metadata,
+                    &change.component,
+                    &mut restart,
+                )?;
+            }
+        }
+
+        for change in &metadata.packages {
+            for component in
+                components_owned_by_package(active_metadata, candidate_metadata, &change.plugin)
+            {
+                if component_survives(self.active(), candidate, &component) {
+                    apply_package_reload_policy(
+                        active_metadata,
+                        candidate_metadata,
+                        &change.plugin,
+                        &component,
+                        &mut restart,
+                    )?;
+                }
+            }
+        }
+
+        for change in &metadata.frontends {
+            for plugin in
+                packages_declaring_frontend(active_metadata, candidate_metadata, &change.frontend)
+            {
+                for component in
+                    components_owned_by_package(active_metadata, candidate_metadata, &plugin)
+                {
+                    if component_survives(self.active(), candidate, &component) {
+                        apply_package_reload_policy(
+                            active_metadata,
+                            candidate_metadata,
+                            &plugin,
+                            &component,
+                            &mut restart,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        let already_restarted: BTreeSet<_> = transition_plan
+            .iter()
+            .filter_map(|action| match action {
+                ReconciliationAction::RestartComponent(component) => Some(component.clone()),
+                _ => None,
+            })
+            .collect();
+        transition_plan.extend(
+            restart
+                .into_iter()
+                .filter(|component| !already_restarted.contains(component))
+                .map(ReconciliationAction::RestartComponent),
+        );
+
+        Ok(MetadataReconciliationPreview {
+            graph,
+            metadata,
+            transition_plan,
+        })
+    }
+}
+
+fn apply_component_reload_policy(
+    previous: &ResolvedCompositionMetadata,
+    next: &ResolvedCompositionMetadata,
+    component: &ComponentId,
+    restart: &mut BTreeSet<ComponentId>,
+) -> Result<(), MetadataReconciliationError> {
+    let policies = previous
+        .components()
+        .iter()
+        .chain(next.components().iter())
+        .filter(|metadata| &metadata.manifest.id == component)
+        .map(|metadata| metadata.reload_policy);
+    apply_reload_policies(component, policies, restart)
+}
+
+fn apply_package_reload_policy(
+    previous: &ResolvedCompositionMetadata,
+    next: &ResolvedCompositionMetadata,
+    plugin: &PluginId,
+    component: &ComponentId,
+    restart: &mut BTreeSet<ComponentId>,
+) -> Result<(), MetadataReconciliationError> {
+    let policies = previous
+        .packages()
+        .iter()
+        .chain(next.packages().iter())
+        .filter(|metadata| &metadata.manifest.id == plugin)
+        .map(|metadata| metadata.reload_policy);
+    apply_reload_policies(component, policies, restart)
+}
+
+fn apply_reload_policies(
+    component: &ComponentId,
+    policies: impl IntoIterator<Item = ReloadPolicy>,
+    restart: &mut BTreeSet<ComponentId>,
+) -> Result<(), MetadataReconciliationError> {
+    let mut requires_restart = false;
+    for policy in policies {
+        match policy {
+            ReloadPolicy::Retain => {}
+            ReloadPolicy::Restart => requires_restart = true,
+            ReloadPolicy::DrainAndRestart => {
+                return Err(MetadataReconciliationError::DrainRequired {
+                    component: component.clone(),
+                });
+            }
+            ReloadPolicy::MigrationRequired => {
+                return Err(MetadataReconciliationError::MigrationRequired {
+                    component: component.clone(),
+                });
+            }
+        }
+    }
+    if requires_restart {
+        restart.insert(component.clone());
+    }
+    Ok(())
+}
+
+fn metadata_changes<'a, K, V, I, J, F, C>(previous: I, next: J, make: F) -> Vec<C>
+where
+    K: Clone + Ord + 'a,
+    V: PartialEq + 'a,
+    I: IntoIterator<Item = (&'a K, &'a V)>,
+    J: IntoIterator<Item = (&'a K, &'a V)>,
+    F: Fn(&K, MetadataChangeKind) -> C,
+{
+    let previous: BTreeMap<_, _> = previous.into_iter().collect();
+    let next: BTreeMap<_, _> = next.into_iter().collect();
+    let keys: BTreeSet<_> = previous.keys().chain(next.keys()).copied().collect();
+
+    keys.into_iter()
+        .filter_map(|key| match (previous.get(key), next.get(key)) {
+            (None, Some(_)) => Some(make(key, MetadataChangeKind::Added)),
+            (Some(_), None) => Some(make(key, MetadataChangeKind::Removed)),
+            (Some(previous), Some(next)) if previous != next => {
+                Some(make(key, MetadataChangeKind::Reconfigured))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn component_survives(
+    previous: &ResolvedHarness,
+    next: &ResolvedHarness,
+    component: &ComponentId,
+) -> bool {
+    previous
+        .components()
+        .iter()
+        .any(|value| &value.id == component)
+        && next.components().iter().any(|value| &value.id == component)
+}
+
+fn components_owned_by_package(
+    previous: &ResolvedCompositionMetadata,
+    next: &ResolvedCompositionMetadata,
+    plugin: &PluginId,
+) -> BTreeSet<ComponentId> {
+    previous
+        .components()
+        .iter()
+        .chain(next.components().iter())
+        .filter(|component| &component.manifest.owner == plugin)
+        .map(|component| component.manifest.id.clone())
+        .collect()
+}
+
+fn packages_declaring_frontend(
+    previous: &ResolvedCompositionMetadata,
+    next: &ResolvedCompositionMetadata,
+    frontend: &ConfigurationFrontendId,
+) -> BTreeSet<PluginId> {
+    previous
+        .packages()
+        .iter()
+        .chain(next.packages().iter())
+        .filter(|package| package.configuration_frontends.contains(frontend))
+        .map(|package| package.manifest.id.clone())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Authority, CompatibilityMetadata, ComponentHostKind, ComponentManifest,
+        ComponentRuntimeMetadata, ComponentStateClass, CompositionMetadataInput, PluginExecution,
+        PluginManifest, PluginPackageMetadata, ReloadPolicy,
+    };
+
+    fn fixture() -> CompositionMetadataInput {
+        let plugin = PluginId::parse("fixture.plugin").unwrap();
+        let component = ComponentId::parse("fixture.component").unwrap();
+        CompositionMetadataInput {
+            packages: vec![PluginPackageMetadata {
+                manifest: PluginManifest {
+                    id: plugin.clone(),
+                    version: 1,
+                    execution: PluginExecution::Embedded,
+                    dependencies: Vec::new(),
+                    services: Vec::new(),
+                    resource_namespaces: Vec::new(),
+                    maximum_authority: Authority::default(),
+                },
+                packaged_components: BTreeSet::from([component.clone()]),
+                packaged_resources: BTreeSet::new(),
+                packaged_skills: BTreeSet::new(),
+                compatibility: CompatibilityMetadata {
+                    minimum_kernel_version: 1,
+                    maximum_kernel_version: None,
+                },
+                durable_namespaces: BTreeSet::new(),
+                migrations: Vec::new(),
+                configuration_frontends: BTreeSet::new(),
+                component_hosts: BTreeSet::from([ComponentHostKind::EmbeddedRust]),
+                reload_policy: ReloadPolicy::Restart,
+            }],
+            components: vec![ComponentRuntimeMetadata {
+                manifest: ComponentManifest {
+                    id: component,
+                    owner: plugin,
+                    imports: Vec::new(),
+                    exports: Vec::new(),
+                    maximum_authority: Authority::default(),
+                },
+                version: 1,
+                configuration_contracts: BTreeSet::new(),
+                requested_capabilities: BTreeSet::new(),
+                state_class: ComponentStateClass::Stateless,
+                reload_policy: ReloadPolicy::Restart,
+                interposition_interfaces: BTreeSet::new(),
+                event_contributions: BTreeSet::new(),
+                controller_contributions: BTreeSet::new(),
+            }],
+            resources: Vec::new(),
+            configuration: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn package_restart_policy_produces_an_explicit_restart_plan() {
+        let mut active_input = fixture();
+        active_input.packages[0].reload_policy = ReloadPolicy::Restart;
+        let mut candidate_input = active_input.clone();
+        candidate_input.packages[0]
+            .compatibility
+            .maximum_kernel_version = Some(2);
+        let (active, active_metadata) = active_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let (candidate, candidate_metadata) = candidate_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let component = ComponentId::parse("fixture.component").unwrap();
+        let reconciler = GraphReconciler::new(active);
+
+        let preview = reconciler
+            .preview_candidate_with_metadata(&active_metadata, &candidate, &candidate_metadata)
+            .unwrap();
+
+        assert!(preview.graph.diff.is_empty());
+        assert_eq!(preview.metadata.packages.len(), 1);
+        assert!(preview
+            .transition_plan
+            .contains(&ReconciliationAction::RestartComponent(component)));
+    }
+
+    #[test]
+    fn drain_policy_rejects_plain_restart_reconciliation() {
+        let active_input = fixture();
+        let mut candidate_input = fixture();
+        candidate_input.packages[0].reload_policy = ReloadPolicy::DrainAndRestart;
+        let (active, active_metadata) = active_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let (candidate, candidate_metadata) = candidate_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let component = ComponentId::parse("fixture.component").unwrap();
+        let reconciler = GraphReconciler::new(active);
+
+        assert_eq!(
+            reconciler.preview_candidate_with_metadata(
+                &active_metadata,
+                &candidate,
+                &candidate_metadata,
+            ),
+            Err(MetadataReconciliationError::DrainRequired { component })
+        );
+    }
+
+    #[test]
+    fn component_lifecycle_change_produces_an_explicit_restart_plan() {
+        let active_input = fixture();
+        let mut candidate_input = fixture();
+        candidate_input.components[0].state_class = ComponentStateClass::Ephemeral;
+        let (active, active_metadata) = active_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let (candidate, candidate_metadata) = candidate_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let component = ComponentId::parse("fixture.component").unwrap();
+        let reconciler = GraphReconciler::new(active);
+
+        let preview = reconciler
+            .preview_candidate_with_metadata(&active_metadata, &candidate, &candidate_metadata)
+            .unwrap();
+
+        assert!(preview.graph.diff.is_empty());
+        assert_eq!(preview.metadata.components.len(), 1);
+        assert!(preview
+            .transition_plan
+            .contains(&ReconciliationAction::RestartComponent(component)));
+    }
+
+    #[test]
+    fn retain_policy_does_not_restart_a_surviving_component_for_metadata_only_change() {
+        let mut active_input = fixture();
+        active_input.components[0].reload_policy = ReloadPolicy::Retain;
+        let mut candidate_input = active_input.clone();
+        candidate_input.components[0].state_class = ComponentStateClass::Ephemeral;
+        let (active, active_metadata) = active_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let (candidate, candidate_metadata) = candidate_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let component = ComponentId::parse("fixture.component").unwrap();
+        let reconciler = GraphReconciler::new(active);
+
+        let preview = reconciler
+            .preview_candidate_with_metadata(&active_metadata, &candidate, &candidate_metadata)
+            .unwrap();
+
+        assert!(preview
+            .metadata
+            .components
+            .iter()
+            .any(|change| change.component == component));
+        assert!(!preview
+            .transition_plan
+            .contains(&ReconciliationAction::RestartComponent(component)));
+    }
+
+    #[test]
+    fn migration_required_policy_rejects_automatic_reconciliation() {
+        let active_input = fixture();
+        let mut candidate_input = fixture();
+        candidate_input.components[0].reload_policy = ReloadPolicy::MigrationRequired;
+        let (active, active_metadata) = active_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let (candidate, candidate_metadata) = candidate_input
+            .resolve_inspectable(&Authority::default())
+            .unwrap();
+        let component = ComponentId::parse("fixture.component").unwrap();
+        let reconciler = GraphReconciler::new(active);
+
+        assert_eq!(
+            reconciler.preview_candidate_with_metadata(
+                &active_metadata,
+                &candidate,
+                &candidate_metadata,
+            ),
+            Err(MetadataReconciliationError::MigrationRequired { component })
+        );
+    }
+}

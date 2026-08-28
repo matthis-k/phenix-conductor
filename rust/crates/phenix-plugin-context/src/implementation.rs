@@ -1,8 +1,12 @@
-use crate::{execution_service, ExecutionCommand, ExecutionResponse, ExecutionState};
+use crate::context_component_id;
 use phenix_core::{
     Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
 };
+pub use phenix_core::{
+    ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
+};
+use phenix_plugin_execution::{ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -13,39 +17,6 @@ const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const ALL_RESOURCES_KEY: &str = "resources/@all";
-
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContextResourceKind {
-    ProjectInstruction,
-    ProjectDocument,
-    Skill,
-    External,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContextScope {
-    Workspace,
-    PathPrefix(String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ContextDescriptor {
-    pub resource_id: String,
-    pub revision: String,
-    pub kind: ContextResourceKind,
-    pub source: String,
-    pub scope: ContextScope,
-    pub content_identity: String,
-    pub estimated_bytes: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ContextResourceRevision {
-    pub descriptor: ContextDescriptor,
-    pub content: Vec<u8>,
-}
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct ExactContextReference {
@@ -164,6 +135,7 @@ pub fn context_manifest() -> PluginManifest {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: phenix_core::ServiceRole::Terminal,
             service: context_service(),
             priority: 100,
             required_authority: Authority::default(),
@@ -447,15 +419,10 @@ fn require_active_execution(host: &PluginHost<'_>, execution_id: &str) -> Result
     let command = ExecutionCommand::GetExecution {
         id: execution_id.to_owned(),
     };
-    let output = host
-        .invoke_service(
-            &execution_service(),
-            &serde_json::to_vec(&command).map_err(|error| error.to_string())?,
-            host.authority(),
-            None,
-        )
+    let response = host
+        .invoke_import::<ExecutionInterface>(&context_component_id(), &command)
         .map_err(|error| error.to_string())?;
-    match serde_json::from_slice::<ExecutionResponse>(&output).map_err(|error| error.to_string())? {
+    match response {
         ExecutionResponse::ExecutionLookup {
             execution: Some(execution),
         } if execution.state == ExecutionState::Active => Ok(()),
@@ -579,8 +546,14 @@ fn parent_path(path: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, LocalPersistence, PluginState};
-    use phenix_plugin_execution::{execution_factory, execution_manifest, ExecutionAuthority};
+    use phenix_core::{
+        Kernel, KernelConfig, LocalPersistence, PluginState, ResolvedHarness,
+        ResolvedHarnessActivation,
+    };
+    use phenix_plugin_execution::{
+        execution_component_manifest, execution_factory, execution_manifest, execution_service,
+        ExecutionAuthority,
+    };
     use std::{
         fs,
         path::PathBuf,
@@ -604,11 +577,22 @@ mod tests {
         let context_plugin = context_manifest.id.clone();
         let execution_manifest = execution_manifest(authority());
         let execution_plugin = execution_manifest.id.clone();
+        let resolved = ResolvedHarness::resolve(
+            [execution_manifest.clone(), context_manifest.clone()],
+            [
+                execution_component_manifest(authority()),
+                crate::context_component_manifest(),
+            ],
+            [],
+            &authority(),
+        )
+        .unwrap();
         let persistence = LocalPersistence::open(path).unwrap();
         let mut kernel = Kernel::with_persistence(
             KernelConfig::new([execution_manifest, context_manifest]).unwrap(),
             persistence,
         );
+        kernel.activate_resolved_harness(&resolved).unwrap();
         kernel
             .register_embedded_factory(execution_plugin.clone(), execution_factory)
             .unwrap();

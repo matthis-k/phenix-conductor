@@ -1553,6 +1553,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1585,10 +1586,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-plugin-basic-agent"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "phenix-plugin-catalog"
 version = "0.1.0"
 dependencies = [
+ "phenix-core",
  "phenix-plugin-artifacts",
+ "phenix-plugin-basic-agent",
  "phenix-plugin-cli",
  "phenix-plugin-context",
  "phenix-plugin-debug",
@@ -1600,6 +1613,7 @@ dependencies = [
  "phenix-plugin-models",
  "phenix-plugin-planning",
  "phenix-plugin-repository-workers",
+ "phenix-plugin-session-tree",
  "phenix-plugin-sessions",
  "phenix-plugin-workspace",
 ]
@@ -1723,6 +1737,16 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-session-tree"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-sessions",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2817,9 +2841,9 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "uuid"
-version = "1.25.0"
+version = "1.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f053576934f05a761a402421fbbe3d425d9366f75f978806a037b3ca481abecc"
+checksum = "b5772d71c9be8a8a6ac2117d949c5b224c1b72241bb611d9a3012edcf8af7812"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",

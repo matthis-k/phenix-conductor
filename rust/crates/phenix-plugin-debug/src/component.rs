@@ -1,0 +1,88 @@
+use crate::{debug_manifest, DebugCommand, DebugResponse, DEBUG_SERVICE};
+use phenix_core::{
+    Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
+    ComponentManifest, InterfaceId, PluginId,
+};
+use phenix_plugin_context::ContextInterface;
+use phenix_plugin_frontend::FrontendInterface;
+use phenix_plugin_jobs::JobInterface;
+use phenix_plugin_models::ModelRoutingInterface;
+use phenix_plugin_planning::PlanningInterface;
+use phenix_plugin_sessions::SessionInterface;
+
+const DEBUG_COMPONENT: &str = "phenix.debug";
+const DEBUG_PLUGIN: &str = "phenix.debug";
+
+pub struct DebugInterface;
+
+impl ComponentInterface for DebugInterface {
+    type Request = DebugCommand;
+    type Response = DebugResponse;
+
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(DEBUG_SERVICE).expect("static debug interface id is valid")
+    }
+}
+
+#[must_use]
+pub fn debug_component_id() -> ComponentId {
+    ComponentId::parse(DEBUG_COMPONENT).expect("static debug component id is valid")
+}
+
+#[must_use]
+pub fn debug_component_manifest(maximum_authority: Authority) -> ComponentManifest {
+    let authority = debug_manifest(maximum_authority).maximum_authority;
+    let optional = |interface: InterfaceId| ComponentImport {
+        interface,
+        required: false,
+        authority: authority.clone(),
+    };
+    ComponentManifest {
+        id: debug_component_id(),
+        owner: PluginId::parse(DEBUG_PLUGIN).expect("static debug plugin id is valid"),
+        imports: vec![
+            optional(SessionInterface::interface_id()),
+            optional(ContextInterface::interface_id()),
+            optional(PlanningInterface::interface_id()),
+            optional(JobInterface::interface_id()),
+            optional(ModelRoutingInterface::interface_id()),
+            optional(FrontendInterface::interface_id()),
+        ],
+        exports: vec![ComponentExport {
+            interface: DebugInterface::interface_id(),
+            priority: 100,
+            required_authority: Authority::default(),
+        }],
+        maximum_authority: authority,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_core::ResolvedComponentGraph;
+    use phenix_plugin_sessions::{session_component_manifest, session_manifest};
+
+    #[test]
+    fn debug_optional_imports_bind_only_available_components() {
+        let authority = Authority::default();
+        let graph = ResolvedComponentGraph::compile(
+            [session_manifest(), debug_manifest(authority.clone())],
+            [
+                session_component_manifest(),
+                debug_component_manifest(authority.clone()),
+            ],
+            &authority,
+        )
+        .unwrap();
+
+        assert!(graph
+            .import_handle(&debug_component_id(), &SessionInterface::interface_id())
+            .unwrap()
+            .is_some());
+        assert!(graph
+            .import_handle(&debug_component_id(), &ContextInterface::interface_id())
+            .unwrap()
+            .is_none());
+    }
+}

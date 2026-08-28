@@ -1,23 +1,85 @@
 use phenix_core::{
-    Authority, CapabilityId, Kernel, KernelConfig, KernelError, PersistenceBackend,
-    PluginExecution, PluginId, PluginInstance, PluginManifest,
+    Authority, CapabilityId, ComponentManifest, ConfigContribution, GraphGenerationId, Kernel,
+    KernelError, LayerPolicy, PersistenceBackend, PluginExecution, PluginId, PluginInstance,
+    PluginManifest, ResolvedHarness, ResolvedHarnessActivation, ResolvedHarnessActivationError,
+    ResolvedHarnessError, ServiceId,
 };
 use phenix_plugin_catalog::{
-    artifact_factory, artifact_manifest, cli_factory, cli_manifest, context_factory,
-    context_manifest, debug_factory, debug_manifest, execution_factory, execution_manifest,
-    frontend_factory, frontend_manifest, hook_factory, hook_manifest, job_factory, job_manifest,
-    language_factory, language_manifest, model_routing_factory, model_routing_manifest,
-    planning_factory, planning_manifest, repository_worker_factory, repository_worker_manifest,
-    session_factory, session_manifest, workspace_factory, workspace_manifest,
+    artifact_component_manifest, artifact_factory, artifact_manifest,
+    basic_context_component_manifest, basic_context_factory, basic_context_manifest,
+    basic_model_component_manifest, basic_model_factory, basic_model_manifest,
+    basic_skills_component_manifest, basic_skills_factory, basic_skills_manifest,
+    basic_tools_component_manifest, basic_tools_factory, basic_tools_manifest,
+    cli_component_manifest, cli_factory, cli_manifest, context_component_manifest, context_factory,
+    context_manifest, debug_component_manifest, debug_factory, debug_manifest,
+    execution_component_manifest, execution_factory, execution_manifest,
+    frontend_component_manifest, frontend_factory, frontend_manifest, hook_component_manifest,
+    hook_factory, hook_manifest, job_component_manifest, job_factory, job_manifest,
+    language_component_manifest, language_factory, language_manifest,
+    model_routing_component_manifest, model_routing_factory, model_routing_manifest,
+    planning_component_manifest, planning_factory, planning_manifest,
+    repository_worker_component_manifest, repository_worker_factory, repository_worker_manifest,
+    session_component_manifest, session_factory, session_manifest, session_tree_component_manifest,
+    session_tree_factory, session_tree_manifest, workspace_component_manifest, workspace_factory,
+    workspace_manifest,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt::{self, Display, Formatter},
     sync::Arc,
 };
+
+mod basic_suite;
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
 type ExternalFactory =
     Arc<dyn Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync>;
+
+#[derive(Debug)]
+pub enum HarnessBuildError {
+    Kernel(KernelError),
+    Resolution(ResolvedHarnessError),
+    Activation(ResolvedHarnessActivationError),
+}
+
+impl Display for HarnessBuildError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Kernel(error) => Display::fmt(error, f),
+            Self::Resolution(error) => Display::fmt(error, f),
+            Self::Activation(error) => write!(f, "resolved Harness activation failed: {error:?}"),
+        }
+    }
+}
+
+impl Error for HarnessBuildError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Kernel(error) => Some(error),
+            Self::Resolution(error) => Some(error),
+            Self::Activation(_) => None,
+        }
+    }
+}
+
+impl From<KernelError> for HarnessBuildError {
+    fn from(error: KernelError) -> Self {
+        Self::Kernel(error)
+    }
+}
+
+impl From<ResolvedHarnessError> for HarnessBuildError {
+    fn from(error: ResolvedHarnessError) -> Self {
+        Self::Resolution(error)
+    }
+}
+
+impl From<ResolvedHarnessActivationError> for HarnessBuildError {
+    fn from(error: ResolvedHarnessActivationError) -> Self {
+        Self::Activation(error)
+    }
+}
 
 pub fn default_suite_authority() -> Authority {
     Authority::new([
@@ -36,6 +98,10 @@ pub struct HarnessBuilder {
     manifests: Vec<PluginManifest>,
     embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,
     external_factories: BTreeMap<PluginId, ExternalFactory>,
+    layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+    components: Vec<ComponentManifest>,
+    contributions: Vec<ConfigContribution>,
+    component_authority: Authority,
 }
 
 impl HarnessBuilder {
@@ -46,8 +112,10 @@ impl HarnessBuilder {
     pub fn with_default_suite() -> Result<Self, KernelError> {
         let mut builder = Self::new();
         let authority = default_suite_authority();
+        builder.component_authority = authority.clone();
         builder.add_embedded(repository_worker_manifest(), repository_worker_factory)?;
         builder.add_embedded(session_manifest(), session_factory)?;
+        builder.add_embedded(session_tree_manifest(), session_tree_factory)?;
         builder.add_embedded(artifact_manifest(), artifact_factory)?;
         builder.add_embedded(cli_manifest(authority.clone()), cli_factory)?;
         builder.add_embedded(context_manifest(), context_factory)?;
@@ -62,7 +130,26 @@ impl HarnessBuilder {
         builder.add_embedded(job_manifest(), job_factory)?;
         builder.add_embedded(frontend_manifest(authority.clone()), frontend_factory)?;
         builder.add_embedded(hook_manifest(authority.clone()), hook_factory)?;
-        builder.add_embedded(debug_manifest(authority), debug_factory)?;
+        builder.add_embedded(debug_manifest(authority.clone()), debug_factory)?;
+        for component in [
+            repository_worker_component_manifest(),
+            session_component_manifest(),
+            session_tree_component_manifest(),
+            artifact_component_manifest(),
+            cli_component_manifest(authority.clone()),
+            context_component_manifest(),
+            execution_component_manifest(authority.clone()),
+            language_component_manifest(),
+            planning_component_manifest(),
+            workspace_component_manifest(),
+            model_routing_component_manifest(authority.clone()),
+            job_component_manifest(),
+            frontend_component_manifest(authority.clone()),
+            hook_component_manifest(authority.clone()),
+            debug_component_manifest(authority),
+        ] {
+            builder.add_component(component);
+        }
         Ok(builder)
     }
 
@@ -71,6 +158,7 @@ impl HarnessBuilder {
         [
             repository_worker_manifest(),
             session_manifest(),
+            session_tree_manifest(),
             artifact_manifest(),
             cli_manifest(authority.clone()),
             context_manifest(),
@@ -90,7 +178,10 @@ impl HarnessBuilder {
     }
 
     pub fn with_selected_suite(enabled: &BTreeSet<String>) -> Result<Self, String> {
-        let available = Self::default_suite_plugin_ids();
+        let available = Self::default_suite_plugin_ids()
+            .into_iter()
+            .chain(Self::basic_suite_plugin_ids())
+            .collect::<BTreeSet<_>>();
         let unknown = enabled.difference(&available).cloned().collect::<Vec<_>>();
         if !unknown.is_empty() {
             return Err(format!(
@@ -101,12 +192,14 @@ impl HarnessBuilder {
 
         let mut builder = Self::new();
         let authority = default_suite_authority();
+        builder.component_authority = authority.clone();
         builder.add_selected(
             enabled,
             repository_worker_manifest(),
             repository_worker_factory,
         )?;
         builder.add_selected(enabled, session_manifest(), session_factory)?;
+        builder.add_selected(enabled, session_tree_manifest(), session_tree_factory)?;
         builder.add_selected(enabled, artifact_manifest(), artifact_factory)?;
         builder.add_selected(enabled, cli_manifest(authority.clone()), cli_factory)?;
         builder.add_selected(enabled, context_manifest(), context_factory)?;
@@ -130,7 +223,36 @@ impl HarnessBuilder {
             frontend_factory,
         )?;
         builder.add_selected(enabled, hook_manifest(authority.clone()), hook_factory)?;
-        builder.add_selected(enabled, debug_manifest(authority), debug_factory)?;
+        builder.add_selected(enabled, debug_manifest(authority.clone()), debug_factory)?;
+        builder.add_selected(enabled, basic_model_manifest(), basic_model_factory)?;
+        builder.add_selected(enabled, basic_tools_manifest(), basic_tools_factory)?;
+        builder.add_selected(enabled, basic_skills_manifest(), basic_skills_factory)?;
+        builder.add_selected(enabled, basic_context_manifest(), basic_context_factory)?;
+        for component in [
+            repository_worker_component_manifest(),
+            session_component_manifest(),
+            session_tree_component_manifest(),
+            artifact_component_manifest(),
+            cli_component_manifest(authority.clone()),
+            context_component_manifest(),
+            execution_component_manifest(authority.clone()),
+            language_component_manifest(),
+            planning_component_manifest(),
+            workspace_component_manifest(),
+            model_routing_component_manifest(authority.clone()),
+            job_component_manifest(),
+            frontend_component_manifest(authority.clone()),
+            hook_component_manifest(authority.clone()),
+            debug_component_manifest(authority),
+            basic_model_component_manifest(),
+            basic_tools_component_manifest(),
+            basic_skills_component_manifest(),
+            basic_context_component_manifest(),
+        ] {
+            if enabled.contains(component.owner.as_str()) {
+                builder.add_component(component);
+            }
+        }
         Ok(builder)
     }
 
@@ -152,6 +274,22 @@ impl HarnessBuilder {
 
     pub fn add_manifest(&mut self, manifest: PluginManifest) {
         self.manifests.push(manifest);
+    }
+
+    pub fn add_component(&mut self, manifest: ComponentManifest) {
+        self.components.push(manifest);
+    }
+
+    pub fn add_config_contribution(&mut self, contribution: ConfigContribution) {
+        self.contributions.push(contribution);
+    }
+
+    pub fn set_component_authority(&mut self, authority: Authority) {
+        self.component_authority = authority;
+    }
+
+    pub fn set_layer_policy(&mut self, service: ServiceId, layers: Vec<LayerPolicy>) {
+        self.layer_policies.insert(service, layers);
     }
 
     pub fn add_embedded<F>(
@@ -188,36 +326,51 @@ impl HarnessBuilder {
         Ok(())
     }
 
-    pub fn build(self) -> Result<PhenixHarness, KernelError> {
-        let config = KernelConfig::new(self.manifests)?;
-        let mut kernel = Kernel::new(config);
+    pub fn build(self) -> Result<PhenixHarness, HarnessBuildError> {
+        let resolved = ResolvedHarness::resolve_with_layer_policies(
+            self.manifests.clone(),
+            self.components,
+            self.contributions,
+            self.layer_policies,
+            &self.component_authority,
+        )?;
+        let mut kernel = Kernel::new(resolved.kernel_config().clone());
+        kernel.activate_resolved_harness(&resolved)?;
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;
         }
         for (plugin, factory) in self.external_factories {
             kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;
         }
-        Ok(PhenixHarness { kernel })
+        Ok(PhenixHarness { kernel, resolved })
     }
 
     pub fn build_with_persistence(
         self,
         persistence: impl PersistenceBackend + 'static,
-    ) -> Result<PhenixHarness, KernelError> {
-        let config = KernelConfig::new(self.manifests)?;
-        let mut kernel = Kernel::with_persistence(config, persistence);
+    ) -> Result<PhenixHarness, HarnessBuildError> {
+        let resolved = ResolvedHarness::resolve_with_layer_policies(
+            self.manifests.clone(),
+            self.components,
+            self.contributions,
+            self.layer_policies,
+            &self.component_authority,
+        )?;
+        let mut kernel = Kernel::with_persistence(resolved.kernel_config().clone(), persistence);
+        kernel.activate_resolved_harness(&resolved)?;
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;
         }
         for (plugin, factory) in self.external_factories {
             kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;
         }
-        Ok(PhenixHarness { kernel })
+        Ok(PhenixHarness { kernel, resolved })
     }
 }
 
 pub struct PhenixHarness {
     kernel: Kernel,
+    resolved: ResolvedHarness,
 }
 
 impl PhenixHarness {
@@ -229,23 +382,39 @@ impl PhenixHarness {
         &mut self.kernel
     }
 
+    pub fn component_graph(&self) -> &phenix_core::ResolvedComponentGraph {
+        self.resolved.component_graph()
+    }
+
+    pub fn resolved_harness(&self) -> &ResolvedHarness {
+        &self.resolved
+    }
+
+    pub fn generation(&self) -> &GraphGenerationId {
+        self.resolved.generation()
+    }
+
     pub fn activate(&mut self) -> Result<(), KernelError> {
         self.kernel.activate_all()
     }
 
     pub fn kernel_only() -> Self {
-        Self {
-            kernel: Kernel::kernel_only(),
-        }
+        let resolved = ResolvedHarness::resolve([], [], [], &Authority::default())
+            .expect("empty kernel-only composition is valid");
+        let mut kernel = Kernel::kernel_only();
+        kernel
+            .activate_resolved_harness(&resolved)
+            .expect("kernel-only resolved Harness activates");
+        Self { kernel, resolved }
     }
 
-    pub fn default_suite() -> Result<Self, KernelError> {
+    pub fn default_suite() -> Result<Self, HarnessBuildError> {
         HarnessBuilder::with_default_suite()?.build()
     }
 
     pub fn default_suite_with_persistence(
         persistence: impl PersistenceBackend + 'static,
-    ) -> Result<Self, KernelError> {
+    ) -> Result<Self, HarnessBuildError> {
         HarnessBuilder::with_default_suite()?.build_with_persistence(persistence)
     }
 
@@ -263,7 +432,7 @@ impl PhenixHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{CapabilityId, ServiceContribution, ServiceId};
+    use phenix_core::{CapabilityId, LayerResult, ServiceContribution, ServiceId, ServiceRole};
     use phenix_plugin_catalog::{
         artifact_manifest, artifact_service, context_manifest, context_service, planning_manifest,
         planning_service, repository_work_queue_service, session_manifest, session_service,
@@ -316,12 +485,30 @@ mod tests {
             execution: PluginExecution::Embedded,
             dependencies: Vec::new(),
             services: vec![ServiceContribution {
+                role: ServiceRole::Terminal,
                 service,
                 priority,
                 required_authority: Authority::default(),
             }],
             resource_namespaces: Vec::new(),
             maximum_authority,
+        }
+    }
+
+    fn layer_manifest(id: &str, service: ServiceId, priority: i32) -> PluginManifest {
+        PluginManifest {
+            id: plugin(id),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: vec![ServiceContribution {
+                role: ServiceRole::Layer,
+                service,
+                priority,
+                required_authority: Authority::default(),
+            }],
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
         }
     }
 
@@ -342,6 +529,28 @@ mod tests {
         }
     }
 
+    struct LayerEcho;
+
+    impl PluginInstance for LayerEcho {
+        fn start(&mut self, _host: &phenix_core::PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn invoke_layer(
+            &mut self,
+            _service: &ServiceId,
+            input: &[u8],
+            host: &phenix_core::PluginHost<'_>,
+        ) -> Result<LayerResult, String> {
+            let lower = host
+                .continue_service(input, host.authority())
+                .map_err(|error| error.to_string())?;
+            let mut output = b"layer:".to_vec();
+            output.extend_from_slice(&lower);
+            Ok(LayerResult::Handled(output))
+        }
+    }
+
     struct FixedResponse(Vec<u8>);
 
     impl PluginInstance for FixedResponse {
@@ -357,6 +566,70 @@ mod tests {
         ) -> Result<Vec<u8>, String> {
             Ok(self.0.clone())
         }
+    }
+
+    #[test]
+    fn harness_builder_applies_layer_policy() {
+        let service = service();
+        let layer_id = plugin("fixture-layer");
+        let mut builder = HarnessBuilder::new();
+        builder
+            .add_embedded(manifest("terminal", 1), || Box::new(Echo(b"terminal")))
+            .unwrap();
+        builder
+            .add_embedded(
+                layer_manifest("fixture-layer", service.clone(), 100),
+                || Box::new(LayerEcho),
+            )
+            .unwrap();
+        builder.set_layer_policy(
+            service.clone(),
+            vec![LayerPolicy {
+                plugin: layer_id,
+                priority: 100,
+                required: true,
+                enabled: true,
+            }],
+        );
+        let mut harness = builder.build().unwrap();
+        harness.activate().unwrap();
+
+        assert_eq!(
+            harness
+                .invoke(&service, b"input", &Authority::default(), None)
+                .unwrap(),
+            b"layer:terminal"
+        );
+    }
+
+    #[test]
+    fn layer_policy_is_part_of_resolved_generation_identity() {
+        fn generation(required: bool) -> GraphGenerationId {
+            let service = service();
+            let mut builder = HarnessBuilder::new();
+            builder
+                .add_embedded(manifest("terminal", 1), || Box::new(Echo(b"terminal")))
+                .unwrap();
+            builder
+                .add_embedded(
+                    layer_manifest("fixture-layer", service.clone(), 100),
+                    || Box::new(LayerEcho),
+                )
+                .unwrap();
+            builder.set_layer_policy(
+                service,
+                vec![LayerPolicy {
+                    plugin: plugin("fixture-layer"),
+                    priority: 100,
+                    required,
+                    enabled: true,
+                }],
+            );
+            builder.build().unwrap().generation().clone()
+        }
+
+        assert_eq!(generation(true), generation(true));
+        assert_ne!(generation(true), generation(false));
     }
 
     #[test]
@@ -388,7 +661,28 @@ mod tests {
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 14);
+        assert_eq!(harness.kernel().config().manifests().count(), 15);
+        for component in [
+            repository_worker_component_manifest().id,
+            session_component_manifest().id,
+            artifact_component_manifest().id,
+            cli_component_manifest(default_suite_authority()).id,
+            context_component_manifest().id,
+            execution_component_manifest(default_suite_authority()).id,
+            language_component_manifest().id,
+            planning_component_manifest().id,
+            workspace_component_manifest().id,
+            model_routing_component_manifest(default_suite_authority()).id,
+            job_component_manifest().id,
+            frontend_component_manifest(default_suite_authority()).id,
+            hook_component_manifest(default_suite_authority()).id,
+            debug_component_manifest(default_suite_authority()).id,
+        ] {
+            assert!(
+                harness.component_graph().component(&component).is_some(),
+                "missing first-party component {component}"
+            );
+        }
 
         let input = serde_json::to_vec(&RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
@@ -409,7 +703,6 @@ mod tests {
 
         let create = serde_json::to_vec(&SessionCommand::Create {
             id: "session-1".into(),
-            parent: None,
         })
         .unwrap();
         let response = harness

@@ -1,11 +1,13 @@
 use crate::{
-    context_service, execution_service, ContextCommand, ContextInjectionLifetime,
-    ContextInjectionRequester, ExecutionCommand, ExecutionResponse,
+    hook_component_id, ContextCommand, ContextInjectionLifetime, ContextInjectionRequester,
+    ExecutionCommand, ExecutionResponse,
 };
 use phenix_core::{
     Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
 };
+use phenix_plugin_context::ContextInterface;
+use phenix_plugin_execution::ExecutionInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -124,6 +126,7 @@ pub fn hook_manifest(maximum_authority: Authority) -> PluginManifest {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: phenix_core::ServiceRole::Terminal,
             service: hook_service(),
             priority: 100,
             required_authority: Authority::default(),
@@ -265,14 +268,9 @@ fn execute_action(
                 lifetime: ContextInjectionLifetime::Execution,
                 reason: reason.clone(),
             };
-            host.invoke_service(
-                &context_service(),
-                &serde_json::to_vec(&command).map_err(|error| error.to_string())?,
-                host.authority(),
-                None,
-            )
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+            host.invoke_import::<ContextInterface>(&hook_component_id(), &command)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
         }
         HookAction::InvokeCallable { callable_id, input } => {
             let command = ExecutionCommand::InvokeCallable {
@@ -280,17 +278,10 @@ fn execute_action(
                 callable_id: callable_id.clone(),
                 input: input.clone(),
             };
-            let output = host
-                .invoke_service(
-                    &execution_service(),
-                    &serde_json::to_vec(&command).map_err(|error| error.to_string())?,
-                    host.authority(),
-                    None,
-                )
+            let response = host
+                .invoke_import::<ExecutionInterface>(&hook_component_id(), &command)
                 .map_err(|error| error.to_string())?;
-            match serde_json::from_slice::<ExecutionResponse>(&output)
-                .map_err(|error| error.to_string())?
-            {
+            match response {
                 ExecutionResponse::Invocation { .. } => Ok(()),
                 other => Err(format!("unexpected callable response: {other:?}")),
             }

@@ -21,7 +21,7 @@ fn main() {
         let mut stdin = child.stdin.take().expect("Harness stdin must be piped");
         stdin
             .write_all(
-                b"{\"id\":1,\"service\":\"phenix.sessions@1\",\"input\":{\"operation\":\"create\",\"id\":\"acp-smoke\",\"parent\":null}}\n{\"id\":2,\"service\":\"phenix.sessions@1\",\"input\":{\"operation\":\"get\",\"id\":\"acp-smoke\"}}\n",
+                b"{\"id\":1,\"service\":\"phenix.sessions@1\",\"input\":{\"operation\":\"create\",\"id\":\"acp-smoke\"}}\n{\"id\":2,\"service\":\"phenix.sessions@1\",\"input\":{\"operation\":\"get\",\"id\":\"acp-smoke\"}}\n",
             )
             .expect("ACP smoke requests must be written");
     }

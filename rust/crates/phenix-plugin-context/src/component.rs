@@ -1,0 +1,94 @@
+use crate::{context_manifest, ContextCommand, ContextResponse, CONTEXT_SERVICE};
+use phenix_core::{
+    ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest,
+    InterfaceId, PluginId,
+};
+use phenix_plugin_execution::ExecutionInterface;
+
+const CONTEXT_COMPONENT: &str = "phenix.context";
+const CONTEXT_PLUGIN: &str = "phenix.context";
+
+pub struct ContextInterface;
+
+impl ComponentInterface for ContextInterface {
+    type Request = ContextCommand;
+    type Response = ContextResponse;
+
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(CONTEXT_SERVICE).expect("static context interface id is valid")
+    }
+}
+
+#[must_use]
+pub fn context_component_id() -> ComponentId {
+    ComponentId::parse(CONTEXT_COMPONENT).expect("static component id is valid")
+}
+
+#[must_use]
+pub fn context_component_manifest() -> ComponentManifest {
+    let authority = context_manifest().maximum_authority;
+    ComponentManifest {
+        id: context_component_id(),
+        owner: PluginId::parse(CONTEXT_PLUGIN).expect("static plugin id is valid"),
+        imports: vec![ComponentImport {
+            interface: ExecutionInterface::interface_id(),
+            required: true,
+            authority: authority.clone(),
+        }],
+        exports: vec![ComponentExport {
+            interface: ContextInterface::interface_id(),
+            priority: 100,
+            required_authority: authority.clone(),
+        }],
+        maximum_authority: authority,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_core::{Authority, ComponentGraphError, ResolvedComponentGraph};
+    use phenix_plugin_execution::{execution_component_manifest, execution_manifest};
+
+    fn authority() -> Authority {
+        context_manifest().maximum_authority
+    }
+
+    #[test]
+    fn context_requires_execution_binding_before_activation() {
+        let error = ResolvedComponentGraph::compile(
+            [execution_manifest(authority()), context_manifest()],
+            [context_component_manifest()],
+            &authority(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ComponentGraphError::MissingRequiredImport { component, interface }
+                if component == context_component_id()
+                    && interface == ExecutionInterface::interface_id()
+        ));
+    }
+
+    #[test]
+    fn context_execution_import_binds_to_execution_component() {
+        let graph = ResolvedComponentGraph::compile(
+            [execution_manifest(authority()), context_manifest()],
+            [
+                execution_component_manifest(authority()),
+                context_component_manifest(),
+            ],
+            &authority(),
+        )
+        .unwrap();
+        let handle = graph
+            .import_handle(&context_component_id(), &ExecutionInterface::interface_id())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            handle.exporter(),
+            &execution_component_manifest(authority()).id
+        );
+        assert_eq!(handle.effective_authority(), &authority());
+    }
+}

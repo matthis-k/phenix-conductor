@@ -147,6 +147,7 @@ mod tests {
             execution: PluginExecution::Embedded,
             dependencies: Vec::new(),
             services: vec![ServiceContribution {
+                role: phenix_core::ServiceRole::Terminal,
                 service: ServiceId::parse("fixture.echo@1").unwrap(),
                 priority: 100,
                 required_authority: Authority::default(),

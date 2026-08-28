@@ -3,13 +3,13 @@ mod runtime_config;
 use phenix_conductor::serve_jsonl;
 use phenix_core::{
     Authority, CapabilityId, ExternalPluginProcess, ExternalSandbox, ExternalTransportConfig,
-    LocalPersistence, PluginExecution, PluginId, PluginManifest, ResourceNamespace,
-    ServiceContribution, ServiceId,
+    LayerPolicy, LocalPersistence, PluginExecution, PluginId, PluginManifest, ResourceNamespace,
+    ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_harness::{default_suite_authority, HarnessBuilder};
 use serde_json::{json, Map, Value};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env,
     error::Error,
     fs, io,
@@ -45,6 +45,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     for package in configured_plugin_packages()? {
         add_packaged_plugin(&mut builder, &package)?;
     }
+    apply_configured_layer_policy(&mut builder)?;
     let mut harness = builder.build_with_persistence(persistence)?;
     harness.activate()?;
     if let Some(path) = env::var_os("PHENIX_RUNTIME_CONFIG") {
@@ -112,6 +113,45 @@ fn configured_first_party_plugins() -> Result<Option<BTreeSet<String>>, Box<dyn 
         .map(str::to_owned)
         .collect();
     Ok(Some(enabled))
+}
+
+#[derive(serde::Deserialize)]
+struct ConfiguredLayerPolicy {
+    service: String,
+    plugin: String,
+    priority: i32,
+    #[serde(default)]
+    required: bool,
+    #[serde(default = "default_layer_enabled")]
+    enabled: bool,
+}
+
+fn default_layer_enabled() -> bool {
+    true
+}
+
+fn apply_configured_layer_policy(builder: &mut HarnessBuilder) -> Result<(), Box<dyn Error>> {
+    let Some(value) = env::var_os("PHENIX_LAYER_POLICY") else {
+        return Ok(());
+    };
+    let value = value
+        .into_string()
+        .map_err(|_| "PHENIX_LAYER_POLICY must be valid UTF-8")?;
+    let configured: Vec<ConfiguredLayerPolicy> = serde_json::from_str(&value)?;
+    let mut policies = BTreeMap::<ServiceId, Vec<LayerPolicy>>::new();
+    for layer in configured {
+        let service = ServiceId::parse(layer.service)?;
+        policies.entry(service).or_default().push(LayerPolicy {
+            plugin: PluginId::parse(layer.plugin)?,
+            priority: layer.priority,
+            required: layer.required,
+            enabled: layer.enabled,
+        });
+    }
+    for (service, layers) in policies {
+        builder.set_layer_policy(service, layers);
+    }
+    Ok(())
 }
 
 fn configured_plugin_packages() -> Result<Vec<PathBuf>, Box<dyn Error>> {
@@ -230,6 +270,11 @@ fn parse_services(value: Option<&Value>) -> Result<Vec<ServiceContribution>, Str
             let object = value
                 .as_object()
                 .ok_or_else(|| "plugin service contribution must be an object".to_owned())?;
+            let role = match required_string(object, "role")? {
+                "terminal" => ServiceRole::Terminal,
+                "layer" => ServiceRole::Layer,
+                other => return Err(format!("unsupported plugin service role: {other}")),
+            };
             let service = ServiceId::parse(required_string(object, "service")?.to_owned())?;
             let priority = object
                 .get("priority")
@@ -238,6 +283,7 @@ fn parse_services(value: Option<&Value>) -> Result<Vec<ServiceContribution>, Str
                 .try_into()
                 .map_err(|_| "plugin service priority does not fit i32".to_owned())?;
             Ok(ServiceContribution {
+                role,
                 service,
                 priority,
                 required_authority: parse_authority(object.get("required_authority"))?,
@@ -280,4 +326,49 @@ fn state_path() -> Result<PathBuf, Box<dyn Error>> {
         return Ok(PathBuf::from(home).join(".local/state/phenix/harness.sqlite"));
     }
     Err("cannot determine durable state path; set PHENIX_STATE_DB or XDG_STATE_HOME".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packaged_service_roles_require_explicit_terminal_or_layer() {
+        let services = json!([
+            { "role": "terminal", "service": "demo.terminal@1" },
+            { "role": "layer", "service": "demo.layer@1" }
+        ]);
+        let parsed = parse_services(Some(&services)).unwrap();
+        assert_eq!(parsed[0].role, ServiceRole::Terminal);
+        assert_eq!(parsed[1].role, ServiceRole::Layer);
+
+        let missing = json!([{ "service": "demo.missing@1" }]);
+        let error = parse_services(Some(&missing)).unwrap_err();
+        assert_eq!(error, "plugin manifest field role must be a string");
+    }
+
+    #[test]
+    fn packaged_service_roles_reject_unknown_values() {
+        let services = json!([{ "role": "fallback", "service": "demo@1" }]);
+        let error = parse_services(Some(&services)).unwrap_err();
+        assert!(error.contains("unsupported plugin service role"));
+    }
+
+    #[test]
+    fn configured_layer_policy_groups_layers_by_service() {
+        let configured = serde_json::to_string(&vec![json!({
+            "service": "demo@1",
+            "plugin": "layer",
+            "priority": 7,
+            "required": true
+        })])
+        .unwrap();
+        let parsed: Vec<ConfiguredLayerPolicy> = serde_json::from_str(&configured).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].service, "demo@1");
+        assert_eq!(parsed[0].plugin, "layer");
+        assert_eq!(parsed[0].priority, 7);
+        assert!(parsed[0].required);
+        assert!(parsed[0].enabled);
+    }
 }

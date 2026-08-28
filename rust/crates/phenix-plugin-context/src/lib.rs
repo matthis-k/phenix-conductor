@@ -1,14 +1,13 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{PluginId, PluginManifest};
-use phenix_plugin_execution::{
-    execution_service, ExecutionCommand, ExecutionResponse, ExecutionState,
-};
 
+mod component;
 mod implementation {
     include!("implementation.rs");
 }
 
+pub use component::*;
 pub use implementation::{
     context_factory, context_service, ContextCommand, ContextDescriptor, ContextInjection,
     ContextInjectionLifetime, ContextInjectionRequester, ContextResourceKind,

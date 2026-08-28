@@ -1,7 +1,9 @@
 use crate::CapabilityId;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
 pub struct Authority {
     capabilities: BTreeSet<CapabilityId>,
 }
@@ -56,5 +58,14 @@ mod tests {
         assert!(child.permits(&cap("fs.read")));
         assert!(!child.permits(&cap("fs.write")));
         assert!(!child.permits(&cap("network.read")));
+    }
+
+    #[test]
+    fn serialized_authority_is_deterministic() {
+        let authority = Authority::new([cap("network.read"), cap("fs.read")]);
+        assert_eq!(
+            serde_json::to_string(&authority).unwrap(),
+            "[\"fs.read\",\"network.read\"]"
+        );
     }
 }
