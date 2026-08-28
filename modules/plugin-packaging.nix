@@ -359,7 +359,7 @@ in
 
             export PHENIX_STATE_DB="$TMPDIR/context-only.sqlite"
             "${contextOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/context-only.json"
-            jq -e '(.plugins == ["phenix.context"]) and (.services | index("phenix.context@1") != null) and (.services | index("phenix.sessions@1") == null)' "$TMPDIR/context-only.json" >/dev/null
+            jq -e '((.plugins | sort) == ["phenix.context", "phenix.execution"]) and (.services | index("phenix.context@1") != null) and (.services | index("phenix.sessions@1") == null)' "$TMPDIR/context-only.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/resource.sqlite"
             test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"
