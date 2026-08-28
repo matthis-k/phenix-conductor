@@ -717,10 +717,17 @@ mod tests {
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 15);
+        let plugins = harness
+            .kernel()
+            .config()
+            .manifests()
+            .map(|manifest| manifest.id.as_str().to_owned())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(plugins, HarnessBuilder::default_suite_plugin_ids());
         for component in [
             repository_worker_component_manifest().id,
             session_component_manifest().id,
+            session_tree_component_manifest().id,
             artifact_component_manifest().id,
             cli_component_manifest(default_suite_authority()).id,
             context_component_manifest().id,
@@ -733,6 +740,8 @@ mod tests {
             frontend_component_manifest(default_suite_authority()).id,
             hook_component_manifest(default_suite_authority()).id,
             debug_component_manifest(default_suite_authority()).id,
+            options_component_manifest().id,
+            sdk_component_manifest(default_suite_authority()).id,
         ] {
             assert!(
                 harness.component_graph().component(&component).is_some(),

@@ -55,9 +55,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     let config_directory = env::var_os("PHENIX_CONFIG_DIR").map(PathBuf::from);
     let nix_settings = env::var_os("PHENIX_NIX_SETTINGS").map(PathBuf::from);
     if config_directory.is_some() || nix_settings.is_some() {
-        let precedence = match env::var("PHENIX_SETTINGS_PRECEDENCE").as_deref() {
-            Ok("file") => OptionStartupPrecedence::File,
-            Ok("nix") | Err(env::VarError::NotPresent) => OptionStartupPrecedence::Nix,
+        let precedence = match env::var("PHENIX_SETTINGS_PRECEDENCE") {
+            Ok(value) if value == "file" => OptionStartupPrecedence::File,
+            Ok(value) if value == "nix" => OptionStartupPrecedence::Nix,
+            Err(env::VarError::NotPresent) => OptionStartupPrecedence::Nix,
             Ok(value) => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
