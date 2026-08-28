@@ -165,7 +165,6 @@ pub enum MetadataReconciliationError {
 pub struct MetadataReconciliationPreview {
     pub graph: ReconciliationPreview,
     pub metadata: CompositionMetadataDiff,
-    pub transition_plan: Vec<ReconciliationAction>,
 }
 
 impl GraphReconciler {
@@ -188,9 +187,8 @@ impl GraphReconciler {
             });
         }
 
-        let graph = self.preview_candidate(candidate);
+        let mut graph = self.preview_candidate(candidate);
         let metadata = CompositionMetadataDiff::between(active_metadata, candidate_metadata);
-        let mut transition_plan = graph.transition_plan.clone();
         let mut restart = BTreeSet::new();
 
         for change in &metadata.components {
@@ -263,7 +261,7 @@ impl GraphReconciler {
                 &change.resource,
             );
             if targets.is_empty()
-                || transition_plan.iter().any(|action| {
+                || graph.transition_plan.iter().any(|action| {
                     matches!(
                         action,
                         ReconciliationAction::InvalidateResourceDerivedState { resource, .. }
@@ -273,31 +271,30 @@ impl GraphReconciler {
             {
                 continue;
             }
-            transition_plan.push(ReconciliationAction::InvalidateResourceDerivedState {
-                resource: change.resource.clone(),
-                targets,
-            });
+            graph
+                .transition_plan
+                .push(ReconciliationAction::InvalidateResourceDerivedState {
+                    resource: change.resource.clone(),
+                    targets,
+                });
         }
 
-        let already_restarted: BTreeSet<_> = transition_plan
+        let already_restarted: BTreeSet<_> = graph
+            .transition_plan
             .iter()
             .filter_map(|action| match action {
                 ReconciliationAction::RestartComponent(component) => Some(component.clone()),
                 _ => None,
             })
             .collect();
-        transition_plan.extend(
+        graph.transition_plan.extend(
             restart
                 .into_iter()
                 .filter(|component| !already_restarted.contains(component))
                 .map(ReconciliationAction::RestartComponent),
         );
 
-        Ok(MetadataReconciliationPreview {
-            graph,
-            metadata,
-            transition_plan,
-        })
+        Ok(MetadataReconciliationPreview { graph, metadata })
     }
 }
 
@@ -587,6 +584,7 @@ mod tests {
         assert!(preview.graph.diff.is_empty());
         assert_eq!(preview.metadata.packages.len(), 1);
         assert!(preview
+            .graph
             .transition_plan
             .contains(&ReconciliationAction::RestartComponent(component)));
     }
@@ -617,6 +615,7 @@ mod tests {
             }]
         );
         assert!(preview
+            .graph
             .transition_plan
             .contains(&ReconciliationAction::RestartComponent(component)));
     }
@@ -624,6 +623,9 @@ mod tests {
     #[test]
     fn resource_metadata_upgrade_is_inspectable_and_invalidates_derived_state() {
         let mut active_input = fixture();
+        active_input.packages[0]
+            .packaged_resources
+            .insert("fixture.skill".into());
         active_input.resources.push(resource());
         let mut candidate_input = active_input.clone();
         candidate_input.resources[0].version = 2;
@@ -648,7 +650,7 @@ mod tests {
                 kind: MetadataChangeKind::Upgraded,
             }]
         );
-        assert!(preview.transition_plan.contains(
+        assert!(preview.graph.transition_plan.contains(
             &ReconciliationAction::InvalidateResourceDerivedState {
                 resource: "fixture.skill".into(),
                 targets: BTreeSet::from(["skill-index".into()]),
@@ -701,6 +703,7 @@ mod tests {
         assert!(preview.graph.diff.is_empty());
         assert_eq!(preview.metadata.components.len(), 1);
         assert!(preview
+            .graph
             .transition_plan
             .contains(&ReconciliationAction::RestartComponent(component)));
     }
@@ -730,6 +733,7 @@ mod tests {
             .iter()
             .any(|change| change.component == component));
         assert!(!preview
+            .graph
             .transition_plan
             .contains(&ReconciliationAction::RestartComponent(component)));
     }

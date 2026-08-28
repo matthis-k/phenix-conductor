@@ -61,7 +61,7 @@ fn metadata_only_resource_change_is_reconfigured_and_invalidates_declared_state(
             kind: MetadataChangeKind::Reconfigured,
         }]
     );
-    assert!(preview.transition_plan.contains(
+    assert!(preview.graph.transition_plan.contains(
         &ReconciliationAction::InvalidateResourceDerivedState {
             resource: "fixture.skill".into(),
             targets: BTreeSet::from(["skill-index".into()]),

@@ -3,9 +3,9 @@ use crate::{
     ComponentInvocationError, DurableSchema, EventBus, EventDispatchReport, EventEnvelope,
     EventError, EventTypeId, GraphGenerationId, KernelConfig, KernelError, KernelEvent,
     KernelPolicyIdentity, LocalPersistence, NamespaceTransaction, PersistenceBackend,
-    PluginExecution, PluginId, PluginManifest, ProviderBinding, ResolvedComponentGraph,
-    ResolvedServiceChain, ResourceNamespace, SchemaMigration, ServiceId, ServiceRole,
-    SkillResourceMetadata, TaskHandle, TaskRuntime, TransactionOp,
+    PluginExecution, PluginId, PluginManifest, ResolvedComponentGraph, ResolvedServiceChain,
+    ResourceNamespace, SchemaMigration, ServiceId, ServiceRole, SkillResourceMetadata, TaskHandle,
+    TaskRuntime, TransactionOp,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -185,14 +185,6 @@ impl<'a> PluginHost<'a> {
         self.authority
     }
 
-    pub(crate) fn resolve_service(
-        &self,
-        service: &ServiceId,
-        binding: Option<&PluginId>,
-    ) -> Result<ProviderBinding, KernelError> {
-        self.config.resolve(service, self.authority, binding)
-    }
-
     pub fn invoke_import<I: ComponentInterface>(
         &self,
         component: &ComponentId,
@@ -253,6 +245,7 @@ impl<'a> PluginHost<'a> {
             .map_err(|error| ComponentInvocationError::Decode(error.to_string()))
     }
 
+    #[cfg(test)]
     pub(crate) fn invoke_service(
         &self,
         service: &ServiceId,

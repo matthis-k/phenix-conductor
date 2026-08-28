@@ -68,12 +68,12 @@ impl GraphReconciler {
             .preview_candidate_with_metadata(active_metadata, &candidate, candidate_metadata)
             .map_err(LiveReconciliationError::MetadataPolicy)?;
         let restart_plugins =
-            restart_plugins_for_plan(self.active(), &candidate, &preview.transition_plan);
+            restart_plugins_for_plan(self.active(), &candidate, &preview.graph.transition_plan);
         kernel
             .reconcile_resolved_generation(&candidate, &restart_plugins)
             .map_err(LiveReconciliationError::Runtime)?;
         let mut result = self.activate_candidate(candidate);
-        result.transition_plan = preview.transition_plan;
+        result.transition_plan = preview.graph.transition_plan;
         Ok(result)
     }
 }
