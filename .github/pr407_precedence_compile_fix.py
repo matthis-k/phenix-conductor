@@ -44,3 +44,21 @@ new = '''        assert_eq!(
 if old not in text:
     raise SystemExit("default suite count anchor missing")
 path.write_text(text.replace(old, new, 1))
+
+path = Path("rust/crates/phenix-harness/tests/supported_product_journeys.rs")
+text = path.read_text()
+old = '''    assert_eq!(
+        harness.kernel().config().manifests().count(),
+        15,
+        "the supported Harness owns the complete first-party suite",
+    );
+'''
+new = '''    assert_eq!(
+        harness.kernel().config().manifests().count(),
+        HarnessBuilder::default_suite_plugin_ids().len(),
+        "the supported Harness owns the complete first-party suite",
+    );
+'''
+if old not in text:
+    raise SystemExit("supported suite count anchor missing")
+path.write_text(text.replace(old, new, 1))
