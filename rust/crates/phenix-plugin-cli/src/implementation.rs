@@ -1,8 +1,8 @@
-use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
 use phenix_core::{
     Authority, CapabilityId, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
     ServiceContribution, ServiceId,
 };
+use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -255,7 +255,9 @@ impl PluginInstance for CliPlugin {
 mod tests {
     use super::*;
     use phenix_core::{Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
-    use phenix_plugin_workspace::{workspace_component_manifest, workspace_factory_for, workspace_manifest};
+    use phenix_plugin_workspace::{
+        workspace_component_manifest, workspace_factory_for, workspace_manifest,
+    };
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},

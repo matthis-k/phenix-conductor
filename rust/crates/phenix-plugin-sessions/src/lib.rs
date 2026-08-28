@@ -1,5 +1,3 @@
 #![forbid(unsafe_code)]
-mod implementation {
-    include!("implementation.rs");
-}
+mod implementation;
 pub use implementation::*;

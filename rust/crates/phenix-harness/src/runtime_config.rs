@@ -1,3 +1,4 @@
+use phenix_core::{CallableId, ModelId, PluginId, RoutingProfileId};
 use phenix_harness::{default_suite_authority, PhenixHarness};
 use phenix_plugin_catalog::{
     execution_configuration_service, model_routing_service, AgentDefinition,
@@ -17,17 +18,17 @@ struct RuntimeConfiguration {
 
 #[derive(Debug, Deserialize)]
 struct RuntimeRoutingProfile {
-    id: String,
+    id: RoutingProfileId,
     default_target: RuntimeModelTarget,
     #[serde(default)]
-    callable_targets: BTreeMap<String, RuntimeModelTarget>,
+    callable_targets: BTreeMap<CallableId, RuntimeModelTarget>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RuntimeModelTarget {
     backend: String,
-    provider: String,
-    model: String,
+    provider: PluginId,
+    model: ModelId,
     #[serde(default)]
     inference: Value,
 }
@@ -237,7 +238,7 @@ mod tests {
             invoke_configuration(
                 &mut harness,
                 ExecutionConfigurationCommand::GetAgent {
-                    id: "agent.scout".into()
+                    id: CallableId::parse("agent.scout").unwrap()
                 }
             ),
             ExecutionConfigurationResponse::Agent { agent: Some(_) }
@@ -246,7 +247,7 @@ mod tests {
             invoke_configuration(
                 &mut harness,
                 ExecutionConfigurationCommand::GetOrchestration {
-                    id: "orchestration.review".into()
+                    id: CallableId::parse("orchestration.review").unwrap()
                 }
             ),
             ExecutionConfigurationResponse::Orchestration {
@@ -258,7 +259,7 @@ mod tests {
             .invoke(
                 &model_routing_service(),
                 &serde_json::to_vec(&ModelCommand::GetProfile {
-                    id: "router.test".into(),
+                    id: RoutingProfileId::parse("router.test").unwrap(),
                 })
                 .unwrap(),
                 &default_suite_authority(),

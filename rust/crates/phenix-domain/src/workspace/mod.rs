@@ -1,57 +1,24 @@
-#[path = "language.rs"]
+mod context;
+pub use context::*;
 mod language;
 pub use language::*;
-#[path = "language_operations.rs"]
 mod language_operations;
 pub use language_operations::*;
-#[path = "objectives.rs"]
 mod objectives;
 pub use objectives::*;
-#[path = "plans.rs"]
 mod plans;
 pub use plans::*;
-#[path = "decisions.rs"]
 mod decisions;
 pub use decisions::*;
 
-use crate::{CallableId, CapabilitySet, ExecutionId, InvalidId, WorkspaceId};
+use crate::{CallableId, CapabilitySet, ExecutionId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
-macro_rules! workspace_id_type {
-    ($name:ident) => {
-        #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn parse(value: impl Into<String>) -> Result<Self, InvalidId> {
-                let value = value.into();
-                if value.trim().is_empty() {
-                    Err(InvalidId)
-                } else {
-                    Ok(Self(value))
-                }
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl Display for $name {
-            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.0)
-            }
-        }
-    };
-}
-
-workspace_id_type!(ObjectiveId);
-workspace_id_type!(ObjectiveCriterionId);
-workspace_id_type!(DecisionId);
+domain_id_type!(ObjectiveId);
+domain_id_type!(ObjectiveCriterionId);
+domain_id_type!(DecisionId);
 
 pub const CAPABILITY_FILESYSTEM_READ: &str = "filesystem.read";
 pub const CAPABILITY_FILESYSTEM_WRITE: &str = "filesystem.write";
@@ -298,6 +265,13 @@ mod tests {
 
     fn callable(id: &str) -> CallableId {
         CallableId::parse(id).unwrap()
+    }
+
+    #[test]
+    fn workspace_ids_reject_blank_wire_values() {
+        assert!(serde_json::from_str::<ObjectiveId>("\"\"").is_err());
+        assert!(serde_json::from_str::<ObjectiveCriterionId>("\"  \"").is_err());
+        assert!(serde_json::from_str::<DecisionId>("\"\t\"").is_err());
     }
 
     #[test]

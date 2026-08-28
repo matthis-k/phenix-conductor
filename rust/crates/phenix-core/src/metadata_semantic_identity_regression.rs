@@ -1,7 +1,7 @@
 use crate::{
     Authority, CompatibilityMetadata, ComponentHostKind, ComponentId, ComponentManifest,
     ComponentRuntimeMetadata, ComponentStateClass, CompositionMetadataInput, ConfigNamespace,
-    DurableMigrationMetadata, GraphReconciler, InterfaceId, PluginExecution, PluginId,
+    DurableMigrationMetadata, EventTypeId, GraphReconciler, InterfaceId, PluginExecution, PluginId,
     PluginManifest, PluginPackageMetadata, ReloadPolicy, ResolvedHarness, ResourceNamespace,
 };
 use std::collections::BTreeSet;
@@ -115,7 +115,9 @@ fn component_contract_and_contribution_metadata_change_stable_generation_identit
     assert_ne!(baseline, resolve(package(), changed));
 
     let mut changed = component_metadata();
-    changed.event_contributions.insert("fixture.event".into());
+    changed
+        .event_contributions
+        .insert(EventTypeId::parse("fixture.event").unwrap());
     assert_ne!(baseline, resolve(package(), changed));
 
     let mut changed = component_metadata();

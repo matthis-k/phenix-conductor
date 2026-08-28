@@ -294,7 +294,9 @@ fn require_session(host: &PluginHost<'_>, id: &str) -> Result<SessionRecord, Str
             session: Some(session),
         } => Ok(session),
         SessionResponse::Session { session: None } => Err(format!("unknown session: {id}")),
-        other => Err(format!("unexpected session response while linking lineage: {other:?}")),
+        other => Err(format!(
+            "unexpected session response while linking lineage: {other:?}"
+        )),
     }
 }
 
@@ -348,9 +350,7 @@ mod tests {
     use phenix_core::{
         Kernel, KernelConfig, LocalPersistence, ResolvedHarness, ResolvedHarnessActivation,
     };
-    use phenix_plugin_sessions::{
-        session_component_manifest, session_factory, session_manifest,
-    };
+    use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
     use std::{
         fs,
         path::PathBuf,
@@ -363,7 +363,12 @@ mod tests {
                 .maximum_authority
                 .capabilities()
                 .cloned()
-                .chain(session_tree_manifest().maximum_authority.capabilities().cloned()),
+                .chain(
+                    session_tree_manifest()
+                        .maximum_authority
+                        .capabilities()
+                        .cloned(),
+                ),
         )
     }
 
@@ -385,7 +390,10 @@ mod tests {
         let tree_plugin = tree.id.clone();
         let resolved = ResolvedHarness::resolve(
             [sessions.clone(), tree.clone()],
-            [session_component_manifest(), session_tree_component_manifest()],
+            [
+                session_component_manifest(),
+                session_tree_component_manifest(),
+            ],
             [],
             &authority(),
         )
@@ -437,18 +445,8 @@ mod tests {
         let path = temp_db("session-tree");
         {
             let mut kernel = kernel_with(&path);
-            invoke_session(
-                &mut kernel,
-                SessionCommand::Create {
-                    id: "root".into(),
-                },
-            );
-            invoke_session(
-                &mut kernel,
-                SessionCommand::Create {
-                    id: "child".into(),
-                },
-            );
+            invoke_session(&mut kernel, SessionCommand::Create { id: "root".into() });
+            invoke_session(&mut kernel, SessionCommand::Create { id: "child".into() });
             assert_eq!(
                 invoke_tree(
                     &mut kernel,
@@ -474,10 +472,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                invoke_session(
-                    &mut kernel,
-                    SessionCommand::Get { id: "child".into() },
-                ),
+                invoke_session(&mut kernel, SessionCommand::Get { id: "child".into() },),
                 SessionResponse::Session {
                     session: Some(SessionRecord { id: "child".into() }),
                 }
@@ -516,12 +511,7 @@ mod tests {
     fn lineage_rejects_missing_sessions() {
         let path = temp_db("session-tree-missing");
         let mut kernel = kernel_with(&path);
-        invoke_session(
-            &mut kernel,
-            SessionCommand::Create {
-                id: "root".into(),
-            },
-        );
+        invoke_session(&mut kernel, SessionCommand::Create { id: "root".into() });
         assert!(invoke_tree(
             &mut kernel,
             SessionTreeCommand::Link {

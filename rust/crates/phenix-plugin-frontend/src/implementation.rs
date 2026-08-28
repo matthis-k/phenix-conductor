@@ -1,6 +1,5 @@
 use crate::{
-    frontend_component_id, ExecutionCommand, ExecutionInterface,
-    ExecutionResponse, ExecutionState,
+    frontend_component_id, ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
 };
 use phenix_core::{
     Authority, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
@@ -364,7 +363,10 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use phenix_core::{Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
-    use phenix_plugin_execution::{execution_component_manifest, execution_factory, execution_manifest, execution_service, ExecutionAuthority};
+    use phenix_plugin_execution::{
+        execution_component_manifest, execution_factory, execution_manifest, execution_service,
+        ExecutionAuthority,
+    };
 
     fn kernel() -> Kernel {
         let execution_manifest = execution_manifest(Authority::default());

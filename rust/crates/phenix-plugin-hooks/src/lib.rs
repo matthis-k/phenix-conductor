@@ -2,9 +2,7 @@
 use phenix_plugin_context::{ContextCommand, ContextInjectionLifetime, ContextInjectionRequester};
 use phenix_plugin_execution::{ExecutionCommand, ExecutionResponse};
 mod component;
-mod implementation {
-    include!("implementation.rs");
-}
+mod implementation;
 pub use component::*;
 pub use implementation::*;
 
