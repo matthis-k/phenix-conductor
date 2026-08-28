@@ -185,7 +185,7 @@ impl<'a> PluginHost<'a> {
         self.authority
     }
 
-    pub fn resolve_service(
+    pub(crate) fn resolve_service(
         &self,
         service: &ServiceId,
         binding: Option<&PluginId>,
@@ -253,7 +253,7 @@ impl<'a> PluginHost<'a> {
             .map_err(|error| ComponentInvocationError::Decode(error.to_string()))
     }
 
-    pub fn invoke_service(
+    pub(crate) fn invoke_service(
         &self,
         service: &ServiceId,
         input: &[u8],
@@ -1197,7 +1197,6 @@ mod tests {
     }
 
     struct MarkerPlugin(Arc<AtomicBool>);
-
     impl PluginInstance for MarkerPlugin {
         fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
             assert_eq!(host.plugin().as_str(), "embedded");
