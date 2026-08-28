@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           ref: tmp/pr404-simplify-validated
-          fetch-depth: 0
+          fetch-depth: 2
       - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
@@ -46,30 +46,32 @@ jobs:
               "        &self.layer_policies\n"
               "    }\n"
           )
-          text = replace_once(text, anchor, accessor + anchor, "KernelConfig layer policy view")
-          path.write_text(text)
+          path.write_text(replace_once(text, anchor, accessor + anchor, "KernelConfig layer policy view"))
 
           path = Path("rust/crates/phenix-core/src/resolver.rs")
           text = path.read_text()
-          start = text.index("pub struct ResolvedHarness {")
-          end = text.index("\n}\n\nimpl ResolvedHarness", start)
-          block = text[start:end]
-          block = replace_once(
-              block,
-              "    layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,\n",
-              "",
-              "ResolvedHarness duplicate layer policy field",
-          )
-          text = text[:start] + block + text[end:]
+          lines = text.splitlines(keepends=True)
+          out = []
+          in_resolved = False
+          removed_field = False
+          for line in lines:
+              if line.startswith("pub struct ResolvedHarness {"):
+                  in_resolved = True
+              elif in_resolved and line.startswith("}"):
+                  in_resolved = False
+              if in_resolved and "layer_policies:" in line:
+                  if removed_field:
+                      raise SystemExit("multiple ResolvedHarness layer policy fields")
+                  removed_field = True
+                  continue
+              out.append(line)
+          if not removed_field:
+              raise SystemExit("ResolvedHarness layer policy field not found")
+          text = "".join(out)
           start = text.index("        Ok(Self {")
           end = text.index("        })", start)
           block = text[start:end]
-          block = replace_once(
-              block,
-              "            layer_policies,\n",
-              "",
-              "ResolvedHarness duplicate layer policy init",
-          )
+          block = replace_once(block, "            layer_policies,\n", "", "ResolvedHarness duplicate layer policy init")
           text = text[:start] + block + text[end:]
           old = (
               "    pub fn layer_policies(&self) -> &BTreeMap<ServiceId, Vec<LayerPolicy>> {\n"
@@ -81,8 +83,7 @@ jobs:
               "        self.kernel_config.layer_policies()\n"
               "    }\n"
           )
-          text = replace_once(text, old, new, "ResolvedHarness derived layer policy view")
-          path.write_text(text)
+          path.write_text(replace_once(text, old, new, "ResolvedHarness derived layer policy view"))
 
           path = Path("rust/crates/phenix-core/src/reconciliation.rs")
           text = path.read_text()
@@ -104,12 +105,7 @@ jobs:
           block = text[start:end]
           block = replace_once(block, "    service: ServiceId,\n", "", "InvocationTrace service field")
           text = text[:start] + block + text[end:]
-          text = replace_once(
-              text,
-              "            service: chain.service.clone(),\n",
-              "",
-              "InvocationTrace service init",
-          )
+          text = replace_once(text, "            service: chain.service.clone(),\n", "", "InvocationTrace service init")
           text = replace_once(
               text,
               "            service: self.service,\n",
@@ -126,17 +122,11 @@ jobs:
               "pub use phenix_core::{\n    model_inference_service, ModelInferenceRequest, ModelInferenceResponse,\n    MODEL_INFERENCE_SERVICE,\n};\n",
               "model primitive re-export",
           )
-          text = replace_once(
-              text,
-              'pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";\n',
-              "",
-              "duplicate model service constant",
-          )
+          text = replace_once(text, 'pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";\n', "", "duplicate model service constant")
           helper = "#[must_use]\npub fn model_inference_service() -> ServiceId {"
           start = text.index(helper)
           end = text.index("\n}\n", start) + len("\n}\n")
-          text = text[:start] + text[end:]
-          path.write_text(text)
+          path.write_text(text[:start] + text[end:])
 
           path = Path("rust/crates/phenix-plugin-context/src/implementation.rs")
           text = path.read_text()
@@ -146,17 +136,11 @@ jobs:
               "pub use phenix_core::{\n    context_service, ContextDescriptor, ContextResourceKind, ContextResourceRevision,\n    ContextScope, CONTEXT_SERVICE,\n};\n",
               "context primitive re-export",
           )
-          text = replace_once(
-              text,
-              'pub const CONTEXT_SERVICE: &str = "phenix.context@1";\n',
-              "",
-              "duplicate context service constant",
-          )
+          text = replace_once(text, 'pub const CONTEXT_SERVICE: &str = "phenix.context@1";\n', "", "duplicate context service constant")
           helper = "#[must_use]\npub fn context_service() -> ServiceId {"
           start = text.index(helper)
           end = text.index("\n}\n", start) + len("\n}\n")
-          text = text[:start] + text[end:]
-          path.write_text(text)
+          path.write_text(text[:start] + text[end:])
           PY
       - name: Validate simplifications
         shell: bash
