@@ -108,6 +108,7 @@ pub use metadata_inspection::ResolvedCompositionMetadata;
 pub use metadata_reconciliation::{
     ComponentMetadataChange, CompositionMetadataDiff, FrontendMetadataChange, MetadataChangeKind,
     MetadataReconciliationError, MetadataReconciliationPreview, PackageMetadataChange,
+    ResourceMetadataChange,
 };
 pub use persistence::{
     BackendFeature, DurableSchema, LocalPersistence, NamespaceTransaction, PersistenceBackend,
