@@ -71,6 +71,12 @@ pub use phenix_plugin_models::{
     ModelTarget, RoutingProfile, RoutingProfileDescriptor, MODEL_INFERENCE_SERVICE,
     MODEL_ROUTING_SERVICE,
 };
+pub use phenix_plugin_options::{
+    default_option_definitions, options_component_id, options_component_manifest, options_factory,
+    options_manifest, options_service, OptionCommand, OptionContext, OptionDefinition, OptionKey,
+    OptionResponse, OptionScope, OptionScopeKind, OptionSubjectId, OptionValue, OptionValueSource,
+    OptionsInterface, ResolvedOption, OPTIONS_COMPONENT, OPTIONS_PLUGIN, OPTIONS_SERVICE,
+};
 pub use phenix_plugin_planning::{
     planning_component_id, planning_component_manifest, planning_factory, planning_manifest,
     planning_service, DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord,
@@ -85,6 +91,11 @@ pub use phenix_plugin_repository_workers::{
     RepositoryPullRequestState, RepositorySelectionReason, RepositoryValidation,
     RepositoryWorkPriority, RepositoryWorkSelection, RepositoryWorkSnapshot,
     RepositoryWorkerInterface, RepositoryWorkerQueue, REPOSITORY_WORK_QUEUE_SERVICE,
+};
+pub use phenix_plugin_sdk::{
+    sdk_component_id, sdk_component_manifest, sdk_contribution, sdk_factory, sdk_manifest,
+    sdk_session_service, SdkSessionCommand, SdkSessionInterface, SdkSessionResponse, SDK_COMPONENT,
+    SDK_PLUGIN, SDK_SESSION_SERVICE,
 };
 pub use phenix_plugin_session_tree::{
     session_tree_component_id, session_tree_component_manifest, session_tree_factory,
