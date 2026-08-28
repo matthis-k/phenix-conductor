@@ -30,7 +30,10 @@ impl fmt::Display for ConductorBuildError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Resolution(error) => fmt::Display::fmt(error, formatter),
-            Self::Activation(error) => write!(formatter, "resolved conductor activation failed: {error:?}"),
+            Self::Activation(error) => write!(
+                formatter,
+                "resolved conductor activation failed: {error:?}"
+            ),
         }
     }
 }
