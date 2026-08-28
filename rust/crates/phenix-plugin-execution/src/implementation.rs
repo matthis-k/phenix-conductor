@@ -63,6 +63,7 @@ pub enum ExecutionState {
 pub struct ExecutionRecord {
     pub id: String,
     pub parent_execution: Option<String>,
+    pub graph_generation: String,
     pub authority: ExecutionAuthority,
     pub state: ExecutionState,
 }
@@ -95,6 +96,7 @@ pub enum WorkerTaskState {
 pub struct WorkerTaskRecord {
     pub id: String,
     pub parent_execution: String,
+    pub graph_generation: String,
     pub description: String,
     #[serde(default)]
     pub depends_on: BTreeSet<String>,
@@ -196,6 +198,7 @@ pub fn execution_manifest(maximum_authority: Authority) -> PluginManifest {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: phenix_core::ServiceRole::Terminal,
             service: execution_service(),
             priority: 100,
             required_authority: Authority::default(),
@@ -285,9 +288,15 @@ fn mutate(
             let effective = ExecutionAuthority::from_authority(
                 &host.authority().attenuate(&requested_authority.parse()?),
             );
+            let graph_generation = host
+                .graph_generation()
+                .ok_or_else(|| "execution requires an active graph generation".to_owned())?
+                .as_str()
+                .to_owned();
             let execution = ExecutionRecord {
                 id: id.clone(),
                 parent_execution: None,
+                graph_generation,
                 authority: effective,
                 state: ExecutionState::Active,
             };
@@ -309,6 +318,7 @@ fn mutate(
             let execution = ExecutionRecord {
                 id: id.clone(),
                 parent_execution: Some(parent_execution),
+                graph_generation: parent.graph_generation.clone(),
                 authority,
                 state: ExecutionState::Active,
             };
@@ -384,6 +394,7 @@ fn mutate(
             let task = WorkerTaskRecord {
                 id: id.clone(),
                 parent_execution,
+                graph_generation: parent.graph_generation.clone(),
                 description,
                 depends_on,
                 delegated_authority,
@@ -429,6 +440,11 @@ fn mutate(
             if execution.authority != task.delegated_authority {
                 return Err(format!(
                     "worker execution authority does not match task: {task_id}"
+                ));
+            }
+            if execution.graph_generation != task.graph_generation {
+                return Err(format!(
+                    "worker execution graph generation does not match task: {task_id}"
                 ));
             }
             let task = state.tasks.get_mut(&task_id).expect("task exists above");
@@ -486,6 +502,16 @@ fn invoke_callable(
 ) -> Result<ExecutionResponse, String> {
     let (_, state) = read_state(host)?;
     let execution = active_execution(&state, execution_id)?;
+    let active_generation = host
+        .graph_generation()
+        .ok_or_else(|| "callable invocation requires an active graph generation".to_owned())?;
+    if execution.graph_generation != active_generation.as_str() {
+        return Err(format!(
+            "execution {execution_id} is pinned to graph generation {}, but active generation is {}",
+            execution.graph_generation,
+            active_generation.as_str()
+        ));
+    }
     let callable = state
         .callables
         .get(callable_id)
@@ -499,7 +525,7 @@ fn invoke_callable(
     let requested = required;
     let service = ServiceId::parse(&callable.service).map_err(|error| error.to_string())?;
     let output = host
-        .invoke_service(&service, input, &requested, None)
+        .invoke_service_abi(&service, input, &requested, None)
         .map_err(|error| error.to_string())?;
     Ok(ExecutionResponse::Invocation { output })
 }
@@ -633,7 +659,10 @@ fn validate_identity(label: &str, value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, LocalPersistence, PluginState};
+    use phenix_core::{
+        Kernel, KernelConfig, LocalPersistence, PluginState, ResolvedHarness,
+        ResolvedHarnessActivation,
+    };
     use std::{
         fs,
         path::PathBuf,
@@ -658,8 +687,16 @@ mod tests {
         let manifest = execution_manifest(caller_authority());
         let plugin = manifest.id.clone();
         let persistence = LocalPersistence::open(path).unwrap();
+        let resolved = ResolvedHarness::resolve(
+            [manifest.clone()],
+            [],
+            [],
+            &caller_authority(),
+        )
+        .unwrap();
         let mut kernel =
             Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        kernel.activate_resolved_harness(&resolved).unwrap();
         kernel
             .register_embedded_factory(plugin.clone(), execution_factory)
             .unwrap();
@@ -716,6 +753,7 @@ mod tests {
             let mut kernel = kernel_with(&path);
             let root = create(&mut kernel, "root", authority(&["fs.read"]));
             assert_eq!(root.authority, authority(&["fs.read"]));
+            assert_eq!(root.graph_generation, kernel.graph_generation().unwrap().as_str());
             let child = match invoke(
                 &mut kernel,
                 &ExecutionCommand::DelegateExecution {
@@ -730,6 +768,7 @@ mod tests {
                 other => panic!("unexpected response: {other:?}"),
             };
             assert_eq!(child.authority, authority(&["fs.read"]));
+            assert_eq!(child.graph_generation, root.graph_generation);
         }
         let mut restored = kernel_with(&path);
         assert!(matches!(

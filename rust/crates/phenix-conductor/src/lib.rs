@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
 use phenix_client::{ServiceRequest, ServiceResponse};
-use phenix_core::{Authority, Kernel, KernelConfig, KernelError, PluginManifest, ServiceId};
+use phenix_core::{
+    Authority, GraphGenerationId, Kernel, KernelError, PluginManifest, ResolvedHarness,
+    ResolvedHarnessActivation, ResolvedHarnessActivationError, ResolvedHarnessError, ServiceId,
+};
 use serde_json::Value;
 use std::{
     fmt,
@@ -14,14 +17,48 @@ use std::{
 /// manifests therefore exposes no first-party services.
 pub struct Conductor {
     kernel: Kernel,
+    resolved: ResolvedHarness,
+}
+
+#[derive(Debug)]
+pub enum ConductorBuildError {
+    Resolution(ResolvedHarnessError),
+    Activation(ResolvedHarnessActivationError),
+}
+
+impl fmt::Display for ConductorBuildError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Resolution(error) => fmt::Display::fmt(error, formatter),
+            Self::Activation(error) => {
+                write!(formatter, "resolved conductor activation failed: {error:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConductorBuildError {}
+
+impl From<ResolvedHarnessError> for ConductorBuildError {
+    fn from(error: ResolvedHarnessError) -> Self {
+        Self::Resolution(error)
+    }
+}
+
+impl From<ResolvedHarnessActivationError> for ConductorBuildError {
+    fn from(error: ResolvedHarnessActivationError) -> Self {
+        Self::Activation(error)
+    }
 }
 
 impl Conductor {
-    pub fn new(manifests: impl IntoIterator<Item = PluginManifest>) -> Result<Self, KernelError> {
-        let config = KernelConfig::new(manifests)?;
-        Ok(Self {
-            kernel: Kernel::new(config),
-        })
+    pub fn new(
+        manifests: impl IntoIterator<Item = PluginManifest>,
+    ) -> Result<Self, ConductorBuildError> {
+        let resolved = ResolvedHarness::resolve(manifests, [], [], &Authority::default())?;
+        let mut kernel = Kernel::new(resolved.kernel_config().clone());
+        kernel.activate_resolved_harness(&resolved)?;
+        Ok(Self { kernel, resolved })
     }
 
     #[must_use]
@@ -31,6 +68,16 @@ impl Conductor {
 
     pub fn kernel_mut(&mut self) -> &mut Kernel {
         &mut self.kernel
+    }
+
+    #[must_use]
+    pub fn resolved_harness(&self) -> &ResolvedHarness {
+        &self.resolved
+    }
+
+    #[must_use]
+    pub fn generation(&self) -> &GraphGenerationId {
+        self.resolved.generation()
     }
 
     pub fn activate_all(&mut self) -> Result<(), KernelError> {
@@ -49,9 +96,13 @@ impl Conductor {
 
 impl Default for Conductor {
     fn default() -> Self {
-        Self {
-            kernel: Kernel::kernel_only(),
-        }
+        let resolved = ResolvedHarness::resolve([], [], [], &Authority::default())
+            .expect("empty conductor composition is valid");
+        let mut kernel = Kernel::new(resolved.kernel_config().clone());
+        kernel
+            .activate_resolved_harness(&resolved)
+            .expect("empty resolved conductor composition activates");
+        Self { kernel, resolved }
     }
 }
 
@@ -147,6 +198,7 @@ mod tests {
             execution: PluginExecution::Embedded,
             dependencies: Vec::new(),
             services: vec![ServiceContribution {
+                role: phenix_core::ServiceRole::Terminal,
                 service: ServiceId::parse("fixture.echo@1").unwrap(),
                 priority: 100,
                 required_authority: Authority::default(),
@@ -198,6 +250,10 @@ mod tests {
         let mut conductor = Conductor::default();
         conductor.activate_all().unwrap();
         assert_eq!(conductor.kernel().config().manifests().count(), 0);
+        assert_eq!(
+            conductor.kernel().graph_generation(),
+            Some(conductor.generation())
+        );
     }
 
     #[test]
@@ -220,6 +276,10 @@ mod tests {
     fn conductor_runs_exactly_one_configured_plugin() {
         let mut conductor = configured_fixture("fixture.primary", br#"{"provider":"primary"}"#);
         assert_eq!(conductor.kernel().config().manifests().count(), 1);
+        assert_eq!(
+            conductor.kernel().graph_generation(),
+            Some(conductor.generation())
+        );
         assert!(matches!(
             invoke_fixture(&mut conductor),
             ServiceResponse::Ok { output: Some(output), .. }

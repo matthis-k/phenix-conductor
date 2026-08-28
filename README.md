@@ -58,6 +58,8 @@ The normal `phenix` package is the supported Harness composition. It is built th
 
 Nix exposes independently packaged first-party plugins through `phenixPlugins.<system>.*` and client adapters through `phenixClients.<system>.*`. `wrappers.phenix.wrap` and `lib.mkPhenix` assemble a conductor with an explicit plugin selection. Omitting a plugin removes its service unless another selected provider supplies the same contract.
 
+The resolved component graph is the canonical runtime composition for component imports. A `ComponentExport` identifies the executable endpoint; it does not need a duplicate terminal `ServiceContribution`. Plugin service contributions remain available for ordinary service dispatch and explicit interposition layers. Embedded and external hosts execute the same graph-selected component identity, and development reconciliation replaces the kernel configuration, component graph, resources, and generation as one resolved runtime topology.
+
 Plugin-owned durable state is canonical. Core enforces namespace ownership, migrations, transactions, and authority without interpreting first-party domain rows.
 
 ### Product configuration and skills

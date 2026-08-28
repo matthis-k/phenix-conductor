@@ -1,5 +1,9 @@
-use crate::{Authority, PluginHost, PluginId, PluginInstance, PluginManifest, ServiceId};
+use crate::{
+    runtime::ContinuationBinding, Authority, CapabilityId, ComponentId, LayerResult, PluginHost,
+    PluginId, PluginInstance, PluginManifest, ServiceId, ServiceRole,
+};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
@@ -14,9 +18,40 @@ use std::{
     time::Duration,
 };
 
-pub const EXTERNAL_PROTOCOL_VERSION: u32 = 1;
+pub const EXTERNAL_PROTOCOL_VERSION: u32 = 3;
 const DEFAULT_MAX_FRAME_BYTES: usize = 1024 * 1024;
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct ExternalService {
+    service: String,
+    role: ExternalServiceRole,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ExternalServiceRole {
+    Terminal,
+    Layer,
+}
+
+impl From<ServiceRole> for ExternalServiceRole {
+    fn from(role: ServiceRole) -> Self {
+        match role {
+            ServiceRole::Terminal => Self::Terminal,
+            ServiceRole::Layer => Self::Layer,
+        }
+    }
+}
+
+impl ExternalService {
+    fn from_contribution(contribution: &crate::ServiceContribution) -> Self {
+        Self {
+            service: contribution.service.as_str().to_owned(),
+            role: contribution.role.into(),
+        }
+    }
+}
 
 pub trait ExternalSandbox: Send + Sync {
     fn spawn(&self, executable: &str) -> io::Result<Child>;
@@ -47,10 +82,24 @@ pub enum ExternalTransportError {
     FrameTooLarge(usize),
     Timeout,
     Disconnected,
-    StaleGeneration { expected: u64, actual: u64 },
-    WrongRequest { expected: u64, actual: u64 },
-    PluginMismatch { expected: PluginId, actual: String },
+    StaleGeneration {
+        expected: u64,
+        actual: u64,
+    },
+    WrongRequest {
+        expected: u64,
+        actual: u64,
+    },
+    PluginMismatch {
+        expected: PluginId,
+        actual: String,
+    },
     UndeclaredService(ServiceId),
+    ServiceRoleMismatch {
+        service: ServiceId,
+        expected: ServiceRole,
+        actual: ServiceRole,
+    },
 }
 
 impl Display for ExternalTransportError {
@@ -77,6 +126,14 @@ impl Display for ExternalTransportError {
             Self::UndeclaredService(service) => {
                 write!(f, "external plugin advertised undeclared service {service}")
             }
+            Self::ServiceRoleMismatch {
+                service,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "external plugin advertised role {actual:?} for service {service}, expected {expected:?}"
+            ),
         }
     }
 }
@@ -90,14 +147,22 @@ enum HostFrame {
         protocol: u32,
         plugin: String,
         generation: u64,
-        services: Vec<String>,
+        services: Vec<ExternalService>,
     },
     Invoke {
         request_id: u64,
         generation: u64,
         service: String,
+        component: Option<String>,
         input: Vec<u8>,
         authority: Vec<String>,
+        continuation: Option<u64>,
+    },
+    ContinuationResult {
+        request_id: u64,
+        generation: u64,
+        continuation: u64,
+        output: Vec<u8>,
     },
     Stop {
         generation: u64,
@@ -111,7 +176,7 @@ enum PluginFrame {
         protocol: u32,
         plugin: String,
         generation: u64,
-        services: Vec<String>,
+        services: Vec<ExternalService>,
     },
     Result {
         request_id: u64,
@@ -122,6 +187,18 @@ enum PluginFrame {
         request_id: u64,
         generation: u64,
         message: String,
+    },
+    Denied {
+        request_id: u64,
+        generation: u64,
+        message: String,
+    },
+    Continue {
+        request_id: u64,
+        generation: u64,
+        continuation: u64,
+        input: Vec<u8>,
+        authority: Vec<String>,
     },
 }
 
@@ -134,6 +211,33 @@ pub struct ExternalPluginProcess {
     child: Option<Child>,
     input: Option<BufWriter<ChildStdin>>,
     output: Option<Receiver<Result<String, ExternalTransportError>>>,
+}
+
+fn continuation_token(generation: u64, request_id: u64, binding: &ContinuationBinding) -> u64 {
+    let mut digest = Sha256::new();
+    digest.update(b"phenix.external.continuation.v1\0");
+    digest.update(generation.to_be_bytes());
+    digest.update(request_id.to_be_bytes());
+    digest.update(binding.policy_identity.get().to_be_bytes());
+    digest.update((binding.next_position as u64).to_be_bytes());
+    if let Some(graph_generation) = &binding.graph_generation {
+        digest.update((graph_generation.as_str().len() as u64).to_be_bytes());
+        digest.update(graph_generation.as_str().as_bytes());
+    } else {
+        digest.update(0_u64.to_be_bytes());
+    }
+    digest.update((binding.service.as_str().len() as u64).to_be_bytes());
+    digest.update(binding.service.as_str().as_bytes());
+    for capability in binding.authority.capabilities() {
+        digest.update((capability.as_str().len() as u64).to_be_bytes());
+        digest.update(capability.as_str().as_bytes());
+    }
+    let digest = digest.finalize();
+    u64::from_be_bytes(
+        digest[..8]
+            .try_into()
+            .expect("sha256 prefix is eight bytes"),
+    )
 }
 
 impl ExternalPluginProcess {
@@ -212,7 +316,7 @@ impl ExternalPluginProcess {
                 .manifest
                 .services
                 .iter()
-                .map(|service| service.service.as_str().to_owned())
+                .map(ExternalService::from_contribution)
                 .collect(),
         };
         self.send(&frame)?;
@@ -236,16 +340,34 @@ impl ExternalPluginProcess {
                     });
                 }
                 self.require_generation(generation)?;
-                for service in services {
-                    let service = ServiceId::parse(service)
+                if services.len() != self.manifest.services.len() {
+                    return Err(ExternalTransportError::Protocol(format!(
+                        "external plugin advertised {} services, expected {}",
+                        services.len(),
+                        self.manifest.services.len()
+                    )));
+                }
+                for advertised in services {
+                    let service = ServiceId::parse(advertised.service)
                         .map_err(|message| ExternalTransportError::Protocol(message.into()))?;
-                    if !self
+                    let Some(declared) = self
                         .manifest
                         .services
                         .iter()
-                        .any(|declared| declared.service == service)
-                    {
+                        .find(|declared| declared.service == service)
+                    else {
                         return Err(ExternalTransportError::UndeclaredService(service));
+                    };
+                    let expected = ExternalServiceRole::from(declared.role);
+                    if advertised.role != expected {
+                        return Err(ExternalTransportError::ServiceRoleMismatch {
+                            service,
+                            expected: declared.role,
+                            actual: match advertised.role {
+                                ExternalServiceRole::Terminal => ServiceRole::Terminal,
+                                ExternalServiceRole::Layer => ServiceRole::Layer,
+                            },
+                        });
                     }
                 }
                 Ok(())
@@ -256,23 +378,58 @@ impl ExternalPluginProcess {
         }
     }
 
+    fn next_request(&mut self) -> u64 {
+        self.next_request += 1;
+        self.next_request
+    }
+
+    fn validate_response(
+        &self,
+        expected_request: u64,
+        actual_request: u64,
+        generation: u64,
+    ) -> Result<(), ExternalTransportError> {
+        self.require_generation(generation)?;
+        if actual_request == expected_request {
+            Ok(())
+        } else {
+            Err(ExternalTransportError::WrongRequest {
+                expected: expected_request,
+                actual: actual_request,
+            })
+        }
+    }
+
+    fn decode_authority(values: Vec<String>) -> Result<Authority, ExternalTransportError> {
+        values
+            .into_iter()
+            .map(|value| {
+                CapabilityId::parse(value)
+                    .map_err(|message| ExternalTransportError::Protocol(message.into()))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Authority::new)
+    }
+
     fn invoke_service(
         &mut self,
+        component: Option<&ComponentId>,
         service: &ServiceId,
         input: &[u8],
         authority: &Authority,
     ) -> Result<Vec<u8>, ExternalTransportError> {
-        self.next_request += 1;
-        let request_id = self.next_request;
+        let request_id = self.next_request();
         self.send(&HostFrame::Invoke {
             request_id,
             generation: self.generation,
             service: service.as_str().to_owned(),
+            component: component.map(|component| component.as_str().to_owned()),
             input: input.to_vec(),
             authority: authority
                 .capabilities()
                 .map(|capability| capability.as_str().to_owned())
                 .collect(),
+            continuation: None,
         })?;
         match self.receive()? {
             PluginFrame::Result {
@@ -280,13 +437,7 @@ impl ExternalPluginProcess {
                 generation,
                 output,
             } => {
-                self.require_generation(generation)?;
-                if actual_request != request_id {
-                    return Err(ExternalTransportError::WrongRequest {
-                        expected: request_id,
-                        actual: actual_request,
-                    });
-                }
+                self.validate_response(request_id, actual_request, generation)?;
                 Ok(output)
             }
             PluginFrame::Error {
@@ -294,18 +445,102 @@ impl ExternalPluginProcess {
                 generation,
                 message,
             } => {
-                self.require_generation(generation)?;
-                if actual_request != request_id {
-                    return Err(ExternalTransportError::WrongRequest {
-                        expected: request_id,
-                        actual: actual_request,
-                    });
-                }
+                self.validate_response(request_id, actual_request, generation)?;
                 Err(ExternalTransportError::Protocol(message))
             }
+            PluginFrame::Denied { .. } => Err(ExternalTransportError::Protocol(
+                "terminal provider cannot deny as a layer".into(),
+            )),
+            PluginFrame::Continue { .. } => Err(ExternalTransportError::Protocol(
+                "terminal provider requested an unavailable continuation".into(),
+            )),
             PluginFrame::HandshakeOk { .. } => Err(ExternalTransportError::Protocol(
                 "unexpected handshake response".into(),
             )),
+        }
+    }
+
+    fn invoke_layer_service(
+        &mut self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<LayerResult, ExternalTransportError> {
+        let request_id = self.next_request();
+        let binding = host
+            .continuation_binding()
+            .map_err(|error| ExternalTransportError::Protocol(error.to_string()))?;
+        let continuation = continuation_token(self.generation, request_id, &binding);
+        self.send(&HostFrame::Invoke {
+            request_id,
+            generation: self.generation,
+            service: service.as_str().to_owned(),
+            component: None,
+            input: input.to_vec(),
+            authority: host
+                .authority()
+                .capabilities()
+                .map(|capability| capability.as_str().to_owned())
+                .collect(),
+            continuation: Some(continuation),
+        })?;
+
+        loop {
+            match self.receive()? {
+                PluginFrame::Result {
+                    request_id: actual_request,
+                    generation,
+                    output,
+                } => {
+                    self.validate_response(request_id, actual_request, generation)?;
+                    return Ok(LayerResult::Handled(output));
+                }
+                PluginFrame::Denied {
+                    request_id: actual_request,
+                    generation,
+                    message,
+                } => {
+                    self.validate_response(request_id, actual_request, generation)?;
+                    return Ok(LayerResult::Denied(message));
+                }
+                PluginFrame::Error {
+                    request_id: actual_request,
+                    generation,
+                    message,
+                } => {
+                    self.validate_response(request_id, actual_request, generation)?;
+                    return Err(ExternalTransportError::Protocol(message));
+                }
+                PluginFrame::Continue {
+                    request_id: actual_request,
+                    generation,
+                    continuation: actual_continuation,
+                    input,
+                    authority,
+                } => {
+                    self.validate_response(request_id, actual_request, generation)?;
+                    if actual_continuation != continuation {
+                        return Err(ExternalTransportError::Protocol(
+                            "external plugin used an invalid continuation token".into(),
+                        ));
+                    }
+                    let requested_authority = Self::decode_authority(authority)?;
+                    let output = host
+                        .continue_service(&input, &requested_authority)
+                        .map_err(|error| ExternalTransportError::Protocol(error.to_string()))?;
+                    self.send(&HostFrame::ContinuationResult {
+                        request_id,
+                        generation: self.generation,
+                        continuation,
+                        output,
+                    })?;
+                }
+                PluginFrame::HandshakeOk { .. } => {
+                    return Err(ExternalTransportError::Protocol(
+                        "unexpected handshake response".into(),
+                    ));
+                }
+            }
         }
     }
 
@@ -407,7 +642,28 @@ impl PluginInstance for ExternalPluginProcess {
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        self.invoke_service(service, input, host.authority())
+        self.invoke_service(None, service, input, host.authority())
+            .map_err(|error| error.to_string())
+    }
+
+    fn invoke_component(
+        &mut self,
+        component: &ComponentId,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        self.invoke_service(Some(component), service, input, host.authority())
+            .map_err(|error| error.to_string())
+    }
+
+    fn invoke_layer(
+        &mut self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<LayerResult, String> {
+        self.invoke_layer_service(service, input, host)
             .map_err(|error| error.to_string())
     }
 
@@ -426,6 +682,7 @@ impl PluginInstance for ExternalPluginProcess {
 mod tests {
     use super::*;
     use crate::{CapabilityId, PluginExecution, ServiceContribution};
+    use crate::{Kernel, KernelConfig, KernelError, LayerPolicy};
     use std::process::{Command, Stdio};
 
     struct ScriptSandbox {
@@ -454,6 +711,7 @@ mod tests {
             },
             dependencies: Vec::new(),
             services: vec![ServiceContribution {
+                role: ServiceRole::Terminal,
                 service: ServiceId::parse("echo@1").unwrap(),
                 priority: 1,
                 required_authority: Authority::default(),
@@ -483,6 +741,7 @@ mod tests {
             request_id: 1,
             generation: 7,
             service: "echo@1".into(),
+            component: None,
             input: Vec::new(),
             authority: Authority::new([
                 CapabilityId::parse("fs.read").unwrap(),
@@ -491,6 +750,7 @@ mod tests {
             .capabilities()
             .map(|capability| capability.as_str().to_owned())
             .collect(),
+            continuation: None,
         };
         let encoded = serde_json::to_value(frame).unwrap();
         assert_eq!(
@@ -500,12 +760,61 @@ mod tests {
     }
 
     #[test]
+    fn component_invoke_frame_carries_exact_component_identity() {
+        let frame = HostFrame::Invoke {
+            request_id: 1,
+            generation: 7,
+            service: "echo@1".into(),
+            component: Some("provider.component".into()),
+            input: Vec::new(),
+            authority: Vec::new(),
+            continuation: None,
+        };
+        let encoded = serde_json::to_value(frame).unwrap();
+        assert_eq!(encoded["component"], "provider.component");
+    }
+
+    #[test]
+    fn continuation_token_binds_invocation_service_policy_authority_and_position() {
+        let read = CapabilityId::parse("workspace.read").unwrap();
+        let baseline_policy = KernelConfig::empty().policy_identity();
+        let other_policy = KernelConfig::empty().policy_identity();
+        let baseline = ContinuationBinding {
+            graph_generation: None,
+            policy_identity: baseline_policy,
+            service: ServiceId::parse("echo@1").unwrap(),
+            authority: Authority::new([read.clone()]),
+            next_position: 1,
+        };
+        let token = continuation_token(7, 11, &baseline);
+
+        let mut changed = baseline.clone();
+        changed.service = ServiceId::parse("other@1").unwrap();
+        assert_ne!(token, continuation_token(7, 11, &changed));
+
+        let mut changed = baseline.clone();
+        changed.policy_identity = other_policy;
+        assert_ne!(token, continuation_token(7, 11, &changed));
+
+        let mut changed = baseline.clone();
+        changed.authority = Authority::default();
+        assert_ne!(token, continuation_token(7, 11, &changed));
+
+        let mut changed = baseline.clone();
+        changed.next_position = 2;
+        assert_ne!(token, continuation_token(7, 11, &changed));
+
+        assert_ne!(token, continuation_token(8, 11, &baseline));
+        assert_ne!(token, continuation_token(7, 12, &baseline));
+    }
+
+    #[test]
     fn compatible_plugin_handshake_and_invoke_succeed() {
         let script = format!(
             r#"
             read handshake
             {READ_GENERATION}
-            echo "{{\"type\":\"handshake_ok\",\"protocol\":1,\"plugin\":\"external\",\"generation\":$generation,\"services\":[\"echo@1\"]}}"
+            echo "{{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external\",\"generation\":$generation,\"services\":[{{\"service\":\"echo@1\",\"role\":\"terminal\"}}]}}"
             read request
             echo "{{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[111,107]}}"
             read stop || true
@@ -521,6 +830,7 @@ mod tests {
         assert_eq!(
             plugin
                 .invoke_service(
+                    None,
                     &ServiceId::parse("echo@1").unwrap(),
                     b"input",
                     &Authority::default(),
@@ -536,7 +846,7 @@ mod tests {
             r#"
             read handshake
             {READ_GENERATION}
-            echo "{{\"type\":\"handshake_ok\",\"protocol\":1,\"plugin\":\"external\",\"generation\":$generation,\"services\":[\"admin@1\"]}}"
+            echo "{{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external\",\"generation\":$generation,\"services\":[{{\"service\":\"admin@1\",\"role\":\"terminal\"}}]}}"
         "#
         );
         let mut plugin = ExternalPluginProcess::new(
@@ -557,7 +867,7 @@ mod tests {
             r#"
             read handshake
             {READ_GENERATION}
-            echo "{{\"type\":\"handshake_ok\",\"protocol\":1,\"plugin\":\"external\",\"generation\":$generation,\"services\":[\"echo@1\"]}}"
+            echo "{{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external\",\"generation\":$generation,\"services\":[{{\"service\":\"echo@1\",\"role\":\"terminal\"}}]}}"
             exit 0
         "#
         );
@@ -570,6 +880,7 @@ mod tests {
         plugin.handshake().unwrap();
         assert!(matches!(
             plugin.invoke_service(
+                None,
                 &ServiceId::parse("echo@1").unwrap(),
                 b"input",
                 &Authority::default(),
@@ -584,7 +895,7 @@ mod tests {
             r#"
             read handshake
             {READ_GENERATION}
-            echo "{{\"type\":\"handshake_ok\",\"protocol\":1,\"plugin\":\"external\",\"generation\":$generation,\"services\":[\"echo@1\"]}}"
+            echo "{{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external\",\"generation\":$generation,\"services\":[{{\"service\":\"echo@1\",\"role\":\"terminal\"}}]}}"
             read request
             sleep 5
         "#
@@ -598,6 +909,7 @@ mod tests {
         plugin.handshake().unwrap();
         assert!(matches!(
             plugin.invoke_service(
+                None,
                 &ServiceId::parse("echo@1").unwrap(),
                 b"input",
                 &Authority::default(),
@@ -605,5 +917,169 @@ mod tests {
             Err(ExternalTransportError::Timeout)
         ));
         assert!(plugin.child.is_none());
+    }
+
+    fn layer_manifest() -> PluginManifest {
+        let mut value = manifest();
+        value.id = PluginId::parse("external-layer").unwrap();
+        value.services[0].role = ServiceRole::Layer;
+        value
+    }
+
+    struct Terminal;
+
+    impl PluginInstance for Terminal {
+        fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn invoke(
+            &mut self,
+            _service: &ServiceId,
+            input: &[u8],
+            _host: &PluginHost<'_>,
+        ) -> Result<Vec<u8>, String> {
+            let mut output = b"terminal:".to_vec();
+            output.extend_from_slice(input);
+            Ok(output)
+        }
+    }
+
+    #[test]
+    fn handshake_rejects_service_role_mismatch() {
+        let script = format!(
+            r#"
+            read handshake
+            {READ_GENERATION}
+            echo "{{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external\",\"generation\":$generation,\"services\":[{{\"service\":\"echo@1\",\"role\":\"layer\"}}]}}"
+        "#
+        );
+        let mut plugin = ExternalPluginProcess::new(
+            manifest(),
+            "fixture",
+            config(&script, Duration::from_secs(2)),
+        );
+        plugin.start_process().unwrap();
+        assert!(matches!(
+            plugin.handshake(),
+            Err(ExternalTransportError::ServiceRoleMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn external_layer_delegates_through_opaque_continuation() {
+        let script = format!(
+            r#"
+            read handshake
+            {READ_GENERATION}
+            echo "{{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external-layer\",\"generation\":$generation,\"services\":[{{\"service\":\"echo@1\",\"role\":\"layer\"}}]}}"
+            read request
+            continuation=$(printf '%s' "$request" | sed -n 's/.*\"continuation\":\([0-9][0-9]*\).*/\1/p')
+            echo "{{\"type\":\"continue\",\"request_id\":1,\"generation\":$generation,\"continuation\":$continuation,\"input\":[100,101,108,101,103,97,116,101,100],\"authority\":[]}}"
+            read continued
+            echo "{{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[108,97,121,101,114,45,111,107]}}"
+            read stop || true
+        "#
+        );
+        let layer = layer_manifest();
+        let layer_id = layer.id.clone();
+        let mut terminal_manifest = manifest();
+        terminal_manifest.execution = crate::PluginExecution::Embedded;
+        let terminal_id = terminal_manifest.id.clone();
+        let kernel_config = KernelConfig::new([layer.clone(), terminal_manifest])
+            .unwrap()
+            .with_layer_policy(
+                ServiceId::parse("echo@1").unwrap(),
+                vec![LayerPolicy {
+                    plugin: layer_id.clone(),
+                    priority: 100,
+                    required: true,
+                    enabled: true,
+                }],
+            )
+            .unwrap();
+        let transport = config(&script, Duration::from_secs(2));
+        let mut kernel = Kernel::new(kernel_config);
+        kernel
+            .register_external_factory(layer_id, move |manifest| {
+                Ok(Box::new(ExternalPluginProcess::new(
+                    manifest.clone(),
+                    "fixture",
+                    transport.clone(),
+                )))
+            })
+            .unwrap();
+        kernel
+            .register_embedded_factory(terminal_id, || Box::new(Terminal))
+            .unwrap();
+        kernel.activate_all().unwrap();
+        assert_eq!(
+            kernel
+                .invoke(
+                    &ServiceId::parse("echo@1").unwrap(),
+                    b"input",
+                    &Authority::default(),
+                    None,
+                )
+                .unwrap(),
+            b"layer-ok"
+        );
+    }
+
+    #[test]
+    fn external_layer_cannot_replay_continuation() {
+        let script = format!(
+            r#"
+            read handshake
+            {READ_GENERATION}
+            echo "{{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external-layer\",\"generation\":$generation,\"services\":[{{\"service\":\"echo@1\",\"role\":\"layer\"}}]}}"
+            read request
+            continuation=$(printf '%s' "$request" | sed -n 's/.*\"continuation\":\([0-9][0-9]*\).*/\1/p')
+            echo "{{\"type\":\"continue\",\"request_id\":1,\"generation\":$generation,\"continuation\":$continuation,\"input\":[],\"authority\":[]}}"
+            read continued
+            echo "{{\"type\":\"continue\",\"request_id\":1,\"generation\":$generation,\"continuation\":$continuation,\"input\":[],\"authority\":[]}}"
+        "#
+        );
+        let layer = layer_manifest();
+        let layer_id = layer.id.clone();
+        let mut terminal_manifest = manifest();
+        terminal_manifest.execution = crate::PluginExecution::Embedded;
+        let terminal_id = terminal_manifest.id.clone();
+        let kernel_config = KernelConfig::new([layer.clone(), terminal_manifest])
+            .unwrap()
+            .with_layer_policy(
+                ServiceId::parse("echo@1").unwrap(),
+                vec![LayerPolicy {
+                    plugin: layer_id.clone(),
+                    priority: 100,
+                    required: true,
+                    enabled: true,
+                }],
+            )
+            .unwrap();
+        let transport = config(&script, Duration::from_secs(2));
+        let mut kernel = Kernel::new(kernel_config);
+        kernel
+            .register_external_factory(layer_id, move |manifest| {
+                Ok(Box::new(ExternalPluginProcess::new(
+                    manifest.clone(),
+                    "fixture",
+                    transport.clone(),
+                )))
+            })
+            .unwrap();
+        kernel
+            .register_embedded_factory(terminal_id, || Box::new(Terminal))
+            .unwrap();
+        kernel.activate_all().unwrap();
+        assert!(matches!(
+            kernel.invoke(
+                &ServiceId::parse("echo@1").unwrap(),
+                b"input",
+                &Authority::default(),
+                None,
+            ),
+            Err(KernelError::ServiceInvoke { .. })
+        ));
     }
 }

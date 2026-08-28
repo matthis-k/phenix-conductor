@@ -70,6 +70,7 @@ let
       plugins ? [ ],
       resources ? [ ],
       enabledPlugins ? null,
+      layerPolicies ? [ ],
       ...
     }:
     let
@@ -90,7 +91,7 @@ let
         else
           null;
     in
-    if plugins == [ ] && resources == [ ] && selectedIds == null then
+    if plugins == [ ] && resources == [ ] && selectedIds == null && layerPolicies == [ ] then
       base
     else
       pkgs.symlinkJoin {
@@ -104,6 +105,7 @@ let
             let
               pluginPackages = pkgs.lib.concatStringsSep ":" (map toString packagedPlugins);
               enabledPluginIds = if selectedIds == null then null else pkgs.lib.concatStringsSep "," selectedIds;
+              layerPolicyJson = builtins.toJSON layerPolicies;
             in
             ''
               for program in phenix phenix-harness; do
@@ -115,6 +117,10 @@ let
                   ${pkgs.lib.optionalString (selectedIds != null) ''
                     wrapProgram "$out/bin/$program" \
                       --set PHENIX_ENABLED_PLUGINS ${pkgs.lib.escapeShellArg enabledPluginIds}
+                  ''}
+                  ${pkgs.lib.optionalString (layerPolicies != [ ]) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_LAYER_POLICY ${pkgs.lib.escapeShellArg layerPolicyJson}
                   ''}
                   ${pkgs.lib.optionalString (resources != [ ]) ''
                     wrapProgram "$out/bin/$program" \
@@ -160,7 +166,7 @@ in
             handshake)
               generation="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .generation)"
               ${pkgs.jq}/bin/jq -cn --argjson generation "$generation" \
-                '{type:"handshake_ok",protocol:1,plugin:"fixture.session-replacement",generation:$generation,services:["phenix.sessions@1"]}'
+                '{type:"handshake_ok",protocol:3,plugin:"fixture.session-replacement",generation:$generation,services:[{service:"phenix.sessions@1",role:"terminal"}]}'
               ;;
             invoke)
               request_id="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .request_id)"
@@ -183,6 +189,7 @@ in
           dependencies = [ ];
           services = [
             {
+              role = "terminal";
               service = "phenix.sessions@1";
               priority = 200;
               required_authority = [ ];
@@ -193,21 +200,105 @@ in
         };
         executable = externalExecutable;
       };
-      firstPartyPlugins = builtins.attrValues self.phenixPlugins.${pkgs.system};
+      externalLayerExecutable = pkgs.writeShellScript "external-layer-fixture" ''
+        set -euo pipefail
+        while IFS= read -r frame; do
+          type="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .type)"
+          case "$type" in
+            handshake)
+              generation="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .generation)"
+              ${pkgs.jq}/bin/jq -cn --argjson generation "$generation" \
+                '{type:"handshake_ok",protocol:3,plugin:"fixture.session-layer",generation:$generation,services:[{service:"phenix.sessions@1",role:"layer"}]}'
+              ;;
+            invoke)
+              request_id="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .request_id)"
+              generation="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .generation)"
+              continuation="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -r .continuation)"
+              input="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -c .input)"
+              authority="$(printf '%s' "$frame" | ${pkgs.jq}/bin/jq -c .authority)"
+              ${pkgs.jq}/bin/jq -cn --argjson request_id "$request_id" --argjson generation "$generation" \
+                --argjson continuation "$continuation" --argjson input "$input" --argjson authority "$authority" \
+                '{type:"continue",request_id:$request_id,generation:$generation,continuation:$continuation,input:$input,authority:$authority}'
+              read -r continued
+              test "$(printf '%s' "$continued" | ${pkgs.jq}/bin/jq -r .type)" = "continuation_result"
+              ${pkgs.jq}/bin/jq -cn --argjson request_id "$request_id" --argjson generation "$generation" \
+                '{type:"result",request_id:$request_id,generation:$generation,output:[123,34,101,120,116,101,114,110,97,108,95,108,97,121,101,114,34,58,116,114,117,101,125]}'
+              ;;
+            stop) exit 0 ;;
+            *) exit 2 ;;
+          esac
+        done
+      '';
+      externalLayerPlugin = mkPhenixPlugin {
+        inherit pkgs;
+        name = "external-layer-fixture";
+        manifest = {
+          id = "fixture.session-layer";
+          version = 1;
+          execution = "external";
+          dependencies = [ ];
+          services = [
+            {
+              role = "layer";
+              service = "phenix.sessions@1";
+              priority = 300;
+              required_authority = [ ];
+            }
+          ];
+          resource_namespaces = [ ];
+          maximum_authority = [
+            "kernel.persistence.read"
+            "kernel.persistence.write"
+          ];
+        };
+        executable = externalLayerExecutable;
+      };
+      defaultPluginNames = [
+        "artifacts"
+        "cli"
+        "context"
+        "debug"
+        "execution"
+        "frontend"
+        "hooks"
+        "jobs"
+        "language"
+        "models"
+        "planning"
+        "repository-workers"
+        "session-tree"
+        "sessions"
+        "workspace"
+      ];
+      defaultPlugins = map (name: self.phenixPlugins.${pkgs.system}.${name}) defaultPluginNames;
       harnessResources = self.packages.${pkgs.system}.phenix-harness-resources;
       defaultComposition = mkPhenix {
         inherit pkgs;
-        plugins = firstPartyPlugins;
+        plugins = defaultPlugins;
         resources = [ harnessResources ];
       };
       externalComposition = mkPhenix {
         inherit pkgs;
-        plugins = firstPartyPlugins ++ [ externalPlugin ];
+        plugins = defaultPlugins ++ [ externalPlugin ];
         resources = [ harnessResources ];
+      };
+      externalLayerComposition = mkPhenix {
+        inherit pkgs;
+        plugins = defaultPlugins ++ [ externalLayerPlugin ];
+        resources = [ harnessResources ];
+        layerPolicies = [
+          {
+            service = "phenix.sessions@1";
+            plugin = "fixture.session-layer";
+            priority = 300;
+            required = true;
+            enabled = true;
+          }
+        ];
       };
       resourceComposition = mkPhenix {
         inherit pkgs;
-        plugins = firstPartyPlugins ++ [ resourcePlugin ];
+        plugins = defaultPlugins ++ [ resourcePlugin ];
         resources = [ harnessResources ];
       };
       conductorComposition = mkPhenix {
@@ -246,7 +337,7 @@ in
             test -f "${defaultComposition}/share/phenix/skills/pstack-LICENSE"
             export PHENIX_STATE_DB="$TMPDIR/composition.sqlite"
             "${defaultComposition}/bin/phenix" --list-services > "$TMPDIR/default-services.json"
-            jq -e '(.plugins | length == 14) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
+            jq -e '(.plugins | length == 15) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/external.sqlite"
             "${externalComposition}/bin/phenix" --list-services > "$TMPDIR/external-services.json"
@@ -255,13 +346,20 @@ in
               | "${externalComposition}/bin/phenix" > "$TMPDIR/replacement.json"
             jq -e '.status == "ok" and .output.replacement == true' "$TMPDIR/replacement.json" >/dev/null
 
+            export PHENIX_STATE_DB="$TMPDIR/external-layer.sqlite"
+            "${externalLayerComposition}/bin/phenix" --list-services > "$TMPDIR/external-layer-services.json"
+            jq -e '(.plugins | index("fixture.session-layer")) != null' "$TMPDIR/external-layer-services.json" >/dev/null
+            printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"get","id":"missing"}}' \
+              | "${externalLayerComposition}/bin/phenix" > "$TMPDIR/external-layer.json"
+            jq -e '.status == "ok" and .output.external_layer == true' "$TMPDIR/external-layer.json" >/dev/null
+
             export PHENIX_STATE_DB="$TMPDIR/session-only.sqlite"
             "${sessionOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/session-only.json"
             jq -e '(.plugins == ["phenix.sessions"]) and (.services | index("phenix.sessions@1") != null) and (.services | index("phenix.context@1") == null)' "$TMPDIR/session-only.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/context-only.sqlite"
             "${contextOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/context-only.json"
-            jq -e '(.plugins == ["phenix.context"]) and (.services | index("phenix.context@1") != null) and (.services | index("phenix.sessions@1") == null)' "$TMPDIR/context-only.json" >/dev/null
+            jq -e '((.plugins | sort) == ["phenix.context", "phenix.execution"]) and (.services | index("phenix.context@1") != null) and (.services | index("phenix.sessions@1") == null)' "$TMPDIR/context-only.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/resource.sqlite"
             test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"

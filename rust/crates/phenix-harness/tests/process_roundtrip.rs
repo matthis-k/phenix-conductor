@@ -54,7 +54,7 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
             serde_json::json!({
                 "id": 1,
                 "service": "phenix.sessions@1",
-                "input": {"operation": "create", "id": "process-session", "parent": null}
+                "input": {"operation": "create", "id": "process-session"}
             }),
             serde_json::json!({
                 "id": 2,

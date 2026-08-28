@@ -1,12 +1,14 @@
-use crate::{
-    context_service, frontend_service, job_service, model_routing_service, planning_service,
-    session_service, ContextCommand, FrontendCommand, JobCommand, ModelCommand, PlanningCommand,
-    SessionCommand,
-};
+use crate::debug_component_id;
 use phenix_core::{
-    Authority, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ServiceContribution, ServiceId,
+    Authority, ComponentInterface, ComponentInvocationError, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ServiceContribution, ServiceId,
 };
+use phenix_plugin_context::{ContextCommand, ContextInterface};
+use phenix_plugin_frontend::{FrontendCommand, FrontendInterface};
+use phenix_plugin_jobs::{JobCommand, JobInterface};
+use phenix_plugin_models::{ModelCommand, ModelRoutingInterface};
+use phenix_plugin_planning::{PlanningCommand, PlanningInterface};
+use phenix_plugin_sessions::{SessionCommand, SessionInterface};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -45,6 +47,7 @@ pub fn debug_manifest(maximum_authority: Authority) -> PluginManifest {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: phenix_core::ServiceRole::Terminal,
             service: debug_service(),
             priority: 100,
             required_authority: Authority::default(),
@@ -93,77 +96,34 @@ impl PluginInstance for DebugPlugin {
 
 fn snapshot(host: &PluginHost<'_>) -> DiagnosticSnapshot {
     let mut services = BTreeMap::new();
-    probe(
-        host,
-        &mut services,
-        "sessions",
-        &session_service(),
-        &SessionCommand::List,
-    );
-    probe(
-        host,
-        &mut services,
-        "context",
-        &context_service(),
-        &ContextCommand::List,
-    );
-    probe(
+    probe::<SessionInterface>(host, &mut services, "sessions", &SessionCommand::List);
+    probe::<ContextInterface>(host, &mut services, "context", &ContextCommand::List);
+    probe::<PlanningInterface>(
         host,
         &mut services,
         "planning_history",
-        &planning_service(),
         &PlanningCommand::SearchHistory {
             objective_id: None,
             query: String::new(),
         },
     );
-    probe(
-        host,
-        &mut services,
-        "jobs",
-        &job_service(),
-        &JobCommand::List,
-    );
-    probe(
-        host,
-        &mut services,
-        "models",
-        &model_routing_service(),
-        &ModelCommand::ListProfiles,
-    );
-    probe(
-        host,
-        &mut services,
-        "frontends",
-        &frontend_service(),
-        &FrontendCommand::Catalog,
-    );
+    probe::<JobInterface>(host, &mut services, "jobs", &JobCommand::List);
+    probe::<ModelRoutingInterface>(host, &mut services, "models", &ModelCommand::ListProfiles);
+    probe::<FrontendInterface>(host, &mut services, "frontends", &FrontendCommand::Catalog);
     DiagnosticSnapshot { services }
 }
 
-fn probe<T: Serialize>(
+fn probe<I>(
     host: &PluginHost<'_>,
     entries: &mut BTreeMap<String, DiagnosticEntry>,
     name: &str,
-    service: &ServiceId,
-    command: &T,
-) {
-    let input = match serde_json::to_vec(command) {
-        Ok(input) => input,
-        Err(error) => {
-            entries.insert(
-                name.into(),
-                DiagnosticEntry {
-                    available: false,
-                    value: serde_json::Value::Null,
-                    error: Some(error.to_string()),
-                },
-            );
-            return;
-        }
-    };
-    let entry = match host.invoke_service(service, &input, host.authority(), None) {
-        Ok(output) => match serde_json::from_slice(&output) {
+    command: &I::Request,
+) where
+    I: ComponentInterface,
+    I::Response: Serialize,
+{
+    let entry = match host.invoke_import::<I>(&debug_component_id(), command) {
+        Ok(response) => match serde_json::to_value(response) {
             Ok(value) => DiagnosticEntry {
                 available: true,
                 value,
@@ -174,6 +134,11 @@ fn probe<T: Serialize>(
                 value: serde_json::Value::Null,
                 error: Some(format!("invalid diagnostic service response: {error}")),
             },
+        },
+        Err(error @ ComponentInvocationError::UnboundImport { .. }) => DiagnosticEntry {
+            available: false,
+            value: serde_json::Value::Null,
+            error: Some(error.to_string()),
         },
         Err(error) => DiagnosticEntry {
             available: false,
@@ -187,31 +152,43 @@ fn probe<T: Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig};
-    use phenix_plugin_sessions::{session_factory, session_manifest};
+    use crate::debug_component_manifest;
+    use phenix_core::{Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
+    use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
 
     #[test]
-    fn diagnostic_service_reports_available_and_omitted_plugins_without_kernel_fallbacks() {
+    fn diagnostic_service_uses_resolved_optional_imports_without_kernel_fallbacks() {
         let session_manifest = session_manifest();
+        let authority = session_manifest.maximum_authority.clone();
         let session_id = session_manifest.id.clone();
-        let debug_manifest = debug_manifest(session_manifest.maximum_authority.clone());
+        let debug_manifest = debug_manifest(authority.clone());
         let debug_id = debug_manifest.id.clone();
-        let mut kernel =
-            Kernel::new(KernelConfig::new([session_manifest, debug_manifest]).unwrap());
+        let manifests = vec![session_manifest, debug_manifest];
+        let resolved = ResolvedHarness::resolve(
+            manifests.clone(),
+            [
+                session_component_manifest(),
+                debug_component_manifest(authority.clone()),
+            ],
+            [],
+            &authority,
+        )
+        .unwrap();
+        let mut kernel = Kernel::new(KernelConfig::new(manifests).unwrap());
         kernel
             .register_embedded_factory(session_id, session_factory)
             .unwrap();
         kernel
             .register_embedded_factory(debug_id, debug_factory)
             .unwrap();
+        kernel.activate_resolved_harness(&resolved).unwrap();
         kernel.activate_all().unwrap();
+
         let output = kernel
             .invoke(
                 &debug_service(),
                 &serde_json::to_vec(&DebugCommand::Snapshot).unwrap(),
-                &Authority::new([
-                    phenix_core::CapabilityId::parse("kernel.persistence.read").unwrap(),
-                ]),
+                &authority,
                 None,
             )
             .unwrap();

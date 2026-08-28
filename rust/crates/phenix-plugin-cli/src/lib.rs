@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
-use phenix_plugin_workspace::{workspace_service, WorkspaceCommand, WorkspaceResponse};
+mod component;
 mod implementation {
     include!("implementation.rs");
 }
+pub use component::*;
 pub use implementation::*;

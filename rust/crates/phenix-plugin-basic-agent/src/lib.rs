@@ -1,0 +1,249 @@
+#![forbid(unsafe_code)]
+
+mod context;
+mod model;
+mod skills;
+mod tools;
+
+pub use context::{
+    basic_context_component_manifest, basic_context_factory, basic_context_manifest,
+    BasicContextInterface, BASIC_CONTEXT_COMPONENT, BASIC_CONTEXT_PLUGIN,
+};
+pub use model::{
+    basic_model_component_manifest, basic_model_factory, basic_model_manifest, BasicModelInterface,
+    BASIC_MODEL_COMPONENT, BASIC_MODEL_PLUGIN,
+};
+pub use skills::{
+    basic_skills_component_manifest, basic_skills_factory, basic_skills_manifest,
+    BasicSkillsInterface, BASIC_SKILLS_COMPONENT, BASIC_SKILLS_PLUGIN,
+};
+pub use tools::{
+    basic_tools_component_manifest, basic_tools_factory, basic_tools_manifest, BasicToolsInterface,
+    BASIC_TOOLS_COMPONENT, BASIC_TOOLS_PLUGIN,
+};
+
+#[cfg(test)]
+mod component_regression;
+#[cfg(test)]
+mod external_replacement_regression;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_core::{
+        context_service, model_inference_service, skill_service, tool_service, Authority,
+        ComponentInterface, ContextCommand, ContextResourceKind, ContextResponse, ContextScope,
+        Kernel, KernelConfig, LocalPersistence, ModelInferenceRequest, ModelInferenceResponse,
+        ResolvedHarness, ResolvedHarnessActivation, SkillCommand, SkillDefinition, SkillResponse,
+        ToolCommand, ToolDefinition, ToolResponse,
+    };
+    use std::{
+        collections::BTreeMap,
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn temp_db() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "phenix-basic-agent-{}-{nonce}.sqlite",
+            std::process::id()
+        ))
+    }
+
+    fn authority() -> Authority {
+        let manifests = [
+            basic_model_manifest(),
+            basic_tools_manifest(),
+            basic_skills_manifest(),
+            basic_context_manifest(),
+        ];
+        Authority::new(
+            manifests
+                .iter()
+                .flat_map(|manifest| manifest.maximum_authority.capabilities().cloned()),
+        )
+    }
+
+    fn kernel(path: &PathBuf) -> Kernel {
+        let manifests = [
+            basic_model_manifest(),
+            basic_tools_manifest(),
+            basic_skills_manifest(),
+            basic_context_manifest(),
+        ];
+        let components = [
+            basic_model_component_manifest(),
+            basic_tools_component_manifest(),
+            basic_skills_component_manifest(),
+            basic_context_component_manifest(),
+        ];
+        let ceiling = authority();
+        let resolved =
+            ResolvedHarness::resolve(manifests.clone(), components, [], &ceiling).unwrap();
+        let mut kernel = Kernel::with_persistence(
+            KernelConfig::new(manifests.clone()).unwrap(),
+            LocalPersistence::open(path).unwrap(),
+        );
+        kernel.activate_resolved_harness(&resolved).unwrap();
+        kernel
+            .register_embedded_factory(manifests[0].id.clone(), basic_model_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(manifests[1].id.clone(), basic_tools_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(manifests[2].id.clone(), basic_skills_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(manifests[3].id.clone(), basic_context_factory)
+            .unwrap();
+        kernel.activate_all().unwrap();
+        kernel
+    }
+
+    fn invoke<T: serde::Serialize, R: serde::de::DeserializeOwned>(
+        kernel: &mut Kernel,
+        service: &phenix_core::ServiceId,
+        request: &T,
+    ) -> R {
+        let output = kernel
+            .invoke(
+                service,
+                &serde_json::to_vec(request).unwrap(),
+                &authority(),
+                None,
+            )
+            .unwrap();
+        serde_json::from_slice(&output).unwrap()
+    }
+
+    #[test]
+    fn basic_components_are_independently_named_and_export_core_interfaces() {
+        let manifests = [
+            basic_model_manifest(),
+            basic_tools_manifest(),
+            basic_skills_manifest(),
+            basic_context_manifest(),
+        ];
+        assert_eq!(
+            manifests
+                .iter()
+                .map(|manifest| manifest.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                BASIC_MODEL_PLUGIN,
+                BASIC_TOOLS_PLUGIN,
+                BASIC_SKILLS_PLUGIN,
+                BASIC_CONTEXT_PLUGIN,
+            ]
+        );
+        assert_eq!(
+            BasicModelInterface::interface_id().as_str(),
+            model_inference_service().as_str()
+        );
+        assert_eq!(
+            BasicToolsInterface::interface_id().as_str(),
+            tool_service().as_str()
+        );
+        assert_eq!(
+            BasicSkillsInterface::interface_id().as_str(),
+            skill_service().as_str()
+        );
+        assert_eq!(
+            BasicContextInterface::interface_id().as_str(),
+            context_service().as_str()
+        );
+    }
+
+    #[test]
+    fn basic_model_is_direct_and_policy_light() {
+        let path = temp_db();
+        let mut kernel = kernel(&path);
+        let response: ModelInferenceResponse = invoke(
+            &mut kernel,
+            &model_inference_service(),
+            &ModelInferenceRequest {
+                model: "direct".into(),
+                input: b"hello".to_vec(),
+                options: BTreeMap::new(),
+            },
+        );
+        assert_eq!(response.output, b"hello");
+        assert_eq!(
+            response.provider_metadata.get("provider"),
+            Some(&serde_json::json!(BASIC_MODEL_PLUGIN))
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn basic_tool_skill_and_context_state_survives_restart() {
+        let path = temp_db();
+        {
+            let mut first = kernel(&path);
+            let _: ToolResponse = invoke(
+                &mut first,
+                &tool_service(),
+                &ToolCommand::Register {
+                    tool: ToolDefinition {
+                        id: "echo".into(),
+                        input_schema: serde_json::json!({}),
+                        output_schema: serde_json::json!({}),
+                        output_prefix: b"tool:".to_vec(),
+                    },
+                },
+            );
+            let _: SkillResponse = invoke(
+                &mut first,
+                &skill_service(),
+                &SkillCommand::Register {
+                    skill: SkillDefinition {
+                        id: "review".into(),
+                        content: b"review carefully".to_vec(),
+                    },
+                },
+            );
+            let registered: ContextResponse = invoke(
+                &mut first,
+                &context_service(),
+                &ContextCommand::Register {
+                    resource_id: "readme".into(),
+                    kind: ContextResourceKind::ProjectDocument,
+                    source: "README.md".into(),
+                    scope: ContextScope::Workspace,
+                    content: b"project".to_vec(),
+                },
+            );
+            assert!(matches!(registered, ContextResponse::Registered { .. }));
+        }
+
+        let mut restored = kernel(&path);
+        let tool: ToolResponse = invoke(
+            &mut restored,
+            &tool_service(),
+            &ToolCommand::Invoke {
+                id: "echo".into(),
+                input: b"hello".to_vec(),
+            },
+        );
+        assert_eq!(
+            tool,
+            ToolResponse::Output {
+                output: b"tool:hello".to_vec()
+            }
+        );
+        let skills: SkillResponse = invoke(&mut restored, &skill_service(), &SkillCommand::List);
+        assert!(matches!(skills, SkillResponse::Skills { skills } if skills[0].id == "review"));
+        let context: ContextResponse =
+            invoke(&mut restored, &context_service(), &ContextCommand::List);
+        assert!(
+            matches!(context, ContextResponse::Resources { descriptors } if descriptors[0].resource_id == "readme")
+        );
+        let _ = fs::remove_file(path);
+    }
+}

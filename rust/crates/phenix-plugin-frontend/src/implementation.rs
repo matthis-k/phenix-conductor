@@ -1,4 +1,7 @@
-use crate::{execution_service, ExecutionCommand, ExecutionResponse, ExecutionState};
+use crate::{
+    frontend_component_id, ExecutionCommand, ExecutionInterface,
+    ExecutionResponse, ExecutionState,
+};
 use phenix_core::{
     Authority, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
     ServiceContribution, ServiceId,
@@ -97,6 +100,7 @@ pub fn frontend_manifest(maximum_authority: Authority) -> PluginManifest {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: phenix_core::ServiceRole::Terminal,
             service: frontend_service(),
             priority: 100,
             required_authority: Authority::default(),
@@ -306,18 +310,15 @@ fn execution_lookup(
     host: &PluginHost<'_>,
     execution_id: &str,
 ) -> Result<Option<crate::ExecutionRecord>, String> {
-    let output = host
-        .invoke_service(
-            &execution_service(),
-            &serde_json::to_vec(&ExecutionCommand::GetExecution {
+    let response = host
+        .invoke_import::<ExecutionInterface>(
+            &frontend_component_id(),
+            &ExecutionCommand::GetExecution {
                 id: execution_id.to_owned(),
-            })
-            .map_err(|error| error.to_string())?,
-            host.authority(),
-            None,
+            },
         )
         .map_err(|error| error.to_string())?;
-    match serde_json::from_slice::<ExecutionResponse>(&output).map_err(|error| error.to_string())? {
+    match response {
         ExecutionResponse::ExecutionLookup { execution } => Ok(execution),
         other => Err(format!("unexpected execution lookup response: {other:?}")),
     }
@@ -362,16 +363,28 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig};
-    use phenix_plugin_execution::{execution_factory, execution_manifest, ExecutionAuthority};
+    use phenix_core::{Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
+    use phenix_plugin_execution::{execution_component_manifest, execution_factory, execution_manifest, execution_service, ExecutionAuthority};
 
     fn kernel() -> Kernel {
         let execution_manifest = execution_manifest(Authority::default());
         let execution_id = execution_manifest.id.clone();
-        let frontend_manifest = frontend_manifest(execution_manifest.maximum_authority.clone());
+        let authority = execution_manifest.maximum_authority.clone();
+        let frontend_manifest = frontend_manifest(authority.clone());
         let frontend_id = frontend_manifest.id.clone();
+        let resolved = ResolvedHarness::resolve(
+            [execution_manifest.clone(), frontend_manifest.clone()],
+            [
+                execution_component_manifest(authority.clone()),
+                crate::frontend_component_manifest(authority.clone()),
+            ],
+            [],
+            &authority,
+        )
+        .unwrap();
         let mut kernel =
             Kernel::new(KernelConfig::new([execution_manifest, frontend_manifest]).unwrap());
+        kernel.activate_resolved_harness(&resolved).unwrap();
         kernel
             .register_embedded_factory(execution_id, execution_factory)
             .unwrap();

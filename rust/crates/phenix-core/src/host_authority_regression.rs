@@ -48,7 +48,7 @@ impl PluginInstance for Delegator {
         let requested = Authority::new([capability("fs.write")]);
         for _ in 0..2 {
             if host
-                .invoke_service(&service("downstream@1"), b"", &requested, None)
+                .invoke_service_abi(&service("downstream@1"), b"", &requested, None)
                 .is_ok()
             {
                 return Err("delegated call regained denied authority".into());
@@ -68,6 +68,7 @@ fn plugin_delegation_and_retry_cannot_regain_denied_authority() {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: crate::ServiceRole::Terminal,
             service: service("root@1"),
             priority: 1,
             required_authority: Authority::default(),
@@ -81,6 +82,7 @@ fn plugin_delegation_and_retry_cannot_regain_denied_authority() {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: crate::ServiceRole::Terminal,
             service: service("downstream@1"),
             priority: 1,
             required_authority: Authority::new([capability("fs.write")]),

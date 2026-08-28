@@ -75,6 +75,12 @@
           test = "context_serialization";
           label = "phenix-domain / context_serialization";
         }
+        {
+          id = "harness-component-graph";
+          package = "phenix-harness";
+          test = "component_graph";
+          label = "phenix-harness / component_graph";
+        }
       ];
 
       systemTargets = [
@@ -541,6 +547,7 @@
                 description = "Installed ACP behavior and package realization";
                 order = [
                   "phenix-acp"
+                  "plugin-packaging"
                   "stitch-runtime"
                   "stitch-mcp"
                 ];
@@ -549,6 +556,11 @@
                     check = "phenix-product-smoke";
                     description = "Run the installed Phenix ACP smoke fixture";
                     stepName = "Phenix ACP smoke";
+                  };
+                  plugin-packaging = mkProductCommand {
+                    check = "phenix-plugin-packaging";
+                    description = "Run composed plugin package smoke journeys";
+                    stepName = "Plugin packaging";
                   };
                   stitch-runtime = mkProductCommand {
                     check = "stitch-runtime-smoke";

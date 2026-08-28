@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
+mod component;
 mod implementation {
     include!("implementation.rs");
 }
+pub use component::*;
 pub use implementation::*;
 
 mod service {
@@ -23,6 +25,7 @@ mod service {
             execution: PluginExecution::Embedded,
             dependencies: Vec::new(),
             services: vec![ServiceContribution {
+                role: phenix_core::ServiceRole::Terminal,
                 service: repository_work_queue_service(),
                 priority: 100,
                 required_authority: Authority::default(),

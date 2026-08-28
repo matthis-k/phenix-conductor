@@ -1,5 +1,6 @@
 use crate::{PluginId, ResourceNamespace};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     error::Error,
@@ -46,7 +47,7 @@ impl DurableSchema {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum TransactionOp {
     Put {
         key: String,
@@ -61,7 +62,7 @@ pub enum TransactionOp {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NamespaceTransaction {
     pub owner: PluginId,
     pub namespace: ResourceNamespace,

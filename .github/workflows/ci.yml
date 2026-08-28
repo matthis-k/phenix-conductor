@@ -244,6 +244,9 @@ jobs:
       - name: "Phenix ACP smoke"
         run: nix run .#phenix-maintenance-command-f2591028a001 -- test product phenix-acp
 
+      - name: "Plugin packaging"
+        run: nix run .#phenix-maintenance-command-ae31e29afa95 -- test product plugin-packaging
+
       - name: "Stitch runtime smoke"
         run: nix run .#phenix-maintenance-command-5ee69eb72dfd -- test product stitch-runtime
 

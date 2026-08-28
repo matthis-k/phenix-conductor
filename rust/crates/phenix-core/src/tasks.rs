@@ -1,4 +1,4 @@
-use crate::{Authority, EventBus, KernelEvent};
+use crate::{Authority, EventBus, GraphGenerationId, KernelEvent};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -12,6 +12,7 @@ use std::{
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
     authority: Authority,
+    graph_generation: GraphGenerationId,
 }
 
 impl CancellationToken {
@@ -22,10 +23,15 @@ impl CancellationToken {
     pub fn authority(&self) -> &Authority {
         &self.authority
     }
+
+    pub fn graph_generation(&self) -> &GraphGenerationId {
+        &self.graph_generation
+    }
 }
 
 pub struct TaskHandle<T> {
     id: u64,
+    graph_generation: GraphGenerationId,
     cancelled: Arc<AtomicBool>,
     receiver: Receiver<T>,
     join: JoinHandle<()>,
@@ -35,6 +41,10 @@ pub struct TaskHandle<T> {
 impl<T> TaskHandle<T> {
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    pub fn graph_generation(&self) -> &GraphGenerationId {
+        &self.graph_generation
     }
 
     pub fn cancel(&self) {
@@ -74,6 +84,7 @@ impl TaskRuntime {
 
     pub fn spawn<T, F>(
         &self,
+        graph_generation: &GraphGenerationId,
         parent_authority: &Authority,
         requested_authority: &Authority,
         worker: F,
@@ -87,6 +98,7 @@ impl TaskRuntime {
         let token = CancellationToken {
             cancelled: Arc::clone(&cancelled),
             authority: parent_authority.attenuate(requested_authority),
+            graph_generation: graph_generation.clone(),
         };
         let (sender, receiver) = mpsc::sync_channel(1);
         let join = thread::spawn(move || {
@@ -96,6 +108,7 @@ impl TaskRuntime {
 
         TaskHandle {
             id,
+            graph_generation: graph_generation.clone(),
             cancelled,
             receiver,
             join,
@@ -107,11 +120,29 @@ impl TaskRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CapabilityId;
+    use crate::{
+        CapabilityId, ComponentManifest, ConfigContribution, PluginManifest, ResolvedHarness,
+    };
     use std::thread;
 
     fn capability(value: &str) -> CapabilityId {
         CapabilityId::parse(value).unwrap()
+    }
+
+    fn generation_with_authority(authority: &Authority) -> GraphGenerationId {
+        ResolvedHarness::resolve(
+            Vec::<PluginManifest>::new(),
+            Vec::<ComponentManifest>::new(),
+            Vec::<ConfigContribution>::new(),
+            authority,
+        )
+        .unwrap()
+        .generation()
+        .clone()
+    }
+
+    fn generation() -> GraphGenerationId {
+        generation_with_authority(&Authority::default())
     }
 
     #[test]
@@ -121,7 +152,7 @@ mod tests {
         let event_receiver = events.subscribe();
         let authority = Authority::default();
 
-        let handle = runtime.spawn(&authority, &authority, |token| {
+        let handle = runtime.spawn(&generation(), &authority, &authority, |token| {
             while !token.is_cancelled() {
                 thread::yield_now();
             }
@@ -145,7 +176,7 @@ mod tests {
         let parent = Authority::new([read.clone()]);
         let requested = Authority::new([read.clone(), write.clone()]);
 
-        let handle = runtime.spawn(&parent, &requested, move |token| {
+        let handle = runtime.spawn(&generation(), &parent, &requested, move |token| {
             (
                 token.authority().permits(&read),
                 token.authority().permits(&write),
@@ -153,5 +184,24 @@ mod tests {
         });
 
         assert_eq!(handle.join().unwrap(), (true, false));
+    }
+
+    #[test]
+    fn task_and_worker_remain_pinned_to_starting_graph_generation() {
+        let runtime = TaskRuntime::default();
+        let authority = Authority::default();
+        let starting_generation = generation();
+        let expected_worker_generation = starting_generation.clone();
+
+        let handle = runtime.spawn(&starting_generation, &authority, &authority, move |token| {
+            token.graph_generation().clone()
+        });
+        let replacement_generation =
+            generation_with_authority(&Authority::new([capability("generation.replacement")]));
+
+        assert_ne!(replacement_generation, starting_generation);
+        assert_ne!(handle.graph_generation(), &replacement_generation);
+        assert_eq!(handle.graph_generation(), &starting_generation);
+        assert_eq!(handle.join().unwrap(), expected_worker_generation);
     }
 }

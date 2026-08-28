@@ -2,6 +2,7 @@ use phenix_core::{
     Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
 };
+pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,20 +35,6 @@ pub struct RoutingProfile {
 pub struct RoutingProfileDescriptor {
     pub id: String,
     pub providers: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ModelInferenceRequest {
-    pub model: String,
-    pub input: Vec<u8>,
-    #[serde(default)]
-    pub options: BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ModelInferenceResponse {
-    pub output: Vec<u8>,
-    pub provider_metadata: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -116,6 +103,7 @@ pub fn model_routing_manifest(maximum_authority: Authority) -> PluginManifest {
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
+            role: phenix_core::ServiceRole::Terminal,
             service: model_routing_service(),
             priority: 100,
             required_authority: Authority::default(),
@@ -229,7 +217,7 @@ impl PluginInstance for ModelRoutingPlugin {
                     options: target.options.clone(),
                 };
                 let output = host
-                    .invoke_service(
+                    .invoke_service_abi(
                         &model_inference_service(),
                         &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
                         host.authority(),
