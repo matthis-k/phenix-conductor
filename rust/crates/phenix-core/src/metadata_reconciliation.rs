@@ -153,6 +153,12 @@ pub enum MetadataReconciliationError {
     MigrationRequired {
         component: ComponentId,
     },
+    ResourceDrainRequired {
+        resource: String,
+    },
+    ResourceMigrationRequired {
+        resource: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -239,6 +245,18 @@ impl GraphReconciler {
         }
 
         for change in &metadata.resources {
+            if matches!(
+                change.kind,
+                MetadataChangeKind::Reconfigured | MetadataChangeKind::Upgraded
+            ) && resource_survives(active_metadata, candidate_metadata, &change.resource)
+            {
+                apply_resource_reload_policy(
+                    active_metadata,
+                    candidate_metadata,
+                    &change.resource,
+                )?;
+            }
+
             let targets = resource_invalidation_targets(
                 active_metadata,
                 candidate_metadata,
@@ -314,6 +332,35 @@ fn apply_package_reload_policy(
     apply_reload_policies(component, policies, restart)
 }
 
+fn apply_resource_reload_policy(
+    previous: &ResolvedCompositionMetadata,
+    next: &ResolvedCompositionMetadata,
+    resource: &str,
+) -> Result<(), MetadataReconciliationError> {
+    for policy in previous
+        .resources()
+        .iter()
+        .chain(next.resources().iter())
+        .filter(|metadata| metadata.identity == resource)
+        .map(|metadata| metadata.reload_policy)
+    {
+        match policy {
+            ReloadPolicy::Retain | ReloadPolicy::Restart => {}
+            ReloadPolicy::DrainAndRestart => {
+                return Err(MetadataReconciliationError::ResourceDrainRequired {
+                    resource: resource.to_owned(),
+                });
+            }
+            ReloadPolicy::MigrationRequired => {
+                return Err(MetadataReconciliationError::ResourceMigrationRequired {
+                    resource: resource.to_owned(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn apply_reload_policies(
     component: &ComponentId,
     policies: impl IntoIterator<Item = ReloadPolicy>,
@@ -377,6 +424,21 @@ fn component_survives(
         .iter()
         .any(|value| &value.id == component)
         && next.components().iter().any(|value| &value.id == component)
+}
+
+fn resource_survives(
+    previous: &ResolvedCompositionMetadata,
+    next: &ResolvedCompositionMetadata,
+    resource: &str,
+) -> bool {
+    previous
+        .resources()
+        .iter()
+        .any(|metadata| metadata.identity == resource)
+        && next
+            .resources()
+            .iter()
+            .any(|metadata| metadata.identity == resource)
 }
 
 fn components_owned_by_package(
