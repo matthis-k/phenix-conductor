@@ -240,6 +240,8 @@ mod tests {
 
     #[test]
     fn empty_composition_has_no_sdk_namespaces() {
-        assert!(ResolvedSdkContributions::resolve(&[], &[], []).unwrap().is_empty());
+        assert!(ResolvedSdkContributions::resolve(&[], &[], [])
+            .unwrap()
+            .is_empty());
     }
 }
