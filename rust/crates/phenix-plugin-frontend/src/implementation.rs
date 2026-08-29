@@ -2,8 +2,8 @@ use crate::{
     frontend_component_id, ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
 };
 use phenix_core::{
-    Authority, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ServiceContribution, ServiceId,
+    Authority, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, SdkClient, ServiceContribution, ServiceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -125,16 +125,45 @@ struct PendingCall {
 }
 
 #[derive(Default)]
-struct FrontendPlugin {
+struct FrontendState {
     providers: BTreeMap<String, BTreeMap<String, FrontendProviderDescriptor>>,
     root_routes: BTreeMap<String, String>,
     pending: BTreeMap<u64, PendingCall>,
     next_correlation_id: u64,
 }
 
+struct FrontendSdk<'host, 'runtime> {
+    execution: SdkClient<'host, 'runtime, ExecutionInterface>,
+}
+
+type FrontendContext<'host, 'runtime, 'state> =
+    PluginContext<'host, 'runtime, FrontendSdk<'host, 'runtime>, (), &'state mut FrontendState>;
+
+fn context<'host, 'runtime, 'state>(
+    host: &'host PluginHost<'runtime>,
+    state: &'state mut FrontendState,
+) -> FrontendContext<'host, 'runtime, 'state> {
+    PluginContext::new(
+        host,
+        FrontendSdk {
+            execution: SdkClient::new(host, frontend_component_id()),
+        },
+        (),
+        state,
+    )
+}
+
+#[derive(Default)]
+struct FrontendPlugin {
+    state: FrontendState,
+}
+
 impl PluginInstance for FrontendPlugin {
-    fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
-        self.next_correlation_id = 1;
+    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
+        context(host, &mut self.state)
+            .plugin
+            .state
+            .next_correlation_id = 1;
         Ok(())
     }
 
@@ -147,175 +176,206 @@ impl PluginInstance for FrontendPlugin {
         if service != &frontend_service() {
             return Err(format!("unsupported frontend service: {service}"));
         }
-        let command: FrontendCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            FrontendCommand::SetProviders {
-                connection_id,
-                providers,
-            } => {
-                validate_id("frontend connection id", &connection_id)?;
-                let mut indexed = BTreeMap::new();
-                for provider in providers {
-                    validate_provider(&provider)?;
-                    if indexed.insert(provider.id.clone(), provider).is_some() {
-                        return Err("duplicate frontend provider id in advertisement".into());
-                    }
-                }
-                self.providers.insert(connection_id, indexed);
-                FrontendResponse::Updated
-            }
-            FrontendCommand::Disconnect { connection_id } => {
-                self.providers.remove(&connection_id);
-                self.root_routes.retain(|_, owner| owner != &connection_id);
-                self.pending
-                    .retain(|_, call| call.connection_id != connection_id);
-                FrontendResponse::Updated
-            }
-            FrontendCommand::Catalog => FrontendResponse::Providers {
-                providers: self.catalog(),
-            },
-            FrontendCommand::BindRoot {
-                execution_id,
-                connection_id,
-            } => {
-                validate_id("execution id", &execution_id)?;
-                if !self.providers.contains_key(&connection_id) {
-                    return Err(format!("unknown frontend connection: {connection_id}"));
-                }
-                let execution = execution_lookup(host, &execution_id)?
-                    .ok_or_else(|| format!("unknown execution: {execution_id}"))?;
-                if execution.parent_execution.is_some() {
-                    return Err("only root executions may be bound to a frontend connection".into());
-                }
-                if !matches!(execution.state, ExecutionState::Active) {
-                    return Err("only active root executions may be bound".into());
-                }
-                if self
-                    .root_routes
-                    .insert(execution_id.clone(), connection_id)
-                    .is_some()
-                {
-                    return Err(format!(
-                        "root execution already has a frontend route: {execution_id}"
-                    ));
-                }
-                FrontendResponse::Updated
-            }
-            FrontendCommand::ReleaseRoot { execution_id } => {
-                self.root_routes.remove(&execution_id);
-                FrontendResponse::Updated
-            }
-            FrontendCommand::BeginExecutionCall {
-                execution_id,
-                provider,
-                method,
-                params,
-            } => {
-                let root = execution_root(host, &execution_id)?;
-                let connection_id = self.root_routes.get(&root).cloned().ok_or_else(|| {
-                    format!("execution has no live frontend root route: {execution_id}")
-                })?;
-                self.begin_call(connection_id, provider, method, params)?
-            }
-            FrontendCommand::BeginDirectCall {
-                connection_id,
-                provider,
-                method,
-                params,
-            } => self.begin_call(connection_id, provider, method, params)?,
-            FrontendCommand::CompleteCall {
-                connection_id,
-                correlation_id,
-                result,
-            } => {
-                let pending = self
-                    .pending
-                    .remove(&correlation_id)
-                    .ok_or_else(|| format!("unknown frontend correlation id: {correlation_id}"))?;
-                if pending.connection_id != connection_id {
-                    self.pending.insert(correlation_id, pending);
-                    return Err("frontend response came from the wrong connection".into());
-                }
-                FrontendResponse::Result {
-                    result: FrontendServiceResult {
-                        correlation_id,
-                        result,
-                    },
-                }
-            }
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&mut context(host, &mut self.state), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-impl FrontendPlugin {
-    fn catalog(&self) -> Vec<LiveFrontendProvider> {
-        let mut result = Vec::new();
-        for (connection_id, providers) in &self.providers {
-            for descriptor in providers.values() {
-                result.push(LiveFrontendProvider {
-                    connection_id: connection_id.clone(),
-                    descriptor: descriptor.clone(),
-                });
+fn handle(
+    context: &mut FrontendContext<'_, '_, '_>,
+    command: FrontendCommand,
+) -> Result<FrontendResponse, String> {
+    match command {
+        FrontendCommand::SetProviders {
+            connection_id,
+            providers,
+        } => {
+            validate_id("frontend connection id", &connection_id)?;
+            let mut indexed = BTreeMap::new();
+            for provider in providers {
+                validate_provider(&provider)?;
+                if indexed.insert(provider.id.clone(), provider).is_some() {
+                    return Err("duplicate frontend provider id in advertisement".into());
+                }
             }
+            context
+                .plugin
+                .state
+                .providers
+                .insert(connection_id, indexed);
+            Ok(FrontendResponse::Updated)
         }
-        result
-    }
-
-    fn begin_call(
-        &mut self,
-        connection_id: String,
-        provider: String,
-        method: String,
-        params: serde_json::Value,
-    ) -> Result<FrontendResponse, String> {
-        validate_id("frontend connection id", &connection_id)?;
-        validate_id("frontend provider id", &provider)?;
-        validate_id("frontend method", &method)?;
-        if !self
-            .providers
-            .get(&connection_id)
-            .is_some_and(|providers| providers.contains_key(&provider))
-        {
-            return Err(format!(
-                "frontend connection {connection_id} does not advertise provider {provider}"
-            ));
+        FrontendCommand::Disconnect { connection_id } => {
+            let state = &mut context.plugin.state;
+            state.providers.remove(&connection_id);
+            state.root_routes.retain(|_, owner| owner != &connection_id);
+            state
+                .pending
+                .retain(|_, call| call.connection_id != connection_id);
+            Ok(FrontendResponse::Updated)
         }
-        let correlation_id = self.next_correlation_id;
-        self.next_correlation_id = self
-            .next_correlation_id
-            .checked_add(1)
-            .ok_or_else(|| "frontend correlation id exhausted".to_owned())?;
-        self.pending.insert(
-            correlation_id,
-            PendingCall {
-                connection_id: connection_id.clone(),
-            },
-        );
-        Ok(FrontendResponse::Request {
-            request: FrontendServiceRequest {
-                correlation_id,
+        FrontendCommand::Catalog => Ok(FrontendResponse::Providers {
+            providers: catalog(context.plugin.state),
+        }),
+        FrontendCommand::BindRoot {
+            execution_id,
+            connection_id,
+        } => {
+            validate_id("execution id", &execution_id)?;
+            if !context.plugin.state.providers.contains_key(&connection_id) {
+                return Err(format!("unknown frontend connection: {connection_id}"));
+            }
+            let execution = execution_lookup(context, &execution_id)?
+                .ok_or_else(|| format!("unknown execution: {execution_id}"))?;
+            if execution.parent_execution.is_some() {
+                return Err("only root executions may be bound to a frontend connection".into());
+            }
+            if !matches!(execution.state, ExecutionState::Active) {
+                return Err("only active root executions may be bound".into());
+            }
+            if context
+                .plugin
+                .state
+                .root_routes
+                .insert(execution_id.clone(), connection_id)
+                .is_some()
+            {
+                return Err(format!(
+                    "root execution already has a frontend route: {execution_id}"
+                ));
+            }
+            Ok(FrontendResponse::Updated)
+        }
+        FrontendCommand::ReleaseRoot { execution_id } => {
+            context.plugin.state.root_routes.remove(&execution_id);
+            Ok(FrontendResponse::Updated)
+        }
+        FrontendCommand::BeginExecutionCall {
+            execution_id,
+            provider,
+            method,
+            params,
+        } => {
+            let root = execution_root(context, &execution_id)?;
+            let connection_id = context
+                .plugin
+                .state
+                .root_routes
+                .get(&root)
+                .cloned()
+                .ok_or_else(|| {
+                    format!("execution has no live frontend root route: {execution_id}")
+                })?;
+            begin_call(
+                context.plugin.state,
                 connection_id,
                 provider,
                 method,
                 params,
-            },
-        })
+            )
+        }
+        FrontendCommand::BeginDirectCall {
+            connection_id,
+            provider,
+            method,
+            params,
+        } => begin_call(
+            context.plugin.state,
+            connection_id,
+            provider,
+            method,
+            params,
+        ),
+        FrontendCommand::CompleteCall {
+            connection_id,
+            correlation_id,
+            result,
+        } => {
+            let pending = context
+                .plugin
+                .state
+                .pending
+                .remove(&correlation_id)
+                .ok_or_else(|| format!("unknown frontend correlation id: {correlation_id}"))?;
+            if pending.connection_id != connection_id {
+                context.plugin.state.pending.insert(correlation_id, pending);
+                return Err("frontend response came from the wrong connection".into());
+            }
+            Ok(FrontendResponse::Result {
+                result: FrontendServiceResult {
+                    correlation_id,
+                    result,
+                },
+            })
+        }
     }
 }
 
+fn catalog(state: &FrontendState) -> Vec<LiveFrontendProvider> {
+    let mut result = Vec::new();
+    for (connection_id, providers) in &state.providers {
+        for descriptor in providers.values() {
+            result.push(LiveFrontendProvider {
+                connection_id: connection_id.clone(),
+                descriptor: descriptor.clone(),
+            });
+        }
+    }
+    result
+}
+
+fn begin_call(
+    state: &mut FrontendState,
+    connection_id: String,
+    provider: String,
+    method: String,
+    params: serde_json::Value,
+) -> Result<FrontendResponse, String> {
+    validate_id("frontend connection id", &connection_id)?;
+    validate_id("frontend provider id", &provider)?;
+    validate_id("frontend method", &method)?;
+    if !state
+        .providers
+        .get(&connection_id)
+        .is_some_and(|providers| providers.contains_key(&provider))
+    {
+        return Err(format!(
+            "frontend connection {connection_id} does not advertise provider {provider}"
+        ));
+    }
+    let correlation_id = state.next_correlation_id;
+    state.next_correlation_id = state
+        .next_correlation_id
+        .checked_add(1)
+        .ok_or_else(|| "frontend correlation id exhausted".to_owned())?;
+    state.pending.insert(
+        correlation_id,
+        PendingCall {
+            connection_id: connection_id.clone(),
+        },
+    );
+    Ok(FrontendResponse::Request {
+        request: FrontendServiceRequest {
+            correlation_id,
+            connection_id,
+            provider,
+            method,
+            params,
+        },
+    })
+}
+
 fn execution_lookup(
-    host: &PluginHost<'_>,
+    context: &FrontendContext<'_, '_, '_>,
     execution_id: &str,
 ) -> Result<Option<crate::ExecutionRecord>, String> {
-    let response = host
-        .invoke_import::<ExecutionInterface>(
-            &frontend_component_id(),
-            &ExecutionCommand::GetExecution {
-                id: execution_id.to_owned(),
-            },
-        )
+    let response = context
+        .sdk
+        .execution
+        .invoke(&ExecutionCommand::GetExecution {
+            id: execution_id.to_owned(),
+        })
         .map_err(|error| error.to_string())?;
     match response {
         ExecutionResponse::ExecutionLookup { execution } => Ok(execution),
@@ -323,14 +383,17 @@ fn execution_lookup(
     }
 }
 
-fn execution_root(host: &PluginHost<'_>, execution_id: &str) -> Result<String, String> {
+fn execution_root(
+    context: &FrontendContext<'_, '_, '_>,
+    execution_id: &str,
+) -> Result<String, String> {
     let mut current = execution_id.to_owned();
     let mut visited = BTreeSet::new();
     loop {
         if !visited.insert(current.clone()) {
             return Err("execution parent cycle while resolving frontend route".into());
         }
-        let execution = execution_lookup(host, &current)?
+        let execution = execution_lookup(context, &current)?
             .ok_or_else(|| format!("unknown execution: {current}"))?;
         match execution.parent_execution {
             Some(parent) => current = parent,

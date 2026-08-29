@@ -1,9 +1,9 @@
 use phenix_core::{
     context_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
     ComponentManifest, ContextCommand, ContextDescriptor, ContextResourceRevision, ContextResponse,
-    DurableSchema, InterfaceId, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, ServiceRole, TransactionOp,
-    CONTEXT_SERVICE,
+    DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, ServiceRole,
+    TransactionOp, CONTEXT_SERVICE,
 };
 use sha2::{Digest, Sha256};
 
@@ -11,6 +11,14 @@ pub const BASIC_CONTEXT_PLUGIN: &str = "phenix.basic-context";
 pub const BASIC_CONTEXT_COMPONENT: &str = "phenix.basic-context";
 const BASIC_CONTEXT_NAMESPACE: &str = "phenix.basic-context.state";
 const INDEX_KEY: &str = "context/@all";
+
+type BasicContextContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(
+    host: &'host PluginHost<'runtime>,
+) -> BasicContextContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 pub struct BasicContextInterface;
 
@@ -65,7 +73,9 @@ struct BasicContext;
 
 impl PluginInstance for BasicContext {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -78,98 +88,111 @@ impl PluginInstance for BasicContext {
         if service != &context_service() {
             return Err(format!("unsupported basic context service: {service}"));
         }
-        let command: ContextCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            ContextCommand::Register {
-                resource_id,
-                kind,
-                source,
-                scope,
-                content,
-            } => {
-                if resource_id.trim().is_empty() {
-                    return Err("context resource id must not be empty".into());
-                }
-                let content_identity = content_identity(&content);
-                let revision = content_identity.clone();
-                let resource = ContextResourceRevision {
-                    descriptor: ContextDescriptor {
-                        resource_id: resource_id.clone(),
-                        revision: revision.clone(),
-                        kind,
-                        source,
-                        scope,
-                        content_identity,
-                        estimated_bytes: content.len(),
-                    },
-                    content,
-                };
-                write_resource(host, &resource)?;
-                ContextResponse::Registered { resource }
-            }
-            ContextCommand::Get {
-                resource_id,
-                revision,
-            } => ContextResponse::Resource {
-                resource: read_resource(host, &resource_id, &revision)?,
-            },
-            ContextCommand::List => ContextResponse::Resources {
-                descriptors: read_index(host)?
-                    .into_iter()
-                    .map(|(id, revision)| {
-                        read_resource(host, &id, &revision)?
-                            .map(|resource| resource.descriptor)
-                            .ok_or_else(|| {
-                                format!("missing durable context revision: {id}@{revision}")
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-fn write_resource(host: &PluginHost<'_>, resource: &ContextResourceRevision) -> Result<(), String> {
+fn handle(
+    context: &BasicContextContext<'_, '_>,
+    command: ContextCommand,
+) -> Result<ContextResponse, String> {
+    match command {
+        ContextCommand::Register {
+            resource_id,
+            kind,
+            source,
+            scope,
+            content,
+        } => {
+            if resource_id.trim().is_empty() {
+                return Err("context resource id must not be empty".into());
+            }
+            let content_identity = content_identity(&content);
+            let revision = content_identity.clone();
+            let resource = ContextResourceRevision {
+                descriptor: ContextDescriptor {
+                    resource_id: resource_id.clone(),
+                    revision: revision.clone(),
+                    kind,
+                    source,
+                    scope,
+                    content_identity,
+                    estimated_bytes: content.len(),
+                },
+                content,
+            };
+            write_resource(context, &resource)?;
+            Ok(ContextResponse::Registered { resource })
+        }
+        ContextCommand::Get {
+            resource_id,
+            revision,
+        } => Ok(ContextResponse::Resource {
+            resource: read_resource(context, &resource_id, &revision)?,
+        }),
+        ContextCommand::List => Ok(ContextResponse::Resources {
+            descriptors: read_index(context)?
+                .into_iter()
+                .map(|(id, revision)| {
+                    read_resource(context, &id, &revision)?
+                        .map(|resource| resource.descriptor)
+                        .ok_or_else(|| format!("missing durable context revision: {id}@{revision}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        }),
+    }
+}
+
+fn write_resource(
+    context: &BasicContextContext<'_, '_>,
+    resource: &ContextResourceRevision,
+) -> Result<(), String> {
     let identity = (
         resource.descriptor.resource_id.clone(),
         resource.descriptor.revision.clone(),
     );
-    let mut index = read_index(host)?;
+    let mut index = read_index(context)?;
     if !index.contains(&identity) {
         index.push(identity.clone());
         index.sort();
     }
-    host.transact_durable(
-        &namespace(),
-        &[
-            TransactionOp::Put {
-                key: resource_key(&identity.0, &identity.1),
-                value: serde_json::to_vec(resource).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: INDEX_KEY.into(),
-                value: serde_json::to_vec(&index).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &namespace(),
+            &[
+                TransactionOp::Put {
+                    key: resource_key(&identity.0, &identity.1),
+                    value: serde_json::to_vec(resource).map_err(|error| error.to_string())?,
+                },
+                TransactionOp::Put {
+                    key: INDEX_KEY.into(),
+                    value: serde_json::to_vec(&index).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn read_resource(
-    host: &PluginHost<'_>,
+    context: &BasicContextContext<'_, '_>,
     id: &str,
     revision: &str,
 ) -> Result<Option<ContextResourceRevision>, String> {
-    host.read_durable(&namespace(), &resource_key(id, revision))
+    context
+        .kernel
+        .read_durable(&namespace(), &resource_key(id, revision))
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn read_index(host: &PluginHost<'_>) -> Result<Vec<(String, String)>, String> {
-    host.read_durable(&namespace(), INDEX_KEY)
+fn read_index(context: &BasicContextContext<'_, '_>) -> Result<Vec<(String, String)>, String> {
+    context
+        .kernel
+        .read_durable(&namespace(), INDEX_KEY)
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .unwrap_or_else(|| Ok(Vec::new()))

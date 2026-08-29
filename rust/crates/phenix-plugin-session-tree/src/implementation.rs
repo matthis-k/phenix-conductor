@@ -1,8 +1,9 @@
 use crate::session_tree_component_id;
 use phenix_core::{
     session_service, Authority, CapabilityId, DurableSchema, LayerResult, NamespaceTransaction,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
-    ServiceContribution, ServiceId, SessionCommand, SessionRecord, SessionResponse, TransactionOp,
+    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionCommand, SessionRecord,
+    SessionResponse, TransactionOp,
 };
 use phenix_plugin_sessions::{
     SessionInterface, SessionMutationCommand, SessionMutationInterface, SessionMutationResponse,
@@ -108,11 +109,36 @@ fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).expect("static capability is valid")
 }
 
+struct SessionTreeSdk<'host, 'runtime> {
+    sessions: SdkClient<'host, 'runtime, SessionInterface>,
+    mutations: SdkClient<'host, 'runtime, SessionMutationInterface>,
+}
+
+type SessionTreeContext<'host, 'runtime> =
+    PluginContext<'host, 'runtime, SessionTreeSdk<'host, 'runtime>>;
+
+fn context<'host, 'runtime>(
+    host: &'host PluginHost<'runtime>,
+) -> SessionTreeContext<'host, 'runtime> {
+    let component = session_tree_component_id();
+    PluginContext::new(
+        host,
+        SessionTreeSdk {
+            sessions: SdkClient::new(host, component.clone()),
+            mutations: SdkClient::new(host, component),
+        },
+        (),
+        (),
+    )
+}
+
 struct SessionTreePlugin;
 
 impl PluginInstance for SessionTreePlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(session_tree_namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(session_tree_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -125,7 +151,10 @@ impl PluginInstance for SessionTreePlugin {
         if service != &session_service() {
             return Err(format!("unsupported session-tree layer service: {service}"));
         }
-        host.continue_service(input, host.authority())
+        let context = context(host);
+        context
+            .kernel
+            .continue_service(input, context.call.authority)
             .map(LayerResult::Handled)
             .map_err(|error| error.to_string())
     }
@@ -139,49 +168,54 @@ impl PluginInstance for SessionTreePlugin {
         if service != &session_tree_service() {
             return Err(format!("unsupported session-tree service: {service}"));
         }
-        let command: SessionTreeCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            SessionTreeCommand::CreateChild {
-                session_id,
-                parent_session_id,
-            } => create_child(host, session_id, parent_session_id)?,
-            SessionTreeCommand::Link {
-                session_id,
-                parent_session_id,
-            } => link(host, session_id, parent_session_id)?,
-            SessionTreeCommand::Parent { session_id } => SessionTreeResponse::Parent {
-                parent_session_id: read_lineage(host, &session_id)?
-                    .and_then(|lineage| lineage.parent_session_id),
-            },
-            SessionTreeCommand::Children { parent_session_id } => SessionTreeResponse::Children {
-                session_ids: read_children(host, parent_session_id.as_deref())?,
-            },
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
+fn handle(
+    context: &SessionTreeContext<'_, '_>,
+    command: SessionTreeCommand,
+) -> Result<SessionTreeResponse, String> {
+    match command {
+        SessionTreeCommand::CreateChild {
+            session_id,
+            parent_session_id,
+        } => create_child(context, session_id, parent_session_id),
+        SessionTreeCommand::Link {
+            session_id,
+            parent_session_id,
+        } => link(context, session_id, parent_session_id),
+        SessionTreeCommand::Parent { session_id } => Ok(SessionTreeResponse::Parent {
+            parent_session_id: read_lineage(context, &session_id)?
+                .and_then(|lineage| lineage.parent_session_id),
+        }),
+        SessionTreeCommand::Children { parent_session_id } => Ok(SessionTreeResponse::Children {
+            session_ids: read_children(context, parent_session_id.as_deref())?,
+        }),
+    }
+}
+
 fn create_child(
-    host: &PluginHost<'_>,
+    context: &SessionTreeContext<'_, '_>,
     session_id: String,
     parent_session_id: String,
 ) -> Result<SessionTreeResponse, String> {
     if session_id == parent_session_id {
         return Err("session cannot be its own parent".into());
     }
-    require_session(host, &parent_session_id)?;
-    if read_lineage(host, &session_id)?.is_some() {
+    require_session(context, &parent_session_id)?;
+    if read_lineage(context, &session_id)?.is_some() {
         return Err(format!("session lineage already exists: {session_id}"));
     }
 
-    let prepared = host
-        .invoke_import::<SessionMutationInterface>(
-            &session_tree_component_id(),
-            &SessionMutationCommand::PrepareCreate {
-                id: session_id.clone(),
-            },
-        )
+    let prepared = context
+        .sdk
+        .mutations
+        .invoke(&SessionMutationCommand::PrepareCreate {
+            id: session_id.clone(),
+        })
         .map_err(|error| error.to_string())?;
     let SessionMutationResponse::PreparedCreate {
         session,
@@ -193,7 +227,7 @@ fn create_child(
         parent_session_id: Some(parent_session_id.clone()),
     };
     let children_key = children_key(Some(&parent_session_id));
-    let old_children = read_raw(host, &children_key)?;
+    let old_children = read_raw(context, &children_key)?;
     let mut children = decode_ids(old_children.as_deref())?;
     children.push(session_id.clone());
     children.sort();
@@ -221,27 +255,29 @@ fn create_child(
         ],
     };
 
-    host.transact_durable_many(&[session_transaction, tree_transaction])
+    context
+        .kernel
+        .transact_durable_many(&[session_transaction, tree_transaction])
         .map_err(|error| error.to_string())?;
     Ok(SessionTreeResponse::ChildCreated { session, lineage })
 }
 
 fn link(
-    host: &PluginHost<'_>,
+    context: &SessionTreeContext<'_, '_>,
     session_id: String,
     parent_session_id: Option<String>,
 ) -> Result<SessionTreeResponse, String> {
-    require_session(host, &session_id)?;
+    require_session(context, &session_id)?;
     if let Some(parent) = parent_session_id.as_deref() {
         if parent == session_id {
             return Err("session cannot be its own parent".into());
         }
-        require_session(host, parent)?;
-        if would_cycle(host, &session_id, parent)? {
+        require_session(context, parent)?;
+        if would_cycle(context, &session_id, parent)? {
             return Err("session lineage would contain a cycle".into());
         }
     }
-    if read_lineage(host, &session_id)?.is_some() {
+    if read_lineage(context, &session_id)?.is_some() {
         return Err(format!("session lineage already exists: {session_id}"));
     }
 
@@ -250,44 +286,48 @@ fn link(
         parent_session_id: parent_session_id.clone(),
     };
     let children_key = children_key(parent_session_id.as_deref());
-    let old_children = read_raw(host, &children_key)?;
+    let old_children = read_raw(context, &children_key)?;
     let mut children = decode_ids(old_children.as_deref())?;
     children.push(session_id.clone());
     children.sort();
     children.dedup();
 
-    host.transact_durable(
-        &session_tree_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: lineage_key(&session_id),
-                expected: None,
-            },
-            TransactionOp::AssertValue {
-                key: children_key.clone(),
-                expected: old_children,
-            },
-            TransactionOp::Put {
-                key: lineage_key(&session_id),
-                value: serde_json::to_vec(&lineage).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: children_key,
-                value: serde_json::to_vec(&children).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+    context
+        .kernel
+        .transact_durable(
+            &session_tree_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: lineage_key(&session_id),
+                    expected: None,
+                },
+                TransactionOp::AssertValue {
+                    key: children_key.clone(),
+                    expected: old_children,
+                },
+                TransactionOp::Put {
+                    key: lineage_key(&session_id),
+                    value: serde_json::to_vec(&lineage).map_err(|error| error.to_string())?,
+                },
+                TransactionOp::Put {
+                    key: children_key,
+                    value: serde_json::to_vec(&children).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
 
     Ok(SessionTreeResponse::Lineage { lineage })
 }
 
-fn require_session(host: &PluginHost<'_>, id: &str) -> Result<SessionRecord, String> {
-    let response = host
-        .invoke_import::<SessionInterface>(
-            &session_tree_component_id(),
-            &SessionCommand::Get { id: id.into() },
-        )
+fn require_session(
+    context: &SessionTreeContext<'_, '_>,
+    id: &str,
+) -> Result<SessionRecord, String> {
+    let response = context
+        .sdk
+        .sessions
+        .invoke(&SessionCommand::Get { id: id.into() })
         .map_err(|error| error.to_string())?;
     match response {
         SessionResponse::Session {
@@ -300,29 +340,41 @@ fn require_session(host: &PluginHost<'_>, id: &str) -> Result<SessionRecord, Str
     }
 }
 
-fn would_cycle(host: &PluginHost<'_>, child: &str, parent: &str) -> Result<bool, String> {
+fn would_cycle(
+    context: &SessionTreeContext<'_, '_>,
+    child: &str,
+    parent: &str,
+) -> Result<bool, String> {
     let mut cursor = Some(parent.to_owned());
     while let Some(id) = cursor {
         if id == child {
             return Ok(true);
         }
-        cursor = read_lineage(host, &id)?.and_then(|lineage| lineage.parent_session_id);
+        cursor = read_lineage(context, &id)?.and_then(|lineage| lineage.parent_session_id);
     }
     Ok(false)
 }
 
-fn read_lineage(host: &PluginHost<'_>, id: &str) -> Result<Option<SessionLineage>, String> {
-    read_raw(host, &lineage_key(id))?
+fn read_lineage(
+    context: &SessionTreeContext<'_, '_>,
+    id: &str,
+) -> Result<Option<SessionLineage>, String> {
+    read_raw(context, &lineage_key(id))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn read_children(host: &PluginHost<'_>, parent: Option<&str>) -> Result<Vec<String>, String> {
-    decode_ids(read_raw(host, &children_key(parent))?.as_deref())
+fn read_children(
+    context: &SessionTreeContext<'_, '_>,
+    parent: Option<&str>,
+) -> Result<Vec<String>, String> {
+    decode_ids(read_raw(context, &children_key(parent))?.as_deref())
 }
 
-fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
-    host.read_durable(&session_tree_namespace(), key)
+fn read_raw(context: &SessionTreeContext<'_, '_>, key: &str) -> Result<Option<Vec<u8>>, String> {
+    context
+        .kernel
+        .read_durable(&session_tree_namespace(), key)
         .map_err(|error| error.to_string())
 }
 

@@ -22,6 +22,7 @@ mod metadata_input;
 mod metadata_inspection;
 mod metadata_reconciliation;
 mod persistence;
+mod plugin_context;
 mod reconciliation;
 mod reconciliation_inspection;
 mod registry;
@@ -116,6 +117,9 @@ pub use persistence::{
     BackendFeature, DurableSchema, LocalPersistence, NamespaceTransaction, PersistenceBackend,
     PersistenceError, SchemaMigration, TransactionOp,
 };
+pub use plugin_context::{
+    CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,
+};
 pub use reconciliation::{
     BindingChange, ComponentChange, ComponentChangeKind, GraphDiff, GraphReconciler,
     ReconciliationAction, ReconciliationPreview, ReconciliationResult, ResourceChange,
@@ -141,7 +145,7 @@ pub enum SourceIdentityRule {
     RequiredNonEmpty,
 }
 
-/// Rule used by a configuration frontend for source revision identity.
+/// Rule used for a configuration frontend's source revision identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceRevisionRule {
     RequiredExact,

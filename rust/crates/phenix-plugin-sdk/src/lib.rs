@@ -36,6 +36,34 @@ pub const SDK_TOOLS_SERVICE: &str = "phenix.sdk.tools@1";
 pub const SDK_SKILLS_SERVICE: &str = "phenix.sdk.skills@1";
 pub const SDK_CONFIG_SERVICE: &str = "phenix.sdk.config@1";
 
+struct SdkDependencies<'host, 'runtime> {
+    sessions: SdkClient<'host, 'runtime, SessionInterface>,
+    options: SdkClient<'host, 'runtime, OptionsInterface>,
+    execution: SdkClient<'host, 'runtime, ExecutionInterface>,
+    context: SdkClient<'host, 'runtime, ContextInterface>,
+}
+
+type SdkRuntimeContext<'host, 'runtime, 'plugin> =
+    PluginContext<'host, 'runtime, SdkDependencies<'host, 'runtime>, &'plugin Option<PathBuf>>;
+
+fn plugin_context<'host, 'runtime, 'plugin>(
+    host: &'host PluginHost<'runtime>,
+    config_root: &'plugin Option<PathBuf>,
+) -> SdkRuntimeContext<'host, 'runtime, 'plugin> {
+    let component = sdk_component_id();
+    PluginContext::new(
+        host,
+        SdkDependencies {
+            sessions: SdkClient::new(host, component.clone()),
+            options: SdkClient::new(host, component.clone()),
+            execution: SdkClient::new(host, component.clone()),
+            context: SdkClient::new(host, component),
+        },
+        config_root,
+        (),
+    )
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkSessionCommand {
@@ -349,37 +377,42 @@ impl PluginInstance for SdkPlugin {
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
+        let context = plugin_context(host, &self.config_root);
         if service == &sdk_session_service() {
-            let command: SdkSessionCommand =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            let response = match command {
-                SdkSessionCommand::Open { id, agent } => open_session(host, id, agent)?,
-            };
-            return serde_json::to_vec(&response).map_err(|error| error.to_string());
+            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            return serde_json::to_vec(&session_command(&context, command)?)
+                .map_err(|error| error.to_string());
         }
         if service == &sdk_tools_service() {
-            let command: SdkToolCommand =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            return serde_json::to_vec(&tool_command(host, command)?)
+            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            return serde_json::to_vec(&tool_command(&context, command)?)
                 .map_err(|error| error.to_string());
         }
         if service == &sdk_skills_service() {
-            let command: SdkSkillCommand =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            return serde_json::to_vec(&skill_command(host, command)?)
+            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            return serde_json::to_vec(&skill_command(&context, command)?)
                 .map_err(|error| error.to_string());
         }
         if service == &sdk_config_service() {
-            let command: SdkConfigCommand =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            let root = self
-                .config_root
+            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let root = context
+                .plugin
+                .settings
                 .as_deref()
                 .ok_or("PHENIX_CONFIG_DIR is not configured")?;
             return serde_json::to_vec(&config_command(root, command)?)
                 .map_err(|error| error.to_string());
         }
         Err(format!("unsupported SDK service: {service}"))
+    }
+}
+
+fn session_command(
+    context: &SdkRuntimeContext<'_, '_, '_>,
+    command: SdkSessionCommand,
+) -> Result<SdkSessionResponse, String> {
+    match command {
+        SdkSessionCommand::Open { id, agent } => open_session(context, id, agent),
     }
 }
 
@@ -417,19 +450,18 @@ fn config_path(root: &Path, relative: &SdkConfigPath) -> Result<PathBuf, String>
 }
 
 fn open_session(
-    host: &PluginHost<'_>,
+    context: &SdkRuntimeContext<'_, '_, '_>,
     id: String,
     agent: Option<String>,
 ) -> Result<SdkSessionResponse, String> {
     if id.trim().is_empty() {
         return Err("session id must not be empty".into());
     }
-    let context = option_context(&id, agent)?;
-    let existing = match host
-        .invoke_import::<SessionInterface>(
-            &sdk_component_id(),
-            &SessionCommand::Get { id: id.clone() },
-        )
+    let option_context = option_context(&id, agent)?;
+    let existing = match context
+        .sdk
+        .sessions
+        .invoke(&SessionCommand::Get { id: id.clone() })
         .map_err(|error| error.to_string())?
     {
         SessionResponse::Session { session } => session,
@@ -437,7 +469,7 @@ fn open_session(
     };
 
     if let Some(session) = existing {
-        if resolve_bool(host, "session.reuse_existing", &context)? {
+        if resolve_bool(context, "session.reuse_existing", &option_context)? {
             return Ok(SdkSessionResponse::Opened {
                 session,
                 created: false,
@@ -448,14 +480,16 @@ fn open_session(
         ));
     }
 
-    if !resolve_bool(host, "session.auto_create", &context)? {
+    if !resolve_bool(context, "session.auto_create", &option_context)? {
         return Err(format!(
             "session does not exist and auto-create is disabled: {id}"
         ));
     }
 
-    match host
-        .invoke_import::<SessionInterface>(&sdk_component_id(), &SessionCommand::Create { id })
+    match context
+        .sdk
+        .sessions
+        .invoke(&SessionCommand::Create { id })
         .map_err(|error| error.to_string())?
     {
         SessionResponse::Created { session } => Ok(SdkSessionResponse::Opened {
@@ -466,22 +500,24 @@ fn open_session(
     }
 }
 
-fn tool_command(host: &PluginHost<'_>, command: SdkToolCommand) -> Result<SdkToolResponse, String> {
+fn tool_command(
+    context: &SdkRuntimeContext<'_, '_, '_>,
+    command: SdkToolCommand,
+) -> Result<SdkToolResponse, String> {
     match command {
         SdkToolCommand::Register {
             id,
             service,
             required_capabilities,
         } => {
-            let response = host
-                .invoke_import::<ExecutionInterface>(
-                    &sdk_component_id(),
-                    &ExecutionCommand::RegisterCallable {
-                        id,
-                        service,
-                        required_authority: ExecutionAuthority::new(required_capabilities),
-                    },
-                )
+            let response = context
+                .sdk
+                .execution
+                .invoke(&ExecutionCommand::RegisterCallable {
+                    id,
+                    service,
+                    required_authority: ExecutionAuthority::new(required_capabilities),
+                })
                 .map_err(|error| error.to_string())?;
             let ExecutionResponse::Callable { callable } = response else {
                 return Err("unexpected execution response while registering SDK tool".into());
@@ -499,15 +535,14 @@ fn tool_command(host: &PluginHost<'_>, command: SdkToolCommand) -> Result<SdkToo
             id,
             input,
         } => {
-            let response = host
-                .invoke_import::<ExecutionInterface>(
-                    &sdk_component_id(),
-                    &ExecutionCommand::InvokeCallable {
-                        execution_id,
-                        callable_id: id,
-                        input,
-                    },
-                )
+            let response = context
+                .sdk
+                .execution
+                .invoke(&ExecutionCommand::InvokeCallable {
+                    execution_id,
+                    callable_id: id,
+                    input,
+                })
                 .map_err(|error| error.to_string())?;
             let ExecutionResponse::Invocation { output } = response else {
                 return Err("unexpected execution response while invoking SDK tool".into());
@@ -518,7 +553,7 @@ fn tool_command(host: &PluginHost<'_>, command: SdkToolCommand) -> Result<SdkToo
 }
 
 fn skill_command(
-    host: &PluginHost<'_>,
+    context: &SdkRuntimeContext<'_, '_, '_>,
     command: SdkSkillCommand,
 ) -> Result<SdkSkillResponse, String> {
     match command {
@@ -526,7 +561,7 @@ fn skill_command(
             require_non_empty("skill id", &id)?;
             let resource_id = skill_resource_id(&id);
             let response = invoke_context(
-                host,
+                context,
                 ContextCommand::Register {
                     resource_id,
                     kind: ContextResourceKind::Skill,
@@ -544,11 +579,11 @@ fn skill_command(
         }
         SdkSkillCommand::Get { id } => {
             require_non_empty("skill id", &id)?;
-            let Some(descriptor) = find_skill_descriptor(host, &id)? else {
+            let Some(descriptor) = find_skill_descriptor(context, &id)? else {
                 return Ok(SdkSkillResponse::Skill { skill: None });
             };
             let response = invoke_context(
-                host,
+                context,
                 ContextCommand::Get {
                     resource_id: descriptor.resource_id,
                     revision: descriptor.revision,
@@ -562,7 +597,7 @@ fn skill_command(
             })
         }
         SdkSkillCommand::List => {
-            let response = invoke_context(host, ContextCommand::List)?;
+            let response = invoke_context(context, ContextCommand::List)?;
             let ContextResponse::Resources { descriptors } = response else {
                 return Err("unexpected context response while listing SDK skills".into());
             };
@@ -578,18 +613,21 @@ fn skill_command(
 }
 
 fn invoke_context(
-    host: &PluginHost<'_>,
+    context: &SdkRuntimeContext<'_, '_, '_>,
     command: ContextCommand,
 ) -> Result<ContextResponse, String> {
-    host.invoke_import::<ContextInterface>(&sdk_component_id(), &command)
+    context
+        .sdk
+        .context
+        .invoke(&command)
         .map_err(|error| error.to_string())
 }
 
 fn find_skill_descriptor(
-    host: &PluginHost<'_>,
+    context: &SdkRuntimeContext<'_, '_, '_>,
     id: &str,
 ) -> Result<Option<ContextDescriptor>, String> {
-    let response = invoke_context(host, ContextCommand::List)?;
+    let response = invoke_context(context, ContextCommand::List)?;
     let ContextResponse::Resources { descriptors } = response else {
         return Err("unexpected context response while locating SDK skill".into());
     };
@@ -638,16 +676,19 @@ fn option_context(id: &str, agent: Option<String>) -> Result<OptionContext, Stri
     })
 }
 
-fn resolve_bool(host: &PluginHost<'_>, key: &str, context: &OptionContext) -> Result<bool, String> {
+fn resolve_bool(
+    context: &SdkRuntimeContext<'_, '_, '_>,
+    key: &str,
+    option_context: &OptionContext,
+) -> Result<bool, String> {
     let key = OptionKey::parse(key).expect("static SDK option key is valid");
-    let response = host
-        .invoke_import::<OptionsInterface>(
-            &sdk_component_id(),
-            &OptionCommand::Resolve {
-                key: key.clone(),
-                context: context.clone(),
-            },
-        )
+    let response = context
+        .sdk
+        .options
+        .invoke(&OptionCommand::Resolve {
+            key: key.clone(),
+            context: option_context.clone(),
+        })
         .map_err(|error| error.to_string())?;
     let OptionResponse::Value { option } = response else {
         return Err(format!("unexpected option resolution response for {key}"));

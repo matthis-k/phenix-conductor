@@ -3,8 +3,9 @@ use crate::{
     ExecutionCommand, ExecutionResponse,
 };
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use phenix_plugin_context::ContextInterface;
 use phenix_plugin_execution::ExecutionInterface;
@@ -17,6 +18,32 @@ const HOOK_NAMESPACE: &str = "phenix.hooks.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
+
+type ActiveHooks = BTreeSet<(u64, String)>;
+
+struct HookSdk<'host, 'runtime> {
+    context: SdkClient<'host, 'runtime, ContextInterface>,
+    execution: SdkClient<'host, 'runtime, ExecutionInterface>,
+}
+
+type HookContext<'host, 'runtime, 'state> =
+    PluginContext<'host, 'runtime, HookSdk<'host, 'runtime>, (), &'state mut ActiveHooks>;
+
+fn context<'host, 'runtime, 'state>(
+    host: &'host PluginHost<'runtime>,
+    active: &'state mut ActiveHooks,
+) -> HookContext<'host, 'runtime, 'state> {
+    let component = hook_component_id();
+    PluginContext::new(
+        host,
+        HookSdk {
+            context: SdkClient::new(host, component.clone()),
+            execution: SdkClient::new(host, component),
+        },
+        (),
+        active,
+    )
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -161,12 +188,14 @@ fn capability(value: &str) -> CapabilityId {
 
 #[derive(Default)]
 struct HookPlugin {
-    active: BTreeSet<(u64, String)>,
+    active: ActiveHooks,
 }
 
 impl PluginInstance for HookPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(hook_namespace(), 1))
+        context(host, &mut self.active)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(hook_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -179,69 +208,72 @@ impl PluginInstance for HookPlugin {
         if service != &hook_service() {
             return Err(format!("unsupported hook service: {service}"));
         }
-        let command: HookCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            HookCommand::RegisterConfiguration { configuration } => {
-                validate_configuration(&configuration)?;
-                insert_configuration(host, &configuration)?;
-                HookResponse::Configuration {
-                    configuration: Some(configuration),
-                }
-            }
-            HookCommand::GetConfiguration { revision } => HookResponse::Configuration {
-                configuration: read_configuration(host, &revision)?,
-            },
-            HookCommand::Trigger {
-                revision,
-                event,
-                execution_id,
-                causality_id,
-            } => HookResponse::Dispatch {
-                dispatch: self.dispatch(host, &revision, event, &execution_id, causality_id)?,
-            },
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&mut context(host, &mut self.active), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-impl HookPlugin {
-    fn dispatch(
-        &mut self,
-        host: &PluginHost<'_>,
-        revision: &str,
-        event: LifecycleEvent,
-        execution_id: &str,
-        causality_id: u64,
-    ) -> Result<HookDispatch, String> {
-        let configuration = read_configuration(host, revision)?
-            .ok_or_else(|| format!("unknown hook configuration revision: {revision}"))?;
-        let hooks = ordered_hooks(&configuration, &event)?;
-        let mut dispatch = HookDispatch {
-            executed: Vec::new(),
-            warnings: Vec::new(),
-            metadata: BTreeMap::new(),
-        };
-        for hook in hooks {
-            let causal_key = (causality_id, hook.id.clone());
-            if !self.active.insert(causal_key.clone()) {
-                let message = format!("causal hook re-entry blocked: {}", hook.id);
-                handle_failure(hook, message, &mut dispatch)?;
-                continue;
-            }
-            let result = execute_action(host, hook, execution_id, &mut dispatch);
-            self.active.remove(&causal_key);
-            match result {
-                Ok(()) => dispatch.executed.push(hook.id.clone()),
-                Err(message) => handle_failure(hook, message, &mut dispatch)?,
-            }
+fn handle(
+    context: &mut HookContext<'_, '_, '_>,
+    command: HookCommand,
+) -> Result<HookResponse, String> {
+    match command {
+        HookCommand::RegisterConfiguration { configuration } => {
+            validate_configuration(&configuration)?;
+            insert_configuration(context, &configuration)?;
+            Ok(HookResponse::Configuration {
+                configuration: Some(configuration),
+            })
         }
-        Ok(dispatch)
+        HookCommand::GetConfiguration { revision } => Ok(HookResponse::Configuration {
+            configuration: read_configuration(context, &revision)?,
+        }),
+        HookCommand::Trigger {
+            revision,
+            event,
+            execution_id,
+            causality_id,
+        } => Ok(HookResponse::Dispatch {
+            dispatch: dispatch(context, &revision, event, &execution_id, causality_id)?,
+        }),
     }
 }
 
+fn dispatch(
+    context: &mut HookContext<'_, '_, '_>,
+    revision: &str,
+    event: LifecycleEvent,
+    execution_id: &str,
+    causality_id: u64,
+) -> Result<HookDispatch, String> {
+    let configuration = read_configuration(context, revision)?
+        .ok_or_else(|| format!("unknown hook configuration revision: {revision}"))?;
+    let hooks = ordered_hooks(&configuration, &event)?;
+    let mut dispatch = HookDispatch {
+        executed: Vec::new(),
+        warnings: Vec::new(),
+        metadata: BTreeMap::new(),
+    };
+    for hook in hooks {
+        let causal_key = (causality_id, hook.id.clone());
+        if !context.plugin.state.insert(causal_key.clone()) {
+            let message = format!("causal hook re-entry blocked: {}", hook.id);
+            handle_failure(hook, message, &mut dispatch)?;
+            continue;
+        }
+        let result = execute_action(context, hook, execution_id, &mut dispatch);
+        context.plugin.state.remove(&causal_key);
+        match result {
+            Ok(()) => dispatch.executed.push(hook.id.clone()),
+            Err(message) => handle_failure(hook, message, &mut dispatch)?,
+        }
+    }
+    Ok(dispatch)
+}
+
 fn execute_action(
-    host: &PluginHost<'_>,
+    context: &HookContext<'_, '_, '_>,
     hook: &HookDefinition,
     execution_id: &str,
     dispatch: &mut HookDispatch,
@@ -259,27 +291,28 @@ fn execute_action(
             resource_id,
             revision,
             reason,
-        } => {
-            let command = ContextCommand::Load {
+        } => context
+            .sdk
+            .context
+            .invoke(&ContextCommand::Load {
                 execution_id: execution_id.to_owned(),
                 resource_id: resource_id.clone(),
                 revision: revision.clone(),
                 requester: ContextInjectionRequester::Hook,
                 lifetime: ContextInjectionLifetime::Execution,
                 reason: reason.clone(),
-            };
-            host.invoke_import::<ContextInterface>(&hook_component_id(), &command)
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
+            })
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         HookAction::InvokeCallable { callable_id, input } => {
-            let command = ExecutionCommand::InvokeCallable {
-                execution_id: execution_id.to_owned(),
-                callable_id: callable_id.clone(),
-                input: input.clone(),
-            };
-            let response = host
-                .invoke_import::<ExecutionInterface>(&hook_component_id(), &command)
+            let response = context
+                .sdk
+                .execution
+                .invoke(&ExecutionCommand::InvokeCallable {
+                    execution_id: execution_id.to_owned(),
+                    callable_id: callable_id.clone(),
+                    input: input.clone(),
+                })
                 .map_err(|error| error.to_string())?;
             match response {
                 ExecutionResponse::Invocation { .. } => Ok(()),
@@ -371,32 +404,36 @@ fn ordered_hooks<'a>(
 }
 
 fn insert_configuration(
-    host: &PluginHost<'_>,
+    context: &HookContext<'_, '_, '_>,
     configuration: &HookConfiguration,
 ) -> Result<(), String> {
     let key = configuration_key(&configuration.revision);
-    host.transact_durable(
-        &hook_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: key.clone(),
-                expected: None,
-            },
-            TransactionOp::Put {
-                key,
-                value: serde_json::to_vec(configuration).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &hook_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: None,
+                },
+                TransactionOp::Put {
+                    key,
+                    value: serde_json::to_vec(configuration).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn read_configuration(
-    host: &PluginHost<'_>,
+    context: &HookContext<'_, '_, '_>,
     revision: &str,
 ) -> Result<Option<HookConfiguration>, String> {
     validate_id("hook configuration revision", revision)?;
-    host.read_durable(&hook_namespace(), &configuration_key(revision))
+    context
+        .kernel
+        .read_durable(&hook_namespace(), &configuration_key(revision))
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()

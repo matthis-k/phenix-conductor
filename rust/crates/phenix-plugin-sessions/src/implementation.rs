@@ -1,8 +1,8 @@
 use phenix_core::{
     session_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, DurableSchema, InterfaceId, NamespaceTransaction, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
-    ServiceId, TransactionOp,
+    ComponentManifest, DurableSchema, InterfaceId, NamespaceTransaction, PluginContext,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
+    ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{
     SessionCommand, SessionInput, SessionInputKind, SessionRecord, SessionResponse, SESSION_SERVICE,
@@ -17,6 +17,12 @@ const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const ALL_SESSIONS_KEY: &str = "sessions/@all";
+
+type SessionContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> SessionContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 pub struct SessionInterface;
 
@@ -130,7 +136,9 @@ struct SessionPlugin;
 
 impl PluginInstance for SessionPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(session_namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(session_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -140,63 +148,73 @@ impl PluginInstance for SessionPlugin {
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
+        let context = context(host);
         if service == &session_service() {
-            let command: SessionCommand =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            let response = match command {
-                SessionCommand::Create { id } => create_session(host, id)?,
-                SessionCommand::Get { id } => SessionResponse::Session {
-                    session: read_session(host, &id)?,
-                },
-                SessionCommand::List => SessionResponse::Sessions {
-                    sessions: read_sessions(host)?,
-                },
-                SessionCommand::Continue { id, kind, content } => {
-                    continue_session(host, &id, kind, content)?
-                }
-                SessionCommand::Inputs { id } => {
-                    if read_session(host, &id)?.is_none() {
-                        return Err(format!("unknown session: {id}"));
-                    }
-                    SessionResponse::Inputs {
-                        inputs: read_inputs(host, &id)?,
-                    }
-                }
-            };
+            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let response = handle_session(&context, command)?;
             return serde_json::to_vec(&response).map_err(|error| error.to_string());
         }
         if service == &session_mutation_service() {
-            let command: SessionMutationCommand =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            let response = match command {
-                SessionMutationCommand::PrepareCreate { id } => {
-                    let (session, transaction) = prepare_create(host, id)?;
-                    SessionMutationResponse::PreparedCreate {
-                        session,
-                        transaction,
-                    }
-                }
-            };
+            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let response = handle_mutation(&context, command)?;
             return serde_json::to_vec(&response).map_err(|error| error.to_string());
         }
         Err(format!("unsupported session service: {service}"))
     }
 }
 
+fn handle_session(
+    context: &SessionContext<'_, '_>,
+    command: SessionCommand,
+) -> Result<SessionResponse, String> {
+    match command {
+        SessionCommand::Create { id } => create_session(context, id),
+        SessionCommand::Get { id } => Ok(SessionResponse::Session {
+            session: read_session(context, &id)?,
+        }),
+        SessionCommand::List => Ok(SessionResponse::Sessions {
+            sessions: read_sessions(context)?,
+        }),
+        SessionCommand::Continue { id, kind, content } => {
+            continue_session(context, &id, kind, content)
+        }
+        SessionCommand::Inputs { id } => {
+            if read_session(context, &id)?.is_none() {
+                return Err(format!("unknown session: {id}"));
+            }
+            Ok(SessionResponse::Inputs {
+                inputs: read_inputs(context, &id)?,
+            })
+        }
+    }
+}
+
+fn handle_mutation(
+    context: &SessionContext<'_, '_>,
+    command: SessionMutationCommand,
+) -> Result<SessionMutationResponse, String> {
+    let SessionMutationCommand::PrepareCreate { id } = command;
+    let (session, transaction) = prepare_create(context, id)?;
+    Ok(SessionMutationResponse::PreparedCreate {
+        session,
+        transaction,
+    })
+}
+
 fn prepare_create(
-    host: &PluginHost<'_>,
+    context: &SessionContext<'_, '_>,
     id: String,
 ) -> Result<(SessionRecord, NamespaceTransaction), String> {
     if id.trim().is_empty() {
         return Err("session id must not be empty".into());
     }
-    if read_session(host, &id)?.is_some() {
+    if read_session(context, &id)?.is_some() {
         return Err(format!("session already exists: {id}"));
     }
 
     let session = SessionRecord { id };
     let session_key = session_key(&session.id);
-    let old_sessions = read_raw(host, ALL_SESSIONS_KEY)?;
+    let old_sessions = read_raw(context, ALL_SESSIONS_KEY)?;
     let mut sessions = decode_ids(old_sessions.as_deref())?;
     sessions.push(session.id.clone());
     sessions.sort();
@@ -226,22 +244,24 @@ fn prepare_create(
     Ok((session, transaction))
 }
 
-fn create_session(host: &PluginHost<'_>, id: String) -> Result<SessionResponse, String> {
-    let (session, transaction) = prepare_create(host, id)?;
-    host.transact_durable(&transaction.namespace, &transaction.operations)
+fn create_session(context: &SessionContext<'_, '_>, id: String) -> Result<SessionResponse, String> {
+    let (session, transaction) = prepare_create(context, id)?;
+    context
+        .kernel
+        .transact_durable(&transaction.namespace, &transaction.operations)
         .map_err(|error| error.to_string())?;
     Ok(SessionResponse::Created { session })
 }
 
 fn continue_session(
-    host: &PluginHost<'_>,
+    context: &SessionContext<'_, '_>,
     id: &str,
     kind: SessionInputKind,
     content: Vec<u8>,
 ) -> Result<SessionResponse, String> {
-    let session = read_session(host, id)?.ok_or_else(|| format!("unknown session: {id}"))?;
+    let session = read_session(context, id)?.ok_or_else(|| format!("unknown session: {id}"))?;
     let key = inputs_key(id);
-    let old_inputs = read_raw(host, &key)?;
+    let old_inputs = read_raw(context, &key)?;
     let mut inputs = decode_inputs(old_inputs.as_deref())?;
     let input = SessionInput {
         sequence: u64::try_from(inputs.len())
@@ -251,42 +271,51 @@ fn continue_session(
         content,
     };
     inputs.push(input.clone());
-    host.transact_durable(
-        &session_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: key.clone(),
-                expected: old_inputs,
-            },
-            TransactionOp::Put {
-                key,
-                value: serde_json::to_vec(&inputs).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+    context
+        .kernel
+        .transact_durable(
+            &session_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: old_inputs,
+                },
+                TransactionOp::Put {
+                    key,
+                    value: serde_json::to_vec(&inputs).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(SessionResponse::Continued { session, input })
 }
 
-fn read_session(host: &PluginHost<'_>, id: &str) -> Result<Option<SessionRecord>, String> {
-    read_raw(host, &session_key(id))?
+fn read_session(
+    context: &SessionContext<'_, '_>,
+    id: &str,
+) -> Result<Option<SessionRecord>, String> {
+    read_raw(context, &session_key(id))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn read_sessions(host: &PluginHost<'_>) -> Result<Vec<SessionRecord>, String> {
-    let ids = decode_ids(read_raw(host, ALL_SESSIONS_KEY)?.as_deref())?;
+fn read_sessions(context: &SessionContext<'_, '_>) -> Result<Vec<SessionRecord>, String> {
+    let ids = decode_ids(read_raw(context, ALL_SESSIONS_KEY)?.as_deref())?;
     ids.into_iter()
-        .map(|id| read_session(host, &id)?.ok_or_else(|| format!("missing durable session: {id}")))
+        .map(|id| {
+            read_session(context, &id)?.ok_or_else(|| format!("missing durable session: {id}"))
+        })
         .collect()
 }
 
-fn read_inputs(host: &PluginHost<'_>, id: &str) -> Result<Vec<SessionInput>, String> {
-    decode_inputs(read_raw(host, &inputs_key(id))?.as_deref())
+fn read_inputs(context: &SessionContext<'_, '_>, id: &str) -> Result<Vec<SessionInput>, String> {
+    decode_inputs(read_raw(context, &inputs_key(id))?.as_deref())
 }
 
-fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
-    host.read_durable(&session_namespace(), key)
+fn read_raw(context: &SessionContext<'_, '_>, key: &str) -> Result<Option<Vec<u8>>, String> {
+    context
+        .kernel
+        .read_durable(&session_namespace(), key)
         .map_err(|error| error.to_string())
 }
 

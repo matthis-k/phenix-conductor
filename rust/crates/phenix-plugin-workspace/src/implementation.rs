@@ -1,6 +1,6 @@
 use phenix_core::{
-    Authority, CapabilityId, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ServiceContribution, ServiceId,
+    Authority, CapabilityId, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, ServiceContribution, ServiceId,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -17,6 +17,16 @@ const WORKSPACE_WRITE: &str = "workspace.write";
 const WORKSPACE_SHELL: &str = "workspace.shell";
 const WORKSPACE_GIT: &str = "workspace.git";
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
+
+type WorkspaceContext<'host, 'runtime, 'state> =
+    PluginContext<'host, 'runtime, (), (), &'state PathBuf>;
+
+fn context<'host, 'runtime, 'state>(
+    host: &'host PluginHost<'runtime>,
+    root: &'state PathBuf,
+) -> WorkspaceContext<'host, 'runtime, 'state> {
+    PluginContext::new(host, (), (), root)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -130,175 +140,6 @@ impl WorkspacePlugin {
     fn new(root: PathBuf) -> Self {
         Self { root }
     }
-
-    fn resolve(&self, input: &str) -> Result<PathBuf, String> {
-        let input = Path::new(input);
-        if input.is_absolute() {
-            return Err("workspace paths must be relative".into());
-        }
-        let mut relative = PathBuf::new();
-        for component in input.components() {
-            match component {
-                Component::Normal(value) => relative.push(value),
-                Component::CurDir => {}
-                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                    return Err("workspace path escapes the configured root".into());
-                }
-            }
-        }
-        Ok(self.root.join(relative))
-    }
-
-    fn require(host: &PluginHost<'_>, value: &str) -> Result<(), String> {
-        let capability = capability(value);
-        if host.authority().permits(&capability) {
-            Ok(())
-        } else {
-            Err(format!("workspace authority denied: {value}"))
-        }
-    }
-
-    fn read(&self, host: &PluginHost<'_>, path: String) -> Result<WorkspaceResponse, String> {
-        Self::require(host, WORKSPACE_READ)?;
-        let resolved = self.resolve(&path)?;
-        let bytes = fs::read(&resolved).map_err(|error| format!("read {path}: {error}"))?;
-        let content = String::from_utf8(bytes.clone())
-            .map_err(|_| format!("workspace read requires UTF-8 text: {path}"))?;
-        Ok(WorkspaceResponse::Read {
-            path,
-            content,
-            version: version_for_bytes(&bytes),
-        })
-    }
-
-    fn write(
-        &self,
-        host: &PluginHost<'_>,
-        path: String,
-        content: String,
-        expected_version: WorkspaceFileVersion,
-    ) -> Result<WorkspaceResponse, String> {
-        Self::require(host, WORKSPACE_WRITE)?;
-        let resolved = self.resolve(&path)?;
-        let observed = match fs::read(&resolved) {
-            Ok(bytes) => version_for_bytes(&bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                WorkspaceFileVersion::Absent
-            }
-            Err(error) => return Err(format!("inspect {path}: {error}")),
-        };
-        if observed != expected_version {
-            return Err(format!(
-                "workspace version conflict for {path}: expected {expected_version:?}, observed {observed:?}"
-            ));
-        }
-        if let Some(parent) = resolved.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("create parent for {path}: {error}"))?;
-        }
-        fs::write(&resolved, content.as_bytes())
-            .map_err(|error| format!("write {path}: {error}"))?;
-        Ok(WorkspaceResponse::Written {
-            path,
-            version: version_for_bytes(content.as_bytes()),
-        })
-    }
-
-    fn search(
-        &self,
-        host: &PluginHost<'_>,
-        needle: String,
-        path: Option<String>,
-        case_sensitive: bool,
-    ) -> Result<WorkspaceResponse, String> {
-        Self::require(host, WORKSPACE_READ)?;
-        if needle.is_empty() {
-            return Err("workspace search needle must not be empty".into());
-        }
-        let relative = path.unwrap_or_else(|| ".".into());
-        let root = self.resolve(&relative)?;
-        let mut matches = Vec::new();
-        self.search_path(&root, &needle, case_sensitive, &mut matches)?;
-        matches.sort_by(|left, right| {
-            left.path
-                .cmp(&right.path)
-                .then_with(|| left.line.cmp(&right.line))
-        });
-        Ok(WorkspaceResponse::Search { matches })
-    }
-
-    fn search_path(
-        &self,
-        path: &Path,
-        needle: &str,
-        case_sensitive: bool,
-        matches: &mut Vec<WorkspaceSearchMatch>,
-    ) -> Result<(), String> {
-        if path.file_name().is_some_and(|name| name == ".git") {
-            return Ok(());
-        }
-        if path.is_dir() {
-            let mut entries = fs::read_dir(path)
-                .map_err(|error| format!("search {}: {error}", path.display()))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| error.to_string())?;
-            entries.sort_by_key(|entry| entry.file_name());
-            for entry in entries {
-                self.search_path(&entry.path(), needle, case_sensitive, matches)?;
-            }
-            return Ok(());
-        }
-        if !path.is_file() {
-            return Ok(());
-        }
-        let Ok(bytes) = fs::read(path) else {
-            return Ok(());
-        };
-        let Ok(content) = String::from_utf8(bytes) else {
-            return Ok(());
-        };
-        let query = if case_sensitive {
-            needle.to_owned()
-        } else {
-            needle.to_lowercase()
-        };
-        for (index, line) in content.lines().enumerate() {
-            let candidate = if case_sensitive {
-                line.to_owned()
-            } else {
-                line.to_lowercase()
-            };
-            if candidate.contains(&query) {
-                let relative = path.strip_prefix(&self.root).unwrap_or(path);
-                matches.push(WorkspaceSearchMatch {
-                    path: relative.to_string_lossy().into_owned(),
-                    line: index + 1,
-                    text: line.to_owned(),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn process(
-        &self,
-        host: &PluginHost<'_>,
-        program: &str,
-        args: &[String],
-        capability: &str,
-    ) -> Result<WorkspaceResponse, String> {
-        Self::require(host, capability)?;
-        let output = Command::new(program)
-            .args(args)
-            .current_dir(&self.root)
-            .output()
-            .map_err(|error| format!("spawn {program}: {error}"))?;
-        Ok(WorkspaceResponse::Process {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: capture(&output.stdout),
-            stderr: capture(&output.stderr),
-        })
-    }
 }
 
 impl PluginInstance for WorkspacePlugin {
@@ -321,32 +162,210 @@ impl PluginInstance for WorkspacePlugin {
         if service != &workspace_service() {
             return Err(format!("unsupported workspace service: {service}"));
         }
-        let command: WorkspaceCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            WorkspaceCommand::Read { path } => self.read(host, path)?,
-            WorkspaceCommand::Write {
-                path,
-                content,
-                expected_version,
-            } => self.write(host, path, content, expected_version)?,
-            WorkspaceCommand::Search {
-                needle,
-                path,
-                case_sensitive,
-            } => self.search(host, needle, path, case_sensitive)?,
-            WorkspaceCommand::Shell { command } => {
-                if command.trim().is_empty() {
-                    return Err("shell command must not be empty".into());
-                }
-                self.process(host, "bash", &["-c".into(), command], WORKSPACE_SHELL)?
-            }
-            WorkspaceCommand::Git { arguments } => {
-                self.process(host, "git", &arguments, WORKSPACE_GIT)?
-            }
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host, &self.root), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
+}
+
+fn handle(
+    context: &WorkspaceContext<'_, '_, '_>,
+    command: WorkspaceCommand,
+) -> Result<WorkspaceResponse, String> {
+    match command {
+        WorkspaceCommand::Read { path } => read(context, path),
+        WorkspaceCommand::Write {
+            path,
+            content,
+            expected_version,
+        } => write(context, path, content, expected_version),
+        WorkspaceCommand::Search {
+            needle,
+            path,
+            case_sensitive,
+        } => search(context, needle, path, case_sensitive),
+        WorkspaceCommand::Shell { command } => {
+            if command.trim().is_empty() {
+                return Err("shell command must not be empty".into());
+            }
+            process(context, "bash", &["-c".into(), command], WORKSPACE_SHELL)
+        }
+        WorkspaceCommand::Git { arguments } => process(context, "git", &arguments, WORKSPACE_GIT),
+    }
+}
+
+fn resolve(context: &WorkspaceContext<'_, '_, '_>, input: &str) -> Result<PathBuf, String> {
+    let input = Path::new(input);
+    if input.is_absolute() {
+        return Err("workspace paths must be relative".into());
+    }
+    let mut relative = PathBuf::new();
+    for component in input.components() {
+        match component {
+            Component::Normal(value) => relative.push(value),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err("workspace path escapes the configured root".into());
+            }
+        }
+    }
+    Ok(context.plugin.state.join(relative))
+}
+
+fn require(context: &WorkspaceContext<'_, '_, '_>, value: &str) -> Result<(), String> {
+    let capability = capability(value);
+    if context.call.authority.permits(&capability) {
+        Ok(())
+    } else {
+        Err(format!("workspace authority denied: {value}"))
+    }
+}
+
+fn read(context: &WorkspaceContext<'_, '_, '_>, path: String) -> Result<WorkspaceResponse, String> {
+    require(context, WORKSPACE_READ)?;
+    let resolved = resolve(context, &path)?;
+    let bytes = fs::read(&resolved).map_err(|error| format!("read {path}: {error}"))?;
+    let content = String::from_utf8(bytes.clone())
+        .map_err(|_| format!("workspace read requires UTF-8 text: {path}"))?;
+    Ok(WorkspaceResponse::Read {
+        path,
+        content,
+        version: version_for_bytes(&bytes),
+    })
+}
+
+fn write(
+    context: &WorkspaceContext<'_, '_, '_>,
+    path: String,
+    content: String,
+    expected_version: WorkspaceFileVersion,
+) -> Result<WorkspaceResponse, String> {
+    require(context, WORKSPACE_WRITE)?;
+    let resolved = resolve(context, &path)?;
+    let observed = match fs::read(&resolved) {
+        Ok(bytes) => version_for_bytes(&bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => WorkspaceFileVersion::Absent,
+        Err(error) => return Err(format!("inspect {path}: {error}")),
+    };
+    if observed != expected_version {
+        return Err(format!(
+            "workspace version conflict for {path}: expected {expected_version:?}, observed {observed:?}"
+        ));
+    }
+    if let Some(parent) = resolved.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("create parent for {path}: {error}"))?;
+    }
+    fs::write(&resolved, content.as_bytes()).map_err(|error| format!("write {path}: {error}"))?;
+    Ok(WorkspaceResponse::Written {
+        path,
+        version: version_for_bytes(content.as_bytes()),
+    })
+}
+
+fn search(
+    context: &WorkspaceContext<'_, '_, '_>,
+    needle: String,
+    path: Option<String>,
+    case_sensitive: bool,
+) -> Result<WorkspaceResponse, String> {
+    require(context, WORKSPACE_READ)?;
+    if needle.is_empty() {
+        return Err("workspace search needle must not be empty".into());
+    }
+    let relative = path.unwrap_or_else(|| ".".into());
+    let root = resolve(context, &relative)?;
+    let mut matches = Vec::new();
+    search_path(
+        context.plugin.state,
+        &root,
+        &needle,
+        case_sensitive,
+        &mut matches,
+    )?;
+    matches.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.line.cmp(&right.line))
+    });
+    Ok(WorkspaceResponse::Search { matches })
+}
+
+fn search_path(
+    workspace_root: &Path,
+    path: &Path,
+    needle: &str,
+    case_sensitive: bool,
+    matches: &mut Vec<WorkspaceSearchMatch>,
+) -> Result<(), String> {
+    if path.file_name().is_some_and(|name| name == ".git") {
+        return Ok(());
+    }
+    if path.is_dir() {
+        let mut entries = fs::read_dir(path)
+            .map_err(|error| format!("search {}: {error}", path.display()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            search_path(
+                workspace_root,
+                &entry.path(),
+                needle,
+                case_sensitive,
+                matches,
+            )?;
+        }
+        return Ok(());
+    }
+    if !path.is_file() {
+        return Ok(());
+    }
+    let Ok(bytes) = fs::read(path) else {
+        return Ok(());
+    };
+    let Ok(content) = String::from_utf8(bytes) else {
+        return Ok(());
+    };
+    let query = if case_sensitive {
+        needle.to_owned()
+    } else {
+        needle.to_lowercase()
+    };
+    for (index, line) in content.lines().enumerate() {
+        let candidate = if case_sensitive {
+            line.to_owned()
+        } else {
+            line.to_lowercase()
+        };
+        if candidate.contains(&query) {
+            let relative = path.strip_prefix(workspace_root).unwrap_or(path);
+            matches.push(WorkspaceSearchMatch {
+                path: relative.to_string_lossy().into_owned(),
+                line: index + 1,
+                text: line.to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn process(
+    context: &WorkspaceContext<'_, '_, '_>,
+    program: &str,
+    args: &[String],
+    capability: &str,
+) -> Result<WorkspaceResponse, String> {
+    require(context, capability)?;
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(context.plugin.state)
+        .output()
+        .map_err(|error| format!("spawn {program}: {error}"))?;
+    Ok(WorkspaceResponse::Process {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout: capture(&output.stdout),
+        stderr: capture(&output.stderr),
+    })
 }
 
 fn version_for_bytes(bytes: &[u8]) -> WorkspaceFileVersion {

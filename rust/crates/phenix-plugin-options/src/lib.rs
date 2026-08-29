@@ -2,8 +2,9 @@
 
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface, ComponentManifest,
-    DurableSchema, InterfaceId, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, ServiceRole, TransactionOp,
+    DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, ServiceRole,
+    TransactionOp,
 };
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,6 +18,14 @@ const STATE_KEY: &str = "options";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
+
+type OptionsContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn plugin_context<'host, 'runtime>(
+    host: &'host PluginHost<'runtime>,
+) -> OptionsContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct OptionKey(String);
@@ -663,7 +672,9 @@ struct OptionsPlugin;
 
 impl PluginInstance for OptionsPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(options_namespace(), 1))
+        plugin_context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(options_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -676,55 +687,63 @@ impl PluginInstance for OptionsPlugin {
         if service != &options_service() {
             return Err(format!("unsupported options service: {service}"));
         }
-        let command: OptionCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let (mut state, raw) = load_state(host)?;
-        let mut changed = false;
-        let response = match command {
-            OptionCommand::Define { definition } => {
-                changed = state.define(definition.clone())?;
-                OptionResponse::Defined { definition }
-            }
-            OptionCommand::GetDefinition { key } => OptionResponse::Definition {
-                definition: state.definitions.get(&key).cloned(),
-            },
-            OptionCommand::Configure {
-                file_values,
-                nix_values,
-                precedence,
-            } => {
-                let count = file_values.len() + nix_values.len();
-                changed = state.configure(file_values, nix_values, precedence)?;
-                OptionResponse::Configured { count }
-            }
-            OptionCommand::Set { key, scope, value } => {
-                changed = state.set(&key, scope.clone(), value)?;
-                OptionResponse::Updated { key, scope }
-            }
-            OptionCommand::Unset { key, scope } => {
-                changed = state.unset(&key, &scope)?;
-                OptionResponse::Updated { key, scope }
-            }
-            OptionCommand::Resolve { key, context } => OptionResponse::Value {
-                option: state.resolve(&key, &context)?,
-            },
-            OptionCommand::List { context } => OptionResponse::Options {
-                options: state
-                    .definitions
-                    .keys()
-                    .map(|key| state.resolve(key, &context))
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-        };
-        if changed {
-            save_state(host, raw, &state)?;
-        }
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&plugin_context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-fn load_state(host: &PluginHost<'_>) -> Result<(OptionState, Option<Vec<u8>>), String> {
-    let raw = host
+fn handle(
+    context: &OptionsContext<'_, '_>,
+    command: OptionCommand,
+) -> Result<OptionResponse, String> {
+    let (mut state, raw) = load_state(context)?;
+    let mut changed = false;
+    let response = match command {
+        OptionCommand::Define { definition } => {
+            changed = state.define(definition.clone())?;
+            OptionResponse::Defined { definition }
+        }
+        OptionCommand::GetDefinition { key } => OptionResponse::Definition {
+            definition: state.definitions.get(&key).cloned(),
+        },
+        OptionCommand::Configure {
+            file_values,
+            nix_values,
+            precedence,
+        } => {
+            let count = file_values.len() + nix_values.len();
+            changed = state.configure(file_values, nix_values, precedence)?;
+            OptionResponse::Configured { count }
+        }
+        OptionCommand::Set { key, scope, value } => {
+            changed = state.set(&key, scope.clone(), value)?;
+            OptionResponse::Updated { key, scope }
+        }
+        OptionCommand::Unset { key, scope } => {
+            changed = state.unset(&key, &scope)?;
+            OptionResponse::Updated { key, scope }
+        }
+        OptionCommand::Resolve { key, context } => OptionResponse::Value {
+            option: state.resolve(&key, &context)?,
+        },
+        OptionCommand::List { context } => OptionResponse::Options {
+            options: state
+                .definitions
+                .keys()
+                .map(|key| state.resolve(key, &context))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+    };
+    if changed {
+        save_state(context, raw, &state)?;
+    }
+    Ok(response)
+}
+
+fn load_state(context: &OptionsContext<'_, '_>) -> Result<(OptionState, Option<Vec<u8>>), String> {
+    let raw = context
+        .kernel
         .read_durable(&options_namespace(), STATE_KEY)
         .map_err(|error| error.to_string())?;
     let state = match raw.as_deref() {
@@ -735,24 +754,26 @@ fn load_state(host: &PluginHost<'_>) -> Result<(OptionState, Option<Vec<u8>>), S
 }
 
 fn save_state(
-    host: &PluginHost<'_>,
+    context: &OptionsContext<'_, '_>,
     old: Option<Vec<u8>>,
     state: &OptionState,
 ) -> Result<(), String> {
-    host.transact_durable(
-        &options_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: STATE_KEY.into(),
-                expected: old,
-            },
-            TransactionOp::Put {
-                key: STATE_KEY.into(),
-                value: serde_json::to_vec(state).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &options_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: STATE_KEY.into(),
+                    expected: old,
+                },
+                TransactionOp::Put {
+                    key: STATE_KEY.into(),
+                    value: serde_json::to_vec(state).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn encode_subject(value: &str) -> String {

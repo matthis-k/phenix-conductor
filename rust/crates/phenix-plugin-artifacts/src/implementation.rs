@@ -1,6 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -11,6 +12,12 @@ const ARTIFACT_NAMESPACE: &str = "phenix.artifacts.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
+
+type ArtifactContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> ArtifactContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactProvenance {
@@ -171,7 +178,9 @@ struct ArtifactPlugin;
 
 impl PluginInstance for ArtifactPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(artifact_namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(artifact_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -184,67 +193,73 @@ impl PluginInstance for ArtifactPlugin {
         if service != &artifact_service() {
             return Err(format!("unsupported artifact service: {service}"));
         }
-        let command: ArtifactCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            ArtifactCommand::Store {
-                content,
-                provenance,
-            } => store(host, content, provenance)?,
-            ArtifactCommand::Get {
-                id,
-                content_identity,
-            } => ArtifactResponse::Artifact {
-                artifact: read_exact(host, &id, &content_identity)?,
-            },
-            ArtifactCommand::RecordRead {
-                request,
-                provider,
-                invocation_provenance,
-                content,
-                dependencies,
-            } => record_read(
-                host,
-                request,
-                provider,
-                invocation_provenance,
-                content,
-                dependencies,
-            )?,
-            ArtifactCommand::LookupRead {
-                request,
-                provider,
-                dependencies,
-            } => ArtifactResponse::ReadLookup {
-                result: lookup_read(host, &request, &provider, &dependencies)?,
-            },
-            ArtifactCommand::Revalidate {
-                result_id,
-                provider,
-                current_dependencies,
-                verdict,
-                provenance,
-            } => revalidate(
-                host,
-                result_id,
-                provider,
-                current_dependencies,
-                verdict,
-                provenance,
-            )?,
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
+fn handle(
+    context: &ArtifactContext<'_, '_>,
+    command: ArtifactCommand,
+) -> Result<ArtifactResponse, String> {
+    match command {
+        ArtifactCommand::Store {
+            content,
+            provenance,
+        } => store(context, content, provenance),
+        ArtifactCommand::Get {
+            id,
+            content_identity,
+        } => Ok(ArtifactResponse::Artifact {
+            artifact: read_exact(context, &id, &content_identity)?,
+        }),
+        ArtifactCommand::RecordRead {
+            request,
+            provider,
+            invocation_provenance,
+            content,
+            dependencies,
+        } => record_read(
+            context,
+            request,
+            provider,
+            invocation_provenance,
+            content,
+            dependencies,
+        ),
+        ArtifactCommand::LookupRead {
+            request,
+            provider,
+            dependencies,
+        } => Ok(ArtifactResponse::ReadLookup {
+            result: lookup_read(context, &request, &provider, &dependencies)?,
+        }),
+        ArtifactCommand::Revalidate {
+            result_id,
+            provider,
+            current_dependencies,
+            verdict,
+            provenance,
+        } => revalidate(
+            context,
+            result_id,
+            provider,
+            current_dependencies,
+            verdict,
+            provenance,
+        ),
+    }
+}
+
 fn store(
-    host: &PluginHost<'_>,
+    context: &ArtifactContext<'_, '_>,
     content: Vec<u8>,
     provenance: ArtifactProvenance,
 ) -> Result<ArtifactResponse, String> {
     let content_identity = exact_content_identity(&content);
     let id = format!("artifact:{content_identity}");
-    if let Some(existing) = read_record(host, &id)? {
+    if let Some(existing) = read_record(context, &id)? {
         if existing.content_identity != content_identity || existing.content != content {
             return Err(format!("artifact identity collision: {id}"));
         }
@@ -260,51 +275,58 @@ fn store(
         content,
         provenance,
     };
-    host.transact_durable(
-        &artifact_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: artifact_key(&artifact.id),
-                expected: None,
-            },
-            TransactionOp::Put {
-                key: artifact_key(&artifact.id),
-                value: serde_json::to_vec(&artifact).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+    context
+        .kernel
+        .transact_durable(
+            &artifact_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: artifact_key(&artifact.id),
+                    expected: None,
+                },
+                TransactionOp::Put {
+                    key: artifact_key(&artifact.id),
+                    value: serde_json::to_vec(&artifact).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(ArtifactResponse::Stored {
         artifact,
         reused: false,
     })
 }
 
-fn read_record(host: &PluginHost<'_>, id: &str) -> Result<Option<ArtifactRecord>, String> {
-    host.read_durable(&artifact_namespace(), &artifact_key(id))
+fn read_record(
+    context: &ArtifactContext<'_, '_>,
+    id: &str,
+) -> Result<Option<ArtifactRecord>, String> {
+    context
+        .kernel
+        .read_durable(&artifact_namespace(), &artifact_key(id))
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
 fn read_exact(
-    host: &PluginHost<'_>,
+    context: &ArtifactContext<'_, '_>,
     id: &str,
     content_identity: &str,
 ) -> Result<Option<ArtifactRecord>, String> {
-    Ok(read_record(host, id)?.filter(|artifact| artifact.content_identity == content_identity))
+    Ok(read_record(context, id)?.filter(|artifact| artifact.content_identity == content_identity))
 }
 
 fn record_read(
-    host: &PluginHost<'_>,
+    context: &ArtifactContext<'_, '_>,
     request: NormalizedReadRequest,
     provider: ReadProviderIdentity,
     invocation_provenance: String,
     content: Vec<u8>,
     dependencies: BTreeMap<String, String>,
 ) -> Result<ArtifactResponse, String> {
-    if let Some(result) = lookup_read(host, &request, &provider, &dependencies)? {
-        let artifact = read_exact(host, &result.artifact_id, &result.content_identity)?
+    if let Some(result) = lookup_read(context, &request, &provider, &dependencies)? {
+        let artifact = read_exact(context, &result.artifact_id, &result.content_identity)?
             .ok_or_else(|| format!("missing artifact for reusable read result: {}", result.id))?;
         return Ok(ArtifactResponse::ReadRecorded {
             result,
@@ -314,7 +336,7 @@ fn record_read(
     }
 
     let artifact = match store(
-        host,
+        context,
         content,
         ArtifactProvenance {
             producer: invocation_provenance.clone(),
@@ -342,7 +364,8 @@ fn record_read(
         invocation_provenance,
     };
     let result_key = read_result_key(&result.id);
-    let existing = host
+    let existing = context
+        .kernel
         .read_durable(&artifact_namespace(), &result_key)
         .map_err(|error| error.to_string())?;
     if let Some(existing) = existing {
@@ -352,24 +375,26 @@ fn record_read(
             return Err(format!("read result identity collision: {}", result.id));
         }
     } else {
-        host.transact_durable(
-            &artifact_namespace(),
-            &[
-                TransactionOp::AssertValue {
-                    key: result_key.clone(),
-                    expected: None,
-                },
-                TransactionOp::Put {
-                    key: result_key,
-                    value: serde_json::to_vec(&result).map_err(|error| error.to_string())?,
-                },
-                TransactionOp::Put {
-                    key: read_index_key(&request_identity, &provider)?,
-                    value: serde_json::to_vec(&result.id).map_err(|error| error.to_string())?,
-                },
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        context
+            .kernel
+            .transact_durable(
+                &artifact_namespace(),
+                &[
+                    TransactionOp::AssertValue {
+                        key: result_key.clone(),
+                        expected: None,
+                    },
+                    TransactionOp::Put {
+                        key: result_key,
+                        value: serde_json::to_vec(&result).map_err(|error| error.to_string())?,
+                    },
+                    TransactionOp::Put {
+                        key: read_index_key(&request_identity, &provider)?,
+                        value: serde_json::to_vec(&result.id).map_err(|error| error.to_string())?,
+                    },
+                ],
+            )
+            .map_err(|error| error.to_string())?;
     }
 
     Ok(ArtifactResponse::ReadRecorded {
@@ -380,13 +405,14 @@ fn record_read(
 }
 
 fn lookup_read(
-    host: &PluginHost<'_>,
+    context: &ArtifactContext<'_, '_>,
     request: &NormalizedReadRequest,
     provider: &ReadProviderIdentity,
     dependencies: &BTreeMap<String, String>,
 ) -> Result<Option<ReadResultRecord>, String> {
     let request_identity = normalized_request_identity(request)?;
-    let Some(result_id) = host
+    let Some(result_id) = context
+        .kernel
         .read_durable(
             &artifact_namespace(),
             &read_index_key(&request_identity, provider)?,
@@ -397,7 +423,8 @@ fn lookup_read(
     };
     let result_id: String =
         serde_json::from_slice(&result_id).map_err(|error| error.to_string())?;
-    let Some(result) = host
+    let Some(result) = context
+        .kernel
         .read_durable(&artifact_namespace(), &read_result_key(&result_id))
         .map_err(|error| error.to_string())?
     else {
@@ -408,7 +435,7 @@ fn lookup_read(
     if result.request_identity != request_identity
         || &result.provider != provider
         || &result.dependencies != dependencies
-        || read_exact(host, &result.artifact_id, &result.content_identity)?.is_none()
+        || read_exact(context, &result.artifact_id, &result.content_identity)?.is_none()
     {
         return Ok(None);
     }
@@ -416,20 +443,21 @@ fn lookup_read(
 }
 
 fn revalidate(
-    host: &PluginHost<'_>,
+    context: &ArtifactContext<'_, '_>,
     result_id: String,
     provider: ReadProviderIdentity,
     current_dependencies: BTreeMap<String, String>,
     verdict: RevalidationVerdict,
     provenance: String,
 ) -> Result<ArtifactResponse, String> {
-    let result = host
+    let result = context
+        .kernel
         .read_durable(&artifact_namespace(), &read_result_key(&result_id))
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("unknown read result: {result_id}"))?;
     let result: ReadResultRecord =
         serde_json::from_slice(&result).map_err(|error| error.to_string())?;
-    if read_exact(host, &result.artifact_id, &result.content_identity)?.is_none() {
+    if read_exact(context, &result.artifact_id, &result.content_identity)?.is_none() {
         return Err(format!("missing artifact for read result: {result_id}"));
     }
     let record = RevalidationRecord {
@@ -439,14 +467,16 @@ fn revalidate(
         verdict,
         provenance,
     };
-    host.transact_durable(
-        &artifact_namespace(),
-        &[TransactionOp::Put {
-            key: revalidation_key(&record)?,
-            value: serde_json::to_vec(&record).map_err(|error| error.to_string())?,
-        }],
-    )
-    .map_err(|error| error.to_string())?;
+    context
+        .kernel
+        .transact_durable(
+            &artifact_namespace(),
+            &[TransactionOp::Put {
+                key: revalidation_key(&record)?,
+                value: serde_json::to_vec(&record).map_err(|error| error.to_string())?,
+            }],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(ArtifactResponse::Revalidated {
         reusable: verdict == RevalidationVerdict::StillValid,
         record,

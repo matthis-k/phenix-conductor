@@ -1,6 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -12,6 +13,12 @@ const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const INDEX_KEY: &str = "index/resources";
+
+type JobContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> JobContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -127,7 +134,9 @@ struct JobPlugin;
 
 impl PluginInstance for JobPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(job_namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(job_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -140,97 +149,100 @@ impl PluginInstance for JobPlugin {
         if service != &job_service() {
             return Err(format!("unsupported job service: {service}"));
         }
-        let command: JobCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            JobCommand::Create {
-                id,
-                kind,
-                owner_execution,
-                authority,
-            } => JobResponse::Resource {
-                resource: Some(create(host, id, kind, owner_execution, authority)?),
-            },
-            JobCommand::Promote { id } => JobResponse::Resource {
-                resource: Some(update(host, &id, |resource| {
-                    if !matches!(resource.kind, RuntimeResourceKind::Job) {
-                        return Err("only jobs may be promoted to workspace lifetime".into());
-                    }
-                    if !matches!(resource.state, RuntimeResourceState::Running) {
-                        return Err("only running jobs may be promoted".into());
-                    }
-                    resource.promoted_to_workspace = true;
-                    Ok(())
-                })?),
-            },
-            JobCommand::Complete {
-                id,
-                code,
-                mut output_references,
-            } => JobResponse::Resource {
-                resource: Some(update(host, &id, |resource| {
-                    if !matches!(resource.state, RuntimeResourceState::Running) {
-                        return Err("only a running resource may complete".into());
-                    }
-                    output_references.sort();
-                    output_references.dedup();
-                    resource.output_references = output_references;
-                    resource.state = RuntimeResourceState::Exited { code };
-                    Ok(())
-                })?),
-            },
-            JobCommand::ExecutionTerminated { execution_id } => JobResponse::Affected {
-                resources: mutate_matching(host, &execution_id, |resource| {
-                    if !resource.promoted_to_workspace
-                        && matches!(resource.state, RuntimeResourceState::Running)
-                    {
-                        resource.state = RuntimeResourceState::Revoked {
-                            reason: "owner execution terminated".into(),
-                        };
-                        true
-                    } else {
-                        false
-                    }
-                })?,
-            },
-            JobCommand::NarrowAuthority {
-                execution_id,
-                authority,
-            } => JobResponse::Affected {
-                resources: mutate_matching(host, &execution_id, |resource| {
-                    if !matches!(resource.state, RuntimeResourceState::Running) {
-                        return false;
-                    }
-                    if resource.authority.is_subset(&authority) {
-                        return false;
-                    }
-                    resource.authority = resource
-                        .authority
-                        .intersection(&authority)
-                        .cloned()
-                        .collect();
-                    resource.state = RuntimeResourceState::Revoked {
-                        reason: "execution authority narrowed below resource capability".into(),
-                    };
-                    true
-                })?,
-            },
-            JobCommand::Get { id } => {
-                validate_id("runtime resource id", &id)?;
-                JobResponse::Resource {
-                    resource: read(host, &id)?,
-                }
-            }
-            JobCommand::List => JobResponse::Resources {
-                resources: load_all(host)?,
-            },
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
+fn handle(context: &JobContext<'_, '_>, command: JobCommand) -> Result<JobResponse, String> {
+    match command {
+        JobCommand::Create {
+            id,
+            kind,
+            owner_execution,
+            authority,
+        } => Ok(JobResponse::Resource {
+            resource: Some(create(context, id, kind, owner_execution, authority)?),
+        }),
+        JobCommand::Promote { id } => Ok(JobResponse::Resource {
+            resource: Some(update(context, &id, |resource| {
+                if !matches!(resource.kind, RuntimeResourceKind::Job) {
+                    return Err("only jobs may be promoted to workspace lifetime".into());
+                }
+                if !matches!(resource.state, RuntimeResourceState::Running) {
+                    return Err("only running jobs may be promoted".into());
+                }
+                resource.promoted_to_workspace = true;
+                Ok(())
+            })?),
+        }),
+        JobCommand::Complete {
+            id,
+            code,
+            mut output_references,
+        } => Ok(JobResponse::Resource {
+            resource: Some(update(context, &id, |resource| {
+                if !matches!(resource.state, RuntimeResourceState::Running) {
+                    return Err("only a running resource may complete".into());
+                }
+                output_references.sort();
+                output_references.dedup();
+                resource.output_references = output_references;
+                resource.state = RuntimeResourceState::Exited { code };
+                Ok(())
+            })?),
+        }),
+        JobCommand::ExecutionTerminated { execution_id } => Ok(JobResponse::Affected {
+            resources: mutate_matching(context, &execution_id, |resource| {
+                if !resource.promoted_to_workspace
+                    && matches!(resource.state, RuntimeResourceState::Running)
+                {
+                    resource.state = RuntimeResourceState::Revoked {
+                        reason: "owner execution terminated".into(),
+                    };
+                    true
+                } else {
+                    false
+                }
+            })?,
+        }),
+        JobCommand::NarrowAuthority {
+            execution_id,
+            authority,
+        } => Ok(JobResponse::Affected {
+            resources: mutate_matching(context, &execution_id, |resource| {
+                if !matches!(resource.state, RuntimeResourceState::Running) {
+                    return false;
+                }
+                if resource.authority.is_subset(&authority) {
+                    return false;
+                }
+                resource.authority = resource
+                    .authority
+                    .intersection(&authority)
+                    .cloned()
+                    .collect();
+                resource.state = RuntimeResourceState::Revoked {
+                    reason: "execution authority narrowed below resource capability".into(),
+                };
+                true
+            })?,
+        }),
+        JobCommand::Get { id } => {
+            validate_id("runtime resource id", &id)?;
+            Ok(JobResponse::Resource {
+                resource: read(context, &id)?,
+            })
+        }
+        JobCommand::List => Ok(JobResponse::Resources {
+            resources: load_all(context)?,
+        }),
+    }
+}
+
 fn create(
-    host: &PluginHost<'_>,
+    context: &JobContext<'_, '_>,
     id: String,
     kind: RuntimeResourceKind,
     owner_execution: String,
@@ -247,22 +259,22 @@ fn create(
         state: RuntimeResourceState::Running,
         output_references: Vec::new(),
     };
-    insert(host, &record)?;
+    insert(context, &record)?;
     Ok(record)
 }
 
 fn mutate_matching(
-    host: &PluginHost<'_>,
+    context: &JobContext<'_, '_>,
     execution_id: &str,
     mut mutation: impl FnMut(&mut RuntimeResourceRecord) -> bool,
 ) -> Result<Vec<RuntimeResourceRecord>, String> {
     validate_id("execution id", execution_id)?;
     let mut affected = Vec::new();
-    for mut resource in load_all(host)? {
+    for mut resource in load_all(context)? {
         if resource.owner_execution != execution_id || !mutation(&mut resource) {
             continue;
         }
-        replace(host, &resource)?;
+        replace(context, &resource)?;
         affected.push(resource);
     }
     affected.sort_by(|left, right| left.id.cmp(&right.id));
@@ -270,85 +282,92 @@ fn mutate_matching(
 }
 
 fn update(
-    host: &PluginHost<'_>,
+    context: &JobContext<'_, '_>,
     id: &str,
     mutation: impl FnOnce(&mut RuntimeResourceRecord) -> Result<(), String>,
 ) -> Result<RuntimeResourceRecord, String> {
     validate_id("runtime resource id", id)?;
-    let mut resource = read(host, id)?.ok_or_else(|| format!("unknown runtime resource: {id}"))?;
+    let mut resource =
+        read(context, id)?.ok_or_else(|| format!("unknown runtime resource: {id}"))?;
     mutation(&mut resource)?;
-    replace(host, &resource)?;
+    replace(context, &resource)?;
     Ok(resource)
 }
 
-fn insert(host: &PluginHost<'_>, resource: &RuntimeResourceRecord) -> Result<(), String> {
+fn insert(context: &JobContext<'_, '_>, resource: &RuntimeResourceRecord) -> Result<(), String> {
     let key = resource_key(&resource.id);
-    let old_index = read_raw(host, INDEX_KEY)?;
+    let old_index = read_raw(context, INDEX_KEY)?;
     let mut ids = decode_index(old_index.as_deref())?;
-    if ids.iter().any(|id| id == &resource.id) || read_raw(host, &key)?.is_some() {
+    if ids.iter().any(|id| id == &resource.id) || read_raw(context, &key)?.is_some() {
         return Err(format!("runtime resource already exists: {}", resource.id));
     }
     ids.push(resource.id.clone());
     ids.sort();
-    host.transact_durable(
-        &job_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: key.clone(),
-                expected: None,
-            },
-            TransactionOp::AssertValue {
-                key: INDEX_KEY.into(),
-                expected: old_index,
-            },
-            TransactionOp::Put {
-                key,
-                value: serde_json::to_vec(resource).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: INDEX_KEY.into(),
-                value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &job_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: None,
+                },
+                TransactionOp::AssertValue {
+                    key: INDEX_KEY.into(),
+                    expected: old_index,
+                },
+                TransactionOp::Put {
+                    key,
+                    value: serde_json::to_vec(resource).map_err(|error| error.to_string())?,
+                },
+                TransactionOp::Put {
+                    key: INDEX_KEY.into(),
+                    value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
-fn replace(host: &PluginHost<'_>, resource: &RuntimeResourceRecord) -> Result<(), String> {
+fn replace(context: &JobContext<'_, '_>, resource: &RuntimeResourceRecord) -> Result<(), String> {
     let key = resource_key(&resource.id);
-    let old = read_raw(host, &key)?
+    let old = read_raw(context, &key)?
         .ok_or_else(|| format!("unknown runtime resource: {}", resource.id))?;
-    host.transact_durable(
-        &job_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: key.clone(),
-                expected: Some(old),
-            },
-            TransactionOp::Put {
-                key,
-                value: serde_json::to_vec(resource).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &job_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: Some(old),
+                },
+                TransactionOp::Put {
+                    key,
+                    value: serde_json::to_vec(resource).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
-fn read(host: &PluginHost<'_>, id: &str) -> Result<Option<RuntimeResourceRecord>, String> {
-    read_raw(host, &resource_key(id))?
+fn read(context: &JobContext<'_, '_>, id: &str) -> Result<Option<RuntimeResourceRecord>, String> {
+    read_raw(context, &resource_key(id))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn load_all(host: &PluginHost<'_>) -> Result<Vec<RuntimeResourceRecord>, String> {
-    decode_index(read_raw(host, INDEX_KEY)?.as_deref())?
+fn load_all(context: &JobContext<'_, '_>) -> Result<Vec<RuntimeResourceRecord>, String> {
+    decode_index(read_raw(context, INDEX_KEY)?.as_deref())?
         .into_iter()
-        .map(|id| read(host, &id)?.ok_or_else(|| format!("missing runtime resource: {id}")))
+        .map(|id| read(context, &id)?.ok_or_else(|| format!("missing runtime resource: {id}")))
         .collect()
 }
 
-fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
-    host.read_durable(&job_namespace(), key)
+fn read_raw(context: &JobContext<'_, '_>, key: &str) -> Result<Option<Vec<u8>>, String> {
+    context
+        .kernel
+        .read_durable(&job_namespace(), key)
         .map_err(|error| error.to_string())
 }
 

@@ -1,6 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,6 +13,14 @@ const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const STATE_KEY: &str = "state";
+
+type ExecutionContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(
+    host: &'host PluginHost<'runtime>,
+) -> ExecutionContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionAuthority {
@@ -230,7 +239,9 @@ struct ExecutionPlugin;
 
 impl PluginInstance for ExecutionPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(execution_namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(execution_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -243,23 +254,25 @@ impl PluginInstance for ExecutionPlugin {
         if service != &execution_service() {
             return Err(format!("unsupported execution service: {service}"));
         }
-        let command: ExecutionCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = execute(command, host)?;
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = execute(&context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-fn execute(command: ExecutionCommand, host: &PluginHost<'_>) -> Result<ExecutionResponse, String> {
+fn execute(
+    context: &ExecutionContext<'_, '_>,
+    command: ExecutionCommand,
+) -> Result<ExecutionResponse, String> {
     match command {
         ExecutionCommand::GetExecution { id } => {
-            let (_, state) = read_state(host)?;
+            let (_, state) = read_state(context)?;
             Ok(ExecutionResponse::ExecutionLookup {
                 execution: state.executions.get(&id).cloned(),
             })
         }
         ExecutionCommand::GetTask { id } => {
-            let (_, state) = read_state(host)?;
+            let (_, state) = read_state(context)?;
             Ok(ExecutionResponse::TaskLookup {
                 task: state.tasks.get(&id).cloned(),
             })
@@ -268,14 +281,14 @@ fn execute(command: ExecutionCommand, host: &PluginHost<'_>) -> Result<Execution
             execution_id,
             callable_id,
             input,
-        } => invoke_callable(host, &execution_id, &callable_id, &input),
-        other => mutate_state(host, |state| mutate(other, host, state)),
+        } => invoke_callable(context, &execution_id, &callable_id, &input),
+        other => mutate_state(context, |state| mutate(context, other, state)),
     }
 }
 
 fn mutate(
+    context: &ExecutionContext<'_, '_>,
     command: ExecutionCommand,
-    host: &PluginHost<'_>,
     state: &mut ExecutionProjection,
 ) -> Result<ExecutionResponse, String> {
     match command {
@@ -286,10 +299,14 @@ fn mutate(
             validate_identity("execution id", &id)?;
             ensure_new_execution(state, &id)?;
             let effective = ExecutionAuthority::from_authority(
-                &host.authority().attenuate(&requested_authority.parse()?),
+                &context
+                    .call
+                    .authority
+                    .attenuate(&requested_authority.parse()?),
             );
-            let graph_generation = host
-                .graph_generation()
+            let graph_generation = context
+                .call
+                .graph_generation
                 .ok_or_else(|| "execution requires an active graph generation".to_owned())?
                 .as_str()
                 .to_owned();
@@ -312,7 +329,10 @@ fn mutate(
             ensure_new_execution(state, &id)?;
             let parent = active_execution(state, &parent_execution)?.clone();
             let caller_limited = ExecutionAuthority::from_authority(
-                &host.authority().attenuate(&requested_authority.parse()?),
+                &context
+                    .call
+                    .authority
+                    .attenuate(&requested_authority.parse()?),
             );
             let authority = parent.authority.attenuate(&caller_limited)?;
             let execution = ExecutionRecord {
@@ -388,7 +408,10 @@ fn mutate(
                 return Err("worker task dependencies contain a cycle".into());
             }
             let caller_limited = ExecutionAuthority::from_authority(
-                &host.authority().attenuate(&requested_authority.parse()?),
+                &context
+                    .call
+                    .authority
+                    .attenuate(&requested_authority.parse()?),
             );
             let delegated_authority = parent.authority.attenuate(&caller_limited)?;
             let task = WorkerTaskRecord {
@@ -495,15 +518,16 @@ fn mutate(
 }
 
 fn invoke_callable(
-    host: &PluginHost<'_>,
+    context: &ExecutionContext<'_, '_>,
     execution_id: &str,
     callable_id: &str,
     input: &[u8],
 ) -> Result<ExecutionResponse, String> {
-    let (_, state) = read_state(host)?;
+    let (_, state) = read_state(context)?;
     let execution = active_execution(&state, execution_id)?;
-    let active_generation = host
-        .graph_generation()
+    let active_generation = context
+        .call
+        .graph_generation
         .ok_or_else(|| "callable invocation requires an active graph generation".to_owned())?;
     if execution.graph_generation != active_generation.as_str() {
         return Err(format!(
@@ -518,43 +542,51 @@ fn invoke_callable(
         .ok_or_else(|| format!("unknown callable: {callable_id}"))?;
     let required = callable.required_authority.parse()?;
     if !execution.authority.parse()?.permits_all(&required)
-        || !host.authority().permits_all(&required)
+        || !context.call.authority.permits_all(&required)
     {
         return Err(format!("callable authority denied: {callable_id}"));
     }
-    let requested = required;
     let service = ServiceId::parse(&callable.service).map_err(|error| error.to_string())?;
-    let output = host
-        .invoke_service_abi(&service, input, &requested, None)
+    let output = context
+        .kernel
+        .invoke_service_abi(&service, input, &required, None)
         .map_err(|error| error.to_string())?;
     Ok(ExecutionResponse::Invocation { output })
 }
 
-fn mutate_state<F>(host: &PluginHost<'_>, mutation: F) -> Result<ExecutionResponse, String>
+fn mutate_state<F>(
+    context: &ExecutionContext<'_, '_>,
+    mutation: F,
+) -> Result<ExecutionResponse, String>
 where
     F: FnOnce(&mut ExecutionProjection) -> Result<ExecutionResponse, String>,
 {
-    let (old, mut state) = read_state(host)?;
+    let (old, mut state) = read_state(context)?;
     let response = mutation(&mut state)?;
-    host.transact_durable(
-        &execution_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: STATE_KEY.into(),
-                expected: old,
-            },
-            TransactionOp::Put {
-                key: STATE_KEY.into(),
-                value: serde_json::to_vec(&state).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+    context
+        .kernel
+        .transact_durable(
+            &execution_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: STATE_KEY.into(),
+                    expected: old,
+                },
+                TransactionOp::Put {
+                    key: STATE_KEY.into(),
+                    value: serde_json::to_vec(&state).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(response)
 }
 
-fn read_state(host: &PluginHost<'_>) -> Result<(Option<Vec<u8>>, ExecutionProjection), String> {
-    let old = host
+fn read_state(
+    context: &ExecutionContext<'_, '_>,
+) -> Result<(Option<Vec<u8>>, ExecutionProjection), String> {
+    let old = context
+        .kernel
         .read_durable(&execution_namespace(), STATE_KEY)
         .map_err(|error| error.to_string())?;
     let state = old
