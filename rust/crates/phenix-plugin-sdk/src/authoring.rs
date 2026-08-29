@@ -1,0 +1,785 @@
+use crate::{
+    SdkConfigInterface, SdkSessionCommand, SdkSessionInterface, SdkSessionResponse,
+    SdkSkillsInterface, SdkToolsInterface,
+};
+use phenix_core::{
+    Authority, ComponentId, ComponentInterface, ComponentInvocationError, GraphGenerationId,
+    PluginHost, PluginId, PluginInstance as CorePluginInstance, ServiceId,
+};
+use phenix_plugin_context::ContextInterface;
+use phenix_plugin_models::ModelRoutingInterface;
+use phenix_plugin_options::OptionsInterface;
+use phenix_plugin_sessions::{SessionCommand, SessionInterface, SessionRecord, SessionResponse};
+use std::{
+    error::Error,
+    fmt::{self, Display, Formatter},
+    marker::PhantomData,
+};
+
+/// Runtime view passed to plugin code.
+///
+/// The context separates kernel access, userspace SDK access, plugin-owned
+/// data, and call-scoped data. Settings and state are borrowed from the live
+/// plugin instance; the context never owns copies of them.
+pub struct PluginContext<'host, 'runtime, 'plugin, Sdk, Settings = (), State = ()> {
+    pub kernel: KernelAccess<'host, 'runtime>,
+    pub sdk: Sdk,
+    pub plugin: CurrentPlugin<'host, 'plugin, Settings, State>,
+    pub call: CallContext<'host>,
+}
+
+impl<'host, 'runtime, 'plugin, Sdk, Settings, State>
+    PluginContext<'host, 'runtime, 'plugin, Sdk, Settings, State>
+{
+    pub fn new(
+        host: &'host PluginHost<'runtime>,
+        sdk: Sdk,
+        settings: &'plugin Settings,
+        state: &'plugin mut State,
+    ) -> Self {
+        Self {
+            kernel: KernelAccess::new(host),
+            sdk,
+            plugin: CurrentPlugin {
+                id: host.plugin(),
+                settings,
+                state,
+            },
+            call: CallContext {
+                authority: host.authority(),
+                graph_generation: host.graph_generation(),
+            },
+        }
+    }
+}
+
+pub type PhenixPluginContext<'host, 'runtime, 'plugin, Settings = (), State = ()> =
+    PluginContext<'host, 'runtime, 'plugin, PhenixSdk<'host, 'runtime>, Settings, State>;
+
+impl<'host, 'runtime, 'plugin, Settings, State>
+    PluginContext<'host, 'runtime, 'plugin, PhenixSdk<'host, 'runtime>, Settings, State>
+{
+    pub fn phenix(
+        host: &'host PluginHost<'runtime>,
+        component: ComponentId,
+        settings: &'plugin Settings,
+        state: &'plugin mut State,
+    ) -> Self {
+        Self::new(host, PhenixSdk::new(host, component), settings, state)
+    }
+}
+
+/// Data owned by the current plugin instance.
+pub struct CurrentPlugin<'host, 'plugin, Settings, State> {
+    pub id: &'host PluginId,
+    pub settings: &'plugin Settings,
+    pub state: &'plugin mut State,
+}
+
+/// Data scoped to the current kernel-mediated call.
+pub struct CallContext<'host> {
+    pub authority: &'host Authority,
+    pub graph_generation: Option<&'host GraphGenerationId>,
+}
+
+/// Author-facing plugin contract.
+///
+/// `PhenixPluginAdapter` owns the settings and mutable state, then projects a
+/// `PluginContext` for each host-backed callback. Keeping behavior on the
+/// static plugin type avoids a second hidden mutable state beside
+/// `context.plugin.state`.
+pub trait PhenixPlugin: Send + 'static {
+    type Settings: Send;
+    type State: Send;
+
+    fn start(
+        _context: PhenixPluginContext<'_, '_, '_, Self::Settings, Self::State>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn invoke(
+        _service: &ServiceId,
+        _input: &[u8],
+        _context: PhenixPluginContext<'_, '_, '_, Self::Settings, Self::State>,
+    ) -> Result<Vec<u8>, String> {
+        Err("service invocation is not implemented".into())
+    }
+
+    fn stop(_settings: &Self::Settings, _state: &mut Self::State) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Core `PluginInstance` adapter for a `PhenixPlugin` definition.
+///
+/// The adapter is the dynamic instance. It owns exactly one settings value and
+/// one mutable state value for the lifetime of the plugin instance.
+pub struct PhenixPluginAdapter<P: PhenixPlugin> {
+    default_component: ComponentId,
+    settings: P::Settings,
+    state: P::State,
+    plugin: PhantomData<fn() -> P>,
+}
+
+impl<P: PhenixPlugin> PhenixPluginAdapter<P> {
+    pub fn new(default_component: ComponentId, settings: P::Settings, state: P::State) -> Self {
+        Self {
+            default_component,
+            settings,
+            state,
+            plugin: PhantomData,
+        }
+    }
+
+    fn context<'host, 'runtime, 'plugin>(
+        &'plugin mut self,
+        host: &'host PluginHost<'runtime>,
+        component: ComponentId,
+    ) -> PhenixPluginContext<'host, 'runtime, 'plugin, P::Settings, P::State> {
+        PluginContext::phenix(host, component, &self.settings, &mut self.state)
+    }
+}
+
+impl<P: PhenixPlugin> CorePluginInstance for PhenixPluginAdapter<P> {
+    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
+        let component = self.default_component.clone();
+        P::start(self.context(host, component))
+    }
+
+    fn invoke(
+        &mut self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        let component = self.default_component.clone();
+        P::invoke(service, input, self.context(host, component))
+    }
+
+    fn invoke_component(
+        &mut self,
+        component: &ComponentId,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        P::invoke(service, input, self.context(host, component.clone()))
+    }
+
+    fn stop(&mut self) -> Result<(), String> {
+        P::stop(&self.settings, &mut self.state)
+    }
+}
+
+/// Scoped access to generic kernel mechanisms.
+///
+/// This intentionally wraps `PluginHost` rather than exposing a mutable kernel.
+#[derive(Clone, Copy)]
+pub struct KernelAccess<'host, 'runtime> {
+    host: &'host PluginHost<'runtime>,
+}
+
+impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
+    fn new(host: &'host PluginHost<'runtime>) -> Self {
+        Self { host }
+    }
+
+    pub fn authority(&self) -> &Authority {
+        self.host.authority()
+    }
+
+    pub fn graph_generation(&self) -> Option<&GraphGenerationId> {
+        self.host.graph_generation()
+    }
+
+    pub fn invoke<I: ComponentInterface>(
+        &self,
+        component: &ComponentId,
+        request: &I::Request,
+    ) -> Result<I::Response, ComponentInvocationError> {
+        self.host.invoke_import::<I>(component, request)
+    }
+}
+
+/// Marker implemented by a typed SDK contract supplied by another plugin.
+pub trait SdkContract {
+    type Interface: ComponentInterface;
+}
+
+/// Kernel-mediated client for one typed SDK interface.
+pub struct SdkClient<'host, 'runtime, I: ComponentInterface> {
+    host: &'host PluginHost<'runtime>,
+    component: ComponentId,
+    interface: PhantomData<fn() -> I>,
+}
+
+impl<'host, 'runtime, I: ComponentInterface> Clone for SdkClient<'host, 'runtime, I> {
+    fn clone(&self) -> Self {
+        Self {
+            host: self.host,
+            component: self.component.clone(),
+            interface: PhantomData,
+        }
+    }
+}
+
+impl<'host, 'runtime, I: ComponentInterface> SdkClient<'host, 'runtime, I> {
+    fn new(host: &'host PluginHost<'runtime>, component: ComponentId) -> Self {
+        Self {
+            host,
+            component,
+            interface: PhantomData,
+        }
+    }
+
+    pub fn component(&self) -> &ComponentId {
+        &self.component
+    }
+
+    pub fn invoke(&self, request: &I::Request) -> Result<I::Response, ComponentInvocationError> {
+        self.host.invoke_import::<I>(&self.component, request)
+    }
+}
+
+/// Consumer-side handle for a provider-owned SDK object.
+///
+/// The handle carries stable identity plus a scoped typed client. It never
+/// contains a reference to provider-internal state.
+pub struct SdkObject<'host, 'runtime, I: ComponentInterface, Id = String> {
+    id: Id,
+    client: SdkClient<'host, 'runtime, I>,
+}
+
+impl<'host, 'runtime, I, Id> Clone for SdkObject<'host, 'runtime, I, Id>
+where
+    I: ComponentInterface,
+    Id: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            client: self.client.clone(),
+        }
+    }
+}
+
+impl<'host, 'runtime, I: ComponentInterface, Id> SdkObject<'host, 'runtime, I, Id> {
+    pub fn new(id: Id, client: SdkClient<'host, 'runtime, I>) -> Self {
+        Self { id, client }
+    }
+
+    pub fn id(&self) -> &Id {
+        &self.id
+    }
+
+    pub fn client(&self) -> &SdkClient<'host, 'runtime, I> {
+        &self.client
+    }
+
+    pub fn into_id(self) -> Id {
+        self.id
+    }
+}
+
+struct SdkAccess<'host, 'runtime> {
+    host: &'host PluginHost<'runtime>,
+    component: ComponentId,
+}
+
+impl<'host, 'runtime> SdkAccess<'host, 'runtime> {
+    fn new(host: &'host PluginHost<'runtime>, component: ComponentId) -> Self {
+        Self { host, component }
+    }
+
+    fn client<I: ComponentInterface>(&self) -> SdkClient<'host, 'runtime, I> {
+        SdkClient::new(self.host, self.component.clone())
+    }
+}
+
+/// Default Phenix userspace SDK available to a plugin.
+pub struct PhenixSdk<'host, 'runtime> {
+    pub sessions: Sessions<'host, 'runtime>,
+    pub models: SdkClient<'host, 'runtime, ModelRoutingInterface>,
+    pub tools: SdkClient<'host, 'runtime, SdkToolsInterface>,
+    pub skills: SdkClient<'host, 'runtime, SdkSkillsInterface>,
+    pub context: SdkClient<'host, 'runtime, ContextInterface>,
+    pub options: SdkClient<'host, 'runtime, OptionsInterface>,
+    pub config: SdkClient<'host, 'runtime, SdkConfigInterface>,
+    extensions: SdkAccess<'host, 'runtime>,
+}
+
+impl<'host, 'runtime> PhenixSdk<'host, 'runtime> {
+    pub fn new(host: &'host PluginHost<'runtime>, component: ComponentId) -> Self {
+        let access = SdkAccess::new(host, component);
+        Self {
+            sessions: Sessions::new(
+                access.client::<SdkSessionInterface>(),
+                access.client::<SessionInterface>(),
+            ),
+            models: access.client::<ModelRoutingInterface>(),
+            tools: access.client::<SdkToolsInterface>(),
+            skills: access.client::<SdkSkillsInterface>(),
+            context: access.client::<ContextInterface>(),
+            options: access.client::<OptionsInterface>(),
+            config: access.client::<SdkConfigInterface>(),
+            extensions: access,
+        }
+    }
+
+    /// Bind an SDK contract declared by this plugin.
+    ///
+    /// Invocation still goes through the caller component import, so undeclared
+    /// or unbound dependencies fail at the kernel boundary.
+    pub fn require<C: SdkContract>(&self) -> SdkClient<'host, 'runtime, C::Interface> {
+        self.extensions.client::<C::Interface>()
+    }
+}
+
+#[derive(Debug)]
+pub enum SdkError {
+    Invocation(ComponentInvocationError),
+    UnexpectedResponse { operation: &'static str },
+}
+
+impl Display for SdkError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Invocation(error) => Display::fmt(error, f),
+            Self::UnexpectedResponse { operation } => {
+                write!(f, "unexpected SDK response while {operation}")
+            }
+        }
+    }
+}
+
+impl Error for SdkError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Invocation(error) => Some(error),
+            Self::UnexpectedResponse { .. } => None,
+        }
+    }
+}
+
+impl From<ComponentInvocationError> for SdkError {
+    fn from(error: ComponentInvocationError) -> Self {
+        Self::Invocation(error)
+    }
+}
+
+#[derive(Clone)]
+pub struct Sessions<'host, 'runtime> {
+    policy: SdkClient<'host, 'runtime, SdkSessionInterface>,
+    storage: SdkClient<'host, 'runtime, SessionInterface>,
+}
+
+impl<'host, 'runtime> Sessions<'host, 'runtime> {
+    fn new(
+        policy: SdkClient<'host, 'runtime, SdkSessionInterface>,
+        storage: SdkClient<'host, 'runtime, SessionInterface>,
+    ) -> Self {
+        Self { policy, storage }
+    }
+
+    pub fn open(&self, id: impl Into<String>) -> Result<Session<'host, 'runtime>, SdkError> {
+        Ok(self.open_with_status(id, None)?.session)
+    }
+
+    pub fn open_for_agent(
+        &self,
+        id: impl Into<String>,
+        agent: impl Into<String>,
+    ) -> Result<Session<'host, 'runtime>, SdkError> {
+        Ok(self.open_with_status(id, Some(agent.into()))?.session)
+    }
+
+    pub fn open_with_status(
+        &self,
+        id: impl Into<String>,
+        agent: Option<String>,
+    ) -> Result<OpenedSession<'host, 'runtime>, SdkError> {
+        let response = self.policy.invoke(&SdkSessionCommand::Open {
+            id: id.into(),
+            agent,
+        })?;
+        let SdkSessionResponse::Opened { session, created } = response;
+        Ok(OpenedSession {
+            session: Session::new(session, self.clone()),
+            created,
+        })
+    }
+
+    pub fn find(
+        &self,
+        id: impl Into<String>,
+    ) -> Result<Option<Session<'host, 'runtime>>, SdkError> {
+        let response = self
+            .storage
+            .invoke(&SessionCommand::Get { id: id.into() })?;
+        let SessionResponse::Session { session } = response else {
+            return Err(SdkError::UnexpectedResponse {
+                operation: "finding session",
+            });
+        };
+        Ok(session.map(|session| Session::new(session, self.clone())))
+    }
+
+    pub fn iter(&self) -> Result<impl Iterator<Item = Session<'host, 'runtime>>, SdkError> {
+        let response = self.storage.invoke(&SessionCommand::List)?;
+        let SessionResponse::Sessions { sessions: records } = response else {
+            return Err(SdkError::UnexpectedResponse {
+                operation: "listing sessions",
+            });
+        };
+        let sessions = self.clone();
+        Ok(records
+            .into_iter()
+            .map(move |record| Session::new(record, sessions.clone())))
+    }
+}
+
+pub struct OpenedSession<'host, 'runtime> {
+    pub session: Session<'host, 'runtime>,
+    pub created: bool,
+}
+
+#[derive(Clone)]
+pub struct Session<'host, 'runtime> {
+    record: SessionRecord,
+    sessions: Sessions<'host, 'runtime>,
+}
+
+impl<'host, 'runtime> Session<'host, 'runtime> {
+    fn new(record: SessionRecord, sessions: Sessions<'host, 'runtime>) -> Self {
+        Self { record, sessions }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.record.id
+    }
+
+    pub fn record(&self) -> &SessionRecord {
+        &self.record
+    }
+
+    pub fn into_record(self) -> SessionRecord {
+        self.record
+    }
+
+    pub fn refresh(&self) -> Result<Option<Self>, SdkError> {
+        self.sessions.find(self.id().to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{sdk_component_manifest, sdk_factory, sdk_manifest};
+    use phenix_core::{
+        CapabilityId, ComponentExport, ComponentImport, ComponentManifest, InterfaceId, Kernel,
+        KernelConfig, PluginExecution, PluginInstance, PluginManifest, ResolvedHarness,
+        ResolvedHarnessActivation, ServiceContribution, ServiceRole,
+    };
+    use phenix_plugin_options::{options_component_manifest, options_factory, options_manifest};
+    use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
+    use serde::{Deserialize, Serialize};
+
+    const ECHO_PLUGIN: &str = "fixture.echo";
+    const ECHO_COMPONENT: &str = "fixture.echo";
+    const ECHO_SERVICE: &str = "fixture.echo@1";
+    const CONSUMER_PLUGIN: &str = "fixture.consumer";
+    const CONSUMER_COMPONENT: &str = "fixture.consumer";
+    const CONSUMER_SERVICE: &str = "fixture.consumer.run@1";
+
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    struct EchoRequest {
+        value: String,
+    }
+
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    struct EchoResponse {
+        value: String,
+        has_persistence_authority: bool,
+    }
+
+    struct EchoInterface;
+
+    impl ComponentInterface for EchoInterface {
+        type Request = EchoRequest;
+        type Response = EchoResponse;
+
+        fn interface_id() -> InterfaceId {
+            InterfaceId::parse(ECHO_SERVICE).unwrap()
+        }
+    }
+
+    struct EchoSdk;
+
+    impl SdkContract for EchoSdk {
+        type Interface = EchoInterface;
+    }
+
+    struct EchoPlugin;
+
+    impl PluginInstance for EchoPlugin {
+        fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn invoke(
+            &mut self,
+            service: &ServiceId,
+            input: &[u8],
+            host: &PluginHost<'_>,
+        ) -> Result<Vec<u8>, String> {
+            if service != &echo_service() {
+                return Err(format!("unsupported echo service: {service}"));
+            }
+            let request: EchoRequest =
+                serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            serde_json::to_vec(&EchoResponse {
+                value: request.value,
+                has_persistence_authority: host
+                    .authority()
+                    .permits(&CapabilityId::parse("kernel.persistence.read").unwrap()),
+            })
+            .map_err(|error| error.to_string())
+        }
+    }
+
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    struct ConsumerOutput {
+        plugin: String,
+        settings: String,
+        state: u32,
+        session: String,
+        echo: String,
+        echo_has_persistence_authority: bool,
+        has_persistence_authority: bool,
+    }
+
+    struct ConsumerPlugin;
+
+    impl PhenixPlugin for ConsumerPlugin {
+        type Settings = String;
+        type State = u32;
+
+        fn invoke(
+            service: &ServiceId,
+            _input: &[u8],
+            context: PhenixPluginContext<'_, '_, '_, Self::Settings, Self::State>,
+        ) -> Result<Vec<u8>, String> {
+            if service != &consumer_service() {
+                return Err(format!("unsupported consumer service: {service}"));
+            }
+
+            let PluginContext {
+                sdk, plugin, call, ..
+            } = context;
+            *plugin.state += 1;
+
+            let opened = sdk
+                .sessions
+                .open("root")
+                .map_err(|error| error.to_string())?;
+            let found = sdk
+                .sessions
+                .iter()
+                .map_err(|error| error.to_string())?
+                .find(|session| session.id() == opened.id())
+                .ok_or("session missing from SDK iterator")?;
+            let refreshed = found
+                .refresh()
+                .map_err(|error| error.to_string())?
+                .ok_or("session disappeared while refreshing SDK object")?;
+
+            let echo = SdkObject::new("echo", sdk.require::<EchoSdk>());
+            let echo = echo
+                .client()
+                .invoke(&EchoRequest {
+                    value: refreshed.id().to_owned(),
+                })
+                .map_err(|error| error.to_string())?;
+
+            serde_json::to_vec(&ConsumerOutput {
+                plugin: plugin.id.as_str().to_owned(),
+                settings: plugin.settings.to_owned(),
+                state: *plugin.state,
+                session: refreshed.id().to_owned(),
+                echo: echo.value,
+                echo_has_persistence_authority: echo.has_persistence_authority,
+                has_persistence_authority: call
+                    .authority
+                    .permits(&CapabilityId::parse("kernel.persistence.read").unwrap()),
+            })
+            .map_err(|error| error.to_string())
+        }
+    }
+
+    fn authority() -> Authority {
+        Authority::new([
+            CapabilityId::parse("kernel.persistence.schema").unwrap(),
+            CapabilityId::parse("kernel.persistence.read").unwrap(),
+            CapabilityId::parse("kernel.persistence.write").unwrap(),
+        ])
+    }
+
+    fn echo_service() -> ServiceId {
+        ServiceId::parse(ECHO_SERVICE).unwrap()
+    }
+
+    fn consumer_service() -> ServiceId {
+        ServiceId::parse(CONSUMER_SERVICE).unwrap()
+    }
+
+    fn consumer_component_id() -> ComponentId {
+        ComponentId::parse(CONSUMER_COMPONENT).unwrap()
+    }
+
+    fn echo_manifest() -> PluginManifest {
+        PluginManifest {
+            id: PluginId::parse(ECHO_PLUGIN).unwrap(),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: vec![ServiceContribution {
+                role: ServiceRole::Terminal,
+                service: echo_service(),
+                priority: 100,
+                required_authority: Authority::default(),
+            }],
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    fn echo_component_manifest() -> ComponentManifest {
+        ComponentManifest {
+            id: ComponentId::parse(ECHO_COMPONENT).unwrap(),
+            owner: PluginId::parse(ECHO_PLUGIN).unwrap(),
+            imports: Vec::new(),
+            exports: vec![ComponentExport {
+                interface: EchoInterface::interface_id(),
+                priority: 100,
+                required_authority: Authority::default(),
+            }],
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    fn consumer_manifest(authority: Authority) -> PluginManifest {
+        PluginManifest {
+            id: PluginId::parse(CONSUMER_PLUGIN).unwrap(),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: vec![ServiceContribution {
+                role: ServiceRole::Terminal,
+                service: consumer_service(),
+                priority: 100,
+                required_authority: authority.clone(),
+            }],
+            resource_namespaces: Vec::new(),
+            maximum_authority: authority,
+        }
+    }
+
+    fn consumer_component_manifest(authority: Authority) -> ComponentManifest {
+        let required = |interface| ComponentImport {
+            interface,
+            required: true,
+            authority: authority.clone(),
+        };
+        ComponentManifest {
+            id: consumer_component_id(),
+            owner: PluginId::parse(CONSUMER_PLUGIN).unwrap(),
+            imports: vec![
+                required(SdkSessionInterface::interface_id()),
+                required(SessionInterface::interface_id()),
+                required(EchoInterface::interface_id()),
+            ],
+            exports: Vec::new(),
+            maximum_authority: authority,
+        }
+    }
+
+    fn consumer_factory() -> Box<dyn PluginInstance> {
+        Box::new(PhenixPluginAdapter::<ConsumerPlugin>::new(
+            consumer_component_id(),
+            "configured".to_owned(),
+            7_u32,
+        ))
+    }
+
+    #[test]
+    fn runtime_passes_context_and_provider_owned_objects_remain_kernel_mediated() {
+        let authority = authority();
+        let session = session_manifest();
+        let options = options_manifest();
+        let sdk = sdk_manifest(authority.clone());
+        let echo = echo_manifest();
+        let consumer = consumer_manifest(authority.clone());
+        let manifests = vec![
+            session.clone(),
+            options.clone(),
+            sdk.clone(),
+            echo.clone(),
+            consumer.clone(),
+        ];
+        let resolved = ResolvedHarness::resolve(
+            manifests.clone(),
+            [
+                session_component_manifest(),
+                options_component_manifest(),
+                sdk_component_manifest(authority.clone()),
+                echo_component_manifest(),
+                consumer_component_manifest(authority.clone()),
+            ],
+            [],
+            &authority,
+        )
+        .unwrap();
+        let mut kernel = Kernel::new(KernelConfig::new(manifests).unwrap());
+        kernel
+            .register_embedded_factory(session.id, session_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(options.id, options_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(sdk.id, sdk_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(echo.id, || Box::new(EchoPlugin))
+            .unwrap();
+        kernel
+            .register_embedded_factory(consumer.id, consumer_factory)
+            .unwrap();
+        kernel.activate_resolved_harness(&resolved).unwrap();
+        kernel.activate_all().unwrap();
+
+        let first = kernel
+            .invoke(&consumer_service(), &[], &authority, None)
+            .unwrap();
+        let first: ConsumerOutput = serde_json::from_slice(&first).unwrap();
+        assert_eq!(
+            first,
+            ConsumerOutput {
+                plugin: CONSUMER_PLUGIN.into(),
+                settings: "configured".into(),
+                state: 8,
+                session: "root".into(),
+                echo: "root".into(),
+                echo_has_persistence_authority: false,
+                has_persistence_authority: true,
+            }
+        );
+
+        let second = kernel
+            .invoke(&consumer_service(), &[], &authority, None)
+            .unwrap();
+        let second: ConsumerOutput = serde_json::from_slice(&second).unwrap();
+        assert_eq!(second.state, 9);
+    }
+}
