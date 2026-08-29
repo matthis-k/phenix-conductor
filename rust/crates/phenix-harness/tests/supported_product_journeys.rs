@@ -92,9 +92,15 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
     let mut harness = PhenixHarness::default_suite().unwrap();
     harness.activate().unwrap();
 
+    let plugins = harness
+        .kernel()
+        .config()
+        .manifests()
+        .map(|manifest| manifest.id.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
     assert_eq!(
-        harness.kernel().config().manifests().count(),
-        15,
+        plugins,
+        HarnessBuilder::default_suite_plugin_ids(),
         "the supported Harness owns the complete first-party suite",
     );
 

@@ -1,9 +1,10 @@
 use phenix_core::{CallableId, ModelId, PluginId, RoutingProfileId};
 use phenix_harness::{default_suite_authority, PhenixHarness};
 use phenix_plugin_catalog::{
-    execution_configuration_service, model_routing_service, AgentDefinition,
+    execution_configuration_service, model_routing_service, options_service, AgentDefinition,
     ExecutionConfigurationCommand, ExecutionConfigurationResponse, ModelCommand, ModelResponse,
-    ModelTarget, OrchestrationDefinition, RoutingProfile,
+    ModelTarget, OptionAssignment, OptionCommand, OptionKey, OptionResponse, OptionScope,
+    OptionStartupPrecedence, OptionSubjectId, OptionValue, OrchestrationDefinition, RoutingProfile,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -22,6 +23,35 @@ struct RuntimeRoutingProfile {
     default_target: RuntimeModelTarget,
     #[serde(default)]
     callable_targets: BTreeMap<CallableId, RuntimeModelTarget>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SettingsConfiguration {
+    #[serde(default)]
+    global: BTreeMap<OptionKey, SettingValue>,
+    #[serde(default)]
+    sessions: BTreeMap<OptionSubjectId, BTreeMap<OptionKey, SettingValue>>,
+    #[serde(default)]
+    agents: BTreeMap<OptionSubjectId, BTreeMap<OptionKey, SettingValue>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum SettingValue {
+    Bool(bool),
+    Integer(i64),
+    String(String),
+}
+
+impl From<SettingValue> for OptionValue {
+    fn from(value: SettingValue) -> Self {
+        match value {
+            SettingValue::Bool(value) => Self::Bool(value),
+            SettingValue::Integer(value) => Self::Integer(value),
+            SettingValue::String(value) => Self::String(value),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +88,109 @@ impl RuntimeRoutingProfile {
                 .collect(),
         }
     }
+}
+
+pub(super) fn apply_default_config_directory(
+    harness: &mut PhenixHarness,
+    directory: &Path,
+) -> Result<(), Box<dyn Error>> {
+    if !directory.is_dir() {
+        return Err(format!(
+            "default config directory does not exist: {}",
+            directory.display()
+        )
+        .into());
+    }
+    let runtime = directory.join("runtime.json");
+    if runtime.is_file() {
+        apply_runtime_config(harness, &runtime)?;
+    }
+    Ok(())
+}
+
+pub(super) fn apply_startup_settings(
+    harness: &mut PhenixHarness,
+    config_directory: Option<&Path>,
+    nix_settings: Option<&Path>,
+    precedence: OptionStartupPrecedence,
+) -> Result<(), Box<dyn Error>> {
+    let file_path = config_directory.map(|directory| directory.join("settings.json"));
+    let file_settings = read_optional_settings(file_path.as_deref())?;
+    let nix_settings = read_optional_settings(nix_settings)?;
+    let file_values = settings_assignments(file_settings);
+    let nix_values = settings_assignments(nix_settings);
+
+    let service = options_service();
+    let has_options = harness.kernel().config().manifests().any(|manifest| {
+        manifest
+            .services
+            .iter()
+            .any(|contribution| contribution.service == service)
+    });
+    if !has_options {
+        if file_values.is_empty() && nix_values.is_empty() {
+            return Ok(());
+        }
+        return Err("startup settings require the phenix.options plugin".into());
+    }
+
+    let output = harness.invoke(
+        &service,
+        &serde_json::to_vec(&OptionCommand::Configure {
+            file_values,
+            nix_values,
+            precedence,
+        })?,
+        &default_suite_authority(),
+        None,
+    )?;
+    match serde_json::from_slice::<OptionResponse>(&output)? {
+        OptionResponse::Configured { .. } => Ok(()),
+        _ => Err("options service rejected startup settings".into()),
+    }
+}
+
+fn read_optional_settings(path: Option<&Path>) -> Result<SettingsConfiguration, Box<dyn Error>> {
+    let Some(path) = path else {
+        return Ok(SettingsConfiguration::default());
+    };
+    if !path.exists() {
+        return Ok(SettingsConfiguration::default());
+    }
+    if !path.is_file() {
+        return Err(format!("settings path is not a file: {}", path.display()).into());
+    }
+    Ok(serde_json::from_slice(&fs::read(path)?)?)
+}
+
+fn settings_assignments(settings: SettingsConfiguration) -> Vec<OptionAssignment> {
+    let mut values = Vec::new();
+    for (key, value) in settings.global {
+        values.push(OptionAssignment {
+            key,
+            scope: OptionScope::Global,
+            value: value.into(),
+        });
+    }
+    for (session, settings) in settings.sessions {
+        for (key, value) in settings {
+            values.push(OptionAssignment {
+                key,
+                scope: OptionScope::Session(session.clone()),
+                value: value.into(),
+            });
+        }
+    }
+    for (agent, settings) in settings.agents {
+        for (key, value) in settings {
+            values.push(OptionAssignment {
+                key,
+                scope: OptionScope::Agent(agent.clone()),
+                value: value.into(),
+            });
+        }
+    }
+    values
 }
 
 pub(super) fn apply_runtime_config(

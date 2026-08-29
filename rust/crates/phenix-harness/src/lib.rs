@@ -17,11 +17,12 @@ use phenix_plugin_catalog::{
     hook_factory, hook_manifest, job_component_manifest, job_factory, job_manifest,
     language_component_manifest, language_factory, language_manifest,
     model_routing_component_manifest, model_routing_factory, model_routing_manifest,
-    planning_component_manifest, planning_factory, planning_manifest,
-    repository_worker_component_manifest, repository_worker_factory, repository_worker_manifest,
-    session_component_manifest, session_factory, session_manifest, session_tree_component_manifest,
-    session_tree_factory, session_tree_manifest, workspace_component_manifest, workspace_factory,
-    workspace_manifest,
+    options_component_manifest, options_factory, options_manifest, planning_component_manifest,
+    planning_factory, planning_manifest, repository_worker_component_manifest,
+    repository_worker_factory, repository_worker_manifest, sdk_component_manifest, sdk_factory,
+    sdk_manifest, session_component_manifest, session_factory, session_manifest,
+    session_tree_component_manifest, session_tree_factory, session_tree_manifest,
+    workspace_component_manifest, workspace_factory, workspace_manifest,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -131,6 +132,8 @@ impl HarnessBuilder {
         builder.add_embedded(frontend_manifest(authority.clone()), frontend_factory)?;
         builder.add_embedded(hook_manifest(authority.clone()), hook_factory)?;
         builder.add_embedded(debug_manifest(authority.clone()), debug_factory)?;
+        builder.add_embedded(options_manifest(), options_factory)?;
+        builder.add_embedded(sdk_manifest(authority.clone()), sdk_factory)?;
         for component in [
             repository_worker_component_manifest(),
             session_component_manifest(),
@@ -146,7 +149,9 @@ impl HarnessBuilder {
             job_component_manifest(),
             frontend_component_manifest(authority.clone()),
             hook_component_manifest(authority.clone()),
-            debug_component_manifest(authority),
+            debug_component_manifest(authority.clone()),
+            options_component_manifest(),
+            sdk_component_manifest(authority),
         ] {
             builder.add_component(component);
         }
@@ -170,7 +175,9 @@ impl HarnessBuilder {
             job_manifest(),
             frontend_manifest(authority.clone()),
             hook_manifest(authority.clone()),
-            debug_manifest(authority),
+            debug_manifest(authority.clone()),
+            options_manifest(),
+            sdk_manifest(authority),
         ]
         .into_iter()
         .map(|manifest| manifest.id.as_str().to_owned())
@@ -195,6 +202,8 @@ impl HarnessBuilder {
             frontend_manifest(authority.clone()),
             hook_manifest(authority.clone()),
             debug_manifest(authority.clone()),
+            options_manifest(),
+            sdk_manifest(authority.clone()),
             basic_model_manifest(),
             basic_tools_manifest(),
             basic_skills_manifest(),
@@ -267,6 +276,8 @@ impl HarnessBuilder {
         )?;
         builder.add_selected(&enabled, hook_manifest(authority.clone()), hook_factory)?;
         builder.add_selected(&enabled, debug_manifest(authority.clone()), debug_factory)?;
+        builder.add_selected(&enabled, options_manifest(), options_factory)?;
+        builder.add_selected(&enabled, sdk_manifest(authority.clone()), sdk_factory)?;
         builder.add_selected(&enabled, basic_model_manifest(), basic_model_factory)?;
         builder.add_selected(&enabled, basic_tools_manifest(), basic_tools_factory)?;
         builder.add_selected(&enabled, basic_skills_manifest(), basic_skills_factory)?;
@@ -286,7 +297,9 @@ impl HarnessBuilder {
             job_component_manifest(),
             frontend_component_manifest(authority.clone()),
             hook_component_manifest(authority.clone()),
-            debug_component_manifest(authority),
+            debug_component_manifest(authority.clone()),
+            options_component_manifest(),
+            sdk_component_manifest(authority),
             basic_model_component_manifest(),
             basic_tools_component_manifest(),
             basic_skills_component_manifest(),
@@ -704,10 +717,17 @@ mod tests {
     fn default_harness_loads_first_party_suite_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        assert_eq!(harness.kernel().config().manifests().count(), 15);
+        let plugins = harness
+            .kernel()
+            .config()
+            .manifests()
+            .map(|manifest| manifest.id.as_str().to_owned())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(plugins, HarnessBuilder::default_suite_plugin_ids());
         for component in [
             repository_worker_component_manifest().id,
             session_component_manifest().id,
+            session_tree_component_manifest().id,
             artifact_component_manifest().id,
             cli_component_manifest(default_suite_authority()).id,
             context_component_manifest().id,
@@ -720,6 +740,8 @@ mod tests {
             frontend_component_manifest(default_suite_authority()).id,
             hook_component_manifest(default_suite_authority()).id,
             debug_component_manifest(default_suite_authority()).id,
+            options_component_manifest().id,
+            sdk_component_manifest(default_suite_authority()).id,
         ] {
             assert!(
                 harness.component_graph().component(&component).is_some(),

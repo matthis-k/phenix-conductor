@@ -71,6 +71,9 @@ let
       resources ? [ ],
       enabledPlugins ? null,
       layerPolicies ? [ ],
+      settings ? { },
+      configDirectory ? null,
+      settingsPrecedence ? "nix",
       ...
     }:
     let
@@ -83,6 +86,11 @@ let
       embeddedPlugins = builtins.filter isEmbedded plugins;
       packagedPlugins = builtins.filter (plugin: !isEmbedded plugin) plugins;
       selectedEmbeddedIds = map (plugin: plugin.phenixPluginId) embeddedPlugins;
+      nixSettingsFile = pkgs.writeText "phenix-nix-settings.json" (builtins.toJSON settings);
+      validSettingsPrecedence = builtins.elem settingsPrecedence [
+        "nix"
+        "file"
+      ];
       selectedIds =
         if enabledPlugins != null then
           enabledPlugins
@@ -91,7 +99,17 @@ let
         else
           null;
     in
-    if plugins == [ ] && resources == [ ] && selectedIds == null && layerPolicies == [ ] then
+    if !validSettingsPrecedence then
+      throw "mkPhenix settingsPrecedence must be either 'nix' or 'file'"
+    else if
+      plugins == [ ]
+      && resources == [ ]
+      && selectedIds == null
+      && layerPolicies == [ ]
+      && settings == { }
+      && configDirectory == null
+      && settingsPrecedence == "nix"
+    then
       base
     else
       pkgs.symlinkJoin {
@@ -110,6 +128,26 @@ let
             ''
               for program in phenix phenix-harness; do
                 if [ -e "$out/bin/$program" ]; then
+                  ${pkgs.lib.optionalString (resources != [ ]) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_DEFAULT_CONFIG_DIR "$out/share/phenix"
+                  ''}
+                  ${pkgs.lib.optionalString (configDirectory != null) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_CONFIG_DIR ${pkgs.lib.escapeShellArg (toString configDirectory)}
+                  ''}
+                  ${pkgs.lib.optionalString (configDirectory == null && resources != [ ]) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_CONFIG_DIR "$out/share/phenix"
+                  ''}
+                  ${pkgs.lib.optionalString (settings != { }) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_NIX_SETTINGS ${pkgs.lib.escapeShellArg (toString nixSettingsFile)}
+                  ''}
+                  ${pkgs.lib.optionalString (configDirectory != null || resources != [ ] || settings != { }) ''
+                    wrapProgram "$out/bin/$program" \
+                      --set PHENIX_SETTINGS_PRECEDENCE ${pkgs.lib.escapeShellArg settingsPrecedence}
+                  ''}
                   ${pkgs.lib.optionalString (packagedPlugins != [ ]) ''
                     wrapProgram "$out/bin/$program" \
                       --set PHENIX_PLUGIN_PACKAGES ${pkgs.lib.escapeShellArg pluginPackages}
@@ -124,7 +162,6 @@ let
                   ''}
                   ${pkgs.lib.optionalString (resources != [ ]) ''
                     wrapProgram "$out/bin/$program" \
-                      --set PHENIX_RUNTIME_CONFIG "$out/share/phenix/runtime.json" \
                       --set PHENIX_SKILL_PATH "$out/share/phenix/skills"
                   ''}
                 fi
@@ -264,8 +301,10 @@ in
         "jobs"
         "language"
         "models"
+        "options"
         "planning"
         "repository-workers"
+        "sdk"
         "session-tree"
         "sessions"
         "workspace"
@@ -276,6 +315,46 @@ in
         inherit pkgs;
         plugins = defaultPlugins;
         resources = [ harnessResources ];
+      };
+      settingsConfigDirectory = pkgs.writeTextDir "settings.json" (
+        builtins.toJSON {
+          global = {
+            "session.auto_create" = true;
+          };
+          agents = {
+            "agent.scout" = {
+              "agent.max_parallel_tasks" = 7;
+            };
+          };
+        }
+      );
+      settingsComposition = mkPhenix {
+        inherit pkgs;
+        plugins = defaultPlugins;
+        resources = [ harnessResources ];
+        configDirectory = settingsConfigDirectory;
+        settings = {
+          global = {
+            "session.auto_create" = false;
+          };
+          agents = {
+            "agent.scout" = {
+              "agent.max_parallel_tasks" = 4;
+            };
+          };
+        };
+      };
+      filePrecedenceComposition = mkPhenix {
+        inherit pkgs;
+        plugins = defaultPlugins;
+        resources = [ harnessResources ];
+        configDirectory = settingsConfigDirectory;
+        settingsPrecedence = "file";
+        settings = {
+          global = {
+            "session.auto_create" = false;
+          };
+        };
       };
       externalComposition = mkPhenix {
         inherit pkgs;
@@ -337,7 +416,29 @@ in
             test -f "${defaultComposition}/share/phenix/skills/pstack-LICENSE"
             export PHENIX_STATE_DB="$TMPDIR/composition.sqlite"
             "${defaultComposition}/bin/phenix" --list-services > "$TMPDIR/default-services.json"
-            jq -e '(.plugins | length == 15) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
+            jq -e '(.plugins | length == 17) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
+
+            export PHENIX_STATE_DB="$TMPDIR/settings.sqlite"
+            printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"operation":"resolve","key":"session.auto_create","context":{}}}' \
+              | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-option.json"
+            jq -e '.status == "ok" and .output.result == "value" and .output.option.value.type == "bool" and .output.option.value.value == false and .output.option.source == "global" and .output.option.layer == "nix"' \
+              "$TMPDIR/settings-option.json" >/dev/null
+            printf '%s\n' '{"id":2,"service":"phenix.sdk.config@1","input":{"operation":"read","path":"settings.json"}}' \
+              | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-config.json"
+            jq -e '.status == "ok" and .output.result == "file" and ((.output.content | implode | fromjson).global["session.auto_create"] == true)' \
+              "$TMPDIR/settings-config.json" >/dev/null
+            printf '%s\n' '{"id":3,"service":"phenix.options@1","input":{"operation":"set","key":"session.auto_create","scope":"global","value":{"type":"bool","value":true}}}' \
+              | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-runtime-set.json"
+            printf '%s\n' '{"id":4,"service":"phenix.options@1","input":{"operation":"resolve","key":"session.auto_create","context":{"agent":"agent.scout"}}}' \
+              | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-runtime-resolve.json"
+            jq -e '.status == "ok" and .output.option.value.value == true and .output.option.layer == "runtime" and .output.option.source == "global"' \
+              "$TMPDIR/settings-runtime-resolve.json" >/dev/null
+
+            export PHENIX_STATE_DB="$TMPDIR/settings-file-first.sqlite"
+            printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"operation":"resolve","key":"session.auto_create","context":{}}}' \
+              | "${filePrecedenceComposition}/bin/phenix" > "$TMPDIR/settings-file-first.json"
+            jq -e '.status == "ok" and .output.option.value.value == true and .output.option.layer == "file"' \
+              "$TMPDIR/settings-file-first.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/external.sqlite"
             "${externalComposition}/bin/phenix" --list-services > "$TMPDIR/external-services.json"
