@@ -1,7 +1,8 @@
 use crate::debug_component_id;
 use phenix_core::{
-    Authority, ComponentInterface, ComponentInvocationError, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ServiceContribution, ServiceId,
+    Authority, ComponentInterface, ComponentInvocationError, PluginContext, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, SdkClient, ServiceContribution,
+    ServiceId,
 };
 use phenix_plugin_context::{ContextCommand, ContextInterface};
 use phenix_plugin_frontend::{FrontendCommand, FrontendInterface};
@@ -67,6 +68,34 @@ pub fn debug_service() -> ServiceId {
     ServiceId::parse(DEBUG_SERVICE).expect("static service id is valid")
 }
 
+struct DebugSdk<'host, 'runtime> {
+    sessions: SdkClient<'host, 'runtime, SessionInterface>,
+    context: SdkClient<'host, 'runtime, ContextInterface>,
+    planning: SdkClient<'host, 'runtime, PlanningInterface>,
+    jobs: SdkClient<'host, 'runtime, JobInterface>,
+    models: SdkClient<'host, 'runtime, ModelRoutingInterface>,
+    frontends: SdkClient<'host, 'runtime, FrontendInterface>,
+}
+
+type DebugContext<'host, 'runtime> = PluginContext<'host, 'runtime, DebugSdk<'host, 'runtime>>;
+
+fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> DebugContext<'host, 'runtime> {
+    let component = debug_component_id();
+    PluginContext::new(
+        host,
+        DebugSdk {
+            sessions: SdkClient::new(host, component.clone()),
+            context: SdkClient::new(host, component.clone()),
+            planning: SdkClient::new(host, component.clone()),
+            jobs: SdkClient::new(host, component.clone()),
+            models: SdkClient::new(host, component.clone()),
+            frontends: SdkClient::new(host, component),
+        },
+        (),
+        (),
+    )
+}
+
 struct DebugPlugin;
 
 impl PluginInstance for DebugPlugin {
@@ -83,23 +112,36 @@ impl PluginInstance for DebugPlugin {
         if service != &debug_service() {
             return Err(format!("unsupported debug service: {service}"));
         }
-        let command: DebugCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            DebugCommand::Snapshot => DebugResponse::Snapshot {
-                snapshot: snapshot(host),
-            },
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command);
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-fn snapshot(host: &PluginHost<'_>) -> DiagnosticSnapshot {
+fn handle(context: &DebugContext<'_, '_>, command: DebugCommand) -> DebugResponse {
+    match command {
+        DebugCommand::Snapshot => DebugResponse::Snapshot {
+            snapshot: snapshot(context),
+        },
+    }
+}
+
+fn snapshot(context: &DebugContext<'_, '_>) -> DiagnosticSnapshot {
     let mut services = BTreeMap::new();
-    probe::<SessionInterface>(host, &mut services, "sessions", &SessionCommand::List);
-    probe::<ContextInterface>(host, &mut services, "context", &ContextCommand::List);
-    probe::<PlanningInterface>(
-        host,
+    probe(
+        &context.sdk.sessions,
+        &mut services,
+        "sessions",
+        &SessionCommand::List,
+    );
+    probe(
+        &context.sdk.context,
+        &mut services,
+        "context",
+        &ContextCommand::List,
+    );
+    probe(
+        &context.sdk.planning,
         &mut services,
         "planning_history",
         &PlanningCommand::SearchHistory {
@@ -107,14 +149,24 @@ fn snapshot(host: &PluginHost<'_>) -> DiagnosticSnapshot {
             query: String::new(),
         },
     );
-    probe::<JobInterface>(host, &mut services, "jobs", &JobCommand::List);
-    probe::<ModelRoutingInterface>(host, &mut services, "models", &ModelCommand::ListProfiles);
-    probe::<FrontendInterface>(host, &mut services, "frontends", &FrontendCommand::Catalog);
+    probe(&context.sdk.jobs, &mut services, "jobs", &JobCommand::List);
+    probe(
+        &context.sdk.models,
+        &mut services,
+        "models",
+        &ModelCommand::ListProfiles,
+    );
+    probe(
+        &context.sdk.frontends,
+        &mut services,
+        "frontends",
+        &FrontendCommand::Catalog,
+    );
     DiagnosticSnapshot { services }
 }
 
 fn probe<I>(
-    host: &PluginHost<'_>,
+    client: &SdkClient<'_, '_, I>,
     entries: &mut BTreeMap<String, DiagnosticEntry>,
     name: &str,
     command: &I::Request,
@@ -122,7 +174,7 @@ fn probe<I>(
     I: ComponentInterface,
     I::Response: Serialize,
 {
-    let entry = match host.invoke_import::<I>(&debug_component_id(), command) {
+    let entry = match client.invoke(command) {
         Ok(response) => match serde_json::to_value(response) {
             Ok(value) => DiagnosticEntry {
                 available: true,

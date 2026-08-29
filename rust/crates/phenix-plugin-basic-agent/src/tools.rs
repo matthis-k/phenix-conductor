@@ -1,14 +1,22 @@
 use phenix_core::{
     tool_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, DurableSchema, InterfaceId, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, ServiceRole,
-    ToolCommand, ToolDefinition, ToolResponse, TransactionOp, TOOL_SERVICE,
+    ComponentManifest, DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost,
+    PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    ServiceRole, ToolCommand, ToolDefinition, ToolResponse, TransactionOp, TOOL_SERVICE,
 };
 
 pub const BASIC_TOOLS_PLUGIN: &str = "phenix.basic-tools";
 pub const BASIC_TOOLS_COMPONENT: &str = "phenix.basic-tools";
 const BASIC_TOOLS_NAMESPACE: &str = "phenix.basic-tools.state";
 const INDEX_KEY: &str = "tools/@all";
+
+type BasicToolsContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(
+    host: &'host PluginHost<'runtime>,
+) -> BasicToolsContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 pub struct BasicToolsInterface;
 
@@ -63,7 +71,9 @@ struct BasicTools;
 
 impl PluginInstance for BasicTools {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -76,67 +86,82 @@ impl PluginInstance for BasicTools {
         if service != &tool_service() {
             return Err(format!("unsupported basic tool service: {service}"));
         }
-        let command: ToolCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            ToolCommand::Register { tool } => {
-                require_id(&tool.id)?;
-                write_tool(host, &tool)?;
-                ToolResponse::Tool { tool: Some(tool) }
-            }
-            ToolCommand::Get { id } => ToolResponse::Tool {
-                tool: read_tool(host, &id)?,
-            },
-            ToolCommand::List => ToolResponse::Tools {
-                tools: read_ids(host)?
-                    .into_iter()
-                    .map(|id| {
-                        read_tool(host, &id)?.ok_or_else(|| format!("missing durable tool: {id}"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-            ToolCommand::Invoke { id, input } => {
-                let tool = read_tool(host, &id)?.ok_or_else(|| format!("unknown tool: {id}"))?;
-                let mut output = tool.output_prefix;
-                output.extend(input);
-                ToolResponse::Output { output }
-            }
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-fn write_tool(host: &PluginHost<'_>, tool: &ToolDefinition) -> Result<(), String> {
-    let mut ids = read_ids(host)?;
+fn handle(
+    context: &BasicToolsContext<'_, '_>,
+    command: ToolCommand,
+) -> Result<ToolResponse, String> {
+    match command {
+        ToolCommand::Register { tool } => {
+            require_id(&tool.id)?;
+            write_tool(context, &tool)?;
+            Ok(ToolResponse::Tool { tool: Some(tool) })
+        }
+        ToolCommand::Get { id } => Ok(ToolResponse::Tool {
+            tool: read_tool(context, &id)?,
+        }),
+        ToolCommand::List => Ok(ToolResponse::Tools {
+            tools: read_ids(context)?
+                .into_iter()
+                .map(|id| {
+                    read_tool(context, &id)?.ok_or_else(|| format!("missing durable tool: {id}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        }),
+        ToolCommand::Invoke { id, input } => {
+            let tool = read_tool(context, &id)?.ok_or_else(|| format!("unknown tool: {id}"))?;
+            let mut output = tool.output_prefix;
+            output.extend(input);
+            Ok(ToolResponse::Output { output })
+        }
+    }
+}
+
+fn write_tool(context: &BasicToolsContext<'_, '_>, tool: &ToolDefinition) -> Result<(), String> {
+    let mut ids = read_ids(context)?;
     if !ids.contains(&tool.id) {
         ids.push(tool.id.clone());
         ids.sort();
     }
-    host.transact_durable(
-        &namespace(),
-        &[
-            TransactionOp::Put {
-                key: format!("tool/{}", tool.id),
-                value: serde_json::to_vec(tool).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: INDEX_KEY.into(),
-                value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &namespace(),
+            &[
+                TransactionOp::Put {
+                    key: format!("tool/{}", tool.id),
+                    value: serde_json::to_vec(tool).map_err(|error| error.to_string())?,
+                },
+                TransactionOp::Put {
+                    key: INDEX_KEY.into(),
+                    value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
-fn read_tool(host: &PluginHost<'_>, id: &str) -> Result<Option<ToolDefinition>, String> {
-    host.read_durable(&namespace(), &format!("tool/{id}"))
+fn read_tool(
+    context: &BasicToolsContext<'_, '_>,
+    id: &str,
+) -> Result<Option<ToolDefinition>, String> {
+    context
+        .kernel
+        .read_durable(&namespace(), &format!("tool/{id}"))
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn read_ids(host: &PluginHost<'_>) -> Result<Vec<String>, String> {
-    host.read_durable(&namespace(), INDEX_KEY)
+fn read_ids(context: &BasicToolsContext<'_, '_>) -> Result<Vec<String>, String> {
+    context
+        .kernel
+        .read_durable(&namespace(), INDEX_KEY)
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .unwrap_or_else(|| Ok(Vec::new()))

@@ -1,6 +1,6 @@
 use phenix_core::{
-    Authority, CallableId, CapabilityId, DurableSchema, ModelId, PluginExecution, PluginHost,
-    PluginId, PluginInstance, PluginManifest, ResourceNamespace, RoutingProfileId,
+    Authority, CallableId, CapabilityId, DurableSchema, ModelId, PluginContext, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, RoutingProfileId,
     ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
@@ -15,6 +15,16 @@ const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const PROFILE_INDEX: &str = "index/profiles";
+
+type ModelContext<'host, 'runtime, 'state> =
+    PluginContext<'host, 'runtime, (), (), &'state mut BTreeSet<PluginId>>;
+
+fn context<'host, 'runtime, 'state>(
+    host: &'host PluginHost<'runtime>,
+    authenticated: &'state mut BTreeSet<PluginId>,
+) -> ModelContext<'host, 'runtime, 'state> {
+    PluginContext::new(host, (), (), authenticated)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelTarget {
@@ -144,7 +154,9 @@ struct ModelRoutingPlugin {
 
 impl PluginInstance for ModelRoutingPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(model_namespace(), 1))
+        context(host, &mut self.authenticated)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(model_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -159,73 +171,81 @@ impl PluginInstance for ModelRoutingPlugin {
         }
         let command: ModelCommand =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            ModelCommand::RegisterProfile { profile } => {
-                insert_profile(host, &profile)?;
-                ModelResponse::Profile {
-                    profile: Some(profile),
-                }
+        let response = handle(&mut context(host, &mut self.authenticated), command)?;
+        serde_json::to_vec(&response).map_err(|error| error.to_string())
+    }
+}
+
+fn handle(
+    context: &mut ModelContext<'_, '_, '_>,
+    command: ModelCommand,
+) -> Result<ModelResponse, String> {
+    match command {
+        ModelCommand::RegisterProfile { profile } => {
+            insert_profile(context, &profile)?;
+            Ok(ModelResponse::Profile {
+                profile: Some(profile),
+            })
+        }
+        ModelCommand::GetProfile { id } => Ok(ModelResponse::Profile {
+            profile: read_profile(context, &id)?,
+        }),
+        ModelCommand::ListProfiles => Ok(ModelResponse::Profiles {
+            profiles: load_profiles(context)?
+                .into_iter()
+                .map(|profile| descriptor(&profile))
+                .collect(),
+        }),
+        ModelCommand::SetProviderAuthenticated {
+            provider_plugin,
+            authenticated,
+        } => {
+            if authenticated {
+                context.plugin.state.insert(provider_plugin.clone());
+            } else {
+                context.plugin.state.remove(&provider_plugin);
             }
-            ModelCommand::GetProfile { id } => ModelResponse::Profile {
-                profile: read_profile(host, &id)?,
-            },
-            ModelCommand::ListProfiles => ModelResponse::Profiles {
-                profiles: load_profiles(host)?
-                    .into_iter()
-                    .map(|profile| descriptor(&profile))
-                    .collect(),
-            },
-            ModelCommand::SetProviderAuthenticated {
+            Ok(ModelResponse::Authentication {
                 provider_plugin,
                 authenticated,
-            } => {
-                if authenticated {
-                    self.authenticated.insert(provider_plugin.clone());
-                } else {
-                    self.authenticated.remove(&provider_plugin);
-                }
-                ModelResponse::Authentication {
-                    provider_plugin,
-                    authenticated,
-                }
+            })
+        }
+        ModelCommand::Resolve {
+            profile_id,
+            callable_id,
+        } => Ok(ModelResponse::Target {
+            target: resolve_target(context, &profile_id, callable_id.as_ref())?,
+        }),
+        ModelCommand::Invoke {
+            profile_id,
+            callable_id,
+            input,
+        } => {
+            let target = resolve_target(context, &profile_id, callable_id.as_ref())?;
+            if !context.plugin.state.contains(&target.provider_plugin) {
+                return Err(format!(
+                    "provider authentication required: {}",
+                    target.provider_plugin
+                ));
             }
-            ModelCommand::Resolve {
-                profile_id,
-                callable_id,
-            } => ModelResponse::Target {
-                target: resolve_target(host, &profile_id, callable_id.as_ref())?,
-            },
-            ModelCommand::Invoke {
-                profile_id,
-                callable_id,
+            let request = ModelInferenceRequest {
+                model: target.model.as_str().to_owned(),
                 input,
-            } => {
-                let target = resolve_target(host, &profile_id, callable_id.as_ref())?;
-                if !self.authenticated.contains(&target.provider_plugin) {
-                    return Err(format!(
-                        "provider authentication required: {}",
-                        target.provider_plugin
-                    ));
-                }
-                let request = ModelInferenceRequest {
-                    model: target.model.as_str().to_owned(),
-                    input,
-                    options: target.options.clone(),
-                };
-                let output = host
-                    .invoke_service_abi(
-                        &model_inference_service(),
-                        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
-                        host.authority(),
-                        Some(&target.provider_plugin),
-                    )
-                    .map_err(|error| error.to_string())?;
-                let response: ModelInferenceResponse =
-                    serde_json::from_slice(&output).map_err(|error| error.to_string())?;
-                ModelResponse::Inference { target, response }
-            }
-        };
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+                options: target.options.clone(),
+            };
+            let output = context
+                .kernel
+                .invoke_service_abi(
+                    &model_inference_service(),
+                    &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+                    context.call.authority,
+                    Some(&target.provider_plugin),
+                )
+                .map_err(|error| error.to_string())?;
+            let response: ModelInferenceResponse =
+                serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+            Ok(ModelResponse::Inference { target, response })
+        }
     }
 }
 
@@ -244,11 +264,11 @@ fn descriptor(profile: &RoutingProfile) -> RoutingProfileDescriptor {
 }
 
 fn resolve_target(
-    host: &PluginHost<'_>,
+    context: &ModelContext<'_, '_, '_>,
     profile_id: &RoutingProfileId,
     callable_id: Option<&CallableId>,
 ) -> Result<ModelTarget, String> {
-    let profile = read_profile(host, profile_id)?
+    let profile = read_profile(context, profile_id)?
         .ok_or_else(|| format!("unknown routing profile: {profile_id}"))?;
     Ok(callable_id
         .and_then(|callable| profile.callable_targets.get(callable))
@@ -256,15 +276,18 @@ fn resolve_target(
         .clone())
 }
 
-fn insert_profile(host: &PluginHost<'_>, profile: &RoutingProfile) -> Result<(), String> {
+fn insert_profile(
+    context: &ModelContext<'_, '_, '_>,
+    profile: &RoutingProfile,
+) -> Result<(), String> {
     let key = profile_key(&profile.id);
-    let old_index = read_raw(host, PROFILE_INDEX)?;
+    let old_index = read_raw(context, PROFILE_INDEX)?;
     let mut ids: Vec<RoutingProfileId> = old_index
         .as_deref()
         .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
         .transpose()?
         .unwrap_or_default();
-    if ids.contains(&profile.id) || read_raw(host, &key)?.is_some() {
+    if ids.contains(&profile.id) || read_raw(context, &key)?.is_some() {
         return Err(format!(
             "routing profile already registered: {}",
             profile.id
@@ -272,52 +295,58 @@ fn insert_profile(host: &PluginHost<'_>, profile: &RoutingProfile) -> Result<(),
     }
     ids.push(profile.id.clone());
     ids.sort();
-    host.transact_durable(
-        &model_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: key.clone(),
-                expected: None,
-            },
-            TransactionOp::AssertValue {
-                key: PROFILE_INDEX.into(),
-                expected: old_index,
-            },
-            TransactionOp::Put {
-                key,
-                value: serde_json::to_vec(profile).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: PROFILE_INDEX.into(),
-                value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &model_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: None,
+                },
+                TransactionOp::AssertValue {
+                    key: PROFILE_INDEX.into(),
+                    expected: old_index,
+                },
+                TransactionOp::Put {
+                    key,
+                    value: serde_json::to_vec(profile).map_err(|error| error.to_string())?,
+                },
+                TransactionOp::Put {
+                    key: PROFILE_INDEX.into(),
+                    value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn read_profile(
-    host: &PluginHost<'_>,
+    context: &ModelContext<'_, '_, '_>,
     id: &RoutingProfileId,
 ) -> Result<Option<RoutingProfile>, String> {
-    read_raw(host, &profile_key(id))?
+    read_raw(context, &profile_key(id))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn load_profiles(host: &PluginHost<'_>) -> Result<Vec<RoutingProfile>, String> {
-    let ids: Vec<RoutingProfileId> = read_raw(host, PROFILE_INDEX)?
+fn load_profiles(context: &ModelContext<'_, '_, '_>) -> Result<Vec<RoutingProfile>, String> {
+    let ids: Vec<RoutingProfileId> = read_raw(context, PROFILE_INDEX)?
         .as_deref()
         .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
         .transpose()?
         .unwrap_or_default();
     ids.into_iter()
-        .map(|id| read_profile(host, &id)?.ok_or_else(|| format!("missing routing profile: {id}")))
+        .map(|id| {
+            read_profile(context, &id)?.ok_or_else(|| format!("missing routing profile: {id}"))
+        })
         .collect()
 }
 
-fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
-    host.read_durable(&model_namespace(), key)
+fn read_raw(context: &ModelContext<'_, '_, '_>, key: &str) -> Result<Option<Vec<u8>>, String> {
+    context
+        .kernel
+        .read_durable(&model_namespace(), key)
         .map_err(|error| error.to_string())
 }
 

@@ -4,13 +4,15 @@ Status: implementation contract.
 
 ## Purpose
 
-Define the author-facing runtime boundary between a plugin instance, the kernel, and the selected SDK.
+Define the runtime boundary between a plugin instance, the kernel, and the selected SDK.
 
-The core runtime stays generic. It passes `PluginHost` to a plugin instance. The SDK authoring layer adapts that callback into the `PluginContext` exposed to plugin code.
+The core `PluginInstance` ABI receives `PluginHost`. A plugin callback immediately projects that host and its instance data into `PluginContext`. Business logic receives the context instead of `PluginHost`.
+
+Generic context types live in `phenix-core`. The default `PhenixSdk` remains in `phenix-plugin-sdk`.
 
 ## Runtime context
 
-`PhenixPlugin` start and invocation callbacks receive one `PluginContext` value:
+Plugin business logic receives one `PluginContext` value:
 
 ```text
 PluginContext
@@ -25,20 +27,35 @@ PluginContext
     graph_generation
 ```
 
-The fields have distinct ownership:
+The fields have distinct roles:
 
 - `kernel`: scoped access to generic kernel mechanisms. It is not a mutable `Kernel` reference.
 - `sdk`: typed userspace clients bound to the component handling the callback.
-- `plugin`: the current plugin identity plus borrowed instance settings and mutable instance state.
+- `plugin`: the current plugin identity plus the settings and state view selected by the plugin instance.
 - `call`: metadata scoped to the current kernel-mediated callback.
 
-`PluginContext` is a borrowed view. It does not own kernel state, SDK providers, settings, or plugin state.
+`PluginContext` always borrows the live `PluginHost`. Its `Settings` and `State` slots are generic. A stateful plugin normally supplies `&Settings` and `&mut State`. A stateless plugin may supply `()`. A plugin with process-local resources may supply another callback-scoped handle.
 
-`PhenixPluginAdapter` is the dynamic core `PluginInstance`. It owns one settings value and one mutable state value. For each host-backed callback it borrows those values into a fresh `PluginContext` and passes that context to the static `PhenixPlugin` definition.
+The context does not create a second owner for plugin state. The dynamic `PluginInstance` remains responsible for its live state and constructs a fresh context for each host-backed callback.
 
-The core `stop` callback has no host. `PhenixPlugin::stop` receives borrowed settings and state directly.
+The core `stop` callback has no host, so it cannot construct a runtime context. Stop logic works directly with data owned by the plugin instance.
 
-This keeps plugin state in one place. A plugin does not have hidden mutable implementation state alongside `context.plugin.state`.
+## ABI adapter
+
+`PluginInstance` methods are the runtime ABI adapter. They should parse the request, construct the appropriate context, call business logic, and serialize the response.
+
+Business logic should not receive `PluginHost`. This keeps host access grouped into four explicit surfaces:
+
+```text
+ctx.kernel  generic kernel mechanisms
+ctx.sdk     typed component imports
+ctx.plugin  current plugin data
+ctx.call    current call metadata
+```
+
+A plugin may define a local context alias and an SDK dependency struct for its declared imports. This makes unavailable dependencies absent from the business-logic type.
+
+The `phenix_context` helper constructs a context with the default `PhenixSdk`. The caller still chooses which settings and state view to place in `ctx.plugin`.
 
 ## SDK access
 
@@ -90,13 +107,13 @@ SDK contracts may expose two kinds of objects.
 
 Self-contained immutable data may cross the contract boundary by value.
 
-Examples: session summaries, model information, artifact metadata, and test results.
+Examples include session summaries, model information, artifact metadata, and test results.
 
 ### Capability objects
 
 Stateful or behavioral objects cross the boundary as typed handles.
 
-Examples: sessions, artifacts, workers, terminals, and test runs.
+Examples include sessions, artifacts, workers, terminals, and test runs.
 
 A capability object carries stable identity and a typed client. Operations remain kernel-mediated, so provider resolution and authority checks still apply. Handles are callback-scoped because their clients borrow the current runtime host. Persistent plugin state should store stable object identity and reacquire a client on the next callback.
 
@@ -106,39 +123,43 @@ Raw Rust references to another plugin's internal state are not part of an SDK co
 
 An SDK call may invoke another plugin, and that provider may perform further SDK calls.
 
-Each provider using the authoring adapter receives a fresh `PluginContext` for its host-backed callback. The kernel remains responsible for authority attenuation, component bindings, provenance, and cycle protection across the call chain.
+Each provider constructs a fresh `PluginContext` for its host-backed callback. The kernel remains responsible for authority attenuation, component bindings, provenance, and cycle protection across the call chain.
 
-## Static and dynamic forms
+## Ownership split
 
-The author-facing split is:
+The runtime split is:
 
 ```text
-PhenixPlugin                 static behavior contract
-  Settings                   immutable instance configuration
-  State                      mutable private instance state
+phenix-core
+  PluginContext
+  KernelAccess
+  SdkClient
+  SdkContract
+  SdkObject
 
-PhenixPluginAdapter          dynamic core PluginInstance
-  default_component
-  settings
-  state
+phenix-plugin-sdk
+  PhenixSdk
+  phenix_context
 
-PluginContext                borrowed callback projection
-  kernel
-  sdk
-  plugin
-  call
+plugin crate
+  PluginInstance ABI adapter
+  instance settings and state
+  typed business logic
 ```
 
-A plugin may have multiple components. Component callbacks bind the SDK to the actual component supplied by the kernel. Legacy service callbacks use the adapter's declared default component.
+A plugin may have multiple components. Component callbacks bind SDK clients to the component supplied by the kernel. A legacy service callback must select the component that declares its imports.
 
 ## Invariants
 
-- Core owns generic plugin execution; the SDK layer owns the author-facing context adapter.
-- Plugin settings and state have one dynamic owner: `PhenixPluginAdapter`.
-- `PluginContext` borrows settings and mutable state; it does not copy or own them.
-- `ctx.sdk` is the typed public dependency namespace available from the current component.
+- Core owns generic plugin execution and generic context mechanisms.
+- The SDK crate owns the default Phenix userspace namespace and authoring helper.
+- A plugin instance remains the single owner of its mutable instance state.
+- A context carries an explicit settings and state view. It does not invent or copy hidden state.
+- Plugin business logic receives `PluginContext`, not `PluginHost`.
+- Typed component imports are available through `ctx.sdk`.
 - Cross-plugin access requires an explicit typed import and remains kernel-mediated.
 - Plugin-owned state is private by default.
 - Stateful SDK objects are handles, not shared provider-internal references.
-- `ctx.kernel` is scoped kernel access, never unrestricted mutable kernel access.
+- Generic kernel mechanisms are available through `ctx.kernel`, never an unrestricted mutable kernel reference.
+- Call authority and graph generation are available through `ctx.call`.
 - Recursive SDK calls cannot expand effective authority.

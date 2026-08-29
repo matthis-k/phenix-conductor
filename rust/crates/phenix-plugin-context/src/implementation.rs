@@ -1,7 +1,8 @@
 use crate::context_component_id;
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 pub use phenix_core::{
     ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
@@ -19,6 +20,26 @@ const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const ALL_RESOURCES_KEY: &str = "resources/@all";
+
+struct ContextSdk<'host, 'runtime> {
+    execution: SdkClient<'host, 'runtime, ExecutionInterface>,
+}
+
+type ContextPluginContext<'host, 'runtime> =
+    PluginContext<'host, 'runtime, ContextSdk<'host, 'runtime>>;
+
+fn context<'host, 'runtime>(
+    host: &'host PluginHost<'runtime>,
+) -> ContextPluginContext<'host, 'runtime> {
+    PluginContext::new(
+        host,
+        ContextSdk {
+            execution: SdkClient::new(host, context_component_id()),
+        },
+        (),
+        (),
+    )
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct ExactContextReference {
@@ -173,7 +194,9 @@ struct ContextPlugin;
 
 impl PluginInstance for ContextPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(context_namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(context_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -186,65 +209,71 @@ impl PluginInstance for ContextPlugin {
         if service != &context_service() {
             return Err(format!("unsupported context service: {service}"));
         }
-        let command: ContextCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            ContextCommand::Register {
-                resource_id,
-                kind,
-                source,
-                scope,
-                content,
-            } => ContextResponse::Registered {
-                resource: register_resource(host, resource_id, kind, source, scope, content)?,
-            },
-            ContextCommand::Get {
-                resource_id,
-                revision,
-            } => ContextResponse::Resource {
-                resource: read_resource(host, &resource_id, &revision)?,
-            },
-            ContextCommand::List => ContextResponse::Resources {
-                descriptors: list_descriptors(host)?,
-            },
-            ContextCommand::DiscoverRepository {
-                workspace_id,
-                sources,
-            } => ContextResponse::Discovered {
-                descriptors: discover_repository(host, &workspace_id, sources)?,
-            },
-            ContextCommand::Load {
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command)?;
+        serde_json::to_vec(&response).map_err(|error| error.to_string())
+    }
+}
+
+fn handle(
+    context: &ContextPluginContext<'_, '_>,
+    command: ContextCommand,
+) -> Result<ContextResponse, String> {
+    match command {
+        ContextCommand::Register {
+            resource_id,
+            kind,
+            source,
+            scope,
+            content,
+        } => Ok(ContextResponse::Registered {
+            resource: register_resource(context, resource_id, kind, source, scope, content)?,
+        }),
+        ContextCommand::Get {
+            resource_id,
+            revision,
+        } => Ok(ContextResponse::Resource {
+            resource: read_resource(context, &resource_id, &revision)?,
+        }),
+        ContextCommand::List => Ok(ContextResponse::Resources {
+            descriptors: list_descriptors(context)?,
+        }),
+        ContextCommand::DiscoverRepository {
+            workspace_id,
+            sources,
+        } => Ok(ContextResponse::Discovered {
+            descriptors: discover_repository(context, &workspace_id, sources)?,
+        }),
+        ContextCommand::Load {
+            execution_id,
+            resource_id,
+            revision,
+            requester,
+            lifetime,
+            reason,
+        } => {
+            let (injection, resource) = load_context(
+                context,
                 execution_id,
                 resource_id,
                 revision,
                 requester,
                 lifetime,
                 reason,
-            } => {
-                let (injection, resource) = load_context(
-                    host,
-                    execution_id,
-                    resource_id,
-                    revision,
-                    requester,
-                    lifetime,
-                    reason,
-                )?;
-                ContextResponse::Loaded {
-                    injection,
-                    resource,
-                }
-            }
-            ContextCommand::Project { execution_id } => ContextResponse::Projection {
-                projection: project_context(host, execution_id)?,
-            },
-        };
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+            )?;
+            Ok(ContextResponse::Loaded {
+                injection,
+                resource,
+            })
+        }
+        ContextCommand::Project { execution_id } => Ok(ContextResponse::Projection {
+            projection: project_context(context, execution_id)?,
+        }),
     }
 }
 
 fn register_resource(
-    host: &PluginHost<'_>,
+    context: &ContextPluginContext<'_, '_>,
     resource_id: String,
     kind: ContextResourceKind,
     source: String,
@@ -271,7 +300,7 @@ fn register_resource(
         content,
     };
     let key = resource_key(&resource_id, &revision);
-    if let Some(existing) = read_raw(host, &key)? {
+    if let Some(existing) = read_raw(context, &key)? {
         let existing: ContextResourceRevision =
             serde_json::from_slice(&existing).map_err(|error| error.to_string())?;
         if existing != resource {
@@ -282,7 +311,7 @@ fn register_resource(
         return Ok(existing);
     }
 
-    let old_refs = read_raw(host, ALL_RESOURCES_KEY)?;
+    let old_refs = read_raw(context, ALL_RESOURCES_KEY)?;
     let mut refs = decode_refs(old_refs.as_deref())?;
     refs.push(ExactContextReference {
         resource_id,
@@ -291,33 +320,35 @@ fn register_resource(
     refs.sort();
     refs.dedup();
 
-    host.transact_durable(
-        &context_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: key.clone(),
-                expected: None,
-            },
-            TransactionOp::AssertValue {
-                key: ALL_RESOURCES_KEY.into(),
-                expected: old_refs,
-            },
-            TransactionOp::Put {
-                key,
-                value: serde_json::to_vec(&resource).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: ALL_RESOURCES_KEY.into(),
-                value: serde_json::to_vec(&refs).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+    context
+        .kernel
+        .transact_durable(
+            &context_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: None,
+                },
+                TransactionOp::AssertValue {
+                    key: ALL_RESOURCES_KEY.into(),
+                    expected: old_refs,
+                },
+                TransactionOp::Put {
+                    key,
+                    value: serde_json::to_vec(&resource).map_err(|error| error.to_string())?,
+                },
+                TransactionOp::Put {
+                    key: ALL_RESOURCES_KEY.into(),
+                    value: serde_json::to_vec(&refs).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(resource)
 }
 
 fn discover_repository(
-    host: &PluginHost<'_>,
+    context: &ContextPluginContext<'_, '_>,
     workspace_id: &str,
     mut sources: Vec<RepositoryContextSource>,
 ) -> Result<Vec<ContextDescriptor>, String> {
@@ -342,7 +373,7 @@ fn discover_repository(
             ContextResourceKind::External => unreachable!(),
         };
         let resource = register_resource(
-            host,
+            context,
             format!("{prefix}:{workspace_id}:{}", source.path),
             kind,
             source.path,
@@ -369,7 +400,7 @@ fn project_file_kind(path: &str) -> Option<ContextResourceKind> {
 }
 
 fn load_context(
-    host: &PluginHost<'_>,
+    context: &ContextPluginContext<'_, '_>,
     execution_id: String,
     resource_id: String,
     revision: String,
@@ -379,11 +410,11 @@ fn load_context(
 ) -> Result<(ContextInjection, ContextResourceRevision), String> {
     validate_identity("execution id", &execution_id)?;
     validate_identity("context load reason", &reason)?;
-    require_active_execution(host, &execution_id)?;
-    let resource = read_resource(host, &resource_id, &revision)?
+    require_active_execution(context, &execution_id)?;
+    let resource = read_resource(context, &resource_id, &revision)?
         .ok_or_else(|| format!("unknown context revision: {resource_id}@{revision}"))?;
     let key = injections_key(&execution_id);
-    let old = read_raw(host, &key)?;
+    let old = read_raw(context, &key)?;
     let mut injections = decode_injections(old.as_deref())?;
     let sequence = u64::try_from(injections.len())
         .map_err(|_| "context injection sequence overflow".to_owned())?
@@ -400,29 +431,35 @@ fn load_context(
         reason,
     };
     injections.push(injection.clone());
-    host.transact_durable(
-        &context_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: key.clone(),
-                expected: old,
-            },
-            TransactionOp::Put {
-                key,
-                value: serde_json::to_vec(&injections).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+    context
+        .kernel
+        .transact_durable(
+            &context_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: old,
+                },
+                TransactionOp::Put {
+                    key,
+                    value: serde_json::to_vec(&injections).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
     Ok((injection, resource))
 }
 
-fn require_active_execution(host: &PluginHost<'_>, execution_id: &str) -> Result<(), String> {
-    let command = ExecutionCommand::GetExecution {
-        id: execution_id.to_owned(),
-    };
-    let response = host
-        .invoke_import::<ExecutionInterface>(&context_component_id(), &command)
+fn require_active_execution(
+    context: &ContextPluginContext<'_, '_>,
+    execution_id: &str,
+) -> Result<(), String> {
+    let response = context
+        .sdk
+        .execution
+        .invoke(&ExecutionCommand::GetExecution {
+            id: execution_id.to_owned(),
+        })
         .map_err(|error| error.to_string())?;
     match response {
         ExecutionResponse::ExecutionLookup {
@@ -442,16 +479,17 @@ fn require_active_execution(host: &PluginHost<'_>, execution_id: &str) -> Result
 }
 
 fn project_context(
-    host: &PluginHost<'_>,
+    context: &ContextPluginContext<'_, '_>,
     execution_id: String,
 ) -> Result<ExecutionContextProjection, String> {
     validate_identity("execution id", &execution_id)?;
-    let injections = decode_injections(read_raw(host, &injections_key(&execution_id))?.as_deref())?;
+    let injections =
+        decode_injections(read_raw(context, &injections_key(&execution_id))?.as_deref())?;
     let entries = injections
         .into_iter()
         .map(|injection| {
             let resource = read_resource(
-                host,
+                context,
                 &injection.source.resource_id,
                 &injection.source.revision,
             )?
@@ -474,20 +512,22 @@ fn project_context(
 }
 
 fn read_resource(
-    host: &PluginHost<'_>,
+    context: &ContextPluginContext<'_, '_>,
     resource_id: &str,
     revision: &str,
 ) -> Result<Option<ContextResourceRevision>, String> {
-    read_raw(host, &resource_key(resource_id, revision))?
+    read_raw(context, &resource_key(resource_id, revision))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn list_descriptors(host: &PluginHost<'_>) -> Result<Vec<ContextDescriptor>, String> {
-    let refs = decode_refs(read_raw(host, ALL_RESOURCES_KEY)?.as_deref())?;
+fn list_descriptors(
+    context: &ContextPluginContext<'_, '_>,
+) -> Result<Vec<ContextDescriptor>, String> {
+    let refs = decode_refs(read_raw(context, ALL_RESOURCES_KEY)?.as_deref())?;
     refs.into_iter()
         .map(|reference| {
-            read_resource(host, &reference.resource_id, &reference.revision)?
+            read_resource(context, &reference.resource_id, &reference.revision)?
                 .map(|resource| resource.descriptor)
                 .ok_or_else(|| {
                     format!(
@@ -499,8 +539,10 @@ fn list_descriptors(host: &PluginHost<'_>) -> Result<Vec<ContextDescriptor>, Str
         .collect()
 }
 
-fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
-    host.read_durable(&context_namespace(), key)
+fn read_raw(context: &ContextPluginContext<'_, '_>, key: &str) -> Result<Option<Vec<u8>>, String> {
+    context
+        .kernel
+        .read_durable(&context_namespace(), key)
         .map_err(|error| error.to_string())
 }
 

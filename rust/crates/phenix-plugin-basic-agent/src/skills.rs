@@ -1,14 +1,22 @@
 use phenix_core::{
     skill_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, DurableSchema, InterfaceId, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, ServiceRole,
-    SkillCommand, SkillDefinition, SkillResponse, TransactionOp, SKILL_SERVICE,
+    ComponentManifest, DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost,
+    PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    ServiceRole, SkillCommand, SkillDefinition, SkillResponse, TransactionOp, SKILL_SERVICE,
 };
 
 pub const BASIC_SKILLS_PLUGIN: &str = "phenix.basic-skills";
 pub const BASIC_SKILLS_COMPONENT: &str = "phenix.basic-skills";
 const BASIC_SKILLS_NAMESPACE: &str = "phenix.basic-skills.state";
 const INDEX_KEY: &str = "skills/@all";
+
+type BasicSkillsContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(
+    host: &'host PluginHost<'runtime>,
+) -> BasicSkillsContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 pub struct BasicSkillsInterface;
 
@@ -63,7 +71,9 @@ struct BasicSkills;
 
 impl PluginInstance for BasicSkills {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -76,61 +86,79 @@ impl PluginInstance for BasicSkills {
         if service != &skill_service() {
             return Err(format!("unsupported basic skill service: {service}"));
         }
-        let command: SkillCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            SkillCommand::Register { skill } => {
-                require_id(&skill.id)?;
-                write_skill(host, &skill)?;
-                SkillResponse::Skill { skill: Some(skill) }
-            }
-            SkillCommand::Get { id } => SkillResponse::Skill {
-                skill: read_skill(host, &id)?,
-            },
-            SkillCommand::List => SkillResponse::Skills {
-                skills: read_ids(host)?
-                    .into_iter()
-                    .map(|id| {
-                        read_skill(host, &id)?.ok_or_else(|| format!("missing durable skill: {id}"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-fn write_skill(host: &PluginHost<'_>, skill: &SkillDefinition) -> Result<(), String> {
-    let mut ids = read_ids(host)?;
+fn handle(
+    context: &BasicSkillsContext<'_, '_>,
+    command: SkillCommand,
+) -> Result<SkillResponse, String> {
+    match command {
+        SkillCommand::Register { skill } => {
+            require_id(&skill.id)?;
+            write_skill(context, &skill)?;
+            Ok(SkillResponse::Skill { skill: Some(skill) })
+        }
+        SkillCommand::Get { id } => Ok(SkillResponse::Skill {
+            skill: read_skill(context, &id)?,
+        }),
+        SkillCommand::List => Ok(SkillResponse::Skills {
+            skills: read_ids(context)?
+                .into_iter()
+                .map(|id| {
+                    read_skill(context, &id)?.ok_or_else(|| format!("missing durable skill: {id}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        }),
+    }
+}
+
+fn write_skill(
+    context: &BasicSkillsContext<'_, '_>,
+    skill: &SkillDefinition,
+) -> Result<(), String> {
+    let mut ids = read_ids(context)?;
     if !ids.contains(&skill.id) {
         ids.push(skill.id.clone());
         ids.sort();
     }
-    host.transact_durable(
-        &namespace(),
-        &[
-            TransactionOp::Put {
-                key: format!("skill/{}", skill.id),
-                value: serde_json::to_vec(skill).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: INDEX_KEY.into(),
-                value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &namespace(),
+            &[
+                TransactionOp::Put {
+                    key: format!("skill/{}", skill.id),
+                    value: serde_json::to_vec(skill).map_err(|error| error.to_string())?,
+                },
+                TransactionOp::Put {
+                    key: INDEX_KEY.into(),
+                    value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
-fn read_skill(host: &PluginHost<'_>, id: &str) -> Result<Option<SkillDefinition>, String> {
-    host.read_durable(&namespace(), &format!("skill/{id}"))
+fn read_skill(
+    context: &BasicSkillsContext<'_, '_>,
+    id: &str,
+) -> Result<Option<SkillDefinition>, String> {
+    context
+        .kernel
+        .read_durable(&namespace(), &format!("skill/{id}"))
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn read_ids(host: &PluginHost<'_>) -> Result<Vec<String>, String> {
-    host.read_durable(&namespace(), INDEX_KEY)
+fn read_ids(context: &BasicSkillsContext<'_, '_>) -> Result<Vec<String>, String> {
+    context
+        .kernel
+        .read_durable(&namespace(), INDEX_KEY)
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .unwrap_or_else(|| Ok(Vec::new()))

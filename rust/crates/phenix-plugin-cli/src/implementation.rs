@@ -1,6 +1,6 @@
 use phenix_core::{
-    Authority, CapabilityId, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ServiceContribution, ServiceId,
+    Authority, CapabilityId, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, SdkClient, ServiceContribution, ServiceId,
 };
 use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,23 @@ const CLI_PLUGIN: &str = "phenix.cli";
 const WORKSPACE_PLUGIN: &str = "phenix.workspace";
 const WORKSPACE_SHELL: &str = "workspace.shell";
 const SUPPORTED: &[&str] = &["git", "gh", "jj", "rg", "fd", "jq", "nix", "cargo"];
+
+struct CliSdk<'host, 'runtime> {
+    workspace: SdkClient<'host, 'runtime, WorkspaceInterface>,
+}
+
+type CliContext<'host, 'runtime> = PluginContext<'host, 'runtime, CliSdk<'host, 'runtime>>;
+
+fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> CliContext<'host, 'runtime> {
+    PluginContext::new(
+        host,
+        CliSdk {
+            workspace: SdkClient::new(host, crate::cli_component_id()),
+        },
+        (),
+        (),
+    )
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CliProbeRequest {
@@ -135,95 +152,93 @@ fn descriptor(name: &str, availability: CliAvailability) -> CliDescriptor {
     }
 }
 
-struct CliPlugin;
-
-impl CliPlugin {
-    fn shell(host: &PluginHost<'_>, command: String) -> Result<WorkspaceResponse, String> {
-        host.invoke_import::<WorkspaceInterface>(
-            &crate::cli_component_id(),
-            &WorkspaceCommand::Shell { command },
-        )
+fn shell(context: &CliContext<'_, '_>, command: String) -> Result<WorkspaceResponse, String> {
+    context
+        .sdk
+        .workspace
+        .invoke(&WorkspaceCommand::Shell { command })
         .map_err(|error| error.to_string())
-    }
-
-    fn discover(host: &PluginHost<'_>, name: &str) -> Result<CliDescriptor, String> {
-        validate_target(name)?;
-        let response = match Self::shell(host, format!("command -v -- {name}")) {
-            Ok(response) => response,
-            Err(error) if error.contains(WORKSPACE_SHELL) || error.contains("authority") => {
-                return Ok(descriptor(name, CliAvailability::Limited));
-            }
-            Err(error) => return Err(error),
-        };
-        let WorkspaceResponse::Process {
-            exit_code, stdout, ..
-        } = response
-        else {
-            return Err("workspace shell returned a non-process response".into());
-        };
-        if exit_code != 0 {
-            return Ok(descriptor(name, CliAvailability::Unavailable));
-        }
-        let mut result = descriptor(name, CliAvailability::Available);
-        result.executable_identity = stdout
-            .lines()
-            .next()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned);
-        Ok(result)
-    }
-
-    fn version(host: &PluginHost<'_>, name: &str) -> Result<CliDescriptor, String> {
-        let mut result = Self::discover(host, name)?;
-        if result.availability != CliAvailability::Available {
-            return Ok(result);
-        }
-        let response = Self::shell(host, format!("{name} --version"))?;
-        let WorkspaceResponse::Process {
-            exit_code,
-            stdout,
-            stderr,
-        } = response
-        else {
-            return Err("workspace shell returned a non-process response".into());
-        };
-        if exit_code == 0 {
-            result.version = stdout
-                .lines()
-                .chain(stderr.lines())
-                .find(|line| !line.trim().is_empty())
-                .map(|line| line.trim().to_owned());
-        }
-        Ok(result)
-    }
-
-    fn auth_state(host: &PluginHost<'_>, name: &str) -> Result<CliDescriptor, String> {
-        let mut result = Self::discover(host, name)?;
-        if name != "gh" {
-            result.auth_state = Some(CliAuthState::Unsupported);
-            return Ok(result);
-        }
-        if result.availability != CliAvailability::Available {
-            result.auth_state = Some(match result.availability {
-                CliAvailability::Limited => CliAuthState::Unknown,
-                CliAvailability::Unavailable => CliAuthState::Unauthenticated,
-                CliAvailability::Available => unreachable!(),
-            });
-            return Ok(result);
-        }
-        let response = Self::shell(host, "gh auth status >/dev/null 2>&1".to_owned())?;
-        let WorkspaceResponse::Process { exit_code, .. } = response else {
-            return Err("workspace shell returned a non-process response".into());
-        };
-        result.auth_state = Some(if exit_code == 0 {
-            CliAuthState::Authenticated
-        } else {
-            CliAuthState::Unauthenticated
-        });
-        Ok(result)
-    }
 }
+
+fn discover(context: &CliContext<'_, '_>, name: &str) -> Result<CliDescriptor, String> {
+    validate_target(name)?;
+    let response = match shell(context, format!("command -v -- {name}")) {
+        Ok(response) => response,
+        Err(error) if error.contains(WORKSPACE_SHELL) || error.contains("authority") => {
+            return Ok(descriptor(name, CliAvailability::Limited));
+        }
+        Err(error) => return Err(error),
+    };
+    let WorkspaceResponse::Process {
+        exit_code, stdout, ..
+    } = response
+    else {
+        return Err("workspace shell returned a non-process response".into());
+    };
+    if exit_code != 0 {
+        return Ok(descriptor(name, CliAvailability::Unavailable));
+    }
+    let mut result = descriptor(name, CliAvailability::Available);
+    result.executable_identity = stdout
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    Ok(result)
+}
+
+fn version(context: &CliContext<'_, '_>, name: &str) -> Result<CliDescriptor, String> {
+    let mut result = discover(context, name)?;
+    if result.availability != CliAvailability::Available {
+        return Ok(result);
+    }
+    let response = shell(context, format!("{name} --version"))?;
+    let WorkspaceResponse::Process {
+        exit_code,
+        stdout,
+        stderr,
+    } = response
+    else {
+        return Err("workspace shell returned a non-process response".into());
+    };
+    if exit_code == 0 {
+        result.version = stdout
+            .lines()
+            .chain(stderr.lines())
+            .find(|line| !line.trim().is_empty())
+            .map(|line| line.trim().to_owned());
+    }
+    Ok(result)
+}
+
+fn auth_state(context: &CliContext<'_, '_>, name: &str) -> Result<CliDescriptor, String> {
+    let mut result = discover(context, name)?;
+    if name != "gh" {
+        result.auth_state = Some(CliAuthState::Unsupported);
+        return Ok(result);
+    }
+    if result.availability != CliAvailability::Available {
+        result.auth_state = Some(match result.availability {
+            CliAvailability::Limited => CliAuthState::Unknown,
+            CliAvailability::Unavailable => CliAuthState::Unauthenticated,
+            CliAvailability::Available => unreachable!(),
+        });
+        return Ok(result);
+    }
+    let response = shell(context, "gh auth status >/dev/null 2>&1".to_owned())?;
+    let WorkspaceResponse::Process { exit_code, .. } = response else {
+        return Err("workspace shell returned a non-process response".into());
+    };
+    result.auth_state = Some(if exit_code == 0 {
+        CliAuthState::Authenticated
+    } else {
+        CliAuthState::Unauthenticated
+    });
+    Ok(result)
+}
+
+struct CliPlugin;
 
 impl PluginInstance for CliPlugin {
     fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
@@ -238,12 +253,13 @@ impl PluginInstance for CliPlugin {
     ) -> Result<Vec<u8>, String> {
         let request: CliProbeRequest =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let context = context(host);
         let result = if service == &cli_discover_service() {
-            Self::discover(host, &request.name)?
+            discover(&context, &request.name)?
         } else if service == &cli_version_service() {
-            Self::version(host, &request.name)?
+            version(&context, &request.name)?
         } else if service == &cli_auth_state_service() {
-            Self::auth_state(host, &request.name)?
+            auth_state(&context, &request.name)?
         } else {
             return Err(format!("unsupported CLI service: {service}"));
         };

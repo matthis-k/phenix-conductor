@@ -1,6 +1,6 @@
 use phenix_core::{
-    CallableId, CapabilityId, DurableSchema, PluginHost, PluginInstance, ResourceNamespace,
-    ServiceId, TransactionOp,
+    CallableId, CapabilityId, DurableSchema, PluginContext, PluginHost, PluginInstance,
+    ResourceNamespace, ServiceId, TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,6 +12,14 @@ use std::{
 pub const EXECUTION_CONFIGURATION_SERVICE: &str = "phenix.execution.configuration@1";
 const EXECUTION_CONFIGURATION_NAMESPACE: &str = "phenix.execution.configuration";
 const STATE_KEY: &str = "state";
+
+type ExecutionConfigurationContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(
+    host: &'host PluginHost<'runtime>,
+) -> ExecutionConfigurationContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String")]
@@ -225,7 +233,9 @@ struct ExecutionConfigurationPlugin;
 
 impl PluginInstance for ExecutionConfigurationPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(execution_configuration_namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(execution_configuration_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -240,43 +250,42 @@ impl PluginInstance for ExecutionConfigurationPlugin {
                 "unsupported execution configuration service: {service}"
             ));
         }
-        let command: ExecutionConfigurationCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = execute(command, host)?;
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = execute(&context(host), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
 fn execute(
+    context: &ExecutionConfigurationContext<'_, '_>,
     command: ExecutionConfigurationCommand,
-    host: &PluginHost<'_>,
 ) -> Result<ExecutionConfigurationResponse, String> {
     match command {
         ExecutionConfigurationCommand::GetAgent { id } => {
-            let (_, state) = read_state(host)?;
+            let (_, state) = read_state(context)?;
             Ok(ExecutionConfigurationResponse::Agent {
                 agent: state.agents.get(&id).cloned(),
             })
         }
         ExecutionConfigurationCommand::ListAgents => {
-            let (_, state) = read_state(host)?;
+            let (_, state) = read_state(context)?;
             Ok(ExecutionConfigurationResponse::Agents {
                 agents: state.agents.into_values().collect(),
             })
         }
         ExecutionConfigurationCommand::GetOrchestration { id } => {
-            let (_, state) = read_state(host)?;
+            let (_, state) = read_state(context)?;
             Ok(ExecutionConfigurationResponse::Orchestration {
                 orchestration: state.orchestrations.get(&id).cloned(),
             })
         }
         ExecutionConfigurationCommand::ListOrchestrations => {
-            let (_, state) = read_state(host)?;
+            let (_, state) = read_state(context)?;
             Ok(ExecutionConfigurationResponse::Orchestrations {
                 orchestrations: state.orchestrations.into_values().collect(),
             })
         }
-        ExecutionConfigurationCommand::RegisterAgent { agent } => mutate_state(host, |state| {
+        ExecutionConfigurationCommand::RegisterAgent { agent } => mutate_state(context, |state| {
             insert_immutable(
                 &mut state.agents,
                 agent.id().clone(),
@@ -286,7 +295,7 @@ fn execute(
             Ok(ExecutionConfigurationResponse::Agent { agent: Some(agent) })
         }),
         ExecutionConfigurationCommand::RegisterOrchestration { orchestration } => {
-            mutate_state(host, |state| {
+            mutate_state(context, |state| {
                 validate_orchestration(&orchestration, &state.agents)?;
                 insert_immutable(
                     &mut state.orchestrations,
@@ -339,35 +348,38 @@ fn validate_orchestration(
 }
 
 fn mutate_state<F>(
-    host: &PluginHost<'_>,
+    context: &ExecutionConfigurationContext<'_, '_>,
     mutation: F,
 ) -> Result<ExecutionConfigurationResponse, String>
 where
     F: FnOnce(&mut ExecutionConfigurationState) -> Result<ExecutionConfigurationResponse, String>,
 {
-    let (old, mut state) = read_state(host)?;
+    let (old, mut state) = read_state(context)?;
     let response = mutation(&mut state)?;
-    host.transact_durable(
-        &execution_configuration_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: STATE_KEY.into(),
-                expected: old,
-            },
-            TransactionOp::Put {
-                key: STATE_KEY.into(),
-                value: serde_json::to_vec(&state).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())?;
+    context
+        .kernel
+        .transact_durable(
+            &execution_configuration_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: STATE_KEY.into(),
+                    expected: old,
+                },
+                TransactionOp::Put {
+                    key: STATE_KEY.into(),
+                    value: serde_json::to_vec(&state).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(response)
 }
 
 fn read_state(
-    host: &PluginHost<'_>,
+    context: &ExecutionConfigurationContext<'_, '_>,
 ) -> Result<(Option<Vec<u8>>, ExecutionConfigurationState), String> {
-    let old = host
+    let old = context
+        .kernel
         .read_durable(&execution_configuration_namespace(), STATE_KEY)
         .map_err(|error| error.to_string())?;
     let state = old

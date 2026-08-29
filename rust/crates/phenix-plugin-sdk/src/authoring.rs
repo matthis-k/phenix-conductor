@@ -2,10 +2,12 @@ use crate::{
     SdkConfigInterface, SdkSessionCommand, SdkSessionInterface, SdkSessionResponse,
     SdkSkillsInterface, SdkToolsInterface,
 };
-use phenix_core::{
-    Authority, ComponentId, ComponentInterface, ComponentInvocationError, GraphGenerationId,
-    PluginHost, PluginId, PluginInstance as CorePluginInstance, ServiceId,
+#[cfg(test)]
+use phenix_core::Authority;
+pub use phenix_core::{
+    CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,
 };
+use phenix_core::{ComponentId, ComponentInterface, PluginHost};
 use phenix_plugin_context::ContextInterface;
 use phenix_plugin_models::ModelRoutingInterface;
 use phenix_plugin_options::OptionsInterface;
@@ -13,273 +15,18 @@ use phenix_plugin_sessions::{SessionCommand, SessionInterface, SessionRecord, Se
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
-    marker::PhantomData,
 };
 
-/// Runtime view passed to plugin code.
-///
-/// The context separates kernel access, userspace SDK access, plugin-owned
-/// data, and call-scoped data. Settings and state are borrowed from the live
-/// plugin instance; the context never owns copies of them.
-pub struct PluginContext<'host, 'runtime, 'plugin, Sdk, Settings = (), State = ()> {
-    pub kernel: KernelAccess<'host, 'runtime>,
-    pub sdk: Sdk,
-    pub plugin: CurrentPlugin<'host, 'plugin, Settings, State>,
-    pub call: CallContext<'host>,
-}
+pub type PhenixPluginContext<'host, 'runtime, Settings = (), State = ()> =
+    PluginContext<'host, 'runtime, PhenixSdk<'host, 'runtime>, Settings, State>;
 
-impl<'host, 'runtime, 'plugin, Sdk, Settings, State>
-    PluginContext<'host, 'runtime, 'plugin, Sdk, Settings, State>
-{
-    pub fn new(
-        host: &'host PluginHost<'runtime>,
-        sdk: Sdk,
-        settings: &'plugin Settings,
-        state: &'plugin mut State,
-    ) -> Self {
-        Self {
-            kernel: KernelAccess::new(host),
-            sdk,
-            plugin: CurrentPlugin {
-                id: host.plugin(),
-                settings,
-                state,
-            },
-            call: CallContext {
-                authority: host.authority(),
-                graph_generation: host.graph_generation(),
-            },
-        }
-    }
-}
-
-pub type PhenixPluginContext<'host, 'runtime, 'plugin, Settings = (), State = ()> =
-    PluginContext<'host, 'runtime, 'plugin, PhenixSdk<'host, 'runtime>, Settings, State>;
-
-impl<'host, 'runtime, 'plugin, Settings, State>
-    PluginContext<'host, 'runtime, 'plugin, PhenixSdk<'host, 'runtime>, Settings, State>
-{
-    pub fn phenix(
-        host: &'host PluginHost<'runtime>,
-        component: ComponentId,
-        settings: &'plugin Settings,
-        state: &'plugin mut State,
-    ) -> Self {
-        Self::new(host, PhenixSdk::new(host, component), settings, state)
-    }
-}
-
-/// Data owned by the current plugin instance.
-pub struct CurrentPlugin<'host, 'plugin, Settings, State> {
-    pub id: &'host PluginId,
-    pub settings: &'plugin Settings,
-    pub state: &'plugin mut State,
-}
-
-/// Data scoped to the current kernel-mediated call.
-pub struct CallContext<'host> {
-    pub authority: &'host Authority,
-    pub graph_generation: Option<&'host GraphGenerationId>,
-}
-
-/// Author-facing plugin contract.
-///
-/// `PhenixPluginAdapter` owns the settings and mutable state, then projects a
-/// `PluginContext` for each host-backed callback. Keeping behavior on the
-/// static plugin type avoids a second hidden mutable state beside
-/// `context.plugin.state`.
-pub trait PhenixPlugin: Send + 'static {
-    type Settings: Send;
-    type State: Send;
-
-    fn start(
-        _context: PhenixPluginContext<'_, '_, '_, Self::Settings, Self::State>,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn invoke(
-        _service: &ServiceId,
-        _input: &[u8],
-        _context: PhenixPluginContext<'_, '_, '_, Self::Settings, Self::State>,
-    ) -> Result<Vec<u8>, String> {
-        Err("service invocation is not implemented".into())
-    }
-
-    fn stop(_settings: &Self::Settings, _state: &mut Self::State) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-/// Core `PluginInstance` adapter for a `PhenixPlugin` definition.
-///
-/// The adapter is the dynamic instance. It owns exactly one settings value and
-/// one mutable state value for the lifetime of the plugin instance.
-pub struct PhenixPluginAdapter<P: PhenixPlugin> {
-    default_component: ComponentId,
-    settings: P::Settings,
-    state: P::State,
-    plugin: PhantomData<fn() -> P>,
-}
-
-impl<P: PhenixPlugin> PhenixPluginAdapter<P> {
-    pub fn new(default_component: ComponentId, settings: P::Settings, state: P::State) -> Self {
-        Self {
-            default_component,
-            settings,
-            state,
-            plugin: PhantomData,
-        }
-    }
-
-    fn context<'host, 'runtime, 'plugin>(
-        &'plugin mut self,
-        host: &'host PluginHost<'runtime>,
-        component: ComponentId,
-    ) -> PhenixPluginContext<'host, 'runtime, 'plugin, P::Settings, P::State> {
-        PluginContext::phenix(host, component, &self.settings, &mut self.state)
-    }
-}
-
-impl<P: PhenixPlugin> CorePluginInstance for PhenixPluginAdapter<P> {
-    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        let component = self.default_component.clone();
-        P::start(self.context(host, component))
-    }
-
-    fn invoke(
-        &mut self,
-        service: &ServiceId,
-        input: &[u8],
-        host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        let component = self.default_component.clone();
-        P::invoke(service, input, self.context(host, component))
-    }
-
-    fn invoke_component(
-        &mut self,
-        component: &ComponentId,
-        service: &ServiceId,
-        input: &[u8],
-        host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        P::invoke(service, input, self.context(host, component.clone()))
-    }
-
-    fn stop(&mut self) -> Result<(), String> {
-        P::stop(&self.settings, &mut self.state)
-    }
-}
-
-/// Scoped access to generic kernel mechanisms.
-///
-/// This intentionally wraps `PluginHost` rather than exposing a mutable kernel.
-#[derive(Clone, Copy)]
-pub struct KernelAccess<'host, 'runtime> {
-    host: &'host PluginHost<'runtime>,
-}
-
-impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
-    fn new(host: &'host PluginHost<'runtime>) -> Self {
-        Self { host }
-    }
-
-    pub fn authority(&self) -> &Authority {
-        self.host.authority()
-    }
-
-    pub fn graph_generation(&self) -> Option<&GraphGenerationId> {
-        self.host.graph_generation()
-    }
-
-    pub fn invoke<I: ComponentInterface>(
-        &self,
-        component: &ComponentId,
-        request: &I::Request,
-    ) -> Result<I::Response, ComponentInvocationError> {
-        self.host.invoke_import::<I>(component, request)
-    }
-}
-
-/// Marker implemented by a typed SDK contract supplied by another plugin.
-pub trait SdkContract {
-    type Interface: ComponentInterface;
-}
-
-/// Kernel-mediated client for one typed SDK interface.
-pub struct SdkClient<'host, 'runtime, I: ComponentInterface> {
+pub fn phenix_context<'host, 'runtime, Settings, State>(
     host: &'host PluginHost<'runtime>,
     component: ComponentId,
-    interface: PhantomData<fn() -> I>,
-}
-
-impl<'host, 'runtime, I: ComponentInterface> Clone for SdkClient<'host, 'runtime, I> {
-    fn clone(&self) -> Self {
-        Self {
-            host: self.host,
-            component: self.component.clone(),
-            interface: PhantomData,
-        }
-    }
-}
-
-impl<'host, 'runtime, I: ComponentInterface> SdkClient<'host, 'runtime, I> {
-    fn new(host: &'host PluginHost<'runtime>, component: ComponentId) -> Self {
-        Self {
-            host,
-            component,
-            interface: PhantomData,
-        }
-    }
-
-    pub fn component(&self) -> &ComponentId {
-        &self.component
-    }
-
-    pub fn invoke(&self, request: &I::Request) -> Result<I::Response, ComponentInvocationError> {
-        self.host.invoke_import::<I>(&self.component, request)
-    }
-}
-
-/// Consumer-side handle for a provider-owned SDK object.
-///
-/// The handle carries stable identity plus a scoped typed client. It never
-/// contains a reference to provider-internal state.
-pub struct SdkObject<'host, 'runtime, I: ComponentInterface, Id = String> {
-    id: Id,
-    client: SdkClient<'host, 'runtime, I>,
-}
-
-impl<'host, 'runtime, I, Id> Clone for SdkObject<'host, 'runtime, I, Id>
-where
-    I: ComponentInterface,
-    Id: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id.clone(),
-            client: self.client.clone(),
-        }
-    }
-}
-
-impl<'host, 'runtime, I: ComponentInterface, Id> SdkObject<'host, 'runtime, I, Id> {
-    pub fn new(id: Id, client: SdkClient<'host, 'runtime, I>) -> Self {
-        Self { id, client }
-    }
-
-    pub fn id(&self) -> &Id {
-        &self.id
-    }
-
-    pub fn client(&self) -> &SdkClient<'host, 'runtime, I> {
-        &self.client
-    }
-
-    pub fn into_id(self) -> Id {
-        self.id
-    }
+    settings: Settings,
+    state: State,
+) -> PhenixPluginContext<'host, 'runtime, Settings, State> {
+    PluginContext::new(host, PhenixSdk::new(host, component), settings, state)
 }
 
 struct SdkAccess<'host, 'runtime> {
@@ -338,7 +85,7 @@ impl<'host, 'runtime> PhenixSdk<'host, 'runtime> {
 
 #[derive(Debug)]
 pub enum SdkError {
-    Invocation(ComponentInvocationError),
+    Invocation(phenix_core::ComponentInvocationError),
     UnexpectedResponse { operation: &'static str },
 }
 
@@ -362,8 +109,8 @@ impl Error for SdkError {
     }
 }
 
-impl From<ComponentInvocationError> for SdkError {
-    fn from(error: ComponentInvocationError) -> Self {
+impl From<phenix_core::ComponentInvocationError> for SdkError {
+    fn from(error: phenix_core::ComponentInvocationError) -> Self {
         Self::Invocation(error)
     }
 }
@@ -478,8 +225,8 @@ mod tests {
     use crate::{sdk_component_manifest, sdk_factory, sdk_manifest};
     use phenix_core::{
         CapabilityId, ComponentExport, ComponentImport, ComponentManifest, InterfaceId, Kernel,
-        KernelConfig, PluginExecution, PluginInstance, PluginManifest, ResolvedHarness,
-        ResolvedHarnessActivation, ServiceContribution, ServiceRole,
+        KernelConfig, PluginExecution, PluginId, PluginInstance, PluginManifest, ResolvedHarness,
+        ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
     };
     use phenix_plugin_options::{options_component_manifest, options_factory, options_manifest};
     use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
@@ -561,23 +308,30 @@ mod tests {
 
     struct ConsumerPlugin;
 
-    impl PhenixPlugin for ConsumerPlugin {
-        type Settings = String;
-        type State = u32;
+    impl PluginInstance for ConsumerPlugin {
+        fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
 
         fn invoke(
+            &mut self,
             service: &ServiceId,
             _input: &[u8],
-            context: PhenixPluginContext<'_, '_, '_, Self::Settings, Self::State>,
+            host: &PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
             if service != &consumer_service() {
                 return Err(format!("unsupported consumer service: {service}"));
             }
 
+            let context = phenix_context(
+                host,
+                consumer_component_id(),
+                "configured".to_owned(),
+                7_u32,
+            );
             let PluginContext {
                 sdk, plugin, call, ..
             } = context;
-            *plugin.state += 1;
 
             let opened = sdk
                 .sessions
@@ -604,8 +358,8 @@ mod tests {
 
             serde_json::to_vec(&ConsumerOutput {
                 plugin: plugin.id.as_str().to_owned(),
-                settings: plugin.settings.to_owned(),
-                state: *plugin.state,
+                settings: plugin.settings,
+                state: plugin.state,
                 session: refreshed.id().to_owned(),
                 echo: echo.value,
                 echo_has_persistence_authority: echo.has_persistence_authority,
@@ -704,16 +458,8 @@ mod tests {
         }
     }
 
-    fn consumer_factory() -> Box<dyn PluginInstance> {
-        Box::new(PhenixPluginAdapter::<ConsumerPlugin>::new(
-            consumer_component_id(),
-            "configured".to_owned(),
-            7_u32,
-        ))
-    }
-
     #[test]
-    fn runtime_passes_context_and_provider_owned_objects_remain_kernel_mediated() {
+    fn context_sdk_and_provider_owned_objects_remain_kernel_mediated() {
         let authority = authority();
         let session = session_manifest();
         let options = options_manifest();
@@ -754,32 +500,27 @@ mod tests {
             .register_embedded_factory(echo.id, || Box::new(EchoPlugin))
             .unwrap();
         kernel
-            .register_embedded_factory(consumer.id, consumer_factory)
+            .register_embedded_factory(consumer.id, || Box::new(ConsumerPlugin))
             .unwrap();
         kernel.activate_resolved_harness(&resolved).unwrap();
         kernel.activate_all().unwrap();
 
-        let first = kernel
+        let output = kernel
             .invoke(&consumer_service(), &[], &authority, None)
             .unwrap();
-        let first: ConsumerOutput = serde_json::from_slice(&first).unwrap();
+        let output: ConsumerOutput = serde_json::from_slice(&output).unwrap();
+
         assert_eq!(
-            first,
+            output,
             ConsumerOutput {
                 plugin: CONSUMER_PLUGIN.into(),
                 settings: "configured".into(),
-                state: 8,
+                state: 7,
                 session: "root".into(),
                 echo: "root".into(),
                 echo_has_persistence_authority: false,
                 has_persistence_authority: true,
             }
         );
-
-        let second = kernel
-            .invoke(&consumer_service(), &[], &authority, None)
-            .unwrap();
-        let second: ConsumerOutput = serde_json::from_slice(&second).unwrap();
-        assert_eq!(second.state, 9);
     }
 }

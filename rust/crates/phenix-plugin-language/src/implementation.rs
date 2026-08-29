@@ -1,6 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -11,6 +12,22 @@ const LANGUAGE_NAMESPACE: &str = "phenix.language.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
+
+#[derive(Default)]
+struct LanguageState {
+    providers: BTreeMap<String, LanguageProviderEpoch>,
+    diagnostics: BTreeMap<String, LanguageOperationResult>,
+}
+
+type LanguageContext<'host, 'runtime, 'state> =
+    PluginContext<'host, 'runtime, (), (), &'state mut LanguageState>;
+
+fn context<'host, 'runtime, 'state>(
+    host: &'host PluginHost<'runtime>,
+    state: &'state mut LanguageState,
+) -> LanguageContext<'host, 'runtime, 'state> {
+    PluginContext::new(host, (), (), state)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -155,13 +172,14 @@ fn capability(value: &str) -> CapabilityId {
 
 #[derive(Default)]
 struct LanguagePlugin {
-    providers: BTreeMap<String, LanguageProviderEpoch>,
-    diagnostics: BTreeMap<String, LanguageOperationResult>,
+    state: LanguageState,
 }
 
 impl PluginInstance for LanguagePlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(language_namespace(), 1))
+        context(host, &mut self.state)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(language_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -174,161 +192,181 @@ impl PluginInstance for LanguagePlugin {
         if service != &language_service() {
             return Err(format!("unsupported language service: {service}"));
         }
-        let command: LanguageCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            LanguageCommand::ActivateProvider {
-                workspace_id,
-                provider_id,
-                epoch,
-            } => {
-                let epoch = self.activate_provider(workspace_id, provider_id, epoch)?;
-                LanguageResponse::Provider { epoch: Some(epoch) }
-            }
-            LanguageCommand::EndProvider {
-                workspace_id,
-                provider_id,
-                epoch,
-            } => {
-                self.require_epoch(&workspace_id, &provider_id, epoch)?;
-                self.providers.remove(&workspace_id);
-                self.diagnostics.remove(&workspace_id);
-                LanguageResponse::Provider { epoch: None }
-            }
-            LanguageCommand::PublishDiagnostics {
-                workspace_id,
-                provider_id,
-                epoch,
-                result,
-            } => {
-                self.require_epoch(&workspace_id, &provider_id, epoch)?;
-                if result.operation != LanguageOperationKind::Diagnostics {
-                    return Err("diagnostic publication must carry a diagnostics operation".into());
-                }
-                validate_result(&result)?;
-                self.diagnostics.insert(workspace_id, result.clone());
-                LanguageResponse::Diagnostics {
-                    result: Some(result),
-                }
-            }
-            LanguageCommand::CurrentDiagnostics { workspace_id } => {
-                validate_identity("workspace id", &workspace_id)?;
-                LanguageResponse::Diagnostics {
-                    result: self.diagnostics.get(&workspace_id).cloned(),
-                }
-            }
-            LanguageCommand::Consume {
-                observation_id,
-                execution_id,
-                workspace_id,
-                provider_id,
-                epoch,
-                result,
-            } => {
-                self.require_epoch(&workspace_id, &provider_id, epoch)?;
-                validate_identity("language observation id", &observation_id)?;
-                validate_identity("consuming execution id", &execution_id)?;
-                validate_result(&result)?;
-                let observation = LanguageObservation {
-                    id: observation_id,
-                    execution_id,
-                    workspace_id,
-                    provider_id,
-                    provider_epoch: epoch,
-                    result,
-                };
-                store_observation(host, &observation)?;
-                LanguageResponse::Observation {
-                    observation: Some(observation),
-                }
-            }
-            LanguageCommand::GetObservation { observation_id } => {
-                validate_identity("language observation id", &observation_id)?;
-                LanguageResponse::Observation {
-                    observation: read_observation(host, &observation_id)?,
-                }
-            }
-        };
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&mut context(host, &mut self.state), command)?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
-impl LanguagePlugin {
-    fn activate_provider(
-        &mut self,
-        workspace_id: String,
-        provider_id: String,
-        epoch: u64,
-    ) -> Result<LanguageProviderEpoch, String> {
-        validate_identity("workspace id", &workspace_id)?;
-        validate_identity("language provider id", &provider_id)?;
-        if epoch == 0 {
-            return Err("language provider epoch must be non-zero".into());
-        }
-        if let Some(current) = self.providers.get(&workspace_id) {
-            if epoch <= current.epoch {
-                return Err(format!(
-                    "language provider epoch must advance beyond {}",
-                    current.epoch
-                ));
-            }
-        }
-        let active = LanguageProviderEpoch {
-            workspace_id: workspace_id.clone(),
+fn handle(
+    context: &mut LanguageContext<'_, '_, '_>,
+    command: LanguageCommand,
+) -> Result<LanguageResponse, String> {
+    match command {
+        LanguageCommand::ActivateProvider {
+            workspace_id,
             provider_id,
             epoch,
-        };
-        self.providers.insert(workspace_id.clone(), active.clone());
-        self.diagnostics.remove(&workspace_id);
-        Ok(active)
-    }
-
-    fn require_epoch(
-        &self,
-        workspace_id: &str,
-        provider_id: &str,
-        epoch: u64,
-    ) -> Result<(), String> {
-        validate_identity("workspace id", workspace_id)?;
-        validate_identity("language provider id", provider_id)?;
-        match self.providers.get(workspace_id) {
-            Some(active) if active.provider_id == provider_id && active.epoch == epoch => Ok(()),
-            Some(active) => Err(format!(
-                "ProviderChanged: active provider is {} epoch {}",
-                active.provider_id, active.epoch
-            )),
-            None => Err("ProviderChanged: no active provider".into()),
+        } => Ok(LanguageResponse::Provider {
+            epoch: Some(activate_provider(
+                context,
+                workspace_id,
+                provider_id,
+                epoch,
+            )?),
+        }),
+        LanguageCommand::EndProvider {
+            workspace_id,
+            provider_id,
+            epoch,
+        } => {
+            require_epoch(context, &workspace_id, &provider_id, epoch)?;
+            context.plugin.state.providers.remove(&workspace_id);
+            context.plugin.state.diagnostics.remove(&workspace_id);
+            Ok(LanguageResponse::Provider { epoch: None })
         }
+        LanguageCommand::PublishDiagnostics {
+            workspace_id,
+            provider_id,
+            epoch,
+            result,
+        } => {
+            require_epoch(context, &workspace_id, &provider_id, epoch)?;
+            if result.operation != LanguageOperationKind::Diagnostics {
+                return Err("diagnostic publication must carry a diagnostics operation".into());
+            }
+            validate_result(&result)?;
+            context
+                .plugin
+                .state
+                .diagnostics
+                .insert(workspace_id, result.clone());
+            Ok(LanguageResponse::Diagnostics {
+                result: Some(result),
+            })
+        }
+        LanguageCommand::CurrentDiagnostics { workspace_id } => {
+            validate_identity("workspace id", &workspace_id)?;
+            Ok(LanguageResponse::Diagnostics {
+                result: context.plugin.state.diagnostics.get(&workspace_id).cloned(),
+            })
+        }
+        LanguageCommand::Consume {
+            observation_id,
+            execution_id,
+            workspace_id,
+            provider_id,
+            epoch,
+            result,
+        } => {
+            require_epoch(context, &workspace_id, &provider_id, epoch)?;
+            validate_identity("language observation id", &observation_id)?;
+            validate_identity("consuming execution id", &execution_id)?;
+            validate_result(&result)?;
+            let observation = LanguageObservation {
+                id: observation_id,
+                execution_id,
+                workspace_id,
+                provider_id,
+                provider_epoch: epoch,
+                result,
+            };
+            store_observation(context, &observation)?;
+            Ok(LanguageResponse::Observation {
+                observation: Some(observation),
+            })
+        }
+        LanguageCommand::GetObservation { observation_id } => {
+            validate_identity("language observation id", &observation_id)?;
+            Ok(LanguageResponse::Observation {
+                observation: read_observation(context, &observation_id)?,
+            })
+        }
+    }
+}
+
+fn activate_provider(
+    context: &mut LanguageContext<'_, '_, '_>,
+    workspace_id: String,
+    provider_id: String,
+    epoch: u64,
+) -> Result<LanguageProviderEpoch, String> {
+    validate_identity("workspace id", &workspace_id)?;
+    validate_identity("language provider id", &provider_id)?;
+    if epoch == 0 {
+        return Err("language provider epoch must be non-zero".into());
+    }
+    if let Some(current) = context.plugin.state.providers.get(&workspace_id) {
+        if epoch <= current.epoch {
+            return Err(format!(
+                "language provider epoch must advance beyond {}",
+                current.epoch
+            ));
+        }
+    }
+    let active = LanguageProviderEpoch {
+        workspace_id: workspace_id.clone(),
+        provider_id,
+        epoch,
+    };
+    context
+        .plugin
+        .state
+        .providers
+        .insert(workspace_id.clone(), active.clone());
+    context.plugin.state.diagnostics.remove(&workspace_id);
+    Ok(active)
+}
+
+fn require_epoch(
+    context: &LanguageContext<'_, '_, '_>,
+    workspace_id: &str,
+    provider_id: &str,
+    epoch: u64,
+) -> Result<(), String> {
+    validate_identity("workspace id", workspace_id)?;
+    validate_identity("language provider id", provider_id)?;
+    match context.plugin.state.providers.get(workspace_id) {
+        Some(active) if active.provider_id == provider_id && active.epoch == epoch => Ok(()),
+        Some(active) => Err(format!(
+            "ProviderChanged: active provider is {} epoch {}",
+            active.provider_id, active.epoch
+        )),
+        None => Err("ProviderChanged: no active provider".into()),
     }
 }
 
 fn store_observation(
-    host: &PluginHost<'_>,
+    context: &LanguageContext<'_, '_, '_>,
     observation: &LanguageObservation,
 ) -> Result<(), String> {
     let key = observation_key(&observation.id);
     let encoded = serde_json::to_vec(observation).map_err(|error| error.to_string())?;
-    host.transact_durable(
-        &language_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: key.clone(),
-                expected: None,
-            },
-            TransactionOp::Put {
-                key,
-                value: encoded,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &language_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: None,
+                },
+                TransactionOp::Put {
+                    key,
+                    value: encoded,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn read_observation(
-    host: &PluginHost<'_>,
+    context: &LanguageContext<'_, '_, '_>,
     observation_id: &str,
 ) -> Result<Option<LanguageObservation>, String> {
-    host.read_durable(&language_namespace(), &observation_key(observation_id))
+    context
+        .kernel
+        .read_durable(&language_namespace(), &observation_key(observation_id))
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()

@@ -1,6 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,6 +15,12 @@ const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const OBJECTIVE_INDEX: &str = "index/objectives";
 const PLAN_INDEX: &str = "index/plans";
 const DECISION_INDEX: &str = "index/decisions";
+
+type PlanningContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+
+fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> PlanningContext<'host, 'runtime> {
+    PluginContext::new(host, (), (), ())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ObjectiveRecord {
@@ -153,7 +160,9 @@ struct PlanningPlugin;
 
 impl PluginInstance for PlanningPlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        host.register_durable_schema(&DurableSchema::new(planning_namespace(), 1))
+        context(host)
+            .kernel
+            .register_durable_schema(&DurableSchema::new(planning_namespace(), 1))
             .map_err(|error| error.to_string())
     }
 
@@ -166,60 +175,66 @@ impl PluginInstance for PlanningPlugin {
         if service != &planning_service() {
             return Err(format!("unsupported planning service: {service}"));
         }
-        let command: PlanningCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = match command {
-            PlanningCommand::CreateObjective { id, title, parent } => PlanningResponse::Objective {
-                objective: Some(create_objective(host, id, title, parent)?),
-            },
-            PlanningCommand::CreatePlan {
-                id,
-                objective_id,
-                goal,
-                steps,
-            } => PlanningResponse::Plan {
-                plan: Some(create_plan(host, id, objective_id, goal, steps)?),
-            },
-            PlanningCommand::RecordDecision {
+        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = handle(&context(host), command)?;
+        serde_json::to_vec(&response).map_err(|error| error.to_string())
+    }
+}
+
+fn handle(
+    context: &PlanningContext<'_, '_>,
+    command: PlanningCommand,
+) -> Result<PlanningResponse, String> {
+    match command {
+        PlanningCommand::CreateObjective { id, title, parent } => Ok(PlanningResponse::Objective {
+            objective: Some(create_objective(context, id, title, parent)?),
+        }),
+        PlanningCommand::CreatePlan {
+            id,
+            objective_id,
+            goal,
+            steps,
+        } => Ok(PlanningResponse::Plan {
+            plan: Some(create_plan(context, id, objective_id, goal, steps)?),
+        }),
+        PlanningCommand::RecordDecision {
+            id,
+            objective_id,
+            statement,
+            rationale,
+            dependencies,
+            supersedes,
+        } => Ok(PlanningResponse::Decision {
+            decision: Some(record_decision(
+                context,
                 id,
                 objective_id,
                 statement,
                 rationale,
                 dependencies,
                 supersedes,
-            } => PlanningResponse::Decision {
-                decision: Some(record_decision(
-                    host,
-                    id,
-                    objective_id,
-                    statement,
-                    rationale,
-                    dependencies,
-                    supersedes,
-                )?),
-            },
-            PlanningCommand::GetObjective { id } => PlanningResponse::Objective {
-                objective: read_record(host, &objective_key(&id))?,
-            },
-            PlanningCommand::GetPlan { id } => PlanningResponse::Plan {
-                plan: read_record(host, &plan_key(&id))?,
-            },
-            PlanningCommand::GetDecision { id } => PlanningResponse::Decision {
-                decision: read_record(host, &decision_key(&id))?,
-            },
-            PlanningCommand::SearchHistory {
-                objective_id,
-                query,
-            } => PlanningResponse::History {
-                entries: search_history(host, objective_id.as_deref(), &query)?,
-            },
-        };
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+            )?),
+        }),
+        PlanningCommand::GetObjective { id } => Ok(PlanningResponse::Objective {
+            objective: read_record(context, &objective_key(&id))?,
+        }),
+        PlanningCommand::GetPlan { id } => Ok(PlanningResponse::Plan {
+            plan: read_record(context, &plan_key(&id))?,
+        }),
+        PlanningCommand::GetDecision { id } => Ok(PlanningResponse::Decision {
+            decision: read_record(context, &decision_key(&id))?,
+        }),
+        PlanningCommand::SearchHistory {
+            objective_id,
+            query,
+        } => Ok(PlanningResponse::History {
+            entries: search_history(context, objective_id.as_deref(), &query)?,
+        }),
     }
 }
 
 fn create_objective(
-    host: &PluginHost<'_>,
+    context: &PlanningContext<'_, '_>,
     id: String,
     title: String,
     parent: Option<String>,
@@ -228,18 +243,23 @@ fn create_objective(
     validate_text("objective title", &title)?;
     if let Some(parent_id) = &parent {
         validate_identity("parent objective id", parent_id)?;
-        require_objective(host, parent_id)?;
+        require_objective(context, parent_id)?;
         if parent_id == &id {
             return Err("objective cannot parent itself".into());
         }
     }
     let record = ObjectiveRecord { id, title, parent };
-    insert_record(host, OBJECTIVE_INDEX, &objective_key(&record.id), &record)?;
+    insert_record(
+        context,
+        OBJECTIVE_INDEX,
+        &objective_key(&record.id),
+        &record,
+    )?;
     Ok(record)
 }
 
 fn create_plan(
-    host: &PluginHost<'_>,
+    context: &PlanningContext<'_, '_>,
     id: String,
     objective_id: String,
     goal: String,
@@ -248,7 +268,7 @@ fn create_plan(
     validate_identity("plan id", &id)?;
     validate_identity("plan objective id", &objective_id)?;
     validate_text("plan goal", &goal)?;
-    require_objective(host, &objective_id)?;
+    require_objective(context, &objective_id)?;
     normalize_and_validate_steps(&mut steps)?;
     let record = PlanRecord {
         id,
@@ -256,12 +276,12 @@ fn create_plan(
         goal,
         steps,
     };
-    insert_record(host, PLAN_INDEX, &plan_key(&record.id), &record)?;
+    insert_record(context, PLAN_INDEX, &plan_key(&record.id), &record)?;
     Ok(record)
 }
 
 fn record_decision(
-    host: &PluginHost<'_>,
+    context: &PlanningContext<'_, '_>,
     id: String,
     objective_id: String,
     statement: String,
@@ -273,12 +293,12 @@ fn record_decision(
     validate_identity("decision objective id", &objective_id)?;
     validate_text("decision statement", &statement)?;
     validate_text("decision rationale", &rationale)?;
-    require_objective(host, &objective_id)?;
+    require_objective(context, &objective_id)?;
     dependencies.sort();
     dependencies.dedup();
     for dependency in &dependencies {
         validate_identity("decision dependency", dependency)?;
-        let record: DecisionRecord = read_record(host, &decision_key(dependency))?
+        let record: DecisionRecord = read_record(context, &decision_key(dependency))?
             .ok_or_else(|| format!("unknown decision dependency: {dependency}"))?;
         if record.objective_id != objective_id {
             return Err(format!(
@@ -292,7 +312,7 @@ fn record_decision(
     }
     if let Some(prior) = &supersedes {
         validate_identity("superseded decision", prior)?;
-        let prior_record: DecisionRecord = read_record(host, &decision_key(prior))?
+        let prior_record: DecisionRecord = read_record(context, &decision_key(prior))?
             .ok_or_else(|| format!("unknown superseded decision: {prior}"))?;
         if prior_record.objective_id != objective_id {
             return Err("superseded decision must belong to the same objective".into());
@@ -301,7 +321,7 @@ fn record_decision(
             return Err("decision cannot supersede itself".into());
         }
     }
-    let existing = load_decisions(host)?;
+    let existing = load_decisions(context)?;
     let mut graph: BTreeMap<String, Vec<String>> = existing
         .into_iter()
         .map(|record| (record.id, record.dependencies))
@@ -317,7 +337,7 @@ fn record_decision(
         dependencies,
         supersedes,
     };
-    insert_record(host, DECISION_INDEX, &decision_key(&record.id), &record)?;
+    insert_record(context, DECISION_INDEX, &decision_key(&record.id), &record)?;
     Ok(record)
 }
 
@@ -387,22 +407,25 @@ fn ensure_acyclic(graph: &BTreeMap<String, Vec<String>>, label: &str) -> Result<
     Ok(())
 }
 
-fn require_objective(host: &PluginHost<'_>, id: &str) -> Result<ObjectiveRecord, String> {
-    read_record(host, &objective_key(id))?.ok_or_else(|| format!("unknown objective: {id}"))
+fn require_objective(
+    context: &PlanningContext<'_, '_>,
+    id: &str,
+) -> Result<ObjectiveRecord, String> {
+    read_record(context, &objective_key(id))?.ok_or_else(|| format!("unknown objective: {id}"))
 }
 
 fn search_history(
-    host: &PluginHost<'_>,
+    context: &PlanningContext<'_, '_>,
     objective_id: Option<&str>,
     query: &str,
 ) -> Result<Vec<HistoryEntry>, String> {
     if let Some(id) = objective_id {
         validate_identity("history objective id", id)?;
-        require_objective(host, id)?;
+        require_objective(context, id)?;
     }
     let query = query.trim().to_lowercase();
     let mut entries = Vec::new();
-    for objective in load_records::<ObjectiveRecord>(host, OBJECTIVE_INDEX, objective_key)? {
+    for objective in load_records::<ObjectiveRecord>(context, OBJECTIVE_INDEX, objective_key)? {
         if objective_id.is_some_and(|scope| scope != objective.id) {
             continue;
         }
@@ -415,7 +438,7 @@ fn search_history(
             });
         }
     }
-    for plan in load_records::<PlanRecord>(host, PLAN_INDEX, plan_key)? {
+    for plan in load_records::<PlanRecord>(context, PLAN_INDEX, plan_key)? {
         if objective_id.is_some_and(|scope| scope != plan.objective_id) {
             continue;
         }
@@ -428,7 +451,7 @@ fn search_history(
             });
         }
     }
-    for decision in load_decisions(host)? {
+    for decision in load_decisions(context)? {
         if objective_id.is_some_and(|scope| scope != decision.objective_id) {
             continue;
         }
@@ -460,76 +483,80 @@ fn matches_query<'a>(query: &str, values: impl IntoIterator<Item = &'a str>) -> 
 }
 
 fn insert_record<T: Serialize>(
-    host: &PluginHost<'_>,
+    context: &PlanningContext<'_, '_>,
     index_key: &str,
     record_key: &str,
     record: &T,
 ) -> Result<(), String> {
-    let old_index = read_raw(host, index_key)?;
+    let old_index = read_raw(context, index_key)?;
     let mut ids = decode_index(old_index.as_deref())?;
     let id = record_key
         .rsplit('/')
         .next()
         .ok_or_else(|| format!("invalid durable record key: {record_key}"))?
         .to_owned();
-    if ids.iter().any(|existing| existing == &id) || read_raw(host, record_key)?.is_some() {
+    if ids.iter().any(|existing| existing == &id) || read_raw(context, record_key)?.is_some() {
         return Err(format!("immutable record already exists: {id}"));
     }
     ids.push(id);
     ids.sort();
-    host.transact_durable(
-        &planning_namespace(),
-        &[
-            TransactionOp::AssertValue {
-                key: record_key.into(),
-                expected: None,
-            },
-            TransactionOp::AssertValue {
-                key: index_key.into(),
-                expected: old_index,
-            },
-            TransactionOp::Put {
-                key: record_key.into(),
-                value: serde_json::to_vec(record).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: index_key.into(),
-                value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
-            },
-        ],
-    )
-    .map_err(|error| error.to_string())
+    context
+        .kernel
+        .transact_durable(
+            &planning_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: record_key.into(),
+                    expected: None,
+                },
+                TransactionOp::AssertValue {
+                    key: index_key.into(),
+                    expected: old_index,
+                },
+                TransactionOp::Put {
+                    key: record_key.into(),
+                    value: serde_json::to_vec(record).map_err(|error| error.to_string())?,
+                },
+                TransactionOp::Put {
+                    key: index_key.into(),
+                    value: serde_json::to_vec(&ids).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())
 }
 
-fn load_decisions(host: &PluginHost<'_>) -> Result<Vec<DecisionRecord>, String> {
-    load_records(host, DECISION_INDEX, decision_key)
+fn load_decisions(context: &PlanningContext<'_, '_>) -> Result<Vec<DecisionRecord>, String> {
+    load_records(context, DECISION_INDEX, decision_key)
 }
 
 fn load_records<T: for<'de> Deserialize<'de>>(
-    host: &PluginHost<'_>,
+    context: &PlanningContext<'_, '_>,
     index_key: &str,
     key: fn(&str) -> String,
 ) -> Result<Vec<T>, String> {
-    decode_index(read_raw(host, index_key)?.as_deref())?
+    decode_index(read_raw(context, index_key)?.as_deref())?
         .into_iter()
         .map(|id| {
-            read_record(host, &key(&id))?
+            read_record(context, &key(&id))?
                 .ok_or_else(|| format!("missing durable record from {index_key}: {id}"))
         })
         .collect()
 }
 
 fn read_record<T: for<'de> Deserialize<'de>>(
-    host: &PluginHost<'_>,
+    context: &PlanningContext<'_, '_>,
     key: &str,
 ) -> Result<Option<T>, String> {
-    read_raw(host, key)?
+    read_raw(context, key)?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
-fn read_raw(host: &PluginHost<'_>, key: &str) -> Result<Option<Vec<u8>>, String> {
-    host.read_durable(&planning_namespace(), key)
+fn read_raw(context: &PlanningContext<'_, '_>, key: &str) -> Result<Option<Vec<u8>>, String> {
+    context
+        .kernel
+        .read_durable(&planning_namespace(), key)
         .map_err(|error| error.to_string())
 }
 
