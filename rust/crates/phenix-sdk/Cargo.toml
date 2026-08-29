@@ -1,0 +1,11 @@
+[package]
+name = "phenix-sdk"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+phenix-core = { path = "../phenix-core" }
+phenix-plugin-sdk = { path = "../phenix-plugin-sdk" }
+phenix-provider-sdk = { path = "../phenix-provider-sdk" }
+serde_json.workspace = true
