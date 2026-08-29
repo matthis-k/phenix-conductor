@@ -206,6 +206,75 @@ impl<'de> Deserialize<'de> for Token {
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+pub struct EnvironmentVariable(String);
+
+impl EnvironmentVariable {
+    pub fn parse(value: impl Into<String>) -> Result<Self, EnvironmentVariableParseError> {
+        let value = value.into();
+        let mut bytes = value.bytes();
+        let Some(first) = bytes.next() else {
+            return Err(EnvironmentVariableParseError);
+        };
+        if !(first.is_ascii_alphabetic() || first == b'_')
+            || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(EnvironmentVariableParseError);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EnvironmentVariableParseError;
+
+impl Display for EnvironmentVariableParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str("environment variable name must match [A-Za-z_][A-Za-z0-9_]*")
+    }
+}
+
+impl std::error::Error for EnvironmentVariableParseError {}
+
+impl Serialize for EnvironmentVariable {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for EnvironmentVariable {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(value).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ApiTokenSource {
+    Literal { token: Token },
+    Environment { variable: EnvironmentVariable },
+}
+
+impl fmt::Debug for ApiTokenSource {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Literal { .. } => f
+                .debug_struct("Literal")
+                .field("token", &"<redacted>")
+                .finish(),
+            Self::Environment { variable } => f
+                .debug_struct("Environment")
+                .field("variable", variable)
+                .finish(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct HeaderName(String);
 
 impl HeaderName {
@@ -262,7 +331,7 @@ pub enum AuthKind {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Auth {
     ApiToken {
-        token: Token,
+        source: ApiTokenSource,
     },
     OAuth {
         access_token: Token,
@@ -306,10 +375,9 @@ impl Auth {
 impl fmt::Debug for Auth {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ApiToken { .. } => f
-                .debug_struct("ApiToken")
-                .field("token", &"<redacted>")
-                .finish(),
+            Self::ApiToken { source } => {
+                f.debug_struct("ApiToken").field("source", source).finish()
+            }
             Self::OAuth {
                 refresh_token,
                 expires_at,
@@ -594,7 +662,12 @@ mod tests {
     fn auth_parse_rejects_impossible_runtime_tokens() {
         assert!(serde_json::from_value::<Auth>(serde_json::json!({
             "type":"api_token",
-            "token":""
+            "source":{"type":"literal","token":""}
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<Auth>(serde_json::json!({
+            "type":"api_token",
+            "source":{"type":"environment","variable":"1INVALID"}
         }))
         .is_err());
         assert!(serde_json::from_value::<Auth>(serde_json::json!({

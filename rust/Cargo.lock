@@ -1614,6 +1614,7 @@ dependencies = [
  "phenix-plugin-models",
  "phenix-plugin-options",
  "phenix-plugin-planning",
+ "phenix-plugin-providers",
  "phenix-plugin-repository-workers",
  "phenix-plugin-sdk",
  "phenix-plugin-session-tree",
@@ -1739,6 +1740,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-providers"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-provider-sdk",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 use crate::{
-    normalize_http_error, provider_auth_service, ApiTokenScheme, Auth, AuthKind, CredentialStore,
-    HttpMethod, ProviderAuthCommand, ProviderAuthResponse, ProviderError, ProviderRequest,
-    ProviderResponse, ProviderSpec, RateLimits,
+    normalize_http_error, provider_auth_service, ApiTokenScheme, ApiTokenSource, Auth, AuthKind,
+    CredentialStore, HttpMethod, ProviderAuthCommand, ProviderAuthResponse, ProviderError,
+    ProviderRequest, ProviderResponse, ProviderSpec, RateLimits, Token,
 };
 use phenix_core::{
     model_inference_service, ModelInferenceRequest, ModelInferenceResponse, PluginHost,
@@ -49,7 +49,7 @@ impl ProviderPlugin {
             return Ok(None);
         }
         let store = self.credentials()?;
-        if self.spec.oauth {
+        if self.spec.auth.oauth.is_some() {
             if let Some(auth) = store.resolve(self.spec.id.as_str(), AuthKind::OAuth)? {
                 if auth.is_expired() {
                     return Err(ProviderError::Authentication {
@@ -62,7 +62,7 @@ impl ProviderPlugin {
                 return Ok(Some(auth));
             }
         }
-        if self.spec.api_token.is_some() {
+        if self.spec.auth.api_token.is_some() {
             if let Some(auth) = store.resolve(self.spec.id.as_str(), AuthKind::ApiToken)? {
                 return Ok(Some(auth));
             }
@@ -119,6 +119,9 @@ impl ProviderPlugin {
                 let auth = store.add(self.spec.id.as_str(), auth)?;
                 Ok(ProviderAuthResponse::Added { auth })
             }
+            ProviderAuthCommand::Methods => Ok(ProviderAuthResponse::Methods {
+                methods: self.spec.auth_kinds(),
+            }),
             ProviderAuthCommand::List => Ok(ProviderAuthResponse::Credentials {
                 credentials: store.list(self.spec.id.as_str())?,
             }),
@@ -131,8 +134,8 @@ impl ProviderPlugin {
 
     fn ensure_auth_supported(&self, kind: AuthKind) -> Result<(), ProviderError> {
         let supported = match kind {
-            AuthKind::ApiToken => self.spec.api_token.is_some(),
-            AuthKind::OAuth => self.spec.oauth,
+            AuthKind::ApiToken => self.spec.auth.api_token.is_some(),
+            AuthKind::OAuth => self.spec.auth.oauth.is_some(),
         };
         if !supported {
             return Err(ProviderError::Authentication {
@@ -202,20 +205,22 @@ fn apply_auth(
 ) -> Result<(), ProviderError> {
     match auth {
         None => Ok(()),
-        Some(Auth::OAuth { access_token, .. }) if spec.oauth => {
+        Some(Auth::OAuth { access_token, .. }) if spec.auth.oauth.is_some() => {
             headers.insert(
                 AUTHORIZATION.as_str().to_owned(),
                 format!("Bearer {}", access_token.expose()),
             );
             Ok(())
         }
-        Some(Auth::ApiToken { token }) => {
-            let scheme = spec
-                .api_token
-                .as_ref()
-                .ok_or_else(|| ProviderError::Authentication {
-                    message: "API-token credential is not accepted by this provider".to_owned(),
-                })?;
+        Some(Auth::ApiToken { source }) => {
+            let token = resolve_api_token(source)?;
+            let scheme =
+                spec.auth
+                    .api_token
+                    .as_ref()
+                    .ok_or_else(|| ProviderError::Authentication {
+                        message: "API-token credential is not accepted by this provider".to_owned(),
+                    })?;
             match scheme {
                 ApiTokenScheme::Bearer => {
                     headers.insert(
@@ -232,6 +237,28 @@ fn apply_auth(
         Some(_) => Err(ProviderError::Authentication {
             message: "credential type does not match provider auth configuration".to_owned(),
         }),
+    }
+}
+
+fn resolve_api_token(source: &ApiTokenSource) -> Result<Token, ProviderError> {
+    match source {
+        ApiTokenSource::Literal { token } => Ok(token.clone()),
+        ApiTokenSource::Environment { variable } => {
+            let value = std::env::var(variable.as_str()).map_err(|error| {
+                ProviderError::Authentication {
+                    message: format!(
+                        "API-token environment variable {} is unavailable: {error}",
+                        variable.as_str()
+                    ),
+                }
+            })?;
+            Token::parse(value).map_err(|error| ProviderError::Authentication {
+                message: format!(
+                    "API-token environment variable {} is invalid: {error}",
+                    variable.as_str()
+                ),
+            })
+        }
     }
 }
 
