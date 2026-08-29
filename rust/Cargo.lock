@@ -1796,6 +1796,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-provider-sdk"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "phenix-sdk"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-sdk",
+ "phenix-provider-sdk",
+ "serde_json",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"

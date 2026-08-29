@@ -1,0 +1,393 @@
+#![forbid(unsafe_code)]
+
+mod protocol;
+mod runtime;
+mod store;
+mod types;
+
+pub use protocol::{normalize_http_error, Protocol, ProtocolAdapter};
+pub use store::*;
+pub use types::*;
+
+use phenix_core::{
+    model_inference_service, Authority, CapabilityId, ComponentExport, ComponentId,
+    ComponentInterface, ComponentManifest, InterfaceId, ModelInferenceRequest,
+    ModelInferenceResponse, PluginExecution, PluginId, PluginInstance, PluginManifest,
+    ServiceContribution, ServiceId, ServiceRole, MODEL_INFERENCE_SERVICE,
+};
+use serde::{Deserialize, Serialize};
+use std::{fmt, sync::Arc};
+
+pub const PROVIDER_AUTH_SERVICE: &str = "phenix.providers.auth@1";
+pub const NETWORK_HTTP_CAPABILITY: &str = "network.http";
+pub const SECRETS_MANAGE_CAPABILITY: &str = "secrets.manage";
+
+pub mod provider {
+    pub use super::{
+        new, ApiTokenScheme, Auth, AuthDescriptor, AuthKind, Endpoint, EndpointParseError,
+        HeaderName, Protocol, ProtocolAdapter, ProviderBuilder, ProviderDefinition, Secret, Token,
+    };
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProviderAuthCommand {
+    Add { auth: Auth },
+    List,
+    Remove { kind: AuthKind },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProviderAuthResponse {
+    Added { auth: AuthDescriptor },
+    Credentials { credentials: Vec<AuthDescriptor> },
+    Removed { auth: Option<AuthDescriptor> },
+}
+
+pub struct ProviderAuthInterface;
+
+impl ComponentInterface for ProviderAuthInterface {
+    type Request = ProviderAuthCommand;
+    type Response = ProviderAuthResponse;
+
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(PROVIDER_AUTH_SERVICE).expect("static provider auth interface is valid")
+    }
+}
+
+pub struct ProviderModelInterface;
+
+impl ComponentInterface for ProviderModelInterface {
+    type Request = ModelInferenceRequest;
+    type Response = ModelInferenceResponse;
+
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(MODEL_INFERENCE_SERVICE).expect("static model interface is valid")
+    }
+}
+
+#[must_use]
+pub fn provider_auth_service() -> ServiceId {
+    ServiceId::parse(PROVIDER_AUTH_SERVICE).expect("static provider auth service is valid")
+}
+
+pub struct MissingProtocol;
+
+pub struct ConfiguredProtocol {
+    adapter: Arc<dyn ProtocolAdapter>,
+}
+
+pub struct ProviderBuilder<State> {
+    endpoint: Endpoint,
+    api_token: Option<ApiTokenScheme>,
+    oauth: bool,
+    protocol: State,
+}
+
+pub fn new(
+    endpoint: impl AsRef<str>,
+) -> Result<ProviderBuilder<MissingProtocol>, EndpointParseError> {
+    Ok(ProviderBuilder {
+        endpoint: Endpoint::parse(endpoint)?,
+        api_token: None,
+        oauth: false,
+        protocol: MissingProtocol,
+    })
+}
+
+impl ProviderBuilder<MissingProtocol> {
+    #[must_use]
+    pub fn protocol(
+        self,
+        adapter: impl ProtocolAdapter + 'static,
+    ) -> ProviderBuilder<ConfiguredProtocol> {
+        ProviderBuilder {
+            endpoint: self.endpoint,
+            api_token: self.api_token,
+            oauth: self.oauth,
+            protocol: ConfiguredProtocol {
+                adapter: Arc::new(adapter),
+            },
+        }
+    }
+}
+
+impl ProviderBuilder<ConfiguredProtocol> {
+    #[must_use]
+    pub fn api_token(mut self, scheme: ApiTokenScheme) -> Self {
+        self.api_token = Some(scheme);
+        self
+    }
+
+    #[must_use]
+    pub fn oauth(mut self) -> Self {
+        self.oauth = true;
+        self
+    }
+
+    pub fn build(
+        self,
+        plugin_id: impl Into<String>,
+    ) -> Result<ProviderDefinition, ProviderBuildError> {
+        let id =
+            PluginId::parse(plugin_id.into()).map_err(|_| ProviderBuildError::InvalidPluginId)?;
+        Ok(ProviderDefinition {
+            spec: Arc::new(ProviderSpec {
+                id,
+                endpoint: self.endpoint,
+                api_token: self.api_token,
+                oauth: self.oauth,
+                protocol: self.protocol.adapter,
+            }),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderBuildError {
+    InvalidPluginId,
+}
+
+impl fmt::Display for ProviderBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("provider plugin id must not be empty")
+    }
+}
+
+impl std::error::Error for ProviderBuildError {}
+
+pub(crate) struct ProviderSpec {
+    id: PluginId,
+    endpoint: Endpoint,
+    api_token: Option<ApiTokenScheme>,
+    oauth: bool,
+    protocol: Arc<dyn ProtocolAdapter>,
+}
+
+impl ProviderSpec {
+    fn supports_auth(&self) -> bool {
+        self.api_token.is_some() || self.oauth
+    }
+}
+
+#[derive(Clone)]
+pub struct ProviderDefinition {
+    spec: Arc<ProviderSpec>,
+}
+
+impl ProviderDefinition {
+    pub fn plugin_id(&self) -> &PluginId {
+        &self.spec.id
+    }
+
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.spec.endpoint
+    }
+
+    pub fn protocol_name(&self) -> &'static str {
+        self.spec.protocol.name()
+    }
+
+    #[must_use]
+    pub fn manifest(&self) -> PluginManifest {
+        let network = network_authority();
+        let mut services = vec![ServiceContribution {
+            role: ServiceRole::Terminal,
+            service: model_inference_service(),
+            priority: 100,
+            required_authority: network.clone(),
+        }];
+        let mut maximum_authority = network;
+        if self.spec.supports_auth() {
+            let secrets = secrets_authority();
+            services.push(ServiceContribution {
+                role: ServiceRole::Terminal,
+                service: provider_auth_service(),
+                priority: 100,
+                required_authority: secrets.clone(),
+            });
+            maximum_authority = Authority::new(
+                maximum_authority
+                    .capabilities()
+                    .cloned()
+                    .chain(secrets.capabilities().cloned()),
+            );
+        }
+        PluginManifest {
+            id: self.spec.id.clone(),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services,
+            resource_namespaces: Vec::new(),
+            maximum_authority,
+        }
+    }
+
+    #[must_use]
+    pub fn component_manifest(&self) -> ComponentManifest {
+        let mut exports = vec![ComponentExport {
+            interface: ProviderModelInterface::interface_id(),
+            priority: 100,
+            required_authority: network_authority(),
+        }];
+        if self.spec.supports_auth() {
+            exports.push(ComponentExport {
+                interface: ProviderAuthInterface::interface_id(),
+                priority: 100,
+                required_authority: secrets_authority(),
+            });
+        }
+        ComponentManifest {
+            id: provider_component_id(&self.spec.id),
+            owner: self.spec.id.clone(),
+            imports: Vec::new(),
+            exports,
+            maximum_authority: self.manifest().maximum_authority,
+        }
+    }
+
+    pub fn factory(&self) -> impl Fn() -> Box<dyn PluginInstance> + Send + Sync + 'static {
+        let spec = Arc::clone(&self.spec);
+        move || Box::new(runtime::ProviderPlugin::new(Arc::clone(&spec)))
+    }
+}
+
+fn provider_component_id(plugin: &PluginId) -> ComponentId {
+    ComponentId::parse(plugin.as_str()).expect("plugin id is valid as provider component id")
+}
+
+fn network_authority() -> Authority {
+    Authority::new([capability(NETWORK_HTTP_CAPABILITY)])
+}
+
+fn secrets_authority() -> Authority {
+    Authority::new([capability(SECRETS_MANAGE_CAPABILITY)])
+}
+
+fn capability(value: &str) -> CapabilityId {
+    CapabilityId::parse(value).expect("static provider capability is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phenix_core::{Kernel, KernelConfig};
+    use std::{
+        collections::BTreeMap,
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+
+    #[test]
+    fn provider_definition_derives_plugin_contracts_from_description() {
+        let definition = new("https://api.example.com/v1")
+            .unwrap()
+            .protocol(Protocol::OpenAiResponses)
+            .api_token(ApiTokenScheme::Bearer)
+            .oauth()
+            .build("provider.example")
+            .unwrap();
+
+        assert_eq!(definition.plugin_id().as_str(), "provider.example");
+        assert_eq!(
+            definition.endpoint().as_str(),
+            "https://api.example.com/v1/"
+        );
+        assert_eq!(definition.protocol_name(), "openai_responses");
+        let manifest = definition.manifest();
+        assert_eq!(manifest.services.len(), 2);
+        assert!(manifest
+            .maximum_authority
+            .permits(&capability(NETWORK_HTTP_CAPABILITY)));
+        assert!(manifest
+            .maximum_authority
+            .permits(&capability(SECRETS_MANAGE_CAPABILITY)));
+        let component = definition.component_manifest();
+        assert!(component
+            .exports
+            .iter()
+            .any(|export| export.interface == ProviderModelInterface::interface_id()));
+        assert!(component
+            .exports
+            .iter()
+            .any(|export| export.interface == ProviderAuthInterface::interface_id()));
+    }
+
+    #[test]
+    fn unauthenticated_provider_does_not_gain_secret_authority() {
+        let definition = new("https://api.example.com/v1")
+            .unwrap()
+            .protocol(Protocol::OpenAiResponses)
+            .build("provider.public")
+            .unwrap();
+        let manifest = definition.manifest();
+        assert_eq!(manifest.services.len(), 1);
+        assert!(!manifest
+            .maximum_authority
+            .permits(&capability(SECRETS_MANAGE_CAPABILITY)));
+        assert_eq!(definition.component_manifest().exports.len(), 1);
+    }
+
+    #[test]
+    fn generated_provider_executes_protocol_end_to_end() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let count = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..count]);
+            assert!(request.starts_with("POST /v1/responses HTTP/1.1"));
+            assert!(request.contains("\"model\":\"model-a\""));
+            assert!(request.contains("\"input\":\"hello\""));
+
+            let body = r#"{"id":"response-1","output":[{"content":[{"type":"output_text","text":"world"}]}]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nx-ratelimit-limit-requests: 100\r\nx-ratelimit-remaining-requests: 99\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+
+        let definition = new(format!("http://{address}/v1"))
+            .unwrap()
+            .protocol(Protocol::OpenAiResponses)
+            .build("provider.local")
+            .unwrap();
+        let manifest = definition.manifest();
+        let plugin = manifest.id.clone();
+        let mut kernel = Kernel::new(KernelConfig::new([manifest]).unwrap());
+        kernel
+            .register_embedded_factory(plugin.clone(), definition.factory())
+            .unwrap();
+        kernel.activate_all().unwrap();
+
+        let output = kernel
+            .invoke(
+                &model_inference_service(),
+                &serde_json::to_vec(&ModelInferenceRequest {
+                    model: "model-a".to_owned(),
+                    input: b"hello".to_vec(),
+                    options: BTreeMap::new(),
+                })
+                .unwrap(),
+                &network_authority(),
+                Some(&plugin),
+            )
+            .unwrap();
+        let response: ModelInferenceResponse = serde_json::from_slice(&output).unwrap();
+        assert_eq!(response.output, b"world");
+        assert_eq!(response.provider_metadata["id"], "response-1");
+        assert_eq!(response.provider_metadata["protocol"], "openai_responses");
+        assert_eq!(
+            response.provider_metadata["rate_limits"]["requests"]["remaining"],
+            99
+        );
+        server.join().unwrap();
+    }
+}
