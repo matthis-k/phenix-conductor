@@ -1,4 +1,4 @@
-use crate::{Auth, AuthDescriptor, AuthKind, ProviderError, Secret, Token};
+use crate::{ApiTokenSource, Auth, AuthDescriptor, AuthKind, ProviderError, Secret, Token};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -25,7 +25,7 @@ struct StoredCredentials {
 #[serde(deny_unknown_fields)]
 struct ProviderCredentials {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    api_token: Option<Token>,
+    api_token: Option<ApiTokenSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     oauth: Option<OAuthCredential>,
 }
@@ -44,11 +44,11 @@ impl ProviderCredentials {
     fn add(&mut self, provider: &str, auth: Auth) -> Result<AuthDescriptor, ProviderError> {
         let descriptor = auth.descriptor();
         match auth {
-            Auth::ApiToken { token } => {
+            Auth::ApiToken { source } => {
                 if self.api_token.is_some() {
                     return Err(duplicate_credential(provider, AuthKind::ApiToken));
                 }
-                self.api_token = Some(token);
+                self.api_token = Some(source);
             }
             Auth::OAuth {
                 access_token,
@@ -100,7 +100,10 @@ impl ProviderCredentials {
 
     fn resolve(&self, kind: AuthKind) -> Option<Auth> {
         match kind {
-            AuthKind::ApiToken => self.api_token.clone().map(|token| Auth::ApiToken { token }),
+            AuthKind::ApiToken => self
+                .api_token
+                .clone()
+                .map(|source| Auth::ApiToken { source }),
             AuthKind::OAuth => self.oauth.as_ref().map(|oauth| Auth::OAuth {
                 access_token: oauth.access_token.clone(),
                 refresh_token: oauth.refresh_token.clone(),
@@ -369,7 +372,9 @@ mod tests {
             .add(
                 "provider.test",
                 Auth::ApiToken {
-                    token: Token::parse("secret-token").unwrap(),
+                    source: ApiTokenSource::Literal {
+                        token: Token::parse("secret-token").unwrap(),
+                    },
                 },
             )
             .unwrap();
@@ -387,7 +392,9 @@ mod tests {
             .add(
                 "provider.test",
                 Auth::ApiToken {
-                    token: Token::parse("other-token").unwrap()
+                    source: ApiTokenSource::Literal {
+                        token: Token::parse("other-token").unwrap()
+                    }
                 }
             )
             .is_err());
@@ -433,10 +440,28 @@ mod tests {
         fs::create_dir_all(parent).unwrap();
         fs::write(
             &store.path,
-            r#"{"providers":{"provider.test":{"api_token":"token","oauth":{"access_token":"oauth"}}}}"#,
+            r#"{"providers":{"provider.test":{"api_token":{"type":"literal","token":"token"},"oauth":{"access_token":"oauth"}}}}"#,
         )
         .unwrap();
         assert_eq!(store.list("provider.test").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn environment_api_token_persists_only_the_variable_name() {
+        let store = temp_store("environment");
+        store
+            .add(
+                "provider.test",
+                Auth::ApiToken {
+                    source: ApiTokenSource::Environment {
+                        variable: crate::EnvironmentVariable::parse("PHENIX_TEST_API_KEY").unwrap(),
+                    },
+                },
+            )
+            .unwrap();
+        let source = fs::read_to_string(&store.path).unwrap();
+        assert!(source.contains("PHENIX_TEST_API_KEY"));
+        assert!(!source.contains("secret-token"));
     }
 
     #[test]

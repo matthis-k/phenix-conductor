@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod auth;
 mod protocol;
 mod runtime;
 mod store;
@@ -24,8 +25,8 @@ pub const SECRETS_MANAGE_CAPABILITY: &str = "secrets.manage";
 
 pub mod provider {
     pub use super::{
-        new, ApiTokenScheme, Auth, AuthDescriptor, AuthKind, Endpoint, EndpointParseError,
-        HeaderName, Protocol, ProtocolAdapter, ProviderBuilder, ProviderDefinition, Secret, Token,
+        define, Endpoint, EndpointParseError, Protocol, ProtocolAdapter, ProviderBuildError,
+        ProviderDefinition,
     };
 }
 
@@ -33,6 +34,7 @@ pub mod provider {
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProviderAuthCommand {
     Add { auth: Auth },
+    Methods,
     List,
     Remove { kind: AuthKind },
 }
@@ -41,6 +43,7 @@ pub enum ProviderAuthCommand {
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProviderAuthResponse {
     Added { auth: AuthDescriptor },
+    Methods { methods: Vec<AuthKind> },
     Credentials { credentials: Vec<AuthDescriptor> },
     Removed { auth: Option<AuthDescriptor> },
 }
@@ -72,102 +75,62 @@ pub fn provider_auth_service() -> ServiceId {
     ServiceId::parse(PROVIDER_AUTH_SERVICE).expect("static provider auth service is valid")
 }
 
-pub struct MissingProtocol;
-
-pub struct ConfiguredProtocol {
-    adapter: Arc<dyn ProtocolAdapter>,
-}
-
-pub struct ProviderBuilder<State> {
-    endpoint: Endpoint,
-    api_token: Option<ApiTokenScheme>,
-    oauth: bool,
-    protocol: State,
-}
-
-pub fn new(
+pub fn define(
+    plugin_id: impl Into<String>,
     endpoint: impl AsRef<str>,
-) -> Result<ProviderBuilder<MissingProtocol>, EndpointParseError> {
-    Ok(ProviderBuilder {
-        endpoint: Endpoint::parse(endpoint)?,
-        api_token: None,
-        oauth: false,
-        protocol: MissingProtocol,
+    protocol: impl ProtocolAdapter + 'static,
+    auth: impl Into<auth::Definition>,
+) -> Result<ProviderDefinition, ProviderBuildError> {
+    let id = PluginId::parse(plugin_id.into()).map_err(|_| ProviderBuildError::InvalidPluginId)?;
+    let endpoint = Endpoint::parse(endpoint).map_err(ProviderBuildError::InvalidEndpoint)?;
+    Ok(ProviderDefinition {
+        spec: Arc::new(ProviderSpec {
+            id,
+            endpoint,
+            auth: auth.into(),
+            protocol: Arc::new(protocol),
+        }),
     })
 }
 
-impl ProviderBuilder<MissingProtocol> {
-    #[must_use]
-    pub fn protocol(
-        self,
-        adapter: impl ProtocolAdapter + 'static,
-    ) -> ProviderBuilder<ConfiguredProtocol> {
-        ProviderBuilder {
-            endpoint: self.endpoint,
-            api_token: self.api_token,
-            oauth: self.oauth,
-            protocol: ConfiguredProtocol {
-                adapter: Arc::new(adapter),
-            },
-        }
-    }
-}
-
-impl ProviderBuilder<ConfiguredProtocol> {
-    #[must_use]
-    pub fn api_token(mut self, scheme: ApiTokenScheme) -> Self {
-        self.api_token = Some(scheme);
-        self
-    }
-
-    #[must_use]
-    pub fn oauth(mut self) -> Self {
-        self.oauth = true;
-        self
-    }
-
-    pub fn build(
-        self,
-        plugin_id: impl Into<String>,
-    ) -> Result<ProviderDefinition, ProviderBuildError> {
-        let id =
-            PluginId::parse(plugin_id.into()).map_err(|_| ProviderBuildError::InvalidPluginId)?;
-        Ok(ProviderDefinition {
-            spec: Arc::new(ProviderSpec {
-                id,
-                endpoint: self.endpoint,
-                api_token: self.api_token,
-                oauth: self.oauth,
-                protocol: self.protocol.adapter,
-            }),
-        })
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProviderBuildError {
+    InvalidEndpoint(EndpointParseError),
     InvalidPluginId,
 }
 
 impl fmt::Display for ProviderBuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("provider plugin id must not be empty")
+        match self {
+            Self::InvalidEndpoint(error) => write!(f, "{error}"),
+            Self::InvalidPluginId => f.write_str("provider plugin id must not be empty"),
+        }
     }
 }
 
-impl std::error::Error for ProviderBuildError {}
+impl std::error::Error for ProviderBuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidEndpoint(error) => Some(error),
+            Self::InvalidPluginId => None,
+        }
+    }
+}
 
 pub(crate) struct ProviderSpec {
     id: PluginId,
     endpoint: Endpoint,
-    api_token: Option<ApiTokenScheme>,
-    oauth: bool,
+    auth: auth::Definition,
     protocol: Arc<dyn ProtocolAdapter>,
 }
 
 impl ProviderSpec {
+    fn auth_kinds(&self) -> Vec<AuthKind> {
+        self.auth.kinds()
+    }
+
     fn supports_auth(&self) -> bool {
-        self.api_token.is_some() || self.oauth
+        !self.auth.is_empty()
     }
 }
 
@@ -187,6 +150,15 @@ impl ProviderDefinition {
 
     pub fn protocol_name(&self) -> &'static str {
         self.spec.protocol.name()
+    }
+
+    pub fn auth(&self) -> &auth::Definition {
+        &self.spec.auth
+    }
+
+    #[must_use]
+    pub fn auth_kinds(&self) -> Vec<AuthKind> {
+        self.spec.auth_kinds()
     }
 
     #[must_use]
@@ -283,13 +255,14 @@ mod tests {
 
     #[test]
     fn provider_definition_derives_plugin_contracts_from_description() {
-        let definition = new("https://api.example.com/v1")
-            .unwrap()
-            .protocol(Protocol::OpenAiResponses)
-            .api_token(ApiTokenScheme::Bearer)
-            .oauth()
-            .build("provider.example")
-            .unwrap();
+        let definition = provider::define(
+            "provider.example",
+            "https://api.example.com/v1",
+            Protocol::OpenAiResponses,
+            auth::Definition::api_token(auth::ApiTokenMethod::bearer())
+                .with_oauth(auth::OAuthMethod::bearer()),
+        )
+        .unwrap();
 
         assert_eq!(definition.plugin_id().as_str(), "provider.example");
         assert_eq!(
@@ -297,6 +270,10 @@ mod tests {
             "https://api.example.com/v1/"
         );
         assert_eq!(definition.protocol_name(), "openai_responses");
+        assert_eq!(
+            definition.auth_kinds(),
+            vec![AuthKind::ApiToken, AuthKind::OAuth]
+        );
         let manifest = definition.manifest();
         assert_eq!(manifest.services.len(), 2);
         assert!(manifest
@@ -318,11 +295,13 @@ mod tests {
 
     #[test]
     fn unauthenticated_provider_does_not_gain_secret_authority() {
-        let definition = new("https://api.example.com/v1")
-            .unwrap()
-            .protocol(Protocol::OpenAiResponses)
-            .build("provider.public")
-            .unwrap();
+        let definition = provider::define(
+            "provider.public",
+            "https://api.example.com/v1",
+            Protocol::OpenAiResponses,
+            auth::Definition::none(),
+        )
+        .unwrap();
         let manifest = definition.manifest();
         assert_eq!(manifest.services.len(), 1);
         assert!(!manifest
@@ -354,11 +333,13 @@ mod tests {
             .unwrap();
         });
 
-        let definition = new(format!("http://{address}/v1"))
-            .unwrap()
-            .protocol(Protocol::OpenAiResponses)
-            .build("provider.local")
-            .unwrap();
+        let definition = provider::define(
+            "provider.local",
+            format!("http://{address}/v1"),
+            Protocol::OpenAiResponses,
+            auth::Definition::none(),
+        )
+        .unwrap();
         let manifest = definition.manifest();
         let plugin = manifest.id.clone();
         let mut kernel = Kernel::new(KernelConfig::new([manifest]).unwrap());

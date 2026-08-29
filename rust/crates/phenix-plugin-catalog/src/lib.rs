@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-pub use phenix_core::{session_service, CallableId, ModelId, RoutingProfileId};
+pub use phenix_core::session_service;
 pub use phenix_plugin_artifacts::{
     artifact_component_id, artifact_component_manifest, artifact_factory, artifact_manifest,
     artifact_service, ArtifactCommand, ArtifactInterface, ArtifactProvenance, ArtifactRecord,
@@ -83,6 +83,10 @@ pub use phenix_plugin_planning::{
     planning_service, DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord,
     PlanStep, PlanningCommand, PlanningInterface, PlanningResponse, PLANNING_SERVICE,
 };
+pub use phenix_plugin_providers::{
+    common_provider_definitions, providers_manifest, ProviderPreset, COMMON_PROVIDERS,
+    PROVIDERS_PLUGIN,
+};
 pub use phenix_plugin_repository_workers::{
     repository_work_queue_service, repository_worker_component_id,
     repository_worker_component_manifest, repository_worker_factory, repository_worker_manifest,
@@ -96,7 +100,7 @@ pub use phenix_plugin_repository_workers::{
 pub use phenix_plugin_sdk::{
     sdk_component_id, sdk_component_manifest, sdk_config_service, sdk_contribution, sdk_factory,
     sdk_manifest, sdk_session_service, sdk_skills_service, sdk_tools_service, SdkConfigCommand,
-    SdkConfigInterface, SdkConfigPath, SdkConfigResponse, SdkSessionCommand, SdkSessionInterface,
+    SdkConfigInterface, SdkConfigResponse, SdkSessionCommand, SdkSessionInterface,
     SdkSessionResponse, SdkSkill, SdkSkillCommand, SdkSkillResponse, SdkSkillSummary,
     SdkSkillsInterface, SdkTool, SdkToolCommand, SdkToolResponse, SdkToolsInterface, SDK_COMPONENT,
     SDK_CONFIG_SERVICE, SDK_PLUGIN, SDK_SESSION_SERVICE, SDK_SKILLS_SERVICE, SDK_TOOLS_SERVICE,

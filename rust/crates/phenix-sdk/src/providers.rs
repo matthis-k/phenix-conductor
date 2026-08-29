@@ -44,6 +44,15 @@ impl<'host, 'runtime> Provider<'host, 'runtime> {
         }
     }
 
+    pub fn auth_methods(&self) -> Result<Vec<AuthKind>, ProviderSdkError> {
+        match self.invoke(&ProviderAuthCommand::Methods)? {
+            ProviderAuthResponse::Methods { methods } => Ok(methods),
+            _ => Err(ProviderSdkError::UnexpectedResponse(
+                "listing provider auth methods",
+            )),
+        }
+    }
+
     pub fn list_auth(&self) -> Result<Vec<AuthDescriptor>, ProviderSdkError> {
         match self.invoke(&ProviderAuthCommand::List)? {
             ProviderAuthResponse::Credentials { credentials } => Ok(credentials),
