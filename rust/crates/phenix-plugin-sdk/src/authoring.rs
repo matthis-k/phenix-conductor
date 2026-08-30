@@ -180,9 +180,7 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
             kind: "session",
             message,
         })?;
-        let response = self
-            .storage
-            .invoke_projected(&SessionCommand::Get { id })?;
+        let response = self.storage.invoke_projected(&SessionCommand::Get { id })?;
         let SessionResponse::Session { session } = response else {
             return Err(SdkError::UnexpectedResponse {
                 operation: "finding session",
