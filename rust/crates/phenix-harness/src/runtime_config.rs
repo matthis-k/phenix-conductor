@@ -369,6 +369,14 @@ mod tests {
     }
 
     #[test]
+    fn startup_settings_use_structural_options_boundary() {
+        let mut harness = PhenixHarness::default_suite().unwrap();
+        harness.activate().unwrap();
+
+        apply_startup_settings(&mut harness, None, None, OptionStartupPrecedence::Nix).unwrap();
+    }
+
+    #[test]
     fn migrated_runtime_configuration_is_active_and_restart_safe() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
