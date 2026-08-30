@@ -1,23 +1,28 @@
 use crate::{
-    debug_component_id, ContextProbeCommand, FrontendProbeCommand, JobProbeCommand,
-    ModelProbeCommand, PlanningProbeCommand, SessionProbeCommand,
+    ContextProbeCommand, FrontendProbeCommand, JobProbeCommand, ModelProbeCommand,
+    PlanningProbeCommand, SessionProbeCommand,
 };
 use phenix_core::{
-    Authority, ComponentInterface, ComponentInvocationError, PhenixValue, PluginContext,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, SdkClient,
-    ServiceContribution, ServiceId,
+    Authority, ComponentInterface, ComponentInvocationError, PhenixValue, PluginExecution,
+    PluginHost, PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
 };
-use phenix_plugin_context::ContextInterface;
-use phenix_plugin_frontend::FrontendInterface;
-use phenix_plugin_jobs::JobInterface;
-use phenix_plugin_models::ModelRoutingInterface;
-use phenix_plugin_planning::PlanningInterface;
-use phenix_plugin_sessions::SessionInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const DEBUG_SERVICE: &str = "phenix.debug@1";
-const DEBUG_PLUGIN: &str = "phenix.debug";
+
+phenix_sdk::phenix_plugin! {
+    "phenix.debug";
+
+    uses {
+        sessions: "phenix.sessions@1",
+        context: "phenix.context@1",
+        planning: "phenix.planning@1",
+        jobs: "phenix.jobs@1",
+        models: "phenix.models.routing@1",
+        frontends: "phenix.frontend-services@1",
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
@@ -46,7 +51,7 @@ pub enum DebugResponse {
 #[must_use]
 pub fn debug_manifest(maximum_authority: Authority) -> PluginManifest {
     PluginManifest {
-        id: PluginId::parse(DEBUG_PLUGIN).expect("static plugin id is valid"),
+        id: phenix_plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
@@ -71,32 +76,10 @@ pub fn debug_service() -> ServiceId {
     ServiceId::parse(DEBUG_SERVICE).expect("static debug service id is valid")
 }
 
-struct DebugSdk<'host, 'runtime> {
-    sessions: SdkClient<'host, 'runtime, SessionInterface>,
-    context: SdkClient<'host, 'runtime, ContextInterface>,
-    planning: SdkClient<'host, 'runtime, PlanningInterface>,
-    jobs: SdkClient<'host, 'runtime, JobInterface>,
-    models: SdkClient<'host, 'runtime, ModelRoutingInterface>,
-    frontends: SdkClient<'host, 'runtime, FrontendInterface>,
-}
-
-type DebugContext<'host, 'runtime> = PluginContext<'host, 'runtime, DebugSdk<'host, 'runtime>>;
+type DebugContext<'host, 'runtime> = phenix_plugin::Context<'host, 'runtime>;
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> DebugContext<'host, 'runtime> {
-    let component = debug_component_id();
-    PluginContext::new(
-        host,
-        DebugSdk {
-            sessions: SdkClient::new(host, component.clone()),
-            context: SdkClient::new(host, component.clone()),
-            planning: SdkClient::new(host, component.clone()),
-            jobs: SdkClient::new(host, component.clone()),
-            models: SdkClient::new(host, component.clone()),
-            frontends: SdkClient::new(host, component),
-        },
-        (),
-        (),
-    )
+    phenix_plugin::context(host, (), ())
 }
 
 struct DebugPlugin;
