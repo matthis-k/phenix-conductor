@@ -40,44 +40,39 @@
         cp ${../config/phenix/NOTICE.md} "$out/share/phenix/NOTICE.md"
       '';
 
-      phenixAcpSmoke = pkgs.rustPlatform.buildRustPackage {
-        pname = "phenix-acp-smoke";
-        version = "0";
-        src = rustSource;
-
-        cargoLock.lockFile = ../rust/Cargo.lock;
-        cargoBuildFlags = [
-          "--package"
-          "phenix-acp-presets"
-          "--bin"
-          "phenix-acp-smoke"
-        ];
-        doCheck = false;
-
-        installPhase = ''
-          runHook preInstall
-          mkdir -p "$out/bin"
-          smoke_binary="$(find target -path '*/release/phenix-acp-smoke' -type f -print -quit)"
-          test -n "$smoke_binary"
-          cp "$smoke_binary" "$out/bin/phenix-acp-smoke"
-          runHook postInstall
-        '';
-      };
-
       supportedPhenix = self.packages.${system}.phenix;
       firstPartyPlugins = builtins.attrValues self.phenixPlugins.${system};
       phenixProductSmoke =
         pkgs.runCommand "phenix-product-smoke"
           {
             nativeBuildInputs = [
-              phenixAcpSmoke
               supportedPhenix
               pkgs.jq
             ]
             ++ firstPartyPlugins;
           }
           ''
-            PHENIX_HARNESS=${supportedPhenix}/bin/phenix-harness phenix-acp-smoke
+            export PHENIX_STATE_DB="$TMPDIR/acp-smoke.sqlite"
+            printf '%s\n' \
+              '{"id":1,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Create","value":{"type":"table","value":{"id":{"type":"string","value":"acp-smoke"}}}}}}' \
+              '{"id":2,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Get","value":{"type":"table","value":{"id":{"type":"string","value":"acp-smoke"}}}}}}' \
+              | ${supportedPhenix}/bin/phenix-harness > "$TMPDIR/acp-smoke.jsonl"
+            if ! jq -se '
+              length == 2
+              and .[0].id == 1
+              and .[0].status == "ok"
+              and .[0].output.type == "variant"
+              and .[0].output.value.tag == "Created"
+              and (.[0].output | tostring | contains("acp-smoke"))
+              and .[1].id == 2
+              and .[1].status == "ok"
+              and .[1].output.type == "variant"
+              and .[1].output.value.tag == "Session"
+              and (.[1].output | tostring | contains("acp-smoke"))
+            ' "$TMPDIR/acp-smoke.jsonl" >/dev/null; then
+              cat "$TMPDIR/acp-smoke.jsonl" >&2
+              exit 1
+            fi
 
             test -f ${supportedPhenix}/share/phenix/runtime.json
             test -f ${supportedPhenix}/share/phenix/skills/write/SKILL.md
@@ -105,7 +100,6 @@
       packages = {
         phenix-harness-runtime = phenixHarnessRuntime;
         phenix-harness-resources = phenixHarnessResources;
-        phenix-acp-smoke = phenixAcpSmoke;
       };
 
       checks.phenix-product-smoke = phenixProductSmoke;
