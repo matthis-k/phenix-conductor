@@ -1,16 +1,21 @@
-use crate::{
-    frontend_component_id, ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
-};
+use crate::{ExecutionCommand, ExecutionResponse, ExecutionState};
 use phenix_core::{
-    Authority, ComponentInterface, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
+    Authority, ComponentInterface, PluginExecution, PluginHost, PluginInstance, PluginManifest,
+    ServiceContribution, ServiceId,
 };
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const FRONTEND_SERVICE: &str = "phenix.frontend-services@1";
-const FRONTEND_PLUGIN: &str = "phenix.frontend-services";
+
+phenix_sdk::phenix_plugin! {
+    "phenix.frontend-services";
+
+    uses {
+        execution: "phenix.execution@1",
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct FrontendProviderDescriptor {
@@ -95,7 +100,7 @@ pub enum FrontendResponse {
 #[must_use]
 pub fn frontend_manifest(maximum_authority: Authority) -> PluginManifest {
     PluginManifest {
-        id: PluginId::parse(FRONTEND_PLUGIN).expect("static plugin id is valid"),
+        id: phenix_plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
@@ -133,25 +138,14 @@ struct FrontendState {
     next_correlation_id: u64,
 }
 
-struct FrontendSdk<'host, 'runtime> {
-    execution: SdkClient<'host, 'runtime, ExecutionInterface>,
-}
-
 type FrontendContext<'host, 'runtime, 'state> =
-    PluginContext<'host, 'runtime, FrontendSdk<'host, 'runtime>, (), &'state mut FrontendState>;
+    phenix_plugin::Context<'host, 'runtime, (), &'state mut FrontendState>;
 
 fn context<'host, 'runtime, 'state>(
     host: &'host PluginHost<'runtime>,
     state: &'state mut FrontendState,
 ) -> FrontendContext<'host, 'runtime, 'state> {
-    PluginContext::new(
-        host,
-        FrontendSdk {
-            execution: SdkClient::new(host, frontend_component_id()),
-        },
-        (),
-        state,
-    )
+    phenix_plugin::context(host, (), state)
 }
 
 #[derive(Default)]
