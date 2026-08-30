@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const FRONTEND_SERVICE: &str = "phenix.frontend-services@1";
 
-phenix_sdk::phenix_plugin! {
+phenix_core::phenix_plugin! {
     "phenix.frontend-services";
 
     uses {
