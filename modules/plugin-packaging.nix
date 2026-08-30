@@ -418,39 +418,54 @@ in
             "${defaultComposition}/bin/phenix" --list-services > "$TMPDIR/default-services.json"
             jq -e '(.plugins | length == 17) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
 
+            assert_option() {
+              local file="$1"
+              local expected_value="$2"
+              local expected_layer="$3"
+              jq -e --argjson expected_value "$expected_value" --arg expected_layer "$expected_layer" '
+                .status == "ok"
+                and .output.type == "variant"
+                and .output.value.tag == "Value"
+                and (.output.value.value.value.option.value |
+                  .value.value.tag == "Bool"
+                  and .value.value.value.type == "bool"
+                  and .value.value.value.value == $expected_value
+                  and .source.value.tag == "Global"
+                  and .layer.value.tag == $expected_layer
+                )
+              ' "$file" >/dev/null
+            }
+
             export PHENIX_STATE_DB="$TMPDIR/settings.sqlite"
-            printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"operation":"resolve","key":"session.auto_create","context":{}}}' \
+            printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Resolve","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"context":{"type":"table","value":{"session":{"type":"option","value":null},"agent":{"type":"option","value":null}}}}}}}}' \
               | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-option.json"
-            jq -e '.status == "ok" and .output.result == "value" and .output.option.value.type == "bool" and .output.option.value.value == false and .output.option.source == "global" and .output.option.layer == "nix"' \
-              "$TMPDIR/settings-option.json" >/dev/null
+            assert_option "$TMPDIR/settings-option.json" false Nix
             printf '%s\n' '{"id":2,"service":"phenix.sdk.config@1","input":{"operation":"read","path":"settings.json"}}' \
               | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-config.json"
             jq -e '.status == "ok" and .output.result == "file" and ((.output.content | implode | fromjson).global["session.auto_create"] == true)' \
               "$TMPDIR/settings-config.json" >/dev/null
-            printf '%s\n' '{"id":3,"service":"phenix.options@1","input":{"operation":"set","key":"session.auto_create","scope":"global","value":{"type":"bool","value":true}}}' \
+            printf '%s\n' '{"id":3,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Set","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"scope":{"type":"variant","value":{"tag":"Global","value":{"type":"unit"}}},"value":{"type":"variant","value":{"tag":"Bool","value":{"type":"bool","value":true}}}}}}}}' \
               | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-runtime-set.json"
-            printf '%s\n' '{"id":4,"service":"phenix.options@1","input":{"operation":"resolve","key":"session.auto_create","context":{"agent":"agent.scout"}}}' \
+            printf '%s\n' '{"id":4,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Resolve","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"context":{"type":"table","value":{"session":{"type":"option","value":null},"agent":{"type":"option","value":{"type":"string","value":"agent.scout"}}}}}}}}}' \
               | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-runtime-resolve.json"
-            jq -e '.status == "ok" and .output.option.value.value == true and .output.option.layer == "runtime" and .output.option.source == "global"' \
-              "$TMPDIR/settings-runtime-resolve.json" >/dev/null
+            assert_option "$TMPDIR/settings-runtime-resolve.json" true Runtime
 
             export PHENIX_STATE_DB="$TMPDIR/settings-file-first.sqlite"
-            printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"operation":"resolve","key":"session.auto_create","context":{}}}' \
+            printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Resolve","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"context":{"type":"table","value":{"session":{"type":"option","value":null},"agent":{"type":"option","value":null}}}}}}}}' \
               | "${filePrecedenceComposition}/bin/phenix" > "$TMPDIR/settings-file-first.json"
-            jq -e '.status == "ok" and .output.option.value.value == true and .output.option.layer == "file"' \
-              "$TMPDIR/settings-file-first.json" >/dev/null
+            assert_option "$TMPDIR/settings-file-first.json" true File
 
             export PHENIX_STATE_DB="$TMPDIR/external.sqlite"
             "${externalComposition}/bin/phenix" --list-services > "$TMPDIR/external-services.json"
             jq -e '(.plugins | index("fixture.session-replacement")) != null' "$TMPDIR/external-services.json" >/dev/null
-            printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"get","id":"missing"}}' \
+            printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Get","value":{"type":"table","value":{"id":{"type":"string","value":"missing"}}}}}}' \
               | "${externalComposition}/bin/phenix" > "$TMPDIR/replacement.json"
             jq -e '.status == "ok" and .output.replacement == true' "$TMPDIR/replacement.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/external-layer.sqlite"
             "${externalLayerComposition}/bin/phenix" --list-services > "$TMPDIR/external-layer-services.json"
             jq -e '(.plugins | index("fixture.session-layer")) != null' "$TMPDIR/external-layer-services.json" >/dev/null
-            printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"operation":"get","id":"missing"}}' \
+            printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Get","value":{"type":"table","value":{"id":{"type":"string","value":"missing"}}}}}}' \
               | "${externalLayerComposition}/bin/phenix" > "$TMPDIR/external-layer.json"
             jq -e '.status == "ok" and .output.external_layer == true' "$TMPDIR/external-layer.json" >/dev/null
 
