@@ -1,13 +1,12 @@
 use phenix_core::{
-    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
-    ServiceId, TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginExecution, PluginHost,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const PLANNING_SERVICE: &str = "phenix.planning@1";
-const PLANNING_PLUGIN: &str = "phenix.planning";
 const PLANNING_NAMESPACE: &str = "phenix.planning.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
@@ -16,10 +15,14 @@ const OBJECTIVE_INDEX: &str = "index/objectives";
 const PLAN_INDEX: &str = "index/plans";
 const DECISION_INDEX: &str = "index/decisions";
 
-type PlanningContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+phenix_core::phenix_plugin! {
+    "phenix.planning";
+}
+
+type PlanningContext<'host, 'runtime> = phenix_plugin::Context<'host, 'runtime>;
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> PlanningContext<'host, 'runtime> {
-    PluginContext::new(host, (), (), ())
+    phenix_plugin::context(host, (), ())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
@@ -119,7 +122,7 @@ pub enum PlanningResponse {
 #[must_use]
 pub fn planning_manifest() -> PluginManifest {
     PluginManifest {
-        id: PluginId::parse(PLANNING_PLUGIN).expect("static plugin id is valid"),
+        id: phenix_plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
