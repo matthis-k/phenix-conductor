@@ -105,8 +105,8 @@ fn handle(
             content,
         } => {
             let content_identity = content_identity(content.as_ref());
-            let revision = ContextRevisionId::parse(content_identity.clone())
-                .map_err(str::to_owned)?;
+            let revision =
+                ContextRevisionId::parse(content_identity.clone()).map_err(str::to_owned)?;
             let resource = ContextResourceRevision {
                 descriptor: ContextDescriptor {
                     resource_id: resource_id.clone(),

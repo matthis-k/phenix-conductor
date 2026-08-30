@@ -416,11 +416,7 @@ mod tests {
         let root = SessionId::parse("root").unwrap();
         {
             let mut kernel = kernel_with(&path);
-            invoke(
-                &mut kernel,
-                &SessionCommand::Create { id: root.clone() },
-            )
-            .unwrap();
+            invoke(&mut kernel, &SessionCommand::Create { id: root.clone() }).unwrap();
             for (kind, content) in [
                 (SessionInputKind::Root, b"system".to_vec()),
                 (SessionInputKind::User, b"hello".to_vec()),
@@ -445,11 +441,7 @@ mod tests {
             }
         );
         assert_eq!(
-            invoke(
-                &mut restored,
-                &SessionCommand::Inputs { id: root },
-            )
-            .unwrap(),
+            invoke(&mut restored, &SessionCommand::Inputs { id: root },).unwrap(),
             SessionResponse::Inputs {
                 inputs: vec![
                     SessionInput {
