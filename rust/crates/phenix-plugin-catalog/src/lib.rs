@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-pub use phenix_core::session_service;
+pub use phenix_core::{session_service, ContextResourceId, ContextRevisionId, SessionId};
 pub use phenix_plugin_artifacts::{
     artifact_component_id, artifact_component_manifest, artifact_factory, artifact_manifest,
     artifact_service, ArtifactCommand, ArtifactInterface, ArtifactProvenance, ArtifactRecord,
@@ -19,8 +19,8 @@ pub use phenix_plugin_basic_agent::{
 pub use phenix_plugin_cli::{
     cli_auth_state_service, cli_component_id, cli_component_manifest, cli_discover_service,
     cli_factory, cli_manifest, cli_version_service, CliAuthState, CliAuthStateInterface,
-    CliAvailability, CliDescriptor, CliDiscoverInterface, CliProbeRequest, CliVersionInterface,
-    CLI_AUTH_STATE_SERVICE, CLI_DISCOVER_SERVICE, CLI_VERSION_SERVICE,
+    CliAvailability, CliDescriptor, CliDiscoverInterface, CliName, CliProbeRequest,
+    CliVersionInterface, CLI_AUTH_STATE_SERVICE, CLI_DISCOVER_SERVICE, CLI_VERSION_SERVICE,
 };
 pub use phenix_plugin_context::{
     context_component_id, context_component_manifest, context_factory, context_manifest,
