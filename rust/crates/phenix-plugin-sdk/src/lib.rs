@@ -5,9 +5,9 @@ pub use authoring::*;
 
 use phenix_core::{
     Authority, Bytes, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-    ComponentManifest, InterfaceId, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, SdkContribution, SdkNamespace, SdkResourceId, ServiceContribution, ServiceId,
-    ServiceRole,
+    ComponentManifest, ContextResourceId, InterfaceId, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, SdkContribution, SdkNamespace, SdkResourceId,
+    ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_plugin_context::{
     ContextCommand, ContextDescriptor, ContextInterface, ContextResourceKind,
@@ -21,7 +21,9 @@ use phenix_plugin_options::{
     OptionCommand, OptionContext, OptionKey, OptionResponse, OptionSubjectId, OptionValue,
     OptionsInterface,
 };
-use phenix_plugin_sessions::{SessionCommand, SessionInterface, SessionRecord, SessionResponse};
+use phenix_plugin_sessions::{
+    SessionCommand, SessionId, SessionInterface, SessionRecord, SessionResponse,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
@@ -545,10 +547,8 @@ fn open_session(
     id: String,
     agent: Option<String>,
 ) -> Result<SdkSessionResponse, String> {
-    if id.trim().is_empty() {
-        return Err("session id must not be empty".into());
-    }
-    let option_context = option_context(&id, agent)?;
+    let id = SessionId::parse(id).map_err(str::to_owned)?;
+    let option_context = option_context(id.as_str(), agent)?;
     let existing = match context
         .sdk
         .sessions
@@ -654,7 +654,7 @@ fn skill_command(
     match command {
         SdkSkillCommand::Register { id, content } => {
             require_non_empty("skill id", &id)?;
-            let resource_id = skill_resource_id(&id);
+            let resource_id = skill_resource_id(&id)?;
             let response = invoke_context(
                 context,
                 ContextCommand::Register {
@@ -741,17 +741,20 @@ fn skill_from_revision(resource: ContextResourceRevision) -> SdkSkill {
 fn skill_summary(descriptor: ContextDescriptor) -> SdkSkillSummary {
     SdkSkillSummary {
         id: skill_id(&descriptor.resource_id).to_owned(),
-        revision: descriptor.revision,
+        revision: descriptor.revision.to_string(),
         source: descriptor.source,
     }
 }
 
-fn skill_resource_id(id: &str) -> String {
-    format!("skill:{id}")
+fn skill_resource_id(id: &str) -> Result<ContextResourceId, String> {
+    ContextResourceId::parse(format!("skill:{id}")).map_err(str::to_owned)
 }
 
-fn skill_id(resource_id: &str) -> &str {
-    resource_id.strip_prefix("skill:").unwrap_or(resource_id)
+fn skill_id(resource_id: &ContextResourceId) -> &str {
+    resource_id
+        .as_str()
+        .strip_prefix("skill:")
+        .unwrap_or(resource_id.as_str())
 }
 
 fn require_non_empty(name: &str, value: &str) -> Result<(), String> {
