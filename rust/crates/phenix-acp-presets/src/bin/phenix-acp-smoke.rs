@@ -21,7 +21,7 @@ fn main() {
         let mut stdin = child.stdin.take().expect("Harness stdin must be piped");
         stdin
             .write_all(
-                b"{\"id\":1,\"service\":\"phenix.sessions@1\",\"input\":{\"operation\":\"create\",\"id\":\"acp-smoke\"}}\n{\"id\":2,\"service\":\"phenix.sessions@1\",\"input\":{\"operation\":\"get\",\"id\":\"acp-smoke\"}}\n",
+                b"{\"id\":1,\"service\":\"phenix.sessions@1\",\"input\":{\"type\":\"variant\",\"value\":{\"tag\":\"Create\",\"value\":{\"type\":\"table\",\"value\":{\"id\":{\"type\":\"string\",\"value\":\"acp-smoke\"}}}}}}\n{\"id\":2,\"service\":\"phenix.sessions@1\",\"input\":{\"type\":\"variant\",\"value\":{\"tag\":\"Get\",\"value\":{\"type\":\"table\",\"value\":{\"id\":{\"type\":\"string\",\"value\":\"acp-smoke\"}}}}}}\n",
             )
             .expect("ACP smoke requests must be written");
     }
@@ -40,17 +40,19 @@ fn main() {
     assert!(
         responses[0].contains(r#""status":"ok""#)
             && responses[0].contains(r#""id":1"#)
-            && responses[0].contains(r#""id":"acp-smoke""#),
+            && responses[0].contains(r#""tag":"Created""#)
+            && responses[0].contains(r#""value":"acp-smoke""#),
         "session creation must cross the supported Harness process boundary: {}",
         responses[0]
     );
     assert!(
         responses[1].contains(r#""status":"ok""#)
             && responses[1].contains(r#""id":2"#)
-            && responses[1].contains(r#""id":"acp-smoke""#),
+            && responses[1].contains(r#""tag":"Session""#)
+            && responses[1].contains(r#""value":"acp-smoke""#),
         "session lookup must cross the supported Harness process boundary: {}",
         responses[1]
     );
 
-    println!("phenix ACP boundary: session journey through supported Harness product");
+    println!("phenix ACP boundary: structural session journey through supported Harness product");
 }
