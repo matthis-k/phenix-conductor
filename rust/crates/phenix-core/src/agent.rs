@@ -1,4 +1,6 @@
-use crate::{Bytes, CallableId, ModelId, ServiceId, SkillId};
+use crate::{
+    Bytes, CallableId, ContextResourceId, ContextRevisionId, ModelId, ServiceId, SessionId, SkillId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -27,26 +29,26 @@ pub struct SessionInput {
 #[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionRecord {
-    pub id: String,
+    pub id: SessionId,
 }
 
 #[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionCommand {
     Create {
-        id: String,
+        id: SessionId,
     },
     Get {
-        id: String,
+        id: SessionId,
     },
     List,
     Continue {
-        id: String,
+        id: SessionId,
         kind: SessionInputKind,
         content: Bytes,
     },
     Inputs {
-        id: String,
+        id: SessionId,
     },
 }
 
@@ -172,8 +174,8 @@ pub enum ContextScope {
 
 #[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContextDescriptor {
-    pub resource_id: String,
-    pub revision: String,
+    pub resource_id: ContextResourceId,
+    pub revision: ContextRevisionId,
     pub kind: ContextResourceKind,
     pub source: String,
     pub scope: ContextScope,
@@ -191,15 +193,15 @@ pub struct ContextResourceRevision {
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ContextCommand {
     Register {
-        resource_id: String,
+        resource_id: ContextResourceId,
         kind: ContextResourceKind,
         source: String,
         scope: ContextScope,
         content: Bytes,
     },
     Get {
-        resource_id: String,
-        revision: String,
+        resource_id: ContextResourceId,
+        revision: ContextRevisionId,
     },
     List,
 }
@@ -244,7 +246,10 @@ mod tests {
 
     #[test]
     fn flat_session_contract_rejects_tree_operations_and_fields() {
-        let create = serde_json::to_value(SessionCommand::Create { id: "root".into() }).unwrap();
+        let create = serde_json::to_value(SessionCommand::Create {
+            id: SessionId::parse("root").unwrap(),
+        })
+        .unwrap();
         assert_eq!(
             create,
             serde_json::json!({"operation":"create","id":"root"})
@@ -264,6 +269,11 @@ mod tests {
         assert!(serde_json::from_value::<SessionRecord>(serde_json::json!({
             "id": "child",
             "parent": "root"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<SessionCommand>(serde_json::json!({
+            "operation": "get",
+            "id": ""
         }))
         .is_err());
     }
