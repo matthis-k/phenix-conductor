@@ -5,8 +5,8 @@
 
 mod activation;
 mod agent;
-mod authority;
 mod authoring;
+mod authority;
 mod component;
 mod composition_metadata;
 mod configuration;
@@ -75,10 +75,10 @@ pub use agent::{
     SkillResponse, ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE,
     MODEL_INFERENCE_SERVICE, SESSION_SERVICE, SKILL_SERVICE, TOOL_SERVICE,
 };
-pub use authority::Authority;
 pub use authoring::{
     EventEmitError, EventEmitter, EventName, HookName, ListenerDeclaration, ListenerProjection,
 };
+pub use authority::Authority;
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
     ResolvedImportHandle,
