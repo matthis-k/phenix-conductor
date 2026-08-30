@@ -1,9 +1,9 @@
 use phenix_core::{
     context_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, ContextCommand, ContextDescriptor, ContextResourceRevision, ContextResponse,
-    DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, ServiceRole,
-    TransactionOp, CONTEXT_SERVICE,
+    ComponentManifest, ContextCommand, ContextDescriptor, ContextResourceId,
+    ContextResourceRevision, ContextResponse, ContextRevisionId, DurableSchema, InterfaceId,
+    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    ResourceNamespace, ServiceContribution, ServiceId, ServiceRole, TransactionOp, CONTEXT_SERVICE,
 };
 use sha2::{Digest, Sha256};
 
@@ -104,11 +104,9 @@ fn handle(
             scope,
             content,
         } => {
-            if resource_id.trim().is_empty() {
-                return Err("context resource id must not be empty".into());
-            }
             let content_identity = content_identity(content.as_ref());
-            let revision = content_identity.clone();
+            let revision = ContextRevisionId::parse(content_identity.clone())
+                .map_err(str::to_owned)?;
             let resource = ContextResourceRevision {
                 descriptor: ContextDescriptor {
                     resource_id: resource_id.clone(),
@@ -177,8 +175,8 @@ fn write_resource(
 
 fn read_resource(
     context: &BasicContextContext<'_, '_>,
-    id: &str,
-    revision: &str,
+    id: &ContextResourceId,
+    revision: &ContextRevisionId,
 ) -> Result<Option<ContextResourceRevision>, String> {
     context
         .kernel
@@ -188,7 +186,9 @@ fn read_resource(
         .transpose()
 }
 
-fn read_index(context: &BasicContextContext<'_, '_>) -> Result<Vec<(String, String)>, String> {
+fn read_index(
+    context: &BasicContextContext<'_, '_>,
+) -> Result<Vec<(ContextResourceId, ContextRevisionId)>, String> {
     context
         .kernel
         .read_durable(&namespace(), INDEX_KEY)
@@ -197,7 +197,7 @@ fn read_index(context: &BasicContextContext<'_, '_>) -> Result<Vec<(String, Stri
         .unwrap_or_else(|| Ok(Vec::new()))
 }
 
-fn resource_key(id: &str, revision: &str) -> String {
+fn resource_key(id: &ContextResourceId, revision: &ContextRevisionId) -> String {
     format!("resource/{id}/{revision}")
 }
 
