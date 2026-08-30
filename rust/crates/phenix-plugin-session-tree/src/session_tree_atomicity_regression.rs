@@ -6,7 +6,7 @@ use phenix_core::{
     Authority, BackendFeature, DurableSchema, Kernel, KernelConfig, LocalPersistence,
     NamespaceTransaction, PersistenceBackend, PersistenceError, PhenixValue, PluginId, Project,
     ResolvedHarness, ResolvedHarnessActivation, ResourceNamespace, SchemaMigration, SessionCommand,
-    SessionResponse, TransactionOp,
+    SessionId, SessionResponse, TransactionOp,
 };
 use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
 use std::{
@@ -72,6 +72,10 @@ impl PersistenceBackend for FailMultiNamespaceTransaction {
         }
         self.inner.transact_many(&transactions)
     }
+}
+
+fn session_id(value: &str) -> SessionId {
+    SessionId::parse(value).unwrap()
 }
 
 fn authority() -> Authority {
@@ -144,7 +148,7 @@ fn invoke_session(kernel: &mut Kernel, command: SessionCommand) {
 }
 
 fn session_exists(kernel: &mut Kernel, id: &str) -> bool {
-    let command = SessionCommand::Get { id: id.into() };
+    let command = SessionCommand::Get { id: session_id(id) };
     let output = kernel
         .invoke(
             &phenix_core::session_service(),
@@ -180,12 +184,15 @@ fn children(kernel: &mut Kernel, parent: &str) -> Vec<String> {
     match invoke_tree(
         kernel,
         SessionTreeCommand::Children {
-            parent_session_id: Some(parent.into()),
+            parent_session_id: Some(session_id(parent)),
         },
     )
     .unwrap()
     {
-        SessionTreeResponse::Children { session_ids } => session_ids,
+        SessionTreeResponse::Children { session_ids } => session_ids
+            .into_iter()
+            .map(|session_id| session_id.to_string())
+            .collect(),
         other => panic!("unexpected session-tree response: {other:?}"),
     }
 }
@@ -194,12 +201,14 @@ fn parent(kernel: &mut Kernel, session: &str) -> Option<String> {
     match invoke_tree(
         kernel,
         SessionTreeCommand::Parent {
-            session_id: session.into(),
+            session_id: session_id(session),
         },
     )
     .unwrap()
     {
-        SessionTreeResponse::Parent { parent_session_id } => parent_session_id,
+        SessionTreeResponse::Parent { parent_session_id } => {
+            parent_session_id.map(|session_id| session_id.to_string())
+        }
         other => panic!("unexpected session-tree response: {other:?}"),
     }
 }
@@ -209,14 +218,17 @@ fn rejected_reparent_does_not_partially_mutate_lineage_indexes() {
     let path = temp_db();
     let mut kernel = kernel_with(&path);
     for id in ["root-a", "root-b", "child"] {
-        invoke_session(&mut kernel, SessionCommand::Create { id: id.into() });
+        invoke_session(
+            &mut kernel,
+            SessionCommand::Create { id: session_id(id) },
+        );
     }
 
     invoke_tree(
         &mut kernel,
         SessionTreeCommand::Link {
-            session_id: "child".into(),
-            parent_session_id: Some("root-a".into()),
+            session_id: session_id("child"),
+            parent_session_id: Some(session_id("root-a")),
         },
     )
     .unwrap();
@@ -224,8 +236,8 @@ fn rejected_reparent_does_not_partially_mutate_lineage_indexes() {
     let error = invoke_tree(
         &mut kernel,
         SessionTreeCommand::Link {
-            session_id: "child".into(),
-            parent_session_id: Some("root-b".into()),
+            session_id: session_id("child"),
+            parent_session_id: Some(session_id("root-b")),
         },
     )
     .unwrap_err();
@@ -247,14 +259,17 @@ fn rejected_cycle_does_not_partially_mutate_lineage_indexes() {
     let path = temp_db();
     let mut kernel = kernel_with(&path);
     for id in ["root", "child"] {
-        invoke_session(&mut kernel, SessionCommand::Create { id: id.into() });
+        invoke_session(
+            &mut kernel,
+            SessionCommand::Create { id: session_id(id) },
+        );
     }
 
     invoke_tree(
         &mut kernel,
         SessionTreeCommand::Link {
-            session_id: "child".into(),
-            parent_session_id: Some("root".into()),
+            session_id: session_id("child"),
+            parent_session_id: Some(session_id("root")),
         },
     )
     .unwrap();
@@ -262,8 +277,8 @@ fn rejected_cycle_does_not_partially_mutate_lineage_indexes() {
     let error = invoke_tree(
         &mut kernel,
         SessionTreeCommand::Link {
-            session_id: "root".into(),
-            parent_session_id: Some("child".into()),
+            session_id: session_id("root"),
+            parent_session_id: Some(session_id("child")),
         },
     )
     .unwrap_err();
@@ -287,29 +302,36 @@ fn rejected_cycle_does_not_partially_mutate_lineage_indexes() {
 fn combined_child_session_and_lineage_operation_commits_as_one_semantic_operation() {
     let path = temp_db();
     let mut kernel = kernel_with(&path);
-    invoke_session(&mut kernel, SessionCommand::Create { id: "root".into() });
+    invoke_session(
+        &mut kernel,
+        SessionCommand::Create {
+            id: session_id("root"),
+        },
+    );
 
     let response = invoke_tree(
         &mut kernel,
         SessionTreeCommand::CreateChild {
-            session_id: "child".into(),
-            parent_session_id: "root".into(),
+            session_id: session_id("child"),
+            parent_session_id: session_id("root"),
         },
     )
     .unwrap();
     assert!(matches!(
         response,
         SessionTreeResponse::ChildCreated { session, lineage }
-            if session.id == "child"
-                && lineage.session_id == "child"
-                && lineage.parent_session_id.as_deref() == Some("root")
+            if session.id.as_str() == "child"
+                && lineage.session_id.as_str() == "child"
+                && lineage.parent_session_id.as_ref().map(SessionId::as_str) == Some("root")
     ));
     assert_eq!(parent(&mut kernel, "child"), Some("root".into()));
     assert_eq!(children(&mut kernel, "root"), vec!["child"]);
 
     drop(kernel);
     let mut restored = kernel_with(&path);
-    let command = SessionCommand::Get { id: "child".into() };
+    let command = SessionCommand::Get {
+        id: session_id("child"),
+    };
     let child = restored
         .invoke(
             &phenix_core::session_service(),
@@ -322,7 +344,7 @@ fn combined_child_session_and_lineage_operation_commits_as_one_semantic_operatio
     let child = SessionResponse::try_from(Project(&child)).unwrap();
     assert!(matches!(
         child,
-        SessionResponse::Session { session: Some(session) } if session.id == "child"
+        SessionResponse::Session { session: Some(session) } if session.id.as_str() == "child"
     ));
     assert_eq!(parent(&mut restored, "child"), Some("root".into()));
     assert_eq!(children(&mut restored, "root"), vec!["child"]);
@@ -334,15 +356,20 @@ fn failed_combined_child_creation_rolls_back_session_and_lineage_namespaces() {
     let path = temp_db();
     {
         let mut setup = kernel_with(&path);
-        invoke_session(&mut setup, SessionCommand::Create { id: "root".into() });
+        invoke_session(
+            &mut setup,
+            SessionCommand::Create {
+                id: session_id("root"),
+            },
+        );
     }
 
     let mut kernel = kernel_with_persistence(FailMultiNamespaceTransaction::open(&path));
     let error = invoke_tree(
         &mut kernel,
         SessionTreeCommand::CreateChild {
-            session_id: "child".into(),
-            parent_session_id: "root".into(),
+            session_id: session_id("child"),
+            parent_session_id: session_id("root"),
         },
     )
     .unwrap_err();
