@@ -1,24 +1,27 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, InterfaceId, PluginContext, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
-    ServiceId, TransactionOp,
+    Authority, CapabilityId, DurableSchema, InterfaceId, PluginExecution, PluginHost,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 pub const JOB_SERVICE: &str = "phenix.jobs@1";
-const JOB_PLUGIN: &str = "phenix.jobs";
 const JOB_NAMESPACE: &str = "phenix.jobs.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const INDEX_KEY: &str = "index/resources";
 
-type JobContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+phenix_core::phenix_plugin! {
+    "phenix.jobs";
+}
+
+type JobContext<'host, 'runtime> = phenix_plugin::Context<'host, 'runtime>;
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> JobContext<'host, 'runtime> {
-    PluginContext::new(host, (), (), ())
+    phenix_plugin::context(host, (), ())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
@@ -94,7 +97,7 @@ pub enum JobResponse {
 #[must_use]
 pub fn job_manifest() -> PluginManifest {
     PluginManifest {
-        id: PluginId::parse(JOB_PLUGIN).expect("static plugin id is valid"),
+        id: phenix_plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
