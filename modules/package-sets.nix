@@ -26,8 +26,7 @@ let
     };
 
   mkEmbeddedPluginPackage =
-    pkgs: package:
-    pkgs.writeTextDir "share/phenix-rust-package/name" "${package}\n";
+    pkgs: package: pkgs.writeTextDir "share/phenix-rust-package/name" "${package}\n";
 
   mkBinaryPackage =
     pkgs: package: binary:
