@@ -1,4 +1,4 @@
-use crate::{artifact_manifest, ArtifactCommand, ArtifactResponse, ARTIFACT_SERVICE};
+use crate::{artifact_manifest, ARTIFACT_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
     PluginId,
@@ -10,11 +10,12 @@ const ARTIFACT_PLUGIN: &str = "phenix.artifacts";
 pub struct ArtifactInterface;
 
 impl ComponentInterface for ArtifactInterface {
-    type Request = ArtifactCommand;
-    type Response = ArtifactResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(ARTIFACT_SERVICE).expect("static artifact interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::ArtifactCommand, crate::ArtifactResponse>()
     }
 }
 
@@ -31,6 +32,7 @@ pub fn artifact_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: ArtifactInterface::interface_id(),
+            schema: ArtifactInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -59,6 +61,7 @@ mod tests {
             owner: consumer_plugin.id.clone(),
             imports: vec![ComponentImport {
                 interface: ArtifactInterface::interface_id(),
+                schema: ArtifactInterface::schema(),
                 required: true,
                 authority: Authority::default(),
             }],

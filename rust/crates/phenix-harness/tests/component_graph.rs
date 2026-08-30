@@ -3,8 +3,9 @@ use phenix_core::{
     ComponentInterface, ComponentManifest, ConfigContribution, ConfigContributionSource,
     ConfigMergeError, ConfigNamespace, ConfigSourceClass, ConfigurationFrontendId,
     ConfigurationFrontendMetadata, ExternalPluginProcess, ExternalSandbox, ExternalTransportConfig,
-    FrontendConfigContribution, FrontendConfigError, InterfaceId, PluginExecution, PluginHost,
-    PluginId, PluginInstance, PluginManifest, ResolvedHarness, ResolvedHarnessError, ServiceId,
+    FrontendConfigContribution, FrontendConfigError, InterfaceId, PhenixValue, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResolvedHarness, ResolvedHarnessError,
+    ServiceId,
 };
 use phenix_harness::{HarnessBuildError, HarnessBuilder};
 use std::{
@@ -52,6 +53,7 @@ fn harness_fails_closed_before_execution_when_required_component_import_is_missi
         owner: plugin("consumer-owner"),
         imports: vec![ComponentImport {
             interface: interface("phenix.fixture@1"),
+            schema: Default::default(),
             required: true,
             authority: Authority::default(),
         }],
@@ -90,6 +92,7 @@ fn harness_exposes_the_resolved_component_binding_and_attenuated_authority() {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: interface("phenix.fixture@1"),
+            schema: Default::default(),
             priority: 10,
             required_authority: Authority::new([read.clone()]),
         }],
@@ -100,6 +103,7 @@ fn harness_exposes_the_resolved_component_binding_and_attenuated_authority() {
         owner: plugin("consumer-owner"),
         imports: vec![ComponentImport {
             interface: interface("phenix.fixture@1"),
+            schema: Default::default(),
             required: true,
             authority: harness_authority,
         }],
@@ -259,9 +263,6 @@ fn harness_builder_rejects_configuration_conflicts_before_activation() {
 struct ExternalEchoInterface;
 
 impl ComponentInterface for ExternalEchoInterface {
-    type Request = String;
-    type Response = String;
-
     fn interface_id() -> InterfaceId {
         interface("fixture.external-echo@1")
     }
@@ -321,7 +322,7 @@ fn typed_component_handle_invokes_an_external_provider_through_the_same_binding(
         generation=${generation%%,*}
         echo "{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external-provider-owner\",\"generation\":$generation,\"services\":[]}"
         read request
-        echo "{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[34,101,120,116,101,114,110,97,108,34]}"
+        echo "{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[123,34,116,121,112,101,34,58,34,115,116,114,105,110,103,34,44,34,118,97,108,117,101,34,58,34,101,120,116,101,114,110,97,108,34,125]}"
         read stop || true
     "#
     .to_owned();
@@ -349,6 +350,7 @@ fn typed_component_handle_invokes_an_external_provider_through_the_same_binding(
         owner: consumer.id,
         imports: vec![ComponentImport {
             interface: ExternalEchoInterface::interface_id(),
+            schema: ExternalEchoInterface::schema(),
             required: true,
             authority: Authority::default(),
         }],
@@ -361,6 +363,7 @@ fn typed_component_handle_invokes_an_external_provider_through_the_same_binding(
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: ExternalEchoInterface::interface_id(),
+            schema: ExternalEchoInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -384,7 +387,10 @@ fn typed_component_handle_invokes_an_external_provider_through_the_same_binding(
     ));
 
     let response = handle
-        .invoke_typed::<ExternalEchoInterface>(harness.kernel_mut(), &"hello".to_owned())
+        .invoke_value::<ExternalEchoInterface>(
+            harness.kernel_mut(),
+            &PhenixValue::String("hello".to_owned()),
+        )
         .unwrap();
-    assert_eq!(response, "external");
+    assert_eq!(response, PhenixValue::String("external".to_owned()));
 }

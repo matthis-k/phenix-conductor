@@ -23,9 +23,6 @@ fn context<'host, 'runtime>(
 pub struct BasicContextInterface;
 
 impl ComponentInterface for BasicContextInterface {
-    type Request = ContextCommand;
-    type Response = ContextResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(CONTEXT_SERVICE).expect("static context interface id is valid")
     }
@@ -57,6 +54,7 @@ pub fn basic_context_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: BasicContextInterface::interface_id(),
+            schema: BasicContextInterface::schema(),
             priority: 10,
             required_authority: Authority::default(),
         }],
@@ -109,7 +107,7 @@ fn handle(
             if resource_id.trim().is_empty() {
                 return Err("context resource id must not be empty".into());
             }
-            let content_identity = content_identity(&content);
+            let content_identity = content_identity(content.as_ref());
             let revision = content_identity.clone();
             let resource = ContextResourceRevision {
                 descriptor: ContextDescriptor {
@@ -119,7 +117,8 @@ fn handle(
                     source,
                     scope,
                     content_identity,
-                    estimated_bytes: content.len(),
+                    estimated_bytes: u64::try_from(content.as_ref().len())
+                        .map_err(|_| "context resource byte length exceeds u64".to_owned())?,
                 },
                 content,
             };

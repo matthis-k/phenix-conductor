@@ -1,27 +1,155 @@
 use phenix_core::{
-    Authority, ModelId, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    RoutingProfileId, ServiceContribution, ServiceId,
+    Authority, ModelId, PhenixValue, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, Project, RoutingProfileId, ServiceContribution, ServiceId, ValueError,
 };
 use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};
 use phenix_plugin_catalog::{
-    execution_service, model_inference_service, model_routing_service, ExecutionAuthority,
-    ExecutionCommand, ExecutionResponse, ModelCommand, ModelInferenceRequest,
-    ModelInferenceResponse, ModelResponse, ModelTarget, RoutingProfile,
+    model_inference_service, ArtifactCommand, ArtifactResponse, CliProbeRequest, ContextCommand,
+    ContextResponse, DebugCommand, DebugResponse, ExecutionAuthority, ExecutionCommand,
+    ExecutionResponse, FrontendCommand, FrontendResponse, HookCommand, HookResponse, JobCommand,
+    JobResponse, LanguageCommand, LanguageResponse, ModelCommand, ModelInferenceRequest,
+    ModelInferenceResponse, ModelResponse, ModelTarget, PlanningCommand, PlanningResponse,
+    RepositoryWorkSnapshot, RoutingProfile, SessionCommand, SessionResponse, SessionTreeCommand,
+    SessionTreeResponse, WorkspaceCommand, WorkspaceResponse,
 };
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn invoke(harness: &mut PhenixHarness, service: &str, input: Value) -> Value {
+    match service {
+        "phenix.repository.worker-queue@1" => {
+            let request: RepositoryWorkSnapshot = serde_json::from_value(input).unwrap();
+            let response = invoke_structural_value(harness, service, &request);
+            let (tag, payload) = response.variant().unwrap();
+            match tag.as_str() {
+                "Selected" => json!({
+                    "pr_number": payload.get("pr_number").unwrap().exact::<u64>().unwrap(),
+                    "reason": payload.get("reason").unwrap().exact::<String>().unwrap(),
+                }),
+                "Empty" => Value::Null,
+                other => panic!("unexpected repository worker response: {other}"),
+            }
+        }
+        "phenix.sessions@1" => {
+            invoke_structural_json::<SessionCommand, SessionResponse>(harness, service, input)
+        }
+        "phenix.session-tree@1" => {
+            invoke_structural_json::<SessionTreeCommand, SessionTreeResponse>(
+                harness, service, input,
+            )
+        }
+        "phenix.artifacts@1" => {
+            invoke_structural_json::<ArtifactCommand, ArtifactResponse>(harness, service, input)
+        }
+        "phenix.context@1" => {
+            invoke_structural_json::<ContextCommand, ContextResponse>(harness, service, input)
+        }
+        "phenix.execution@1" => {
+            invoke_structural_json::<ExecutionCommand, ExecutionResponse>(harness, service, input)
+        }
+        "phenix.language@1" => {
+            invoke_structural_json::<LanguageCommand, LanguageResponse>(harness, service, input)
+        }
+        "phenix.planning@1" => {
+            invoke_structural_json::<PlanningCommand, PlanningResponse>(harness, service, input)
+        }
+        "phenix.models.routing@1" => {
+            invoke_structural_json::<ModelCommand, ModelResponse>(harness, service, input)
+        }
+        "phenix.jobs@1" => {
+            invoke_structural_json::<JobCommand, JobResponse>(harness, service, input)
+        }
+        "phenix.frontend-services@1" => {
+            invoke_structural_json::<FrontendCommand, FrontendResponse>(harness, service, input)
+        }
+        "phenix.hooks@1" => {
+            invoke_structural_json::<HookCommand, HookResponse>(harness, service, input)
+        }
+        "phenix.workspace@1" => {
+            invoke_structural_json::<WorkspaceCommand, WorkspaceResponse>(harness, service, input)
+        }
+        "phenix.debug@1" => {
+            invoke_structural_json::<DebugCommand, DebugResponse>(harness, service, input)
+        }
+        other => panic!("unsupported structural test service: {other}"),
+    }
+}
+
+fn invoke_structural_value<Request>(
+    harness: &mut PhenixHarness,
+    service: &str,
+    request: &Request,
+) -> PhenixValue
+where
+    for<'value> PhenixValue: From<&'value Request>,
+{
     let service = ServiceId::parse(service).unwrap();
     let output = harness
         .invoke(
             &service,
-            &serde_json::to_vec(&input).unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(request)).unwrap(),
             &default_suite_authority(),
             None,
         )
         .unwrap_or_else(|error| panic!("{service}: {error}"));
     serde_json::from_slice(&output).unwrap_or_else(|error| panic!("{service}: {error}"))
+}
+
+fn invoke_structural_json<Request, Response>(
+    harness: &mut PhenixHarness,
+    service: &str,
+    input: Value,
+) -> Value
+where
+    Request: DeserializeOwned,
+    for<'value> PhenixValue: From<&'value Request>,
+    for<'value> Response: TryFrom<Project<&'value PhenixValue>, Error = ValueError> + Serialize,
+{
+    let request = serde_json::from_value(input).unwrap();
+    serde_json::to_value(invoke_structural::<Request, Response>(
+        harness, service, &request,
+    ))
+    .unwrap()
+}
+
+fn invoke_structural<Request, Response>(
+    harness: &mut PhenixHarness,
+    service: &str,
+    request: &Request,
+) -> Response
+where
+    for<'value> PhenixValue: From<&'value Request>,
+    for<'value> Response: TryFrom<Project<&'value PhenixValue>, Error = ValueError>,
+{
+    let service = ServiceId::parse(service).unwrap();
+    let output = harness
+        .invoke(
+            &service,
+            &serde_json::to_vec(&PhenixValue::from(request)).unwrap(),
+            &default_suite_authority(),
+            None,
+        )
+        .unwrap_or_else(|error| panic!("{service}: {error}"));
+    let output: PhenixValue =
+        serde_json::from_slice(&output).unwrap_or_else(|error| panic!("{service}: {error}"));
+    Response::try_from(Project(&output)).unwrap_or_else(|error| panic!("{service}: {error}"))
+}
+
+fn invoke_value_raw(
+    harness: &mut PhenixHarness,
+    service: &ServiceId,
+    request: &PhenixValue,
+) -> PhenixValue {
+    let output = harness
+        .invoke(
+            service,
+            &serde_json::to_vec(request).unwrap(),
+            &default_suite_authority(),
+            None,
+        )
+        .unwrap();
+    serde_json::from_slice(&output).unwrap()
 }
 
 fn fixture_manifest(id: &str, service: ServiceId) -> PluginManifest {
@@ -57,16 +185,20 @@ impl PluginInstance for ModelProvider {
         if service != &model_inference_service() {
             return Err(format!("unsupported fixture model service: {service}"));
         }
-        let request: ModelInferenceRequest =
+        let input: PhenixValue =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let request =
+            ModelInferenceRequest::try_from(Project(&input)).map_err(|error| error.to_string())?;
         let response = ModelInferenceResponse {
-            output: [b"answer:".as_slice(), request.input.as_slice()].concat(),
+            output: [b"answer:".as_slice(), request.input.as_slice()]
+                .concat()
+                .into(),
             provider_metadata: BTreeMap::from([(
                 "model".into(),
-                serde_json::Value::String(request.model),
+                serde_json::Value::String(request.model.as_str().to_owned()),
             )]),
         };
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        serde_json::to_vec(&PhenixValue::from(&response)).map_err(|error| error.to_string())
     }
 }
 
@@ -233,10 +365,13 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
         .all(|entry| entry["available"] == true));
 
     let cli = ServiceId::parse("phenix.cli.discover@1").unwrap();
+    let request = CliProbeRequest {
+        name: "not-a-supported-cli".into(),
+    };
     let error = harness
         .invoke(
             &cli,
-            &serde_json::to_vec(&json!({"name": "not-a-supported-cli"})).unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(&request)).unwrap(),
             &default_suite_authority(),
             None,
         )
@@ -273,95 +408,64 @@ fn supported_harness_routes_model_inference_and_tool_calls_through_plugins() {
         },
         callable_targets: BTreeMap::new(),
     };
-    let register = serde_json::to_vec(&ModelCommand::RegisterProfile { profile }).unwrap();
-    harness
-        .invoke(
-            &model_routing_service(),
-            &register,
-            &default_suite_authority(),
-            None,
-        )
-        .unwrap();
-    let authenticate = serde_json::to_vec(&ModelCommand::SetProviderAuthenticated {
-        provider_plugin: PluginId::parse(provider).unwrap(),
-        authenticated: true,
-    })
-    .unwrap();
-    harness
-        .invoke(
-            &model_routing_service(),
-            &authenticate,
-            &default_suite_authority(),
-            None,
-        )
-        .unwrap();
-    let model = serde_json::to_vec(&ModelCommand::Invoke {
-        profile_id: RoutingProfileId::parse("parity").unwrap(),
-        callable_id: None,
-        input: b"hello".to_vec(),
-    })
-    .unwrap();
-    let output = harness
-        .invoke(
-            &model_routing_service(),
-            &model,
-            &default_suite_authority(),
-            None,
-        )
-        .unwrap();
-    let output: ModelResponse = serde_json::from_slice(&output).unwrap();
+    let _: ModelResponse = invoke_structural(
+        &mut harness,
+        "phenix.models.routing@1",
+        &ModelCommand::RegisterProfile { profile },
+    );
+    let _: ModelResponse = invoke_structural(
+        &mut harness,
+        "phenix.models.routing@1",
+        &ModelCommand::SetProviderAuthenticated {
+            provider_plugin: PluginId::parse(provider).unwrap(),
+            authenticated: true,
+        },
+    );
+    let output: ModelResponse = invoke_structural(
+        &mut harness,
+        "phenix.models.routing@1",
+        &ModelCommand::Invoke {
+            profile_id: RoutingProfileId::parse("parity").unwrap(),
+            callable_id: None,
+            input: b"hello".to_vec().into(),
+        },
+    );
     match output {
         ModelResponse::Inference { target, response } => {
             assert_eq!(target.provider_plugin.as_str(), provider);
             assert_eq!(target.model.as_str(), "fixture-model");
-            assert_eq!(response.output, b"answer:hello");
+            assert_eq!(response.output.as_ref(), b"answer:hello");
             assert_eq!(response.provider_metadata["model"], "fixture-model");
         }
         other => panic!("unexpected model response: {other:?}"),
     }
 
-    let create = serde_json::to_vec(&ExecutionCommand::CreateExecution {
-        id: "root".into(),
-        requested_authority: ExecutionAuthority::new(Vec::<String>::new()),
-    })
-    .unwrap();
-    harness
-        .invoke(
-            &execution_service(),
-            &create,
-            &default_suite_authority(),
-            None,
-        )
-        .unwrap();
-    let register = serde_json::to_vec(&ExecutionCommand::RegisterCallable {
-        id: "echo".into(),
-        service: tool_service.to_string(),
-        required_authority: ExecutionAuthority::new(Vec::<String>::new()),
-    })
-    .unwrap();
-    harness
-        .invoke(
-            &execution_service(),
-            &register,
-            &default_suite_authority(),
-            None,
-        )
-        .unwrap();
-    let invoke_tool = serde_json::to_vec(&ExecutionCommand::InvokeCallable {
-        execution_id: "root".into(),
-        callable_id: "echo".into(),
-        input: br#"{"value":"hello"}"#.to_vec(),
-    })
-    .unwrap();
-    let output = harness
-        .invoke(
-            &execution_service(),
-            &invoke_tool,
-            &default_suite_authority(),
-            None,
-        )
-        .unwrap();
-    let output: ExecutionResponse = serde_json::from_slice(&output).unwrap();
+    let _: ExecutionResponse = invoke_structural(
+        &mut harness,
+        "phenix.execution@1",
+        &ExecutionCommand::CreateExecution {
+            id: "root".into(),
+            requested_authority: ExecutionAuthority::new(Vec::<String>::new()),
+        },
+    );
+    let _: ExecutionResponse = invoke_structural(
+        &mut harness,
+        "phenix.execution@1",
+        &ExecutionCommand::RegisterCallable {
+            id: "echo".into(),
+            service: tool_service.to_string(),
+            required_authority: ExecutionAuthority::new(Vec::<String>::new()),
+        },
+    );
+    let output: ExecutionResponse = invoke_structural(
+        &mut harness,
+        "phenix.execution@1",
+        &ExecutionCommand::InvokeCallable {
+            execution_id: "root".into(),
+            callable_id: "echo".into(),
+            input: br#"{"value":"hello"}"#.to_vec(),
+        },
+    );
     match output {
         ExecutionResponse::Invocation { output } => {
             assert_eq!(output, br#"{"value":"hello"}"#);
@@ -381,11 +485,13 @@ fn hook_behavior_is_omittable_and_replaceable_through_harness_composition() {
         .build()
         .unwrap();
     without_hooks.activate().unwrap();
+    let request = HookCommand::GetConfiguration {
+        revision: "missing".into(),
+    };
     let error = without_hooks
         .invoke(
             &hook_service,
-            &serde_json::to_vec(&json!({"operation": "get_configuration", "revision": "missing"}))
-                .unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(&request)).unwrap(),
             &default_suite_authority(),
             None,
         )
@@ -401,9 +507,9 @@ fn hook_behavior_is_omittable_and_replaceable_through_harness_composition() {
         .unwrap();
     let mut replacement = replacement_builder.build().unwrap();
     replacement.activate().unwrap();
-    let request = json!({"replacement": true});
+    let request = PhenixValue::Bool(true);
     assert_eq!(
-        invoke(&mut replacement, "phenix.hooks@1", request.clone()),
+        invoke_value_raw(&mut replacement, &hook_service, &request),
         request
     );
 

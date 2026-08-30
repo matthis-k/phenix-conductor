@@ -1,8 +1,9 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
-    TransactionOp,
+    Authority, CapabilityId, DurableSchema, InterfaceId, PluginContext, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
+    ServiceId, TransactionOp,
 };
+use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -20,14 +21,14 @@ fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> JobContext<'ho
     PluginContext::new(host, (), (), ())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeResourceKind {
     Terminal,
     Job,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeResourceState {
     Running,
@@ -35,7 +36,7 @@ pub enum RuntimeResourceState {
     Revoked { reason: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct RuntimeResourceRecord {
     pub id: String,
     pub kind: RuntimeResourceKind,
@@ -46,7 +47,7 @@ pub struct RuntimeResourceRecord {
     pub output_references: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum JobCommand {
     Create {
@@ -76,7 +77,7 @@ pub enum JobCommand {
     List,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum JobResponse {
     Resource {
@@ -122,6 +123,10 @@ pub fn job_service() -> ServiceId {
     ServiceId::parse(JOB_SERVICE).expect("static service id is valid")
 }
 
+fn job_interface() -> InterfaceId {
+    InterfaceId::parse(JOB_SERVICE).expect("static job interface id is valid")
+}
+
 fn job_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(JOB_NAMESPACE).expect("static namespace is valid")
 }
@@ -149,9 +154,16 @@ impl PluginInstance for JobPlugin {
         if service != &job_service() {
             return Err(format!("unsupported job service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host);
+        let command = context
+            .kernel
+            .decode_projected::<JobCommand>(&job_interface(), input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -394,7 +406,7 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, LocalPersistence};
+    use phenix_core::{Kernel, KernelConfig, LocalPersistence, PhenixValue, Project};
     use std::{
         fs,
         path::PathBuf,
@@ -429,12 +441,13 @@ mod tests {
         let output = kernel
             .invoke(
                 &job_service(),
-                &serde_json::to_vec(&command).unwrap(),
+                &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
                 &job_manifest().maximum_authority,
                 None,
             )
             .unwrap();
-        serde_json::from_slice(&output).unwrap()
+        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        JobResponse::try_from(Project(&output)).unwrap()
     }
 
     fn create_job(kernel: &mut Kernel, id: &str) {

@@ -109,7 +109,75 @@ impl<'de> Deserialize<'de> for OptionSubjectId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+macro_rules! validated_string_value {
+    ($ty:ty, $parse:path) => {
+        impl phenix_core::ValueCodec for $ty {
+            fn phenix_type() -> phenix_core::Type {
+                phenix_core::Type::String
+            }
+
+            fn to_value(&self) -> phenix_core::PhenixValue {
+                phenix_core::PhenixValue::String(self.as_str().to_owned())
+            }
+
+            fn from_value(
+                value: &phenix_core::PhenixValue,
+            ) -> Result<Self, phenix_core::ValueError> {
+                let value = String::try_from(phenix_core::Exact(value))?;
+                $parse(value).map_err(|error| phenix_core::ValueError::InvalidValue(error.into()))
+            }
+
+            fn project_from_value(
+                value: &phenix_core::PhenixValue,
+            ) -> Result<Self, phenix_core::ValueError> {
+                let value = String::try_from(phenix_core::Project(value))?;
+                $parse(value).map_err(|error| phenix_core::ValueError::InvalidValue(error.into()))
+            }
+        }
+
+        impl From<&$ty> for phenix_core::PhenixValue {
+            fn from(value: &$ty) -> Self {
+                <$ty as phenix_core::ValueCodec>::to_value(value)
+            }
+        }
+
+        impl<'value> TryFrom<phenix_core::Exact<&'value phenix_core::PhenixValue>> for $ty {
+            type Error = phenix_core::ValueError;
+
+            fn try_from(
+                value: phenix_core::Exact<&'value phenix_core::PhenixValue>,
+            ) -> Result<Self, Self::Error> {
+                <Self as phenix_core::ValueCodec>::from_value(value.0)
+            }
+        }
+
+        impl<'value> TryFrom<phenix_core::Project<&'value phenix_core::PhenixValue>> for $ty {
+            type Error = phenix_core::ValueError;
+
+            fn try_from(
+                value: phenix_core::Project<&'value phenix_core::PhenixValue>,
+            ) -> Result<Self, Self::Error> {
+                <Self as phenix_core::ValueCodec>::project_from_value(value.0)
+            }
+        }
+    };
+}
+
+validated_string_value!(OptionKey, OptionKey::parse);
+validated_string_value!(OptionSubjectId, OptionSubjectId::parse);
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionScopeKind {
     Global,
@@ -117,7 +185,17 @@ pub enum OptionScopeKind {
     Agent,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionScope {
     Global,
@@ -143,14 +221,16 @@ impl OptionScope {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(deny_unknown_fields)]
 pub struct OptionContext {
     pub session: Option<OptionSubjectId>,
     pub agent: Option<OptionSubjectId>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum OptionValue {
     Bool(bool),
@@ -169,7 +249,17 @@ impl OptionValue {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Serialize,
+    phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionStartupPrecedence {
     #[default]
@@ -177,7 +267,9 @@ pub enum OptionStartupPrecedence {
     File,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionValueLayer {
     Runtime,
@@ -186,7 +278,7 @@ pub enum OptionValueLayer {
     Default,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(deny_unknown_fields)]
 pub struct OptionDefinition {
     key: OptionKey,
@@ -202,7 +294,7 @@ struct OptionDefinitionWire {
     scopes: BTreeSet<OptionScopeKind>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(deny_unknown_fields)]
 pub struct OptionAssignment {
     pub key: OptionKey,
@@ -261,7 +353,9 @@ impl<'de> Deserialize<'de> for OptionDefinition {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionValueSource {
     Default,
@@ -270,7 +364,7 @@ pub enum OptionValueSource {
     Agent,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(deny_unknown_fields)]
 pub struct ResolvedOption {
     pub key: OptionKey,
@@ -279,7 +373,7 @@ pub struct ResolvedOption {
     pub layer: OptionValueLayer,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OptionCommand {
     Define {
@@ -311,7 +405,7 @@ pub enum OptionCommand {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OptionResponse {
     Defined {
@@ -338,11 +432,12 @@ pub enum OptionResponse {
 pub struct OptionsInterface;
 
 impl ComponentInterface for OptionsInterface {
-    type Request = OptionCommand;
-    type Response = OptionResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(OPTIONS_SERVICE).expect("static options interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<OptionCommand, OptionResponse>()
     }
 }
 
@@ -382,6 +477,7 @@ pub fn options_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: OptionsInterface::interface_id(),
+            schema: OptionsInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -687,9 +783,17 @@ impl PluginInstance for OptionsPlugin {
         if service != &options_service() {
             return Err(format!("unsupported options service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&plugin_context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = plugin_context(host);
+        let interface = OptionsInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<OptionCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 

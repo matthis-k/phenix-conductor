@@ -1,27 +1,22 @@
 use crate::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-    ComponentManifest, InterfaceId, Kernel, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResolvedHarness, ResolvedHarnessActivation, ServiceId,
+    ComponentManifest, InterfaceId, Kernel, PhenixValue, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResolvedHarness, ResolvedHarnessActivation, ServiceId,
 };
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct Request;
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct Response(String);
 struct Demo;
 impl ComponentInterface for Demo {
-    type Request = Request;
-    type Response = Response;
     fn interface_id() -> InterfaceId {
         InterfaceId::parse("fixture.component-endpoint@1").unwrap()
     }
 }
+
 struct Provider;
 impl PluginInstance for Provider {
     fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
     }
+
     fn invoke_component(
         &mut self,
         component: &ComponentId,
@@ -29,16 +24,19 @@ impl PluginInstance for Provider {
         _input: &[u8],
         _host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        serde_json::to_vec(&Response(component.as_str().to_owned()))
+        serde_json::to_vec(&PhenixValue::String(component.as_str().to_owned()))
             .map_err(|error| error.to_string())
     }
 }
+
 fn plugin(value: &str) -> PluginId {
     PluginId::parse(value).unwrap()
 }
+
 fn component(value: &str) -> ComponentId {
     ComponentId::parse(value).unwrap()
 }
+
 #[test]
 fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
     let provider = PluginManifest {
@@ -68,6 +66,7 @@ fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
                 imports: Vec::new(),
                 exports: vec![ComponentExport {
                     interface: Demo::interface_id(),
+                    schema: Demo::schema(),
                     priority: 1,
                     required_authority: Authority::default(),
                 }],
@@ -79,6 +78,7 @@ fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
                 imports: Vec::new(),
                 exports: vec![ComponentExport {
                     interface: Demo::interface_id(),
+                    schema: Demo::schema(),
                     priority: 100,
                     required_authority: Authority::default(),
                 }],
@@ -89,6 +89,7 @@ fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
                 owner: consumer.id.clone(),
                 imports: vec![ComponentImport {
                     interface: Demo::interface_id(),
+                    schema: Demo::schema(),
                     required: true,
                     authority: Authority::default(),
                 }],
@@ -107,6 +108,7 @@ fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
         .unwrap()
         .clone();
     assert_eq!(handle.exporter(), &component("provider-high"));
+
     let mut kernel = Kernel::new(resolved.kernel_config().clone());
     kernel.activate_resolved_harness(&resolved).unwrap();
     kernel
@@ -116,6 +118,16 @@ fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
         .register_embedded_factory(consumer.id, || Box::new(Provider))
         .unwrap();
     kernel.activate_all().unwrap();
-    let response = handle.invoke_typed::<Demo>(&mut kernel, &Request).unwrap();
-    assert_eq!(response, Response("provider-high".into()));
+
+    let output = kernel
+        .invoke_component(
+            handle.exporter(),
+            &ServiceId::parse(Demo::interface_id().as_str().to_owned()).unwrap(),
+            &serde_json::to_vec(&PhenixValue::Unit).unwrap(),
+            handle.effective_authority(),
+            handle.owning_plugin(),
+        )
+        .unwrap();
+    let response: PhenixValue = serde_json::from_slice(&output).unwrap();
+    assert_eq!(response, PhenixValue::String("provider-high".into()));
 }

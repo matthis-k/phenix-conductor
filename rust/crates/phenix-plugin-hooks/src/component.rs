@@ -1,4 +1,4 @@
-use crate::{hook_manifest, HookCommand, HookResponse, HOOK_SERVICE};
+use crate::{hook_manifest, HOOK_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginId,
@@ -12,11 +12,12 @@ const HOOK_PLUGIN: &str = "phenix.hooks";
 pub struct HookInterface;
 
 impl ComponentInterface for HookInterface {
-    type Request = HookCommand;
-    type Response = HookResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(HOOK_SERVICE).expect("static hook interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::HookCommand, crate::HookResponse>()
     }
 }
 
@@ -34,17 +35,20 @@ pub fn hook_component_manifest(maximum_authority: Authority) -> ComponentManifes
         imports: vec![
             ComponentImport {
                 interface: ContextInterface::interface_id(),
+                schema: ContextInterface::schema(),
                 required: true,
                 authority: authority.clone(),
             },
             ComponentImport {
                 interface: ExecutionInterface::interface_id(),
+                schema: ExecutionInterface::schema(),
                 required: true,
                 authority: authority.clone(),
             },
         ],
         exports: vec![ComponentExport {
             interface: HookInterface::interface_id(),
+            schema: HookInterface::schema(),
             priority: 100,
             required_authority: authority.clone(),
         }],

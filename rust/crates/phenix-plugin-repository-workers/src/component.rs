@@ -1,4 +1,4 @@
-use crate::{repository_worker_manifest, RepositoryWorkSnapshot, REPOSITORY_WORK_QUEUE_SERVICE};
+use crate::{repository_worker_manifest, REPOSITORY_WORK_QUEUE_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
     PluginId,
@@ -10,12 +10,16 @@ const REPOSITORY_WORKER_PLUGIN: &str = "phenix.repository-workers";
 pub struct RepositoryWorkerInterface;
 
 impl ComponentInterface for RepositoryWorkerInterface {
-    type Request = RepositoryWorkSnapshot;
-    type Response = serde_json::Value;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(REPOSITORY_WORK_QUEUE_SERVICE)
             .expect("static repository worker interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<
+            crate::RepositoryWorkSnapshot,
+            crate::service::RepositoryWorkQueueResponse,
+        >()
     }
 }
 
@@ -34,6 +38,7 @@ pub fn repository_worker_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: RepositoryWorkerInterface::interface_id(),
+            schema: RepositoryWorkerInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -62,6 +67,7 @@ mod tests {
             owner: consumer_plugin.id.clone(),
             imports: vec![ComponentImport {
                 interface: RepositoryWorkerInterface::interface_id(),
+                schema: RepositoryWorkerInterface::schema(),
                 required: true,
                 authority: Authority::default(),
             }],

@@ -146,10 +146,14 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
         id: impl Into<String>,
         agent: Option<String>,
     ) -> Result<OpenedSession<'host, 'runtime>, SdkError> {
-        let response = self.policy.invoke(&SdkSessionCommand::Open {
-            id: id.into(),
-            agent,
-        })?;
+        let response = self
+            .policy
+            .invoke_projected::<SdkSessionCommand, SdkSessionResponse>(
+                &SdkSessionCommand::Open {
+                    id: id.into(),
+                    agent,
+                },
+            )?;
         let SdkSessionResponse::Opened { session, created } = response;
         Ok(OpenedSession {
             session: Session::new(session, self.clone()),
@@ -163,7 +167,7 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
     ) -> Result<Option<Session<'host, 'runtime>>, SdkError> {
         let response = self
             .storage
-            .invoke(&SessionCommand::Get { id: id.into() })?;
+            .invoke_projected(&SessionCommand::Get { id: id.into() })?;
         let SessionResponse::Session { session } = response else {
             return Err(SdkError::UnexpectedResponse {
                 operation: "finding session",
@@ -173,7 +177,7 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
     }
 
     pub fn iter(&self) -> Result<impl Iterator<Item = Session<'host, 'runtime>>, SdkError> {
-        let response = self.storage.invoke(&SessionCommand::List)?;
+        let response = self.storage.invoke_projected(&SessionCommand::List)?;
         let SessionResponse::Sessions { sessions: records } = response else {
             return Err(SdkError::UnexpectedResponse {
                 operation: "listing sessions",
@@ -230,6 +234,7 @@ mod tests {
     };
     use phenix_plugin_options::{options_component_manifest, options_factory, options_manifest};
     use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
+    use phenix_sdk_macros::PhenixValue;
     use serde::{Deserialize, Serialize};
 
     const ECHO_PLUGIN: &str = "fixture.echo";
@@ -239,12 +244,12 @@ mod tests {
     const CONSUMER_COMPONENT: &str = "fixture.consumer";
     const CONSUMER_SERVICE: &str = "fixture.consumer.run@1";
 
-    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize, PhenixValue)]
     struct EchoRequest {
         value: String,
     }
 
-    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize, PhenixValue)]
     struct EchoResponse {
         value: String,
         has_persistence_authority: bool,
@@ -253,11 +258,12 @@ mod tests {
     struct EchoInterface;
 
     impl ComponentInterface for EchoInterface {
-        type Request = EchoRequest;
-        type Response = EchoResponse;
-
         fn interface_id() -> InterfaceId {
             InterfaceId::parse(ECHO_SERVICE).unwrap()
+        }
+
+        fn schema() -> phenix_core::InterfaceSchema {
+            phenix_core::InterfaceSchema::of::<EchoRequest, EchoResponse>()
         }
     }
 
@@ -283,15 +289,20 @@ mod tests {
             if service != &echo_service() {
                 return Err(format!("unsupported echo service: {service}"));
             }
-            let request: EchoRequest =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            serde_json::to_vec(&EchoResponse {
-                value: request.value,
-                has_persistence_authority: host
-                    .authority()
-                    .permits(&CapabilityId::parse("kernel.persistence.read").unwrap()),
-            })
-            .map_err(|error| error.to_string())
+            let context: PluginContext<'_, '_, ()> = PluginContext::new(host, (), (), ());
+            let request = context
+                .kernel
+                .decode_projected::<EchoRequest>(&EchoInterface::interface_id(), input)
+                .map_err(|error| error.to_string())?;
+            context
+                .kernel
+                .encode_value(&EchoResponse {
+                    value: request.value,
+                    has_persistence_authority: host
+                        .authority()
+                        .permits(&CapabilityId::parse("kernel.persistence.read").unwrap()),
+                })
+                .map_err(|error| error.to_string())
         }
     }
 
@@ -349,9 +360,9 @@ mod tests {
                 .ok_or("session disappeared while refreshing SDK object")?;
 
             let echo = SdkObject::new("echo", sdk.require::<EchoSdk>());
-            let echo = echo
+            let echo: EchoResponse = echo
                 .client()
-                .invoke(&EchoRequest {
+                .invoke_projected(&EchoRequest {
                     value: refreshed.id().to_owned(),
                 })
                 .map_err(|error| error.to_string())?;
@@ -415,6 +426,7 @@ mod tests {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: EchoInterface::interface_id(),
+                schema: EchoInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             }],
@@ -440,8 +452,9 @@ mod tests {
     }
 
     fn consumer_component_manifest(authority: Authority) -> ComponentManifest {
-        let required = |interface| ComponentImport {
+        let required = |interface, schema| ComponentImport {
             interface,
+            schema,
             required: true,
             authority: authority.clone(),
         };
@@ -449,9 +462,12 @@ mod tests {
             id: consumer_component_id(),
             owner: PluginId::parse(CONSUMER_PLUGIN).unwrap(),
             imports: vec![
-                required(SdkSessionInterface::interface_id()),
-                required(SessionInterface::interface_id()),
-                required(EchoInterface::interface_id()),
+                required(
+                    SdkSessionInterface::interface_id(),
+                    SdkSessionInterface::schema(),
+                ),
+                required(SessionInterface::interface_id(), SessionInterface::schema()),
+                required(EchoInterface::interface_id(), EchoInterface::schema()),
             ],
             exports: Vec::new(),
             maximum_authority: authority,
@@ -522,5 +538,96 @@ mod tests {
                 has_persistence_authority: true,
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod schema_match_tests {
+    use phenix_core::{
+        HasPhenixSchema, Key, PhenixSchema, PhenixValue, SchemaCompatibility, ValueMatch,
+    };
+    use phenix_sdk_macros::PhenixValue as DerivePhenixValue;
+    use std::collections::BTreeMap;
+
+    #[derive(Debug, Eq, PartialEq, DerivePhenixValue)]
+    struct Needed {
+        value: String,
+    }
+
+    #[derive(Debug, Eq, PartialEq, DerivePhenixValue)]
+    struct Provided {
+        value: String,
+        extra: u64,
+    }
+
+    fn key(value: &str) -> Key {
+        Key::parse(value).unwrap()
+    }
+
+    #[test]
+    fn derived_schemas_classify_exact_and_projected_values() {
+        assert!(matches!(
+            Needed::phenix_schema().accepts(&Needed::phenix_schema()),
+            SchemaCompatibility::Exact
+        ));
+        assert!(matches!(
+            Needed::phenix_schema().accepts(&Provided::phenix_schema()),
+            SchemaCompatibility::Compatible
+        ));
+
+        let exact = PhenixValue::from(&Needed {
+            value: "exact".into(),
+        });
+        let matched: ValueMatch<Needed> = (&exact).into();
+        assert!(matches!(matched, ValueMatch::Exact(_)));
+
+        let projected = PhenixValue::from(&Provided {
+            value: "projected".into(),
+            extra: 7,
+        });
+        let matched: ValueMatch<Needed> = projected.into();
+        assert!(matches!(matched, ValueMatch::Compatible(_)));
+
+        let incompatible = PhenixValue::U64(7);
+        assert!(matches!(
+            incompatible.match_as::<Needed>(),
+            ValueMatch::Incompatible(_)
+        ));
+    }
+
+    #[test]
+    fn variant_compatibility_is_directional() {
+        let narrow = PhenixSchema::Variant(BTreeMap::from([(key("A"), PhenixSchema::Unit)]));
+        let broad = PhenixSchema::Variant(BTreeMap::from([
+            (key("A"), PhenixSchema::Unit),
+            (key("B"), PhenixSchema::Unit),
+        ]));
+
+        assert!(matches!(
+            broad.accepts(&narrow),
+            SchemaCompatibility::Compatible
+        ));
+        assert!(matches!(
+            narrow.accepts(&broad),
+            SchemaCompatibility::Incompatible(_)
+        ));
+    }
+
+    #[test]
+    fn fixed_arrays_can_satisfy_dynamic_lists_but_not_the_reverse() {
+        let array = PhenixSchema::Array {
+            item: Box::new(PhenixSchema::String),
+            len: 2,
+        };
+        let list = PhenixSchema::List(Box::new(PhenixSchema::String));
+
+        assert!(matches!(
+            list.accepts(&array),
+            SchemaCompatibility::Compatible
+        ));
+        assert!(matches!(
+            array.accepts(&list),
+            SchemaCompatibility::Incompatible(_)
+        ));
     }
 }

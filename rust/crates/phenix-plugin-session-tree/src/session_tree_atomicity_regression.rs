@@ -4,8 +4,9 @@ use crate::{
 };
 use phenix_core::{
     Authority, BackendFeature, DurableSchema, Kernel, KernelConfig, LocalPersistence,
-    NamespaceTransaction, PersistenceBackend, PersistenceError, PluginId, ResolvedHarness,
-    ResolvedHarnessActivation, ResourceNamespace, SchemaMigration, SessionCommand, TransactionOp,
+    NamespaceTransaction, PersistenceBackend, PersistenceError, PhenixValue, PluginId, Project,
+    ResolvedHarness, ResolvedHarnessActivation, ResourceNamespace, SchemaMigration, SessionCommand,
+    SessionResponse, TransactionOp,
 };
 use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
 use std::{
@@ -135,7 +136,7 @@ fn invoke_session(kernel: &mut Kernel, command: SessionCommand) {
     kernel
         .invoke(
             &phenix_core::session_service(),
-            &serde_json::to_vec(&command).unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority(),
             None,
         )
@@ -143,17 +144,19 @@ fn invoke_session(kernel: &mut Kernel, command: SessionCommand) {
 }
 
 fn session_exists(kernel: &mut Kernel, id: &str) -> bool {
+    let command = SessionCommand::Get { id: id.into() };
     let output = kernel
         .invoke(
             &phenix_core::session_service(),
-            &serde_json::to_vec(&SessionCommand::Get { id: id.into() }).unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority(),
             None,
         )
         .unwrap();
+    let output: PhenixValue = serde_json::from_slice(&output).unwrap();
     matches!(
-        serde_json::from_slice::<phenix_core::SessionResponse>(&output).unwrap(),
-        phenix_core::SessionResponse::Session { session: Some(_) }
+        SessionResponse::try_from(Project(&output)).unwrap(),
+        SessionResponse::Session { session: Some(_) }
     )
 }
 
@@ -164,12 +167,13 @@ fn invoke_tree(
     let output = kernel
         .invoke(
             &session_tree_service(),
-            &serde_json::to_vec(&command).unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority(),
             None,
         )
         .map_err(|error| error.to_string())?;
-    serde_json::from_slice(&output).map_err(|error| error.to_string())
+    let output: PhenixValue = serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+    output.project().map_err(|error| error.to_string())
 }
 
 fn children(kernel: &mut Kernel, parent: &str) -> Vec<String> {
@@ -305,18 +309,20 @@ fn combined_child_session_and_lineage_operation_commits_as_one_semantic_operatio
 
     drop(kernel);
     let mut restored = kernel_with(&path);
+    let command = SessionCommand::Get { id: "child".into() };
     let child = restored
         .invoke(
             &phenix_core::session_service(),
-            &serde_json::to_vec(&SessionCommand::Get { id: "child".into() }).unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority(),
             None,
         )
         .unwrap();
-    let child: phenix_core::SessionResponse = serde_json::from_slice(&child).unwrap();
+    let child: PhenixValue = serde_json::from_slice(&child).unwrap();
+    let child = SessionResponse::try_from(Project(&child)).unwrap();
     assert!(matches!(
         child,
-        phenix_core::SessionResponse::Session { session: Some(session) } if session.id == "child"
+        SessionResponse::Session { session: Some(session) } if session.id == "child"
     ));
     assert_eq!(parent(&mut restored, "child"), Some("root".into()));
     assert_eq!(children(&mut restored, "root"), vec!["child"]);

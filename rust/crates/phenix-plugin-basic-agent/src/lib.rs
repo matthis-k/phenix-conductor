@@ -32,10 +32,10 @@ mod tests {
     use super::*;
     use phenix_core::{
         context_service, model_inference_service, skill_service, tool_service, Authority,
-        ComponentInterface, ContextCommand, ContextResourceKind, ContextResponse, ContextScope,
-        Kernel, KernelConfig, LocalPersistence, ModelInferenceRequest, ModelInferenceResponse,
-        ResolvedHarness, ResolvedHarnessActivation, SkillCommand, SkillDefinition, SkillResponse,
-        ToolCommand, ToolDefinition, ToolResponse,
+        CallableId, ComponentInterface, ContextCommand, ContextResourceKind, ContextResponse,
+        ContextScope, Kernel, KernelConfig, LocalPersistence, ModelId, ModelInferenceRequest,
+        ModelInferenceResponse, ResolvedHarness, ResolvedHarnessActivation, SkillCommand,
+        SkillDefinition, SkillId, SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
     };
     use std::{
         collections::BTreeMap,
@@ -168,12 +168,12 @@ mod tests {
             &mut kernel,
             &model_inference_service(),
             &ModelInferenceRequest {
-                model: "direct".into(),
-                input: b"hello".to_vec(),
+                model: ModelId::parse("direct").unwrap(),
+                input: b"hello".to_vec().into(),
                 options: BTreeMap::new(),
             },
         );
-        assert_eq!(response.output, b"hello");
+        assert_eq!(response.output.as_ref(), b"hello");
         assert_eq!(
             response.provider_metadata.get("provider"),
             Some(&serde_json::json!(BASIC_MODEL_PLUGIN))
@@ -191,10 +191,10 @@ mod tests {
                 &tool_service(),
                 &ToolCommand::Register {
                     tool: ToolDefinition {
-                        id: "echo".into(),
+                        id: CallableId::parse("echo").unwrap(),
                         input_schema: serde_json::json!({}),
                         output_schema: serde_json::json!({}),
-                        output_prefix: b"tool:".to_vec(),
+                        output_prefix: b"tool:".to_vec().into(),
                     },
                 },
             );
@@ -203,8 +203,8 @@ mod tests {
                 &skill_service(),
                 &SkillCommand::Register {
                     skill: SkillDefinition {
-                        id: "review".into(),
-                        content: b"review carefully".to_vec(),
+                        id: SkillId::parse("review").unwrap(),
+                        content: b"review carefully".to_vec().into(),
                     },
                 },
             );
@@ -216,7 +216,7 @@ mod tests {
                     kind: ContextResourceKind::ProjectDocument,
                     source: "README.md".into(),
                     scope: ContextScope::Workspace,
-                    content: b"project".to_vec(),
+                    content: b"project".to_vec().into(),
                 },
             );
             assert!(matches!(registered, ContextResponse::Registered { .. }));
@@ -227,18 +227,20 @@ mod tests {
             &mut restored,
             &tool_service(),
             &ToolCommand::Invoke {
-                id: "echo".into(),
-                input: b"hello".to_vec(),
+                id: CallableId::parse("echo").unwrap(),
+                input: b"hello".to_vec().into(),
             },
         );
         assert_eq!(
             tool,
             ToolResponse::Output {
-                output: b"tool:hello".to_vec()
+                output: b"tool:hello".to_vec().into()
             }
         );
         let skills: SkillResponse = invoke(&mut restored, &skill_service(), &SkillCommand::List);
-        assert!(matches!(skills, SkillResponse::Skills { skills } if skills[0].id == "review"));
+        assert!(
+            matches!(skills, SkillResponse::Skills { skills } if skills[0].id.as_str() == "review")
+        );
         let context: ContextResponse =
             invoke(&mut restored, &context_service(), &ContextCommand::List);
         assert!(

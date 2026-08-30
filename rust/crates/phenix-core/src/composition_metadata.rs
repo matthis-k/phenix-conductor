@@ -493,11 +493,13 @@ mod tests {
         let metadata = component_metadata(
             vec![ComponentImport {
                 interface: required_interface.clone(),
+                schema: Default::default(),
                 required: true,
                 authority: Authority::default(),
             }],
             vec![ComponentExport {
                 interface: exported_interface.clone(),
+                schema: Default::default(),
                 priority: 10,
                 required_authority: Authority::default(),
             }],
@@ -548,11 +550,13 @@ mod tests {
             vec![
                 ComponentImport {
                     interface: interface.clone(),
+                    schema: Default::default(),
                     required: true,
                     authority: Authority::default(),
                 },
                 ComponentImport {
                     interface: interface.clone(),
+                    schema: Default::default(),
                     required: false,
                     authority: Authority::default(),
                 },

@@ -30,6 +30,7 @@ fn invalid_candidate_resolution_leaves_active_generation_unchanged() {
         owner: plugin.id.clone(),
         imports: vec![ComponentImport {
             interface: InterfaceId::parse("fixture.missing@1").unwrap(),
+            schema: Default::default(),
             required: true,
             authority: Authority::default(),
         }],
@@ -55,6 +56,7 @@ fn removing_a_required_live_provider_rejects_the_candidate_and_retains_the_activ
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: interface.clone(),
+            schema: Default::default(),
             priority: 0,
             required_authority: Authority::default(),
         }],
@@ -65,6 +67,7 @@ fn removing_a_required_live_provider_rejects_the_candidate_and_retains_the_activ
         owner: plugin.id.clone(),
         imports: vec![ComponentImport {
             interface,
+            schema: Default::default(),
             required: true,
             authority: Authority::default(),
         }],

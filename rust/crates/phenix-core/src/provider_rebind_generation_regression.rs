@@ -22,6 +22,7 @@ fn provider(id: &str, owner: &str, interface: &InterfaceId, priority: i32) -> Co
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: interface.clone(),
+            schema: Default::default(),
             priority,
             required_authority: Authority::default(),
         }],
@@ -35,6 +36,7 @@ fn consumer(interface: &InterfaceId) -> ComponentManifest {
         owner: PluginId::parse("consumer-package").unwrap(),
         imports: vec![ComponentImport {
             interface: interface.clone(),
+            schema: Default::default(),
             required: true,
             authority: Authority::default(),
         }],

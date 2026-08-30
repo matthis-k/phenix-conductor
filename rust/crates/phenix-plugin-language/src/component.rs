@@ -1,4 +1,4 @@
-use crate::{language_manifest, LanguageCommand, LanguageResponse, LANGUAGE_SERVICE};
+use crate::{language_manifest, LANGUAGE_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
     PluginId,
@@ -10,11 +10,12 @@ const LANGUAGE_PLUGIN: &str = "phenix.language";
 pub struct LanguageInterface;
 
 impl ComponentInterface for LanguageInterface {
-    type Request = LanguageCommand;
-    type Response = LanguageResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(LANGUAGE_SERVICE).expect("static language interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::LanguageCommand, crate::LanguageResponse>()
     }
 }
 
@@ -31,6 +32,7 @@ pub fn language_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: LanguageInterface::interface_id(),
+            schema: LanguageInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -61,6 +63,7 @@ mod tests {
             owner: PluginId::parse("fixture.language-consumer").unwrap(),
             imports: vec![ComponentImport {
                 interface: LanguageInterface::interface_id(),
+                schema: LanguageInterface::schema(),
                 required: true,
                 authority: Authority::default(),
             }],

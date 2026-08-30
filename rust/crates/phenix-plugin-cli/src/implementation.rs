@@ -1,8 +1,9 @@
 use phenix_core::{
-    Authority, CapabilityId, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, SdkClient, ServiceContribution, ServiceId,
+    Authority, CapabilityId, ComponentInterface, PluginContext, PluginExecution, PluginHost,
+    PluginId, PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
 };
 use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
+use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -31,12 +32,12 @@ fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> CliContext<'ho
     )
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct CliProbeRequest {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum CliAvailability {
     Available,
@@ -44,7 +45,7 @@ pub enum CliAvailability {
     Limited,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum CliAuthState {
     Unsupported,
@@ -54,7 +55,7 @@ pub enum CliAuthState {
     Error,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct CliDescriptor {
     pub name: String,
     pub availability: CliAvailability,
@@ -156,7 +157,9 @@ fn shell(context: &CliContext<'_, '_>, command: String) -> Result<WorkspaceRespo
     context
         .sdk
         .workspace
-        .invoke(&WorkspaceCommand::Shell { command })
+        .invoke_projected::<WorkspaceCommand, WorkspaceResponse>(&WorkspaceCommand::Shell {
+            command,
+        })
         .map_err(|error| error.to_string())
 }
 
@@ -251,26 +254,40 @@ impl PluginInstance for CliPlugin {
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        let request: CliProbeRequest =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let context = context(host);
+        let interface = if service == &cli_discover_service() {
+            crate::CliDiscoverInterface::interface_id()
+        } else if service == &cli_version_service() {
+            crate::CliVersionInterface::interface_id()
+        } else if service == &cli_auth_state_service() {
+            crate::CliAuthStateInterface::interface_id()
+        } else {
+            return Err(format!("unsupported CLI service: {service}"));
+        };
+        let request = context
+            .kernel
+            .decode_projected::<CliProbeRequest>(&interface, input)
+            .map_err(|error| error.to_string())?;
         let result = if service == &cli_discover_service() {
             discover(&context, &request.name)?
         } else if service == &cli_version_service() {
             version(&context, &request.name)?
-        } else if service == &cli_auth_state_service() {
-            auth_state(&context, &request.name)?
         } else {
-            return Err(format!("unsupported CLI service: {service}"));
+            auth_state(&context, &request.name)?
         };
-        serde_json::to_vec(&result).map_err(|error| error.to_string())
+        context
+            .kernel
+            .encode_value(&result)
+            .map_err(|error| error.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
+    use phenix_core::{
+        Kernel, KernelConfig, PhenixValue, Project, ResolvedHarness, ResolvedHarnessActivation,
+    };
     use phenix_plugin_workspace::{
         workspace_component_manifest, workspace_factory_for, workspace_manifest,
     };
@@ -324,14 +341,18 @@ mod tests {
         name: &str,
         authority: Authority,
     ) -> Result<CliDescriptor, String> {
-        let input = serde_json::to_vec(&CliProbeRequest {
+        let request = CliProbeRequest {
             name: name.to_owned(),
-        })
-        .unwrap();
+        };
+        let input = serde_json::to_vec(&PhenixValue::from(&request)).unwrap();
         let output = kernel
             .invoke(&service, &input, &authority, None)
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        {
+            let output: PhenixValue =
+                serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+            CliDescriptor::try_from(Project(&output)).map_err(|error| error.to_string())
+        }
     }
 
     #[test]

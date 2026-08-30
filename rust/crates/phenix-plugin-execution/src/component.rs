@@ -1,4 +1,4 @@
-use crate::{execution_manifest, ExecutionCommand, ExecutionResponse, EXECUTION_SERVICE};
+use crate::{execution_manifest, EXECUTION_SERVICE};
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface, ComponentManifest,
     InterfaceId, PluginId,
@@ -13,11 +13,12 @@ const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 pub struct ExecutionInterface;
 
 impl ComponentInterface for ExecutionInterface {
-    type Request = ExecutionCommand;
-    type Response = ExecutionResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(EXECUTION_SERVICE).expect("static execution interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::ExecutionCommand, crate::ExecutionResponse>()
     }
 }
 
@@ -35,6 +36,7 @@ pub fn execution_component_manifest(maximum_authority: Authority) -> ComponentMa
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: ExecutionInterface::interface_id(),
+            schema: ExecutionInterface::schema(),
             priority: 100,
             required_authority: persistence_authority(),
         }],

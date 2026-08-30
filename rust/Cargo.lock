@@ -1550,6 +1550,7 @@ dependencies = [
 name = "phenix-core"
 version = "0.1.0"
 dependencies = [
+ "phenix-sdk-macros",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1581,6 +1582,7 @@ name = "phenix-plugin-artifacts"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1628,6 +1630,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-workspace",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1639,6 +1642,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-execution",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1655,6 +1659,7 @@ dependencies = [
  "phenix-plugin-models",
  "phenix-plugin-planning",
  "phenix-plugin-sessions",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1665,6 +1670,7 @@ name = "phenix-plugin-execution"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1676,6 +1682,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-execution",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1688,6 +1695,7 @@ dependencies = [
  "phenix-core",
  "phenix-plugin-context",
  "phenix-plugin-execution",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1698,6 +1706,7 @@ name = "phenix-plugin-jobs"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1708,6 +1717,7 @@ name = "phenix-plugin-language"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1718,6 +1728,7 @@ name = "phenix-plugin-models"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1728,6 +1739,7 @@ name = "phenix-plugin-options"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
 ]
@@ -1737,6 +1749,7 @@ name = "phenix-plugin-planning"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1755,6 +1768,7 @@ name = "phenix-plugin-repository-workers"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1770,6 +1784,7 @@ dependencies = [
  "phenix-plugin-models",
  "phenix-plugin-options",
  "phenix-plugin-sessions",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
 ]
@@ -1780,6 +1795,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-sessions",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
 ]
@@ -1789,6 +1805,7 @@ name = "phenix-plugin-sessions"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1799,6 +1816,7 @@ name = "phenix-plugin-workspace"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk-macros",
  "serde",
  "serde_json",
  "sha2",
@@ -1823,7 +1841,17 @@ dependencies = [
  "phenix-core",
  "phenix-plugin-sdk",
  "phenix-provider-sdk",
+ "phenix-sdk-macros",
  "serde_json",
+]
+
+[[package]]
+name = "phenix-sdk-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

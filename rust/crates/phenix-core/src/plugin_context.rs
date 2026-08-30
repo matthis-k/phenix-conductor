@@ -1,10 +1,13 @@
 use crate::{
     Authority, ComponentId, ComponentInterface, ComponentInvocationError, DurableSchema,
-    EventDispatchReport, EventError, EventTypeId, GraphGenerationId, KernelError,
-    NamespaceTransaction, PluginHost, PluginId, ResourceNamespace, SchemaMigration, ServiceId,
-    TaskHandle, TransactionOp,
+    EventDispatchReport, EventError, EventTypeId, Exact, GraphGenerationId, InterfaceId,
+    KernelError, NamespaceTransaction, PhenixValue, PluginHost, PluginId, Project,
+    ResourceNamespace, SchemaMigration, ServiceId, TaskHandle, TransactionOp, ValueError,
 };
 use std::marker::PhantomData;
+
+const STRUCTURAL_MISMATCH_EVENT: &str = "kernel.structural_value_mismatch";
+const STRUCTURAL_MISMATCH_EVENT_VERSION: u32 = 1;
 
 /// Runtime view passed to plugin code.
 ///
@@ -111,6 +114,49 @@ impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
         )
     }
 
+    /// Decode a structural request using the provider's local projected view.
+    pub fn decode_projected<T>(
+        &self,
+        interface: &InterfaceId,
+        input: &[u8],
+    ) -> Result<T, ComponentInvocationError>
+    where
+        for<'value> T: TryFrom<Project<&'value PhenixValue>, Error = ValueError>,
+    {
+        let value = serde_json::from_slice::<PhenixValue>(input)
+            .map_err(|error| ComponentInvocationError::Decode(error.to_string()))?;
+        T::try_from(Project(&value)).map_err(|error| {
+            report_structural_mismatch(self.host, interface, "request", &error);
+            ComponentInvocationError::Decode(error.to_string())
+        })
+    }
+
+    /// Decode a structural request using the provider's exact local view.
+    pub fn decode_exact<T>(
+        &self,
+        interface: &InterfaceId,
+        input: &[u8],
+    ) -> Result<T, ComponentInvocationError>
+    where
+        for<'value> T: TryFrom<Exact<&'value PhenixValue>, Error = ValueError>,
+    {
+        let value = serde_json::from_slice::<PhenixValue>(input)
+            .map_err(|error| ComponentInvocationError::Decode(error.to_string()))?;
+        T::try_from(Exact(&value)).map_err(|error| {
+            report_structural_mismatch(self.host, interface, "request", &error);
+            ComponentInvocationError::Decode(error.to_string())
+        })
+    }
+
+    /// Encode a provider-local value for the structural plugin ABI.
+    pub fn encode_value<T>(&self, value: &T) -> Result<Vec<u8>, ComponentInvocationError>
+    where
+        for<'value> PhenixValue: From<&'value T>,
+    {
+        serde_json::to_vec(&PhenixValue::from(value))
+            .map_err(|error| ComponentInvocationError::Encode(error.to_string()))
+    }
+
     pub fn register_durable_schema(&self, schema: &DurableSchema) -> Result<(), KernelError> {
         self.host.register_durable_schema(schema)
     }
@@ -147,12 +193,12 @@ impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
     }
 }
 
-/// Marker implemented by a typed SDK contract supplied by another plugin.
+/// Marker implemented by an SDK contract supplied by another plugin.
 pub trait SdkContract {
     type Interface: ComponentInterface;
 }
 
-/// Kernel-mediated client for one typed imported interface.
+/// Kernel-mediated client for one imported interface.
 pub struct SdkClient<'host, 'runtime, I: ComponentInterface> {
     host: &'host PluginHost<'runtime>,
     component: ComponentId,
@@ -182,15 +228,72 @@ impl<'host, 'runtime, I: ComponentInterface> SdkClient<'host, 'runtime, I> {
         &self.component
     }
 
-    pub fn invoke(&self, request: &I::Request) -> Result<I::Response, ComponentInvocationError> {
+    /// Invoke the interface using the structural plugin ABI.
+    pub fn invoke_value(
+        &self,
+        request: &PhenixValue,
+    ) -> Result<PhenixValue, ComponentInvocationError> {
         self.host.invoke_import::<I>(&self.component, request)
     }
+
+    /// Invoke and let the consumer project the provider response into its local type.
+    pub fn invoke_projected<Request, Response>(
+        &self,
+        request: &Request,
+    ) -> Result<Response, ComponentInvocationError>
+    where
+        for<'value> PhenixValue: From<&'value Request>,
+        for<'value> Response: TryFrom<Project<&'value PhenixValue>, Error = ValueError>,
+    {
+        let request = PhenixValue::from(request);
+        let response = self.invoke_value(&request)?;
+        Response::try_from(Project(&response)).map_err(|error| {
+            report_structural_mismatch(self.host, &I::interface_id(), "response", &error);
+            ComponentInvocationError::Decode(error.to_string())
+        })
+    }
+
+    /// Invoke and require the provider response to exactly match the consumer type.
+    pub fn invoke_exact<Request, Response>(
+        &self,
+        request: &Request,
+    ) -> Result<Response, ComponentInvocationError>
+    where
+        for<'value> PhenixValue: From<&'value Request>,
+        for<'value> Response: TryFrom<Exact<&'value PhenixValue>, Error = ValueError>,
+    {
+        let request = PhenixValue::from(request);
+        let response = self.invoke_value(&request)?;
+        Response::try_from(Exact(&response)).map_err(|error| {
+            report_structural_mismatch(self.host, &I::interface_id(), "response", &error);
+            ComponentInvocationError::Decode(error.to_string())
+        })
+    }
+}
+
+fn report_structural_mismatch(
+    host: &PluginHost<'_>,
+    interface: &InterfaceId,
+    direction: &'static str,
+    error: &ValueError,
+) {
+    let payload = serde_json::json!({
+        "interface": interface.as_str(),
+        "direction": direction,
+        "error": error.to_string(),
+    });
+    let Ok(payload) = serde_json::to_vec(&payload) else {
+        return;
+    };
+    let event_type = EventTypeId::parse(STRUCTURAL_MISMATCH_EVENT)
+        .expect("static structural mismatch event type is valid");
+    let _ = host.dispatch_event(event_type, STRUCTURAL_MISMATCH_EVENT_VERSION, 0, 0, payload);
 }
 
 /// Consumer-side handle for a provider-owned SDK object.
 ///
-/// The handle contains stable identity plus a scoped typed client. Provider
-/// state remains owned by the providing plugin.
+/// The handle contains stable identity plus a scoped client. Provider state
+/// remains owned by the providing plugin.
 pub struct SdkObject<'host, 'runtime, I: ComponentInterface, Id = String> {
     id: Id,
     client: SdkClient<'host, 'runtime, I>,

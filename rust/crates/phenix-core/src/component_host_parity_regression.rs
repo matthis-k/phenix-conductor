@@ -49,6 +49,7 @@ fn graph(provider_execution: PluginExecution) -> ResolvedComponentGraph {
             owner: plugin("consumer-owner"),
             imports: vec![ComponentImport {
                 interface: interface(),
+                schema: Default::default(),
                 required: true,
                 authority: ceiling.clone(),
             }],
@@ -61,6 +62,7 @@ fn graph(provider_execution: PluginExecution) -> ResolvedComponentGraph {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: interface(),
+                schema: Default::default(),
                 priority: 10,
                 required_authority: Authority::new([read.clone()]),
             }],

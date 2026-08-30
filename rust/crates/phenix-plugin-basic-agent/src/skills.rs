@@ -2,7 +2,8 @@ use phenix_core::{
     skill_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
     ComponentManifest, DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost,
     PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
-    ServiceRole, SkillCommand, SkillDefinition, SkillResponse, TransactionOp, SKILL_SERVICE,
+    ServiceRole, SkillCommand, SkillDefinition, SkillId, SkillResponse, TransactionOp,
+    SKILL_SERVICE,
 };
 
 pub const BASIC_SKILLS_PLUGIN: &str = "phenix.basic-skills";
@@ -21,9 +22,6 @@ fn context<'host, 'runtime>(
 pub struct BasicSkillsInterface;
 
 impl ComponentInterface for BasicSkillsInterface {
-    type Request = SkillCommand;
-    type Response = SkillResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(SKILL_SERVICE).expect("static skill interface id is valid")
     }
@@ -55,6 +53,7 @@ pub fn basic_skills_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: BasicSkillsInterface::interface_id(),
+            schema: BasicSkillsInterface::schema(),
             priority: 10,
             required_authority: Authority::default(),
         }],
@@ -98,7 +97,6 @@ fn handle(
 ) -> Result<SkillResponse, String> {
     match command {
         SkillCommand::Register { skill } => {
-            require_id(&skill.id)?;
             write_skill(context, &skill)?;
             Ok(SkillResponse::Skill { skill: Some(skill) })
         }
@@ -145,7 +143,7 @@ fn write_skill(
 
 fn read_skill(
     context: &BasicSkillsContext<'_, '_>,
-    id: &str,
+    id: &SkillId,
 ) -> Result<Option<SkillDefinition>, String> {
     context
         .kernel
@@ -155,21 +153,13 @@ fn read_skill(
         .transpose()
 }
 
-fn read_ids(context: &BasicSkillsContext<'_, '_>) -> Result<Vec<String>, String> {
+fn read_ids(context: &BasicSkillsContext<'_, '_>) -> Result<Vec<SkillId>, String> {
     context
         .kernel
         .read_durable(&namespace(), INDEX_KEY)
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .unwrap_or_else(|| Ok(Vec::new()))
-}
-
-fn require_id(id: &str) -> Result<(), String> {
-    if id.trim().is_empty() {
-        Err("skill id must not be empty".into())
-    } else {
-        Ok(())
-    }
 }
 
 fn namespace() -> ResourceNamespace {

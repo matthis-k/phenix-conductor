@@ -12,9 +12,6 @@ pub const BASIC_MODEL_COMPONENT: &str = "phenix.basic-model";
 pub struct BasicModelInterface;
 
 impl ComponentInterface for BasicModelInterface {
-    type Request = ModelInferenceRequest;
-    type Response = ModelInferenceResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(MODEL_INFERENCE_SERVICE).expect("static model interface id is valid")
     }
@@ -46,6 +43,7 @@ pub fn basic_model_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: BasicModelInterface::interface_id(),
+            schema: BasicModelInterface::schema(),
             priority: 10,
             required_authority: Authority::default(),
         }],

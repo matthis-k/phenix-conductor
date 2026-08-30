@@ -1,15 +1,116 @@
-use crate::{InterfaceId, Kernel, KernelError, ResolvedImportHandle, ServiceId};
-use serde::{de::DeserializeOwned, Serialize};
+use crate::{
+    HasPhenixSchema, InterfaceId, Kernel, KernelError, PhenixSchema, PhenixValue,
+    ResolvedImportHandle, SchemaCompatibility, SchemaMismatch, ServiceId,
+};
+use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
 };
 
-pub trait ComponentInterface {
-    type Request: Serialize;
-    type Response: DeserializeOwned;
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct InterfaceSchema {
+    request: PhenixSchema,
+    response: PhenixSchema,
+}
 
+impl InterfaceSchema {
+    pub fn new(request: PhenixSchema, response: PhenixSchema) -> Self {
+        Self { request, response }
+    }
+
+    pub fn of<Request: HasPhenixSchema, Response: HasPhenixSchema>() -> Self {
+        Self::new(Request::phenix_schema(), Response::phenix_schema())
+    }
+
+    pub fn request(&self) -> &PhenixSchema {
+        &self.request
+    }
+
+    pub fn response(&self) -> &PhenixSchema {
+        &self.response
+    }
+
+    pub fn accepts_provider(&self, provider: &Self) -> InterfaceCompatibility {
+        let request = provider.request.accepts(&self.request);
+        let response = self.response.accepts(&provider.response);
+        let request_exact = matches!(request, SchemaCompatibility::Exact);
+        let response_exact = matches!(response, SchemaCompatibility::Exact);
+        let request_mismatch = match request {
+            SchemaCompatibility::Incompatible(error) => Some(error),
+            SchemaCompatibility::Exact | SchemaCompatibility::Compatible => None,
+        };
+        let response_mismatch = match response {
+            SchemaCompatibility::Incompatible(error) => Some(error),
+            SchemaCompatibility::Exact | SchemaCompatibility::Compatible => None,
+        };
+        if request_mismatch.is_some() || response_mismatch.is_some() {
+            return InterfaceCompatibility::Incompatible(InterfaceSchemaMismatch {
+                request: request_mismatch,
+                response: response_mismatch,
+            });
+        }
+        if request_exact && response_exact {
+            InterfaceCompatibility::Exact
+        } else {
+            InterfaceCompatibility::Compatible
+        }
+    }
+}
+
+impl Default for InterfaceSchema {
+    fn default() -> Self {
+        Self::new(PhenixSchema::Any, PhenixSchema::Any)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InterfaceCompatibility {
+    Exact,
+    Compatible,
+    Incompatible(InterfaceSchemaMismatch),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterfaceSchemaMismatch {
+    request: Option<SchemaMismatch>,
+    response: Option<SchemaMismatch>,
+}
+
+impl InterfaceSchemaMismatch {
+    pub fn request(&self) -> Option<&SchemaMismatch> {
+        self.request.as_ref()
+    }
+
+    pub fn response(&self) -> Option<&SchemaMismatch> {
+        self.response.as_ref()
+    }
+}
+
+impl Display for InterfaceSchemaMismatch {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match (&self.request, &self.response) {
+            (Some(request), Some(response)) => {
+                write!(
+                    f,
+                    "request mismatch: {request}; response mismatch: {response}"
+                )
+            }
+            (Some(request), None) => write!(f, "request mismatch: {request}"),
+            (None, Some(response)) => write!(f, "response mismatch: {response}"),
+            (None, None) => f.write_str("interface schemas are compatible"),
+        }
+    }
+}
+
+impl Error for InterfaceSchemaMismatch {}
+
+pub trait ComponentInterface {
     fn interface_id() -> InterfaceId;
+
+    fn schema() -> InterfaceSchema {
+        InterfaceSchema::default()
+    }
 }
 
 #[derive(Debug)]
@@ -75,11 +176,11 @@ impl From<crate::ComponentGraphError> for ComponentInvocationError {
 }
 
 impl ResolvedImportHandle {
-    pub fn invoke_typed<I: ComponentInterface>(
+    pub fn invoke_value<I: ComponentInterface>(
         &self,
         kernel: &mut Kernel,
-        request: &I::Request,
-    ) -> Result<I::Response, ComponentInvocationError> {
+        request: &PhenixValue,
+    ) -> Result<PhenixValue, ComponentInvocationError> {
         let requested = I::interface_id();
         if self.interface() != &requested {
             return Err(ComponentInvocationError::InterfaceMismatch {
@@ -114,29 +215,33 @@ mod tests {
     use super::*;
     use crate::{
         Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentManifest,
-        KernelConfig, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-        ResolvedComponentGraph, ResolvedHarness, ResolvedHarnessActivation, ServiceContribution,
-        ServiceRole,
+        KernelConfig, Key, PhenixValue, PluginExecution, PluginHost, PluginId, PluginInstance,
+        PluginManifest, ResolvedComponentGraph, ResolvedHarness, ResolvedHarnessActivation,
+        ServiceContribution, ServiceRole,
     };
-    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
 
-    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-    struct EchoRequest {
-        value: String,
+    fn key(value: &str) -> Key {
+        Key::parse(value.to_owned()).unwrap()
     }
 
-    #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-    struct EchoResponse {
-        provider: String,
-        value: String,
+    fn echo_request(value: &str) -> PhenixValue {
+        PhenixValue::Table(BTreeMap::from([(
+            key("value"),
+            PhenixValue::String(value.to_owned()),
+        )]))
+    }
+
+    fn echo_response(provider: &str, value: &str) -> PhenixValue {
+        PhenixValue::Table(BTreeMap::from([
+            (key("provider"), PhenixValue::String(provider.to_owned())),
+            (key("value"), PhenixValue::String(value.to_owned())),
+        ]))
     }
 
     struct EchoInterface;
 
     impl ComponentInterface for EchoInterface {
-        type Request = EchoRequest;
-        type Response = EchoResponse;
-
         fn interface_id() -> InterfaceId {
             InterfaceId::parse("fixture.echo@1").unwrap()
         }
@@ -145,9 +250,6 @@ mod tests {
     struct OtherInterface;
 
     impl ComponentInterface for OtherInterface {
-        type Request = EchoRequest;
-        type Response = EchoResponse;
-
         fn interface_id() -> InterfaceId {
             InterfaceId::parse("fixture.other@1").unwrap()
         }
@@ -166,13 +268,13 @@ mod tests {
             input: &[u8],
             _host: &PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
-            let request: EchoRequest =
+            let request: PhenixValue =
                 serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            serde_json::to_vec(&EchoResponse {
-                provider: self.0.into(),
-                value: request.value,
-            })
-            .map_err(|error| error.to_string())
+            let value = match request.get("value").map_err(|error| error.to_string())? {
+                PhenixValue::String(value) => value.clone(),
+                other => return Err(format!("expected string value, got {:?}", other.kind())),
+            };
+            serde_json::to_vec(&echo_response(self.0, &value)).map_err(|error| error.to_string())
         }
     }
 
@@ -217,6 +319,7 @@ mod tests {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: EchoInterface::interface_id(),
+                schema: EchoInterface::schema(),
                 priority,
                 required_authority: Authority::default(),
             }],
@@ -250,6 +353,7 @@ mod tests {
                 owner: consumer.id,
                 imports: vec![ComponentImport {
                     interface: EchoInterface::interface_id(),
+                    schema: EchoInterface::schema(),
                     required: true,
                     authority: authority.clone(),
                 }],
@@ -292,20 +396,9 @@ mod tests {
         kernel.activate_all().unwrap();
 
         let response = handle
-            .invoke_typed::<EchoInterface>(
-                &mut kernel,
-                &EchoRequest {
-                    value: "hello".into(),
-                },
-            )
+            .invoke_value::<EchoInterface>(&mut kernel, &echo_request("hello"))
             .unwrap();
-        assert_eq!(
-            response,
-            EchoResponse {
-                provider: "graph".into(),
-                value: "hello".into()
-            }
-        );
+        assert_eq!(response, echo_response("graph", "hello"));
     }
 
     #[test]
@@ -328,6 +421,7 @@ mod tests {
                     owner: consumer.id.clone(),
                     imports: vec![ComponentImport {
                         interface: EchoInterface::interface_id(),
+                        schema: EchoInterface::schema(),
                         required: true,
                         authority: Authority::default(),
                     }],
@@ -346,12 +440,7 @@ mod tests {
         let mut kernel = Kernel::new(KernelConfig::new([consumer, owner]).unwrap());
 
         assert!(matches!(
-            handle.invoke_typed::<OtherInterface>(
-                &mut kernel,
-                &EchoRequest {
-                    value: "never dispatched".into()
-                }
-            ),
+            handle.invoke_value::<OtherInterface>(&mut kernel, &echo_request("never dispatched")),
             Err(ComponentInvocationError::InterfaceMismatch { .. })
         ));
     }

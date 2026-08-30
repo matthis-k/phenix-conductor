@@ -1,7 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
-    TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
+    ServiceId, TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -29,7 +29,7 @@ fn context<'host, 'runtime, 'state>(
     PluginContext::new(host, (), (), state)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum LanguageOperationKind {
     Definition,
@@ -42,7 +42,7 @@ pub enum LanguageOperationKind {
     CallHierarchy,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum DocumentProvenance {
     WorkspaceBacked,
@@ -50,28 +50,28 @@ pub enum DocumentProvenance {
     MixedOrUnknown,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct LanguageDocumentIdentity {
     pub path: String,
     pub file_version: Option<String>,
     pub provenance: DocumentProvenance,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct LanguageProviderEpoch {
     pub workspace_id: String,
     pub provider_id: String,
     pub epoch: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct LanguageOperationResult {
     pub operation: LanguageOperationKind,
     pub payload: serde_json::Value,
     pub documents: Vec<LanguageDocumentIdentity>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct LanguageObservation {
     pub id: String,
     pub execution_id: String,
@@ -81,7 +81,7 @@ pub struct LanguageObservation {
     pub result: LanguageOperationResult,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum LanguageCommand {
     ActivateProvider {
@@ -116,7 +116,7 @@ pub enum LanguageCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum LanguageResponse {
     Provider {
@@ -192,9 +192,17 @@ impl PluginInstance for LanguagePlugin {
         if service != &language_service() {
             return Err(format!("unsupported language service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&mut context(host, &mut self.state), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let mut context = context(host, &mut self.state);
+        let interface = crate::LanguageInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<LanguageCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&mut context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -431,7 +439,7 @@ mod tests {
     }
 
     fn invoke(kernel: &mut Kernel, command: LanguageCommand) -> Result<LanguageResponse, String> {
-        let input = serde_json::to_vec(&command).unwrap();
+        let input = serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap();
         let output = kernel
             .invoke(
                 &language_service(),
@@ -440,7 +448,9 @@ mod tests {
                 None,
             )
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        let output: phenix_core::PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        output.project().map_err(|error| error.to_string())
     }
 
     fn activate(kernel: &mut Kernel, epoch: u64) {

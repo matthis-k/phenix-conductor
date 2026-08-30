@@ -4,7 +4,7 @@ mod authoring;
 pub use authoring::*;
 
 use phenix_core::{
-    Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
+    Authority, Bytes, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, SdkContribution, SdkNamespace, SdkResourceId, ServiceContribution, ServiceId,
     ServiceRole,
@@ -64,7 +64,7 @@ fn plugin_context<'host, 'runtime, 'plugin>(
     )
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkSessionCommand {
     Open {
@@ -74,7 +74,7 @@ pub enum SdkSessionCommand {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkSessionResponse {
     Opened {
@@ -86,15 +86,16 @@ pub enum SdkSessionResponse {
 pub struct SdkSessionInterface;
 
 impl ComponentInterface for SdkSessionInterface {
-    type Request = SdkSessionCommand;
-    type Response = SdkSessionResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(SDK_SESSION_SERVICE).expect("static SDK session interface id is valid")
     }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<SdkSessionCommand, SdkSessionResponse>()
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(deny_unknown_fields)]
 pub struct SdkTool {
     pub id: String,
@@ -102,7 +103,7 @@ pub struct SdkTool {
     pub required_capabilities: BTreeSet<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkToolCommand {
     Register {
@@ -118,7 +119,7 @@ pub enum SdkToolCommand {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkToolResponse {
     Tool { tool: SdkTool },
@@ -128,22 +129,23 @@ pub enum SdkToolResponse {
 pub struct SdkToolsInterface;
 
 impl ComponentInterface for SdkToolsInterface {
-    type Request = SdkToolCommand;
-    type Response = SdkToolResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(SDK_TOOLS_SERVICE).expect("static SDK tools interface id is valid")
     }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<SdkToolCommand, SdkToolResponse>()
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(deny_unknown_fields)]
 pub struct SdkSkill {
     pub id: String,
-    pub content: Vec<u8>,
+    pub content: Bytes,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(deny_unknown_fields)]
 pub struct SdkSkillSummary {
     pub id: String,
@@ -151,15 +153,15 @@ pub struct SdkSkillSummary {
     pub source: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkSkillCommand {
-    Register { id: String, content: Vec<u8> },
+    Register { id: String, content: Bytes },
     Get { id: String },
     List,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkSkillResponse {
     Skill { skill: Option<SdkSkill> },
@@ -169,15 +171,16 @@ pub enum SdkSkillResponse {
 pub struct SdkSkillsInterface;
 
 impl ComponentInterface for SdkSkillsInterface {
-    type Request = SdkSkillCommand;
-    type Response = SdkSkillResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(SDK_SKILLS_SERVICE).expect("static SDK skills interface id is valid")
     }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<SdkSkillCommand, SdkSkillResponse>()
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkConfigCommand {
     Read { path: SdkConfigPath },
@@ -218,20 +221,69 @@ impl TryFrom<String> for SdkConfigPath {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+impl phenix_core::ValueCodec for SdkConfigPath {
+    fn phenix_type() -> phenix_core::Type {
+        phenix_core::Type::String
+    }
+
+    fn to_value(&self) -> phenix_core::PhenixValue {
+        phenix_core::PhenixValue::String(self.0.clone())
+    }
+
+    fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> {
+        let value = String::try_from(phenix_core::Exact(value))?;
+        Self::try_from(value).map_err(|error| phenix_core::ValueError::InvalidValue(error.into()))
+    }
+
+    fn project_from_value(
+        value: &phenix_core::PhenixValue,
+    ) -> Result<Self, phenix_core::ValueError> {
+        let value = String::try_from(phenix_core::Project(value))?;
+        Self::try_from(value).map_err(|error| phenix_core::ValueError::InvalidValue(error.into()))
+    }
+}
+
+impl From<&SdkConfigPath> for phenix_core::PhenixValue {
+    fn from(value: &SdkConfigPath) -> Self {
+        <SdkConfigPath as phenix_core::ValueCodec>::to_value(value)
+    }
+}
+
+impl<'value> TryFrom<phenix_core::Exact<&'value phenix_core::PhenixValue>> for SdkConfigPath {
+    type Error = phenix_core::ValueError;
+
+    fn try_from(
+        value: phenix_core::Exact<&'value phenix_core::PhenixValue>,
+    ) -> Result<Self, Self::Error> {
+        <Self as phenix_core::ValueCodec>::from_value(value.0)
+    }
+}
+
+impl<'value> TryFrom<phenix_core::Project<&'value phenix_core::PhenixValue>> for SdkConfigPath {
+    type Error = phenix_core::ValueError;
+
+    fn try_from(
+        value: phenix_core::Project<&'value phenix_core::PhenixValue>,
+    ) -> Result<Self, Self::Error> {
+        <Self as phenix_core::ValueCodec>::project_from_value(value.0)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SdkConfigResponse {
-    File { content: Vec<u8> },
+    File { content: Bytes },
 }
 
 pub struct SdkConfigInterface;
 
 impl ComponentInterface for SdkConfigInterface {
-    type Request = SdkConfigCommand;
-    type Response = SdkConfigResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(SDK_CONFIG_SERVICE).expect("static SDK config interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<SdkConfigCommand, SdkConfigResponse>()
     }
 }
 
@@ -288,38 +340,47 @@ pub fn sdk_manifest(maximum_authority: Authority) -> PluginManifest {
 
 #[must_use]
 pub fn sdk_component_manifest(maximum_authority: Authority) -> ComponentManifest {
-    let optional_import = |interface: InterfaceId| ComponentImport {
-        interface,
-        required: false,
-        authority: maximum_authority.clone(),
-    };
+    let optional_import =
+        |interface: InterfaceId, schema: phenix_core::InterfaceSchema| ComponentImport {
+            interface,
+            schema,
+            required: false,
+            authority: maximum_authority.clone(),
+        };
     ComponentManifest {
         id: sdk_component_id(),
         owner: PluginId::parse(SDK_PLUGIN).expect("static SDK plugin id is valid"),
         imports: vec![
-            optional_import(SessionInterface::interface_id()),
-            optional_import(OptionsInterface::interface_id()),
-            optional_import(ExecutionInterface::interface_id()),
-            optional_import(ContextInterface::interface_id()),
+            optional_import(SessionInterface::interface_id(), SessionInterface::schema()),
+            optional_import(OptionsInterface::interface_id(), OptionsInterface::schema()),
+            optional_import(
+                ExecutionInterface::interface_id(),
+                ExecutionInterface::schema(),
+            ),
+            optional_import(ContextInterface::interface_id(), ContextInterface::schema()),
         ],
         exports: vec![
             ComponentExport {
                 interface: SdkSessionInterface::interface_id(),
+                schema: SdkSessionInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },
             ComponentExport {
                 interface: SdkToolsInterface::interface_id(),
+                schema: SdkToolsInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },
             ComponentExport {
                 interface: SdkSkillsInterface::interface_id(),
+                schema: SdkSkillsInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },
             ComponentExport {
                 interface: SdkConfigInterface::interface_id(),
+                schema: SdkConfigInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },
@@ -379,28 +440,56 @@ impl PluginInstance for SdkPlugin {
     ) -> Result<Vec<u8>, String> {
         let context = plugin_context(host, &self.config_root);
         if service == &sdk_session_service() {
-            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            return serde_json::to_vec(&session_command(&context, command)?)
+            let interface = SdkSessionInterface::interface_id();
+            let command = context
+                .kernel
+                .decode_projected::<SdkSessionCommand>(&interface, input)
+                .map_err(|error| error.to_string())?;
+            let response = session_command(&context, command)?;
+            return context
+                .kernel
+                .encode_value(&response)
                 .map_err(|error| error.to_string());
         }
         if service == &sdk_tools_service() {
-            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            return serde_json::to_vec(&tool_command(&context, command)?)
+            let interface = SdkToolsInterface::interface_id();
+            let command = context
+                .kernel
+                .decode_projected::<SdkToolCommand>(&interface, input)
+                .map_err(|error| error.to_string())?;
+            let response = tool_command(&context, command)?;
+            return context
+                .kernel
+                .encode_value(&response)
                 .map_err(|error| error.to_string());
         }
         if service == &sdk_skills_service() {
-            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            return serde_json::to_vec(&skill_command(&context, command)?)
+            let interface = SdkSkillsInterface::interface_id();
+            let command = context
+                .kernel
+                .decode_projected::<SdkSkillCommand>(&interface, input)
+                .map_err(|error| error.to_string())?;
+            let response = skill_command(&context, command)?;
+            return context
+                .kernel
+                .encode_value(&response)
                 .map_err(|error| error.to_string());
         }
         if service == &sdk_config_service() {
-            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let interface = SdkConfigInterface::interface_id();
+            let command = context
+                .kernel
+                .decode_projected::<SdkConfigCommand>(&interface, input)
+                .map_err(|error| error.to_string())?;
             let root = context
                 .plugin
                 .settings
                 .as_deref()
                 .ok_or("PHENIX_CONFIG_DIR is not configured")?;
-            return serde_json::to_vec(&config_command(root, command)?)
+            let response = config_command(root, command)?;
+            return context
+                .kernel
+                .encode_value(&response)
                 .map_err(|error| error.to_string());
         }
         Err(format!("unsupported SDK service: {service}"))
@@ -423,7 +512,9 @@ fn config_command(root: &Path, command: SdkConfigCommand) -> Result<SdkConfigRes
             let content = fs::read(&path).map_err(|error| {
                 format!("failed to read config file {}: {error}", path.display())
             })?;
-            Ok(SdkConfigResponse::File { content })
+            Ok(SdkConfigResponse::File {
+                content: content.into(),
+            })
         }
     }
 }
@@ -461,7 +552,7 @@ fn open_session(
     let existing = match context
         .sdk
         .sessions
-        .invoke(&SessionCommand::Get { id: id.clone() })
+        .invoke_projected(&SessionCommand::Get { id: id.clone() })
         .map_err(|error| error.to_string())?
     {
         SessionResponse::Session { session } => session,
@@ -489,7 +580,7 @@ fn open_session(
     match context
         .sdk
         .sessions
-        .invoke(&SessionCommand::Create { id })
+        .invoke_projected(&SessionCommand::Create { id })
         .map_err(|error| error.to_string())?
     {
         SessionResponse::Created { session } => Ok(SdkSessionResponse::Opened {
@@ -513,11 +604,13 @@ fn tool_command(
             let response = context
                 .sdk
                 .execution
-                .invoke(&ExecutionCommand::RegisterCallable {
-                    id,
-                    service,
-                    required_authority: ExecutionAuthority::new(required_capabilities),
-                })
+                .invoke_projected::<ExecutionCommand, ExecutionResponse>(
+                    &ExecutionCommand::RegisterCallable {
+                        id,
+                        service,
+                        required_authority: ExecutionAuthority::new(required_capabilities),
+                    },
+                )
                 .map_err(|error| error.to_string())?;
             let ExecutionResponse::Callable { callable } = response else {
                 return Err("unexpected execution response while registering SDK tool".into());
@@ -538,11 +631,13 @@ fn tool_command(
             let response = context
                 .sdk
                 .execution
-                .invoke(&ExecutionCommand::InvokeCallable {
-                    execution_id,
-                    callable_id: id,
-                    input,
-                })
+                .invoke_projected::<ExecutionCommand, ExecutionResponse>(
+                    &ExecutionCommand::InvokeCallable {
+                        execution_id,
+                        callable_id: id,
+                        input,
+                    },
+                )
                 .map_err(|error| error.to_string())?;
             let ExecutionResponse::Invocation { output } = response else {
                 return Err("unexpected execution response while invoking SDK tool".into());
@@ -619,7 +714,7 @@ fn invoke_context(
     context
         .sdk
         .context
-        .invoke(&command)
+        .invoke_projected(&command)
         .map_err(|error| error.to_string())
 }
 
@@ -685,7 +780,7 @@ fn resolve_bool(
     let response = context
         .sdk
         .options
-        .invoke(&OptionCommand::Resolve {
+        .invoke_projected(&OptionCommand::Resolve {
             key: key.clone(),
             context: option_context.clone(),
         })
@@ -736,6 +831,26 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn abi<T>(value: &T) -> Vec<u8>
+    where
+        for<'value> phenix_core::PhenixValue: From<&'value T>,
+    {
+        serde_json::to_vec(&phenix_core::PhenixValue::from(value)).unwrap()
+    }
+
+    fn projected<T>(bytes: &[u8]) -> T
+    where
+        for<'value> T: TryFrom<
+            phenix_core::Project<&'value phenix_core::PhenixValue>,
+            Error = phenix_core::ValueError,
+        >,
+    {
+        serde_json::from_slice::<phenix_core::PhenixValue>(bytes)
+            .unwrap()
+            .project()
+            .unwrap()
     }
 
     fn authority() -> Authority {
@@ -793,7 +908,7 @@ mod tests {
             )
             .unwrap(),
             SdkConfigResponse::File {
-                content: b"settings".to_vec(),
+                content: b"settings".to_vec().into(),
             }
         );
     }
@@ -860,16 +975,15 @@ mod tests {
             let output = kernel
                 .invoke(
                     &sdk_session_service(),
-                    &serde_json::to_vec(&SdkSessionCommand::Open {
+                    &abi(&SdkSessionCommand::Open {
                         id: "root".into(),
                         agent: Some("planner".into()),
-                    })
-                    .unwrap(),
+                    }),
                     &authority,
                     None,
                 )
                 .unwrap();
-            serde_json::from_slice::<SdkSessionResponse>(&output).unwrap()
+            projected::<SdkSessionResponse>(&output)
         };
 
         assert!(matches!(
@@ -884,12 +998,11 @@ mod tests {
         kernel
             .invoke(
                 &options_service(),
-                &serde_json::to_vec(&OptionCommand::Set {
+                &abi(&OptionCommand::Set {
                     key: OptionKey::parse("session.reuse_existing").unwrap(),
                     scope: OptionScope::Agent(OptionSubjectId::parse("planner").unwrap()),
                     value: OptionValue::Bool(false),
-                })
-                .unwrap(),
+                }),
                 &authority,
                 None,
             )
@@ -898,11 +1011,10 @@ mod tests {
         assert!(kernel
             .invoke(
                 &sdk_session_service(),
-                &serde_json::to_vec(&SdkSessionCommand::Open {
+                &abi(&SdkSessionCommand::Open {
                     id: "root".into(),
                     agent: Some("planner".into()),
-                })
-                .unwrap(),
+                }),
                 &authority,
                 None,
             )
@@ -938,18 +1050,17 @@ mod tests {
         let output = kernel
             .invoke(
                 &sdk_tools_service(),
-                &serde_json::to_vec(&SdkToolCommand::Register {
+                &abi(&SdkToolCommand::Register {
                     id: "read".into(),
                     service: "fixture.read@1".into(),
                     required_capabilities: BTreeSet::new(),
-                })
-                .unwrap(),
+                }),
                 &authority,
                 None,
             )
             .unwrap();
         assert!(matches!(
-            serde_json::from_slice::<SdkToolResponse>(&output).unwrap(),
+            projected::<SdkToolResponse>(&output),
             SdkToolResponse::Tool { tool } if tool.id == "read" && tool.service == "fixture.read@1"
         ));
     }
@@ -992,31 +1103,30 @@ mod tests {
         let register = kernel
             .invoke(
                 &sdk_skills_service(),
-                &serde_json::to_vec(&SdkSkillCommand::Register {
+                &abi(&SdkSkillCommand::Register {
                     id: "review".into(),
-                    content: b"review carefully".to_vec(),
-                })
-                .unwrap(),
+                    content: b"review carefully".to_vec().into(),
+                }),
                 &authority,
                 None,
             )
             .unwrap();
         assert!(matches!(
-            serde_json::from_slice::<SdkSkillResponse>(&register).unwrap(),
+            projected::<SdkSkillResponse>(&register),
             SdkSkillResponse::Skill { skill: Some(skill) }
-                if skill.id == "review" && skill.content == b"review carefully"
+                if skill.id == "review" && skill.content.as_ref() == b"review carefully"
         ));
 
         let list = kernel
             .invoke(
                 &sdk_skills_service(),
-                &serde_json::to_vec(&SdkSkillCommand::List).unwrap(),
+                &abi(&SdkSkillCommand::List),
                 &authority,
                 None,
             )
             .unwrap();
         assert!(matches!(
-            serde_json::from_slice::<SdkSkillResponse>(&list).unwrap(),
+            projected::<SdkSkillResponse>(&list),
             SdkSkillResponse::Skills { skills } if skills.len() == 1 && skills[0].id == "review"
         ));
     }

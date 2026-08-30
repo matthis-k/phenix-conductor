@@ -4,8 +4,8 @@ use crate::{
 };
 use phenix_core::{
     Authority, CapabilityId, ConfigContribution, ConfigContributionSource, ConfigNamespace,
-    ConfigurationFrontendId, Kernel, KernelConfig, LocalPersistence, ResolvedHarness,
-    ResolvedHarnessActivation,
+    ConfigurationFrontendId, Kernel, KernelConfig, LocalPersistence, PhenixValue, Project,
+    ResolvedHarness, ResolvedHarnessActivation,
 };
 use std::{
     fs,
@@ -65,12 +65,15 @@ fn invoke(kernel: &mut Kernel, command: &ExecutionCommand) -> ExecutionResponse 
     let output = kernel
         .invoke(
             &execution_service(),
-            &serde_json::to_vec(command).unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(command)).unwrap(),
             &caller_authority(),
             None,
         )
         .unwrap();
-    serde_json::from_slice(&output).unwrap()
+    {
+        let value: PhenixValue = serde_json::from_slice(&output).unwrap();
+        ExecutionResponse::try_from(Project(&value)).unwrap()
+    }
 }
 
 fn execution(response: ExecutionResponse) -> ExecutionRecord {
@@ -151,11 +154,11 @@ fn restored_execution_lineage_stays_pinned_when_the_runtime_generation_changes()
     let error = kernel
         .invoke(
             &execution_service(),
-            &serde_json::to_vec(&ExecutionCommand::InvokeCallable {
+            &serde_json::to_vec(&PhenixValue::from(&ExecutionCommand::InvokeCallable {
                 execution_id: "root".into(),
                 callable_id: "fixture.callable".into(),
                 input: Vec::new(),
-            })
+            }))
             .unwrap(),
             &caller_authority(),
             None,

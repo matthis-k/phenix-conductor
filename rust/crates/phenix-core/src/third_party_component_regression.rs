@@ -32,6 +32,7 @@ fn third_party_plugin_defines_a_typed_runtime_interface_without_core_registratio
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: interface.clone(),
+            schema: Default::default(),
             priority: 100,
             required_authority: Authority::new([use_review.clone()]),
         }],
@@ -42,6 +43,7 @@ fn third_party_plugin_defines_a_typed_runtime_interface_without_core_registratio
         owner: PluginId::parse("acme.agent-plugin").unwrap(),
         imports: vec![ComponentImport {
             interface: interface.clone(),
+            schema: Default::default(),
             required: true,
             authority: Authority::new([use_review.clone()]),
         }],

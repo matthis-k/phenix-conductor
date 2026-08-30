@@ -1,4 +1,4 @@
-use crate::{model_routing_manifest, ModelCommand, ModelResponse, MODEL_ROUTING_SERVICE};
+use crate::{model_routing_manifest, MODEL_ROUTING_SERVICE};
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface, ComponentManifest,
     InterfaceId, PluginId,
@@ -13,12 +13,13 @@ const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 pub struct ModelRoutingInterface;
 
 impl ComponentInterface for ModelRoutingInterface {
-    type Request = ModelCommand;
-    type Response = ModelResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(MODEL_ROUTING_SERVICE)
             .expect("static model routing interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::ModelCommand, crate::ModelResponse>()
     }
 }
 
@@ -37,6 +38,7 @@ pub fn model_routing_component_manifest(maximum_authority: Authority) -> Compone
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: ModelRoutingInterface::interface_id(),
+            schema: ModelRoutingInterface::schema(),
             priority: 100,
             required_authority: persistence_authority(),
         }],
@@ -86,6 +88,7 @@ mod tests {
             owner: plugin("fixture.model-consumer"),
             imports: vec![ComponentImport {
                 interface: ModelRoutingInterface::interface_id(),
+                schema: ModelRoutingInterface::schema(),
                 required: true,
                 authority: authority.clone(),
             }],
@@ -118,6 +121,7 @@ mod tests {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: ModelRoutingInterface::interface_id(),
+                schema: ModelRoutingInterface::schema(),
                 priority: 200,
                 required_authority: Authority::default(),
             }],

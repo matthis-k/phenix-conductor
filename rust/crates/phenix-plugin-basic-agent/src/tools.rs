@@ -1,8 +1,9 @@
 use phenix_core::{
-    tool_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost,
-    PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
-    ServiceRole, ToolCommand, ToolDefinition, ToolResponse, TransactionOp, TOOL_SERVICE,
+    tool_service, Authority, CallableId, CapabilityId, ComponentExport, ComponentId,
+    ComponentInterface, ComponentManifest, DurableSchema, InterfaceId, PluginContext,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
+    ServiceContribution, ServiceId, ServiceRole, ToolCommand, ToolDefinition, ToolResponse,
+    TransactionOp, TOOL_SERVICE,
 };
 
 pub const BASIC_TOOLS_PLUGIN: &str = "phenix.basic-tools";
@@ -21,9 +22,6 @@ fn context<'host, 'runtime>(
 pub struct BasicToolsInterface;
 
 impl ComponentInterface for BasicToolsInterface {
-    type Request = ToolCommand;
-    type Response = ToolResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(TOOL_SERVICE).expect("static tool interface id is valid")
     }
@@ -55,6 +53,7 @@ pub fn basic_tools_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: BasicToolsInterface::interface_id(),
+            schema: BasicToolsInterface::schema(),
             priority: 10,
             required_authority: Authority::default(),
         }],
@@ -98,7 +97,6 @@ fn handle(
 ) -> Result<ToolResponse, String> {
     match command {
         ToolCommand::Register { tool } => {
-            require_id(&tool.id)?;
             write_tool(context, &tool)?;
             Ok(ToolResponse::Tool { tool: Some(tool) })
         }
@@ -115,9 +113,11 @@ fn handle(
         }),
         ToolCommand::Invoke { id, input } => {
             let tool = read_tool(context, &id)?.ok_or_else(|| format!("unknown tool: {id}"))?;
-            let mut output = tool.output_prefix;
-            output.extend(input);
-            Ok(ToolResponse::Output { output })
+            let mut output = tool.output_prefix.into_vec();
+            output.extend_from_slice(input.as_ref());
+            Ok(ToolResponse::Output {
+                output: output.into(),
+            })
         }
     }
 }
@@ -148,7 +148,7 @@ fn write_tool(context: &BasicToolsContext<'_, '_>, tool: &ToolDefinition) -> Res
 
 fn read_tool(
     context: &BasicToolsContext<'_, '_>,
-    id: &str,
+    id: &CallableId,
 ) -> Result<Option<ToolDefinition>, String> {
     context
         .kernel
@@ -158,21 +158,13 @@ fn read_tool(
         .transpose()
 }
 
-fn read_ids(context: &BasicToolsContext<'_, '_>) -> Result<Vec<String>, String> {
+fn read_ids(context: &BasicToolsContext<'_, '_>) -> Result<Vec<CallableId>, String> {
     context
         .kernel
         .read_durable(&namespace(), INDEX_KEY)
         .map_err(|error| error.to_string())?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
         .unwrap_or_else(|| Ok(Vec::new()))
-}
-
-fn require_id(id: &str) -> Result<(), String> {
-    if id.trim().is_empty() {
-        Err("tool id must not be empty".into())
-    } else {
-        Ok(())
-    }
 }
 
 fn namespace() -> ResourceNamespace {

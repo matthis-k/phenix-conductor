@@ -1,4 +1,4 @@
-use crate::{frontend_manifest, FrontendCommand, FrontendResponse, FRONTEND_SERVICE};
+use crate::{frontend_manifest, FRONTEND_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginId,
@@ -11,11 +11,12 @@ const FRONTEND_PLUGIN: &str = "phenix.frontend-services";
 pub struct FrontendInterface;
 
 impl ComponentInterface for FrontendInterface {
-    type Request = FrontendCommand;
-    type Response = FrontendResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(FRONTEND_SERVICE).expect("static frontend interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::FrontendCommand, crate::FrontendResponse>()
     }
 }
 
@@ -32,11 +33,13 @@ pub fn frontend_component_manifest(maximum_authority: Authority) -> ComponentMan
         owner: PluginId::parse(FRONTEND_PLUGIN).expect("static frontend plugin id is valid"),
         imports: vec![ComponentImport {
             interface: ExecutionInterface::interface_id(),
+            schema: ExecutionInterface::schema(),
             required: true,
             authority: authority.clone(),
         }],
         exports: vec![ComponentExport {
             interface: FrontendInterface::interface_id(),
+            schema: FrontendInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],

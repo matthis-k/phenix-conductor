@@ -82,10 +82,11 @@ fn request_object(
     request: &ModelInferenceRequest,
     reserved: &[&str],
 ) -> Result<(Map<String, Value>, String), ProviderError> {
-    let text =
-        String::from_utf8(request.input.clone()).map_err(|_| ProviderError::InvalidRequest {
+    let text = std::str::from_utf8(request.input.as_ref())
+        .map_err(|_| ProviderError::InvalidRequest {
             message: "provider protocols require UTF-8 model input".to_owned(),
-        })?;
+        })?
+        .to_owned();
     let mut body = Map::new();
     for (key, value) in &request.options {
         if reserved.contains(&key.as_str()) {
@@ -105,7 +106,10 @@ fn openai_responses_request(
     request: &ModelInferenceRequest,
 ) -> Result<ProviderRequest, ProviderError> {
     let (mut body, text) = request_object(request, &["model", "input"])?;
-    body.insert("model".to_owned(), Value::String(request.model.clone()));
+    body.insert(
+        "model".to_owned(),
+        Value::String(request.model.as_str().to_owned()),
+    );
     body.insert("input".to_owned(), Value::String(text));
     base_request(endpoint, "responses", Value::Object(body), json_headers())
 }
@@ -115,7 +119,10 @@ fn openai_chat_request(
     request: &ModelInferenceRequest,
 ) -> Result<ProviderRequest, ProviderError> {
     let (mut body, text) = request_object(request, &["model", "messages"])?;
-    body.insert("model".to_owned(), Value::String(request.model.clone()));
+    body.insert(
+        "model".to_owned(),
+        Value::String(request.model.as_str().to_owned()),
+    );
     body.insert(
         "messages".to_owned(),
         serde_json::json!([{"role":"user","content":text}]),
@@ -133,7 +140,10 @@ fn anthropic_request(
     request: &ModelInferenceRequest,
 ) -> Result<ProviderRequest, ProviderError> {
     let (mut body, text) = request_object(request, &["model", "messages"])?;
-    body.insert("model".to_owned(), Value::String(request.model.clone()));
+    body.insert(
+        "model".to_owned(),
+        Value::String(request.model.as_str().to_owned()),
+    );
     body.insert(
         "messages".to_owned(),
         serde_json::json!([{"role":"user","content":text}]),
@@ -160,7 +170,7 @@ fn response_with_text(value: &Value, text: String) -> ModelInferenceResponse {
         provider_metadata.insert("usage".to_owned(), usage);
     }
     ModelInferenceResponse {
-        output: text.into_bytes(),
+        output: text.into_bytes().into(),
         provider_metadata,
     }
 }
@@ -303,8 +313,8 @@ mod tests {
 
     fn request() -> ModelInferenceRequest {
         ModelInferenceRequest {
-            model: "test-model".to_owned(),
-            input: b"hello".to_vec(),
+            model: phenix_core::ModelId::parse("test-model").unwrap(),
+            input: b"hello".to_vec().into(),
             options: BTreeMap::new(),
         }
     }
@@ -342,7 +352,7 @@ mod tests {
                 }),
             ))
             .unwrap();
-        assert_eq!(decoded.output, b"world");
+        assert_eq!(decoded.output.as_ref(), b"world");
         assert_eq!(decoded.provider_metadata["id"], "response-1");
     }
 
@@ -365,7 +375,7 @@ mod tests {
                 }),
             ))
             .unwrap();
-        assert_eq!(decoded.output, b"world");
+        assert_eq!(decoded.output.as_ref(), b"world");
     }
 
     #[test]

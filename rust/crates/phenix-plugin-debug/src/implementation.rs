@@ -1,40 +1,43 @@
-use crate::debug_component_id;
-use phenix_core::{
-    Authority, ComponentInterface, ComponentInvocationError, PluginContext, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, SdkClient, ServiceContribution,
-    ServiceId,
+use crate::{
+    debug_component_id, ContextProbeCommand, FrontendProbeCommand, JobProbeCommand,
+    ModelProbeCommand, PlanningProbeCommand, SessionProbeCommand,
 };
-use phenix_plugin_context::{ContextCommand, ContextInterface};
-use phenix_plugin_frontend::{FrontendCommand, FrontendInterface};
-use phenix_plugin_jobs::{JobCommand, JobInterface};
-use phenix_plugin_models::{ModelCommand, ModelRoutingInterface};
-use phenix_plugin_planning::{PlanningCommand, PlanningInterface};
-use phenix_plugin_sessions::{SessionCommand, SessionInterface};
+use phenix_core::{
+    Authority, ComponentInterface, ComponentInvocationError, PhenixValue, PluginContext,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, SdkClient,
+    ServiceContribution, ServiceId,
+};
+use phenix_plugin_context::ContextInterface;
+use phenix_plugin_frontend::FrontendInterface;
+use phenix_plugin_jobs::JobInterface;
+use phenix_plugin_models::ModelRoutingInterface;
+use phenix_plugin_planning::PlanningInterface;
+use phenix_plugin_sessions::SessionInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const DEBUG_SERVICE: &str = "phenix.debug@1";
 const DEBUG_PLUGIN: &str = "phenix.debug";
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum DebugCommand {
     Snapshot,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct DiagnosticEntry {
     pub available: bool,
     pub value: serde_json::Value,
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct DiagnosticSnapshot {
     pub services: BTreeMap<String, DiagnosticEntry>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum DebugResponse {
     Snapshot { snapshot: DiagnosticSnapshot },
@@ -112,9 +115,17 @@ impl PluginInstance for DebugPlugin {
         if service != &debug_service() {
             return Err(format!("unsupported debug service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command);
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host);
+        let interface = crate::DebugInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<DebugCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&context, command);
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -132,73 +143,89 @@ fn snapshot(context: &DebugContext<'_, '_>) -> DiagnosticSnapshot {
         &context.sdk.sessions,
         &mut services,
         "sessions",
-        &SessionCommand::List,
+        &SessionProbeCommand::List,
     );
     probe(
         &context.sdk.context,
         &mut services,
         "context",
-        &ContextCommand::List,
+        &ContextProbeCommand::List,
     );
     probe(
         &context.sdk.planning,
         &mut services,
         "planning_history",
-        &PlanningCommand::SearchHistory {
+        &PlanningProbeCommand::SearchHistory {
             objective_id: None,
             query: String::new(),
         },
     );
-    probe(&context.sdk.jobs, &mut services, "jobs", &JobCommand::List);
+    probe(
+        &context.sdk.jobs,
+        &mut services,
+        "jobs",
+        &JobProbeCommand::List,
+    );
     probe(
         &context.sdk.models,
         &mut services,
         "models",
-        &ModelCommand::ListProfiles,
+        &ModelProbeCommand::ListProfiles,
     );
     probe(
         &context.sdk.frontends,
         &mut services,
         "frontends",
-        &FrontendCommand::Catalog,
+        &FrontendProbeCommand::Catalog,
     );
     DiagnosticSnapshot { services }
 }
 
-fn probe<I>(
+fn probe<I, Request>(
     client: &SdkClient<'_, '_, I>,
     entries: &mut BTreeMap<String, DiagnosticEntry>,
     name: &str,
-    command: &I::Request,
+    command: &Request,
 ) where
     I: ComponentInterface,
-    I::Response: Serialize,
+    for<'value> PhenixValue: From<&'value Request>,
 {
-    let entry = match client.invoke(command) {
-        Ok(response) => match serde_json::to_value(response) {
-            Ok(value) => DiagnosticEntry {
-                available: true,
-                value,
-                error: None,
-            },
-            Err(error) => DiagnosticEntry {
-                available: false,
-                value: serde_json::Value::Null,
-                error: Some(format!("invalid diagnostic service response: {error}")),
-            },
-        },
-        Err(error @ ComponentInvocationError::UnboundImport { .. }) => DiagnosticEntry {
-            available: false,
-            value: serde_json::Value::Null,
-            error: Some(error.to_string()),
+    let request = PhenixValue::from(command);
+    let entry = match client.invoke_value(&request) {
+        Ok(response) => response_entry(response),
+        Err(error) => error_entry(error),
+    };
+    entries.insert(name.into(), entry);
+}
+
+fn response_entry(response: PhenixValue) -> DiagnosticEntry {
+    match serde_json::to_value(response) {
+        Ok(value) => DiagnosticEntry {
+            available: true,
+            value,
+            error: None,
         },
         Err(error) => DiagnosticEntry {
             available: false,
             value: serde_json::Value::Null,
+            error: Some(format!("invalid diagnostic service response: {error}")),
+        },
+    }
+}
+
+fn error_entry(error: ComponentInvocationError) -> DiagnosticEntry {
+    match error {
+        error @ ComponentInvocationError::UnboundImport { .. } => DiagnosticEntry {
+            available: false,
+            value: serde_json::Value::Null,
             error: Some(error.to_string()),
         },
-    };
-    entries.insert(name.into(), entry);
+        error => DiagnosticEntry {
+            available: false,
+            value: serde_json::Value::Null,
+            error: Some(error.to_string()),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -236,15 +263,12 @@ mod tests {
         kernel.activate_resolved_harness(&resolved).unwrap();
         kernel.activate_all().unwrap();
 
+        let input = serde_json::to_vec(&PhenixValue::from(&DebugCommand::Snapshot)).unwrap();
         let output = kernel
-            .invoke(
-                &debug_service(),
-                &serde_json::to_vec(&DebugCommand::Snapshot).unwrap(),
-                &authority,
-                None,
-            )
+            .invoke(&debug_service(), &input, &authority, None)
             .unwrap();
-        let DebugResponse::Snapshot { snapshot } = serde_json::from_slice(&output).unwrap();
+        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        let DebugResponse::Snapshot { snapshot } = output.project().unwrap();
         assert!(snapshot.services["sessions"].available);
         assert!(!snapshot.services["context"].available);
         assert!(!snapshot.services["models"].available);

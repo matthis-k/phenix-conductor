@@ -1,3 +1,8 @@
+use phenix_core::{PhenixValue, Project, ValueError};
+use phenix_plugin_catalog::{
+    ContextCommand, ContextResourceKind, ContextResponse, ContextScope, PlanningCommand,
+    PlanningResponse, SessionCommand, SessionRecord, SessionResponse,
+};
 use serde_json::Value;
 use std::{
     fs,
@@ -15,7 +20,6 @@ fn run_harness(state: &Path, requests: &[Value]) -> Vec<Value> {
         .stderr(Stdio::inherit())
         .spawn()
         .expect("supported Harness binary must start");
-
     {
         let mut stdin = child.stdin.take().expect("Harness stdin must be piped");
         for request in requests {
@@ -23,7 +27,6 @@ fn run_harness(state: &Path, requests: &[Value]) -> Vec<Value> {
             stdin.write_all(b"\n").unwrap();
         }
     }
-
     let output = child.wait_with_output().unwrap();
     assert!(
         output.status.success(),
@@ -34,6 +37,21 @@ fn run_harness(state: &Path, requests: &[Value]) -> Vec<Value> {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+fn structural_input<T>(value: &T) -> Value
+where
+    for<'value> PhenixValue: From<&'value T>,
+{
+    serde_json::to_value(PhenixValue::from(value)).unwrap()
+}
+
+fn structural_output<T>(response: &Value) -> T
+where
+    for<'value> T: TryFrom<Project<&'value PhenixValue>, Error = ValueError>,
+{
+    let value: PhenixValue = serde_json::from_value(response.clone()).unwrap();
+    T::try_from(Project(&value)).unwrap()
 }
 
 #[test]
@@ -54,42 +72,53 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
             serde_json::json!({
                 "id": 1,
                 "service": "phenix.sessions@1",
-                "input": {"operation": "create", "id": "process-session"}
+                "input": structural_input(&SessionCommand::Create { id: "process-session".into() })
             }),
             serde_json::json!({
                 "id": 2,
                 "service": "phenix.context@1",
-                "input": {
-                    "operation": "register",
-                    "resource_id": "process:context",
-                    "kind": "external",
-                    "source": "process-roundtrip",
-                    "scope": "workspace",
-                    "content": [112, 114, 111, 99, 101, 115, 115]
-                }
+                "input": structural_input(&ContextCommand::Register {
+                    resource_id: "process:context".into(),
+                    kind: ContextResourceKind::External,
+                    source: "process-roundtrip".into(),
+                    scope: ContextScope::Workspace,
+                    content: b"process".to_vec().into(),
+                })
             }),
             serde_json::json!({
                 "id": 3,
                 "service": "phenix.planning@1",
-                "input": {
-                    "operation": "create_objective",
-                    "id": "process-objective",
-                    "title": "Process parity",
-                    "parent": null
-                }
+                "input": structural_input(&PlanningCommand::CreateObjective {
+                    id: "process-objective".into(),
+                    title: "Process parity".into(),
+                    parent: None,
+                })
             }),
         ],
     );
     assert_eq!(first.len(), 3);
     assert_eq!(first[0]["status"], "ok");
-    assert_eq!(first[0]["output"]["session"]["id"], "process-session");
-    assert_eq!(first[1]["status"], "ok");
     assert_eq!(
-        first[1]["output"]["resource"]["descriptor"]["resource_id"],
-        "process:context"
+        structural_output::<SessionResponse>(&first[0]["output"]),
+        SessionResponse::Created {
+            session: SessionRecord {
+                id: "process-session".into()
+            },
+        }
     );
+    assert_eq!(first[1]["status"], "ok");
+    let ContextResponse::Registered { resource } = structural_output(&first[1]["output"]) else {
+        panic!("context register returned the wrong response")
+    };
+    assert_eq!(resource.descriptor.resource_id, "process:context");
     assert_eq!(first[2]["status"], "ok");
-    assert_eq!(first[2]["output"]["objective"]["id"], "process-objective");
+    let PlanningResponse::Objective {
+        objective: Some(objective),
+    } = structural_output(&first[2]["output"])
+    else {
+        panic!("planning create returned the wrong response")
+    };
+    assert_eq!(objective.id, "process-objective");
 
     let second = run_harness(
         &state,
@@ -97,31 +126,45 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
             serde_json::json!({
                 "id": 4,
                 "service": "phenix.sessions@1",
-                "input": {"operation": "get", "id": "process-session"}
+                "input": structural_input(&SessionCommand::Get { id: "process-session".into() })
             }),
             serde_json::json!({
                 "id": 5,
                 "service": "phenix.context@1",
-                "input": {"operation": "list"}
+                "input": structural_input(&ContextCommand::List)
             }),
             serde_json::json!({
                 "id": 6,
                 "service": "phenix.planning@1",
-                "input": {"operation": "get_objective", "id": "process-objective"}
+                "input": structural_input(&PlanningCommand::GetObjective { id: "process-objective".into() })
             }),
         ],
     );
     assert_eq!(second.len(), 3);
     assert_eq!(second[0]["status"], "ok");
-    assert_eq!(second[0]["output"]["session"]["id"], "process-session");
+    assert_eq!(
+        structural_output::<SessionResponse>(&second[0]["output"]),
+        SessionResponse::Session {
+            session: Some(SessionRecord {
+                id: "process-session".into()
+            }),
+        }
+    );
     assert_eq!(second[1]["status"], "ok");
-    assert!(second[1]["output"]["descriptors"]
-        .as_array()
-        .unwrap()
+    let ContextResponse::Resources { descriptors } = structural_output(&second[1]["output"]) else {
+        panic!("context list returned the wrong response")
+    };
+    assert!(descriptors
         .iter()
-        .any(|descriptor| descriptor["resource_id"] == "process:context"));
+        .any(|descriptor| descriptor.resource_id == "process:context"));
     assert_eq!(second[2]["status"], "ok");
-    assert_eq!(second[2]["output"]["objective"]["id"], "process-objective");
+    let PlanningResponse::Objective {
+        objective: Some(objective),
+    } = structural_output(&second[2]["output"])
+    else {
+        panic!("planning get returned the wrong response")
+    };
+    assert_eq!(objective.id, "process-objective");
 
     let _ = fs::remove_file(&state);
 }

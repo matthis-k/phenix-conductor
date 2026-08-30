@@ -1,7 +1,8 @@
 use phenix_core::{
-    Authority, CapabilityId, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ServiceContribution, ServiceId,
+    Authority, CapabilityId, ComponentInterface, PluginContext, PluginExecution, PluginHost,
+    PluginId, PluginInstance, PluginManifest, ServiceContribution, ServiceId,
 };
+use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -28,21 +29,21 @@ fn context<'host, 'runtime, 'state>(
     PluginContext::new(host, (), (), root)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum WorkspaceFileVersion {
     Absent,
     Present { content_hash: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct WorkspaceSearchMatch {
     pub path: String,
-    pub line: usize,
+    pub line: u64,
     pub text: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WorkspaceCommand {
     Read {
@@ -66,7 +67,7 @@ pub enum WorkspaceCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum WorkspaceResponse {
     Read {
@@ -162,9 +163,17 @@ impl PluginInstance for WorkspacePlugin {
         if service != &workspace_service() {
             return Err(format!("unsupported workspace service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host, &self.root), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host, &self.root);
+        let interface = crate::WorkspaceInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<WorkspaceCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -341,7 +350,10 @@ fn search_path(
             let relative = path.strip_prefix(workspace_root).unwrap_or(path);
             matches.push(WorkspaceSearchMatch {
                 path: relative.to_string_lossy().into_owned(),
-                line: index + 1,
+                line: u64::try_from(index)
+                    .ok()
+                    .and_then(|line| line.checked_add(1))
+                    .ok_or_else(|| "workspace search line overflow".to_owned())?,
                 text: line.to_owned(),
             });
         }
@@ -386,7 +398,7 @@ fn capture(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig};
+    use phenix_core::{Kernel, KernelConfig, PhenixValue, Project};
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
@@ -423,11 +435,15 @@ mod tests {
         command: WorkspaceCommand,
         authority: &Authority,
     ) -> Result<WorkspaceResponse, String> {
-        let input = serde_json::to_vec(&command).unwrap();
+        let input = serde_json::to_vec(&PhenixValue::from(&command)).unwrap();
         let output = kernel
             .invoke(&workspace_service(), &input, authority, None)
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        {
+            let output: PhenixValue =
+                serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+            WorkspaceResponse::try_from(Project(&output)).map_err(|error| error.to_string())
+        }
     }
 
     #[test]

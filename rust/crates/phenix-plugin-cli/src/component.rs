@@ -1,7 +1,4 @@
-use crate::{
-    cli_manifest, CliDescriptor, CliProbeRequest, CLI_AUTH_STATE_SERVICE, CLI_DISCOVER_SERVICE,
-    CLI_VERSION_SERVICE,
-};
+use crate::{cli_manifest, CLI_AUTH_STATE_SERVICE, CLI_DISCOVER_SERVICE, CLI_VERSION_SERVICE};
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginId,
@@ -19,11 +16,12 @@ pub struct CliAuthStateInterface;
 macro_rules! cli_interface {
     ($type:ty, $service:expr) => {
         impl ComponentInterface for $type {
-            type Request = CliProbeRequest;
-            type Response = CliDescriptor;
-
             fn interface_id() -> InterfaceId {
                 InterfaceId::parse($service).expect("static CLI interface id is valid")
+            }
+
+            fn schema() -> phenix_core::InterfaceSchema {
+                phenix_core::InterfaceSchema::of::<crate::CliProbeRequest, crate::CliDescriptor>()
             }
         }
     };
@@ -49,22 +47,26 @@ pub fn cli_component_manifest(maximum_authority: Authority) -> ComponentManifest
         owner: PluginId::parse(CLI_PLUGIN).expect("static CLI plugin id is valid"),
         imports: vec![ComponentImport {
             interface: WorkspaceInterface::interface_id(),
+            schema: WorkspaceInterface::schema(),
             required: true,
             authority: shell,
         }],
         exports: vec![
             ComponentExport {
                 interface: CliDiscoverInterface::interface_id(),
+                schema: CliDiscoverInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },
             ComponentExport {
                 interface: CliVersionInterface::interface_id(),
+                schema: CliVersionInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },
             ComponentExport {
                 interface: CliAuthStateInterface::interface_id(),
+                schema: CliAuthStateInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },

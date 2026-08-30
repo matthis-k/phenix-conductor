@@ -1,7 +1,7 @@
 use crate::{session_tree_factory, session_tree_manifest};
 use phenix_core::{
-    session_service, Authority, Kernel, KernelConfig, KernelError, LayerPolicy, PluginId,
-    ServiceParticipantOutcome, SessionCommand, SessionResponse,
+    session_service, Authority, Kernel, KernelConfig, KernelError, LayerPolicy, PhenixValue,
+    PluginId, Project, ServiceParticipantOutcome, SessionCommand, SessionResponse,
 };
 use phenix_plugin_sessions::{session_factory, session_manifest};
 
@@ -41,15 +41,17 @@ fn configured_kernel(layer: LayerPolicy) -> Kernel {
 }
 
 fn create(kernel: &mut Kernel, id: &str) -> SessionResponse {
+    let command = SessionCommand::Create { id: id.into() };
     let output = kernel
         .invoke(
             &session_service(),
-            &serde_json::to_vec(&SessionCommand::Create { id: id.into() }).unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority(),
             None,
         )
         .unwrap();
-    serde_json::from_slice(&output).unwrap()
+    let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+    SessionResponse::try_from(Project(&output)).unwrap()
 }
 
 #[test]

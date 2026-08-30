@@ -1,7 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
-    TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
+    ServiceId, TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -19,7 +19,7 @@ fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> ArtifactContex
     PluginContext::new(host, (), (), ())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct ArtifactProvenance {
     pub producer: String,
     pub provider_identity: Option<String>,
@@ -27,7 +27,7 @@ pub struct ArtifactProvenance {
     pub source_observations: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct ArtifactRecord {
     pub id: String,
     pub content_identity: String,
@@ -35,14 +35,14 @@ pub struct ArtifactRecord {
     pub provenance: ArtifactProvenance,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct NormalizedReadRequest {
     pub resource: String,
     pub parameters: BTreeMap<String, String>,
     pub presentation_hint: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct ReadProviderIdentity {
     pub provider: String,
     pub contract_version: String,
@@ -50,7 +50,7 @@ pub struct ReadProviderIdentity {
     pub configuration_identity: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct ReadResultRecord {
     pub id: String,
     pub request_identity: String,
@@ -61,7 +61,9 @@ pub struct ReadResultRecord {
     pub invocation_provenance: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RevalidationVerdict {
     StillValid,
@@ -69,7 +71,7 @@ pub enum RevalidationVerdict {
     Unknown,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct RevalidationRecord {
     pub result_id: String,
     pub provider: ReadProviderIdentity,
@@ -78,7 +80,7 @@ pub struct RevalidationRecord {
     pub provenance: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ArtifactCommand {
     Store {
@@ -110,7 +112,7 @@ pub enum ArtifactCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum ArtifactResponse {
     Stored {
@@ -193,9 +195,17 @@ impl PluginInstance for ArtifactPlugin {
         if service != &artifact_service() {
             return Err(format!("unsupported artifact service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host);
+        let interface = crate::ArtifactInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<ArtifactCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -585,11 +595,12 @@ mod tests {
     }
 
     fn invoke(kernel: &mut Kernel, command: ArtifactCommand) -> ArtifactResponse {
-        let input = serde_json::to_vec(&command).unwrap();
+        let input = serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap();
         let output = kernel
             .invoke(&artifact_service(), &input, &authority(), None)
             .unwrap();
-        serde_json::from_slice(&output).unwrap()
+        let output: phenix_core::PhenixValue = serde_json::from_slice(&output).unwrap();
+        output.project().unwrap()
     }
 
     fn provenance() -> ArtifactProvenance {

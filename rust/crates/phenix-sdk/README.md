@@ -5,17 +5,17 @@ The default plugin-author SDK re-exports the normal Phenix userspace API and pro
 Define a provider from typed protocol and auth values:
 
 ```rust
-use phenix_sdk::{auth, provider};
-use phenix_sdk::provider::Protocol;
+use phenix_sdk::{auth, PluginId};
+use phenix_sdk::provider::{Endpoint, Protocol, ProviderDefinition};
 
 let auth = auth::Definition::api_token(auth::ApiTokenMethod::bearer())
     .with_oauth(auth::OAuthMethod::bearer());
-let provider = provider::define(
-    "provider.example",
-    "https://api.example.com/v1",
+let provider = ProviderDefinition::new(
+    PluginId::parse("provider.example")?,
+    Endpoint::parse("https://api.example.com/v1")?,
     Protocol::OpenAiResponses,
     auth,
-)?;
+);
 ```
 
 The provider definition is composite: endpoint, protocol, and authentication stay separate typed values. Constructors express the semantic choice. Builders are reserved for optional refinement, such as adding another accepted auth method.

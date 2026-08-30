@@ -565,6 +565,7 @@ mod tests {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: interface("fixture.echo@1"),
+                schema: Default::default(),
                 priority: 1,
                 required_authority: authority.clone(),
             }],
@@ -578,6 +579,7 @@ mod tests {
             owner: plugin("consumer-owner"),
             imports: vec![ComponentImport {
                 interface: interface("fixture.echo@1"),
+                schema: Default::default(),
                 required: true,
                 authority: authority.clone(),
             }],
@@ -909,11 +911,13 @@ mod tests {
                 owner: plugin("left-owner"),
                 imports: vec![ComponentImport {
                     interface: right_interface.clone(),
+                    schema: Default::default(),
                     required: true,
                     authority: Authority::default(),
                 }],
                 exports: vec![ComponentExport {
                     interface: left_interface.clone(),
+                    schema: Default::default(),
                     priority: 1,
                     required_authority: Authority::default(),
                 }],
@@ -924,11 +928,13 @@ mod tests {
                 owner: plugin("right-owner"),
                 imports: vec![ComponentImport {
                     interface: left_interface,
+                    schema: Default::default(),
                     required: true,
                     authority: Authority::default(),
                 }],
                 exports: vec![ComponentExport {
                     interface: right_interface,
+                    schema: Default::default(),
                     priority: 1,
                     required_authority: Authority::default(),
                 }],

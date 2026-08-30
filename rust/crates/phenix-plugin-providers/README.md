@@ -21,4 +21,4 @@ For API-token providers, the frontend may submit the token itself or an environm
 
 A preset exposes its default auth definition through `ProviderPreset::auth()`. `definition_with_auth(...)` accepts a replacement composite definition, so additional methods such as `auth::OAuthMethod::bearer()` do not require provider-specific booleans or branches.
 
-Use `provider::define(...)` when an endpoint needs a different protocol or auth definition. Add a `ProtocolAdapter` when the wire format itself differs.
+Use `ProviderDefinition::new(...)` when an endpoint needs a different protocol or auth definition. Add a `ProtocolAdapter` when the wire format itself differs.

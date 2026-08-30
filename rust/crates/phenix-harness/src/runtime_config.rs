@@ -256,15 +256,17 @@ fn ensure_routing_profile(
     profile: RoutingProfile,
 ) -> Result<(), Box<dyn Error>> {
     let authority = default_suite_authority();
+    let command = ModelCommand::GetProfile {
+        id: profile.id.clone(),
+    };
     let output = harness.invoke(
         &model_routing_service(),
-        &serde_json::to_vec(&ModelCommand::GetProfile {
-            id: profile.id.clone(),
-        })?,
+        &serde_json::to_vec(&phenix_core::PhenixValue::from(&command))?,
         &authority,
         None,
     )?;
-    let existing = match serde_json::from_slice::<ModelResponse>(&output)? {
+    let output: phenix_core::PhenixValue = serde_json::from_slice(&output)?;
+    let existing = match ModelResponse::try_from(phenix_core::Project(&output))? {
         ModelResponse::Profile { profile } => profile,
         _ => return Err("model routing service returned the wrong profile response".into()),
     };
@@ -273,14 +275,16 @@ fn ensure_routing_profile(
         Some(existing) if existing == profile => Ok(()),
         Some(_) => Err(format!("routing profile identity is immutable: {}", profile.id).into()),
         None => {
+            let command = ModelCommand::RegisterProfile { profile };
             let output = harness.invoke(
                 &model_routing_service(),
-                &serde_json::to_vec(&ModelCommand::RegisterProfile { profile })?,
+                &serde_json::to_vec(&phenix_core::PhenixValue::from(&command))?,
                 &authority,
                 None,
             )?;
+            let output: phenix_core::PhenixValue = serde_json::from_slice(&output)?;
             if matches!(
-                serde_json::from_slice::<ModelResponse>(&output)?,
+                ModelResponse::try_from(phenix_core::Project(&output))?,
                 ModelResponse::Profile { profile: Some(_) }
             ) {
                 Ok(())
@@ -388,19 +392,20 @@ mod tests {
             }
         ));
 
+        let command = ModelCommand::GetProfile {
+            id: RoutingProfileId::parse("router.test").unwrap(),
+        };
         let output = harness
             .invoke(
                 &model_routing_service(),
-                &serde_json::to_vec(&ModelCommand::GetProfile {
-                    id: RoutingProfileId::parse("router.test").unwrap(),
-                })
-                .unwrap(),
+                &serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap(),
                 &default_suite_authority(),
                 None,
             )
             .unwrap();
+        let output: phenix_core::PhenixValue = serde_json::from_slice(&output).unwrap();
         assert!(matches!(
-            serde_json::from_slice::<ModelResponse>(&output).unwrap(),
+            ModelResponse::try_from(phenix_core::Project(&output)).unwrap(),
             ModelResponse::Profile { profile: Some(_) }
         ));
     }

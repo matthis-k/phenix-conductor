@@ -158,6 +158,7 @@ mod tests {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: InterfaceId::parse(interface).unwrap(),
+                schema: Default::default(),
                 priority: 0,
                 required_authority: Authority::default(),
             }],

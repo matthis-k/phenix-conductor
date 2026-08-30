@@ -5,15 +5,23 @@ pub use component::*;
 pub use implementation::*;
 
 mod service {
-    use super::{RepositorySelectionReason, RepositoryWorkSnapshot, RepositoryWorkerQueue};
-    use phenix_core::{
-        Authority, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-        ServiceContribution, ServiceId,
+    use super::{
+        RepositorySelectionReason, RepositoryWorkSnapshot, RepositoryWorkerInterface,
+        RepositoryWorkerQueue,
     };
-    use serde_json::json;
+    use phenix_core::{
+        Authority, ComponentInterface, PluginContext, PluginExecution, PluginHost, PluginId,
+        PluginInstance, PluginManifest, ServiceContribution, ServiceId,
+    };
 
     pub const REPOSITORY_WORK_QUEUE_SERVICE: &str = "phenix.repository.worker-queue@1";
     const REPOSITORY_WORKER_PLUGIN: &str = "phenix.repository-workers";
+
+    #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+    pub(crate) enum RepositoryWorkQueueResponse {
+        Selected { pr_number: u64, reason: String },
+        Empty,
+    }
 
     #[must_use]
     pub fn repository_worker_manifest() -> PluginManifest {
@@ -54,22 +62,29 @@ mod service {
             &mut self,
             service: &ServiceId,
             input: &[u8],
-            _host: &PluginHost<'_>,
+            host: &PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
             if service != &repository_work_queue_service() {
                 return Err(format!("unsupported repository worker service: {service}"));
             }
-            let snapshot: RepositoryWorkSnapshot =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let context = PluginContext::new(host, (), (), ());
+            let interface = RepositoryWorkerInterface::interface_id();
+            let snapshot = context
+                .kernel
+                .decode_projected::<RepositoryWorkSnapshot>(&interface, input)
+                .map_err(|error| error.to_string())?;
             let queue = RepositoryWorkerQueue::reconstruct(&snapshot);
             let result = match queue.select_work() {
-                Some(selection) => json!({
-                    "pr_number": selection.pr_number,
-                    "reason": selection_reason_name(selection.reason),
-                }),
-                None => serde_json::Value::Null,
+                Some(selection) => RepositoryWorkQueueResponse::Selected {
+                    pr_number: selection.pr_number,
+                    reason: selection_reason_name(selection.reason).to_owned(),
+                },
+                None => RepositoryWorkQueueResponse::Empty,
             };
-            serde_json::to_vec(&result).map_err(|error| error.to_string())
+            context
+                .kernel
+                .encode_value(&result)
+                .map_err(|error| error.to_string())
         }
     }
 
@@ -93,8 +108,14 @@ pub use service::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Authority, Kernel, KernelConfig, PluginState};
+    use phenix_core::{Authority, Kernel, KernelConfig, PhenixValue, PluginState, Project};
     use std::collections::BTreeSet;
+
+    #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+    enum RepositoryWorkQueueView {
+        Selected { pr_number: u64, reason: String },
+        Empty,
+    }
 
     fn success_validation() -> RepositoryValidation {
         RepositoryValidation {
@@ -141,7 +162,7 @@ mod tests {
             }],
             issues: Vec::new(),
         };
-        let input = serde_json::to_vec(&snapshot).unwrap();
+        let input = serde_json::to_vec(&PhenixValue::from(&snapshot)).unwrap();
         let output = kernel
             .invoke(
                 &repository_work_queue_service(),
@@ -150,8 +171,13 @@ mod tests {
                 None,
             )
             .unwrap();
-        let output: serde_json::Value = serde_json::from_slice(&output).unwrap();
-        assert_eq!(output["pr_number"], 42);
-        assert_eq!(output["reason"], "next_ready");
+        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            RepositoryWorkQueueView::try_from(Project(&output)).unwrap(),
+            RepositoryWorkQueueView::Selected {
+                pr_number: 42,
+                reason: "next_ready".to_owned(),
+            }
+        );
     }
 }

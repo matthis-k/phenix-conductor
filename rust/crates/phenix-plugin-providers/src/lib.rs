@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{Authority, PluginExecution, PluginId, PluginManifest};
-use phenix_provider_sdk::{auth, provider, Protocol, ProviderDefinition};
+use phenix_provider_sdk::{auth, Endpoint, Protocol, ProviderDefinition};
 
 pub const PROVIDERS_PLUGIN: &str = "phenix.providers";
 
@@ -73,8 +73,12 @@ impl ProviderPreset {
 
     #[must_use]
     pub fn definition_with_auth(self, auth: auth::Definition) -> ProviderDefinition {
-        provider::define(self.id, self.endpoint, self.protocol, auth)
-            .expect("common provider definition is valid")
+        ProviderDefinition::new(
+            PluginId::parse(self.id).expect("common provider plugin id is valid"),
+            Endpoint::parse(self.endpoint).expect("common provider endpoint is valid"),
+            self.protocol,
+            auth,
+        )
     }
 }
 

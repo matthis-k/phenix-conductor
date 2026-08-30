@@ -1,12 +1,13 @@
 use crate::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, ExternalPluginProcess, ExternalSandbox, ExternalTransportConfig,
-    InterfaceId, Kernel, KernelConfig, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResolvedHarness, ResolvedHarnessActivation, ServiceContribution, ServiceId,
-    ServiceRole,
+    InterfaceId, Kernel, KernelConfig, Key, PhenixValue, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResolvedHarness, ResolvedHarnessActivation,
+    ServiceContribution, ServiceId, ServiceRole,
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     io,
     process::{Child, Command, Stdio},
     sync::Arc,
@@ -24,12 +25,31 @@ struct EchoResponse {
     value: String,
 }
 
+fn key(value: &str) -> Key {
+    Key::parse(value.to_owned()).unwrap()
+}
+
+fn echo_value(value: &str) -> PhenixValue {
+    PhenixValue::Table(BTreeMap::from([(
+        key("value"),
+        PhenixValue::String(value.to_owned()),
+    )]))
+}
+
+fn decode_echo(value: &PhenixValue) -> Result<EchoResponse, String> {
+    let string = |name| match value.get(name).map_err(|error| error.to_string())? {
+        PhenixValue::String(value) => Ok(value.clone()),
+        other => Err(format!("expected string {name}, got {:?}", other.kind())),
+    };
+    Ok(EchoResponse {
+        provider: string("provider")?,
+        value: string("value")?,
+    })
+}
+
 struct EchoInterface;
 
 impl ComponentInterface for EchoInterface {
-    type Request = EchoRequest;
-    type Response = EchoResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse("fixture.external-typed@1").unwrap()
     }
@@ -51,9 +71,9 @@ impl PluginInstance for Consumer {
         let request: EchoRequest =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = host
-            .invoke_import::<EchoInterface>(&component("consumer"), &request)
+            .invoke_import::<EchoInterface>(&component("consumer"), &echo_value(&request.value))
             .map_err(|error| error.to_string())?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        serde_json::to_vec(&decode_echo(&response)?).map_err(|error| error.to_string())
     }
 }
 
@@ -134,6 +154,7 @@ fn typed_component_import_executes_through_the_external_process_host() {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: EchoInterface::interface_id(),
+                schema: EchoInterface::schema(),
                 priority: 100,
                 required_authority: provider_authority.clone(),
             }],
@@ -144,6 +165,7 @@ fn typed_component_import_executes_through_the_external_process_host() {
             owner: consumer.id.clone(),
             imports: vec![ComponentImport {
                 interface: EchoInterface::interface_id(),
+                schema: EchoInterface::schema(),
                 required: true,
                 authority: consumer_authority.clone(),
             }],
@@ -164,7 +186,7 @@ fn typed_component_import_executes_through_the_external_process_host() {
           *'"authority":["workspace.read"]'*) ;;
           *) echo "{\"type\":\"error\",\"request_id\":1,\"generation\":$generation,\"message\":\"authority was not attenuated\"}"; exit 0 ;;
         esac
-        echo "{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[123,34,112,114,111,118,105,100,101,114,34,58,34,101,120,116,101,114,110,97,108,34,44,34,118,97,108,117,101,34,58,34,104,101,108,108,111,34,125]}"
+        echo "{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[123,34,116,121,112,101,34,58,34,116,97,98,108,101,34,44,34,118,97,108,117,101,34,58,123,34,112,114,111,118,105,100,101,114,34,58,123,34,116,121,112,101,34,58,34,115,116,114,105,110,103,34,44,34,118,97,108,117,101,34,58,34,101,120,116,101,114,110,97,108,34,125,44,34,118,97,108,117,101,34,58,123,34,116,121,112,101,34,58,34,115,116,114,105,110,103,34,44,34,118,97,108,117,101,34,58,34,104,101,108,108,111,34,125,125,125]}"
         read stop || true
     "#;
     let transport = ExternalTransportConfig::new(
