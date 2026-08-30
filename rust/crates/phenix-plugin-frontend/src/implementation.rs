@@ -243,17 +243,16 @@ fn handle(
             if !matches!(execution.state, ExecutionState::Active) {
                 return Err("only active root executions may be bound".into());
             }
-            if context
-                .plugin
-                .state
-                .root_routes
-                .insert(execution_id.clone(), connection_id)
-                .is_some()
-            {
+            if context.plugin.state.root_routes.contains_key(&execution_id) {
                 return Err(format!(
                     "root execution already has a frontend route: {execution_id}"
                 ));
             }
+            context
+                .plugin
+                .state
+                .root_routes
+                .insert(execution_id, connection_id);
             Ok(FrontendResponse::Updated)
         }
         FrontendCommand::ReleaseRoot { execution_id } => {
@@ -305,12 +304,12 @@ fn handle(
                 .plugin
                 .state
                 .pending
-                .remove(&correlation_id)
+                .get(&correlation_id)
                 .ok_or_else(|| format!("unknown frontend correlation id: {correlation_id}"))?;
             if pending.connection_id != connection_id {
-                context.plugin.state.pending.insert(correlation_id, pending);
                 return Err("frontend response came from the wrong connection".into());
             }
+            context.plugin.state.pending.remove(&correlation_id);
             Ok(FrontendResponse::Result {
                 result: FrontendServiceResult {
                     correlation_id,
@@ -573,6 +572,56 @@ mod tests {
             )
             .unwrap(),
             FrontendResponse::Result { .. }
+        ));
+    }
+
+    #[test]
+    fn duplicate_root_binding_does_not_replace_the_existing_route() {
+        let mut kernel = kernel();
+        execution(&mut kernel, "root", None);
+        for connection_id in ["frontend-a", "frontend-b"] {
+            invoke(
+                &mut kernel,
+                FrontendCommand::SetProviders {
+                    connection_id: connection_id.into(),
+                    providers: vec![FrontendProviderDescriptor {
+                        id: "web".into(),
+                        capabilities: BTreeSet::new(),
+                    }],
+                },
+            )
+            .unwrap();
+        }
+        invoke(
+            &mut kernel,
+            FrontendCommand::BindRoot {
+                execution_id: "root".into(),
+                connection_id: "frontend-a".into(),
+            },
+        )
+        .unwrap();
+        assert!(invoke(
+            &mut kernel,
+            FrontendCommand::BindRoot {
+                execution_id: "root".into(),
+                connection_id: "frontend-b".into(),
+            },
+        )
+        .unwrap_err()
+        .contains("already has a frontend route"));
+        let response = invoke(
+            &mut kernel,
+            FrontendCommand::BeginExecutionCall {
+                execution_id: "root".into(),
+                provider: "web".into(),
+                method: "search".into(),
+                params: serde_json::json!({}),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            response,
+            FrontendResponse::Request { request } if request.connection_id == "frontend-a"
         ));
     }
 

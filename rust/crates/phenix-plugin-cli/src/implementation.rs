@@ -150,6 +150,28 @@ pub struct CliDescriptor {
     pub observation_provenance: String,
 }
 
+enum CliDiscovery {
+    Available { executable_identity: Option<String> },
+    Unavailable,
+    Limited,
+}
+
+impl CliDiscovery {
+    fn into_descriptor(self, name: &CliName) -> CliDescriptor {
+        match self {
+            Self::Available {
+                executable_identity,
+            } => {
+                let mut result = descriptor(name, CliAvailability::Available);
+                result.executable_identity = executable_identity;
+                result
+            }
+            Self::Unavailable => descriptor(name, CliAvailability::Unavailable),
+            Self::Limited => descriptor(name, CliAvailability::Limited),
+        }
+    }
+}
+
 #[must_use]
 pub fn cli_manifest(maximum_authority: Authority) -> PluginManifest {
     let shell = Authority::new([capability(WORKSPACE_SHELL)]);
@@ -239,11 +261,11 @@ fn shell(context: &CliContext<'_, '_>, command: String) -> Result<WorkspaceRespo
         .map_err(|error| error.to_string())
 }
 
-fn discover(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescriptor, String> {
+fn discover_state(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDiscovery, String> {
     let response = match shell(context, format!("command -v -- {name}")) {
         Ok(response) => response,
         Err(error) if error.contains(WORKSPACE_SHELL) || error.contains("authority") => {
-            return Ok(descriptor(name, CliAvailability::Limited));
+            return Ok(CliDiscovery::Limited);
         }
         Err(error) => return Err(error),
     };
@@ -254,23 +276,35 @@ fn discover(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescripto
         return Err("workspace shell returned a non-process response".into());
     };
     if exit_code != 0 {
-        return Ok(descriptor(name, CliAvailability::Unavailable));
+        return Ok(CliDiscovery::Unavailable);
     }
-    let mut result = descriptor(name, CliAvailability::Available);
-    result.executable_identity = stdout
-        .lines()
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
-    Ok(result)
+    Ok(CliDiscovery::Available {
+        executable_identity: stdout
+            .lines()
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+    })
+}
+
+fn discover(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescriptor, String> {
+    Ok(discover_state(context, name)?.into_descriptor(name))
 }
 
 fn version(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescriptor, String> {
-    let mut result = discover(context, name)?;
-    if result.availability != CliAvailability::Available {
-        return Ok(result);
-    }
+    let discovery = discover_state(context, name)?;
+    let mut result = match discovery {
+        CliDiscovery::Available {
+            executable_identity,
+        } => {
+            let mut result = descriptor(name, CliAvailability::Available);
+            result.executable_identity = executable_identity;
+            result
+        }
+        CliDiscovery::Unavailable => return Ok(descriptor(name, CliAvailability::Unavailable)),
+        CliDiscovery::Limited => return Ok(descriptor(name, CliAvailability::Limited)),
+    };
     let response = shell(context, format!("{name} --version"))?;
     let WorkspaceResponse::Process {
         exit_code,
@@ -291,19 +325,31 @@ fn version(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescriptor
 }
 
 fn auth_state(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescriptor, String> {
-    let mut result = discover(context, name)?;
+    let discovery = discover_state(context, name)?;
     if name.as_str() != "gh" {
+        let mut result = discovery.into_descriptor(name);
         result.auth_state = Some(CliAuthState::Unsupported);
         return Ok(result);
     }
-    if result.availability != CliAvailability::Available {
-        result.auth_state = Some(match result.availability {
-            CliAvailability::Limited => CliAuthState::Unknown,
-            CliAvailability::Unavailable => CliAuthState::Unauthenticated,
-            CliAvailability::Available => unreachable!(),
-        });
-        return Ok(result);
-    }
+    let mut result = match discovery {
+        CliDiscovery::Available {
+            executable_identity,
+        } => {
+            let mut result = descriptor(name, CliAvailability::Available);
+            result.executable_identity = executable_identity;
+            result
+        }
+        CliDiscovery::Limited => {
+            let mut result = descriptor(name, CliAvailability::Limited);
+            result.auth_state = Some(CliAuthState::Unknown);
+            return Ok(result);
+        }
+        CliDiscovery::Unavailable => {
+            let mut result = descriptor(name, CliAvailability::Unavailable);
+            result.auth_state = Some(CliAuthState::Unauthenticated);
+            return Ok(result);
+        }
+    };
     let response = shell(context, "gh auth status >/dev/null 2>&1".to_owned())?;
     let WorkspaceResponse::Process { exit_code, .. } = response else {
         return Err("workspace shell returned a non-process response".into());

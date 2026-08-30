@@ -11,15 +11,20 @@ use serde_json::Value;
 use std::{
     fmt,
     io::{self, BufRead, Write},
+    marker::PhantomData,
 };
+
+pub struct Configured;
+pub struct Active;
 
 /// Generic configured Phenix server runtime.
 ///
 /// Product plugin selection belongs to the Harness. A conductor created with no
 /// manifests therefore exposes no first-party services.
-pub struct Conductor {
+pub struct Conductor<State = Configured> {
     kernel: Kernel,
     resolved: ResolvedHarness,
+    state: PhantomData<State>,
 }
 
 #[derive(Debug)]
@@ -53,16 +58,7 @@ impl From<ResolvedHarnessActivationError> for ConductorBuildError {
     }
 }
 
-impl Conductor {
-    pub fn new(
-        manifests: impl IntoIterator<Item = PluginManifest>,
-    ) -> Result<Self, ConductorBuildError> {
-        let resolved = ResolvedHarness::resolve(manifests, [], [], &Authority::default())?;
-        let mut kernel = Kernel::new(resolved.kernel_config().clone());
-        kernel.activate_resolved_harness(&resolved)?;
-        Ok(Self { kernel, resolved })
-    }
-
+impl<State> Conductor<State> {
     #[must_use]
     pub fn kernel(&self) -> &Kernel {
         &self.kernel
@@ -81,11 +77,33 @@ impl Conductor {
     pub fn generation(&self) -> &GraphGenerationId {
         self.resolved.generation()
     }
+}
 
-    pub fn activate_all(&mut self) -> Result<(), KernelError> {
-        self.kernel.activate_all()
+impl Conductor<Configured> {
+    pub fn new(
+        manifests: impl IntoIterator<Item = PluginManifest>,
+    ) -> Result<Self, ConductorBuildError> {
+        let resolved = ResolvedHarness::resolve(manifests, [], [], &Authority::default())?;
+        let mut kernel = Kernel::new(resolved.kernel_config().clone());
+        kernel.activate_resolved_harness(&resolved)?;
+        Ok(Self {
+            kernel,
+            resolved,
+            state: PhantomData,
+        })
     }
 
+    pub fn activate_all(mut self) -> Result<Conductor<Active>, KernelError> {
+        self.kernel.activate_all()?;
+        Ok(Conductor {
+            kernel: self.kernel,
+            resolved: self.resolved,
+            state: PhantomData,
+        })
+    }
+}
+
+impl Conductor<Active> {
     pub fn serve_jsonl<R: BufRead, W: Write>(
         &mut self,
         authority: &Authority,
@@ -96,7 +114,7 @@ impl Conductor {
     }
 }
 
-impl Default for Conductor {
+impl Default for Conductor<Configured> {
     fn default() -> Self {
         let resolved = ResolvedHarness::resolve([], [], [], &Authority::default())
             .expect("empty conductor composition is valid");
@@ -104,7 +122,11 @@ impl Default for Conductor {
         kernel
             .activate_resolved_harness(&resolved)
             .expect("empty resolved conductor composition activates");
-        Self { kernel, resolved }
+        Self {
+            kernel,
+            resolved,
+            state: PhantomData,
+        }
     }
 }
 
@@ -227,7 +249,7 @@ mod tests {
         }
     }
 
-    fn configured_fixture(plugin: &str, output: &'static [u8]) -> Conductor {
+    fn configured_fixture(plugin: &str, output: &'static [u8]) -> Conductor<Active> {
         let manifest = fixture_manifest(plugin);
         let plugin = manifest.id.clone();
         let mut conductor = Conductor::new([manifest]).unwrap();
@@ -235,11 +257,10 @@ mod tests {
             .kernel_mut()
             .register_embedded_factory(plugin, move || Box::new(Echo(output)))
             .unwrap();
-        conductor.activate_all().unwrap();
-        conductor
+        conductor.activate_all().unwrap()
     }
 
-    fn invoke_fixture(conductor: &mut Conductor) -> ServiceResponse {
+    fn invoke_fixture(conductor: &mut Conductor<Active>) -> ServiceResponse {
         handle_service_request(
             conductor.kernel_mut(),
             &Authority::default(),
@@ -249,8 +270,7 @@ mod tests {
 
     #[test]
     fn zero_plugin_conductor_has_no_first_party_fallback() {
-        let mut conductor = Conductor::default();
-        conductor.activate_all().unwrap();
+        let conductor = Conductor::default().activate_all().unwrap();
         assert_eq!(conductor.kernel().config().manifests().count(), 0);
         assert_eq!(
             conductor.kernel().graph_generation(),
@@ -260,8 +280,7 @@ mod tests {
 
     #[test]
     fn zero_plugin_transport_reports_missing_service() {
-        let mut conductor = Conductor::default();
-        conductor.activate_all().unwrap();
+        let mut conductor = Conductor::default().activate_all().unwrap();
         let input = b"{\"id\":1,\"service\":\"phenix.sessions@1\",\"input\":{}}\n";
         let mut output = Vec::new();
         conductor
