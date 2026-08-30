@@ -362,7 +362,7 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
         .as_object()
         .unwrap()
         .values()
-        .all(|entry| entry["available"] == true));
+        .all(|entry| entry["state"] == "available"));
 
     let error = serde_json::from_value::<CliProbeRequest>(json!({
         "name": "not-a-supported-cli"
