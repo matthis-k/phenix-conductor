@@ -62,6 +62,48 @@ impl<T> TaskHandle<T> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct TaskScope<'a> {
+    runtime: &'a TaskRuntime,
+    graph_generation: &'a GraphGenerationId,
+    authority: &'a Authority,
+}
+
+impl<'a> TaskScope<'a> {
+    pub(crate) fn new(
+        runtime: &'a TaskRuntime,
+        graph_generation: &'a GraphGenerationId,
+        authority: &'a Authority,
+    ) -> Self {
+        Self {
+            runtime,
+            graph_generation,
+            authority,
+        }
+    }
+
+    pub fn graph_generation(&self) -> &GraphGenerationId {
+        self.graph_generation
+    }
+
+    pub fn authority(&self) -> &Authority {
+        self.authority
+    }
+
+    pub fn spawn<T, F>(&self, requested_authority: &Authority, worker: F) -> TaskHandle<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(CancellationToken) -> T + Send + 'static,
+    {
+        self.runtime.spawn(
+            self.graph_generation,
+            self.authority,
+            requested_authority,
+            worker,
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct TaskRuntime {
     next_id: AtomicU64,
@@ -183,6 +225,27 @@ mod tests {
             )
         });
 
+        assert_eq!(handle.join().unwrap(), (true, false));
+    }
+
+    #[test]
+    fn task_scope_pins_generation_and_parent_authority() {
+        let runtime = TaskRuntime::default();
+        let read = capability("fs.read");
+        let write = capability("fs.write");
+        let authority = Authority::new([read.clone()]);
+        let generation = generation();
+        let scope = TaskScope::new(&runtime, &generation, &authority);
+
+        assert_eq!(scope.graph_generation(), &generation);
+        assert_eq!(scope.authority(), &authority);
+        let requested = Authority::new([read.clone(), write.clone()]);
+        let handle = scope.spawn(&requested, move |token| {
+            (
+                token.authority().permits(&read),
+                token.authority().permits(&write),
+            )
+        });
         assert_eq!(handle.join().unwrap(), (true, false));
     }
 
