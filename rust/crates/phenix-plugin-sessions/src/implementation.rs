@@ -1,6 +1,6 @@
 use crate::{
-    session_service, SessionCommand, SessionInput, SessionInputKind, SessionRecord, SessionResponse,
-    SESSION_SERVICE,
+    session_service, SessionCommand, SessionInput, SessionInputKind, SessionRecord,
+    SessionResponse, SESSION_SERVICE,
 };
 use phenix_core::{
     Authority, Bytes, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
