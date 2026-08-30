@@ -4,8 +4,7 @@ use serde_json::json;
 use std::io;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conductor = Conductor::default();
-    conductor.activate_all()?;
+    let mut conductor = Conductor::default().activate_all()?;
 
     if std::env::args().any(|argument| argument == "--list-services") {
         let plugins = conductor

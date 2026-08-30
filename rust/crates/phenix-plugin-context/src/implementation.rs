@@ -95,6 +95,41 @@ pub struct RepositoryContextSource {
     pub content: Bytes,
 }
 
+#[derive(Clone, Copy)]
+enum ProjectFileKind {
+    Instruction,
+    Document,
+    Skill,
+}
+
+impl ProjectFileKind {
+    fn resource_kind(self) -> ContextResourceKind {
+        match self {
+            Self::Instruction => ContextResourceKind::ProjectInstruction,
+            Self::Document => ContextResourceKind::ProjectDocument,
+            Self::Skill => ContextResourceKind::Skill,
+        }
+    }
+
+    fn id_prefix(self) -> &'static str {
+        match self {
+            Self::Instruction => "project-instruction",
+            Self::Document => "project-document",
+            Self::Skill => "skill",
+        }
+    }
+
+    fn scope(self, path: &str) -> ContextScope {
+        match self {
+            Self::Skill => ContextScope::Workspace,
+            Self::Instruction | Self::Document => match parent_path(path) {
+                Some(parent) if !parent.is_empty() => ContextScope::PathPrefix(parent.to_owned()),
+                _ => ContextScope::Workspace,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ContextCommand {
@@ -369,26 +404,17 @@ fn discover_repository(
         let Some(kind) = project_file_kind(&source.path) else {
             continue;
         };
-        let scope = match kind {
-            ContextResourceKind::Skill => ContextScope::Workspace,
-            _ => match parent_path(&source.path) {
-                Some(parent) if !parent.is_empty() => ContextScope::PathPrefix(parent.to_owned()),
-                _ => ContextScope::Workspace,
-            },
-        };
-        let prefix = match kind {
-            ContextResourceKind::ProjectInstruction => "project-instruction",
-            ContextResourceKind::ProjectDocument => "project-document",
-            ContextResourceKind::Skill => "skill",
-            ContextResourceKind::External => unreachable!(),
-        };
-        let resource_id =
-            ContextResourceId::parse(format!("{prefix}:{workspace_id}:{}", source.path))
-                .map_err(str::to_owned)?;
+        let scope = kind.scope(&source.path);
+        let resource_id = ContextResourceId::parse(format!(
+            "{}:{workspace_id}:{}",
+            kind.id_prefix(),
+            source.path
+        ))
+        .map_err(str::to_owned)?;
         let resource = register_resource(
             context,
             resource_id,
-            kind,
+            kind.resource_kind(),
             source.path,
             scope,
             source.content,
@@ -403,11 +429,11 @@ fn discover_repository(
     Ok(descriptors)
 }
 
-fn project_file_kind(path: &str) -> Option<ContextResourceKind> {
+fn project_file_kind(path: &str) -> Option<ProjectFileKind> {
     match file_name(path) {
-        "AGENTS.md" | "AGENTS.override.md" => Some(ContextResourceKind::ProjectInstruction),
-        "CONTRIBUTING.md" | "DEVELOPMENT.md" => Some(ContextResourceKind::ProjectDocument),
-        "SKILL.md" => Some(ContextResourceKind::Skill),
+        "AGENTS.md" | "AGENTS.override.md" => Some(ProjectFileKind::Instruction),
+        "CONTRIBUTING.md" | "DEVELOPMENT.md" => Some(ProjectFileKind::Document),
+        "SKILL.md" => Some(ProjectFileKind::Skill),
         _ => None,
     }
 }

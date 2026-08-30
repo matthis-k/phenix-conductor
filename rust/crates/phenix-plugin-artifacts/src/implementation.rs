@@ -142,9 +142,24 @@ pub enum ArtifactResponse {
     },
 }
 
-struct StoredArtifact {
-    artifact: ArtifactRecord,
-    reused: bool,
+enum StoredArtifact {
+    Stored(ArtifactRecord),
+    Reused(ArtifactRecord),
+}
+
+impl StoredArtifact {
+    fn into_parts(self) -> (ArtifactRecord, bool) {
+        match self {
+            Self::Stored(artifact) => (artifact, false),
+            Self::Reused(artifact) => (artifact, true),
+        }
+    }
+
+    fn into_artifact(self) -> ArtifactRecord {
+        match self {
+            Self::Stored(artifact) | Self::Reused(artifact) => artifact,
+        }
+    }
 }
 
 #[must_use]
@@ -278,7 +293,7 @@ fn store(
     content: Vec<u8>,
     provenance: ArtifactProvenance,
 ) -> Result<ArtifactResponse, String> {
-    let StoredArtifact { artifact, reused } = store_artifact(context, content, provenance)?;
+    let (artifact, reused) = store_artifact(context, content, provenance)?.into_parts();
     Ok(ArtifactResponse::Stored { artifact, reused })
 }
 
@@ -293,10 +308,7 @@ fn store_artifact(
         if existing.content_identity != content_identity || existing.content != content {
             return Err(format!("artifact identity collision: {id}"));
         }
-        return Ok(StoredArtifact {
-            artifact: existing,
-            reused: true,
-        });
+        return Ok(StoredArtifact::Reused(existing));
     }
 
     let artifact = ArtifactRecord {
@@ -321,10 +333,7 @@ fn store_artifact(
             ],
         )
         .map_err(|error| error.to_string())?;
-    Ok(StoredArtifact {
-        artifact,
-        reused: false,
-    })
+    Ok(StoredArtifact::Stored(artifact))
 }
 
 fn read_record(
@@ -375,7 +384,7 @@ fn record_read(
             source_observations: dependencies.clone(),
         },
     )?
-    .artifact;
+    .into_artifact();
     let request_identity = normalized_request_identity(&request)?;
     let result = ReadResultRecord {
         id: read_result_identity(
