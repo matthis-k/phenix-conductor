@@ -5,7 +5,8 @@ use phenix_core::{
     ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{
-    SessionCommand, SessionInput, SessionInputKind, SessionRecord, SessionResponse, SESSION_SERVICE,
+    SessionCommand, SessionId, SessionInput, SessionInputKind, SessionRecord, SessionResponse,
+    SESSION_SERVICE,
 };
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
@@ -40,7 +41,7 @@ impl ComponentInterface for SessionInterface {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionMutationCommand {
-    PrepareCreate { id: String },
+    PrepareCreate { id: SessionId },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
@@ -222,11 +223,8 @@ fn handle_mutation(
 
 fn prepare_create(
     context: &SessionContext<'_, '_>,
-    id: String,
+    id: SessionId,
 ) -> Result<(SessionRecord, NamespaceTransaction), String> {
-    if id.trim().is_empty() {
-        return Err("session id must not be empty".into());
-    }
     if read_session(context, &id)?.is_some() {
         return Err(format!("session already exists: {id}"));
     }
@@ -263,7 +261,10 @@ fn prepare_create(
     Ok((session, transaction))
 }
 
-fn create_session(context: &SessionContext<'_, '_>, id: String) -> Result<SessionResponse, String> {
+fn create_session(
+    context: &SessionContext<'_, '_>,
+    id: SessionId,
+) -> Result<SessionResponse, String> {
     let (session, transaction) = prepare_create(context, id)?;
     context
         .kernel
@@ -274,7 +275,7 @@ fn create_session(context: &SessionContext<'_, '_>, id: String) -> Result<Sessio
 
 fn continue_session(
     context: &SessionContext<'_, '_>,
-    id: &str,
+    id: &SessionId,
     kind: SessionInputKind,
     content: Bytes,
 ) -> Result<SessionResponse, String> {
@@ -311,7 +312,7 @@ fn continue_session(
 
 fn read_session(
     context: &SessionContext<'_, '_>,
-    id: &str,
+    id: &SessionId,
 ) -> Result<Option<SessionRecord>, String> {
     read_raw(context, &session_key(id))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
@@ -327,7 +328,10 @@ fn read_sessions(context: &SessionContext<'_, '_>) -> Result<Vec<SessionRecord>,
         .collect()
 }
 
-fn read_inputs(context: &SessionContext<'_, '_>, id: &str) -> Result<Vec<SessionInput>, String> {
+fn read_inputs(
+    context: &SessionContext<'_, '_>,
+    id: &SessionId,
+) -> Result<Vec<SessionInput>, String> {
     decode_inputs(read_raw(context, &inputs_key(id))?.as_deref())
 }
 
@@ -338,7 +342,7 @@ fn read_raw(context: &SessionContext<'_, '_>, key: &str) -> Result<Option<Vec<u8
         .map_err(|error| error.to_string())
 }
 
-fn decode_ids(value: Option<&[u8]>) -> Result<Vec<String>, String> {
+fn decode_ids(value: Option<&[u8]>) -> Result<Vec<SessionId>, String> {
     value
         .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
         .unwrap_or_else(|| Ok(Vec::new()))
@@ -350,11 +354,11 @@ fn decode_inputs(value: Option<&[u8]>) -> Result<Vec<SessionInput>, String> {
         .unwrap_or_else(|| Ok(Vec::new()))
 }
 
-fn session_key(id: &str) -> String {
+fn session_key(id: &SessionId) -> String {
     format!("session/{id}")
 }
 
-fn inputs_key(id: &str) -> String {
+fn inputs_key(id: &SessionId) -> String {
     format!("inputs/{id}")
 }
 
@@ -409,9 +413,14 @@ mod tests {
     #[test]
     fn flat_sessions_and_ordered_inputs_are_durable_across_plugin_restart() {
         let path = temp_db("sessions");
+        let root = SessionId::parse("root").unwrap();
         {
             let mut kernel = kernel_with(&path);
-            invoke(&mut kernel, &SessionCommand::Create { id: "root".into() }).unwrap();
+            invoke(
+                &mut kernel,
+                &SessionCommand::Create { id: root.clone() },
+            )
+            .unwrap();
             for (kind, content) in [
                 (SessionInputKind::Root, b"system".to_vec()),
                 (SessionInputKind::User, b"hello".to_vec()),
@@ -419,7 +428,7 @@ mod tests {
                 invoke(
                     &mut kernel,
                     &SessionCommand::Continue {
-                        id: "root".into(),
+                        id: root.clone(),
                         kind,
                         content: content.into(),
                     },
@@ -432,11 +441,15 @@ mod tests {
         assert_eq!(
             invoke(&mut restored, &SessionCommand::List).unwrap(),
             SessionResponse::Sessions {
-                sessions: vec![SessionRecord { id: "root".into() }],
+                sessions: vec![SessionRecord { id: root.clone() }],
             }
         );
         assert_eq!(
-            invoke(&mut restored, &SessionCommand::Inputs { id: "root".into() },).unwrap(),
+            invoke(
+                &mut restored,
+                &SessionCommand::Inputs { id: root },
+            )
+            .unwrap(),
             SessionResponse::Inputs {
                 inputs: vec![
                     SessionInput {
