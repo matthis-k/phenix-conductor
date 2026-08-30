@@ -1,12 +1,12 @@
-use phenix_core::{
-    session_service, Authority, Bytes, CapabilityId, ComponentExport, ComponentId,
-    ComponentInterface, ComponentManifest, DurableSchema, InterfaceId, NamespaceTransaction,
-    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
-};
-pub use phenix_core::{
-    SessionCommand, SessionId, SessionInput, SessionInputKind, SessionRecord, SessionResponse,
+use crate::{
+    session_service, SessionCommand, SessionInput, SessionInputKind, SessionRecord, SessionResponse,
     SESSION_SERVICE,
+};
+use phenix_core::{
+    Authority, Bytes, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
+    ComponentManifest, DurableSchema, InterfaceId, NamespaceTransaction, PluginContext,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
+    ServiceContribution, ServiceId, SessionId, TransactionOp,
 };
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};

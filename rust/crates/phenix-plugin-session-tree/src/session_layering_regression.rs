@@ -1,9 +1,12 @@
 use crate::{session_tree_factory, session_tree_manifest};
 use phenix_core::{
-    session_service, Authority, Kernel, KernelConfig, KernelError, LayerPolicy, PhenixValue,
-    PluginId, Project, ServiceParticipantOutcome, SessionCommand, SessionId, SessionResponse,
+    Authority, Kernel, KernelConfig, KernelError, LayerPolicy, PhenixValue, PluginId, Project,
+    ServiceParticipantOutcome, SessionId,
 };
-use phenix_plugin_sessions::{session_factory, session_manifest};
+use phenix_plugin_sessions::{
+    session_factory, session_manifest, session_service, SessionCommand, SessionRecord,
+    SessionResponse,
+};
 
 fn authority() -> Authority {
     Authority::new(
@@ -70,7 +73,7 @@ fn configured_session_tree_layer_delegates_to_flat_session_terminal() {
     assert_eq!(
         create(&mut kernel, "root"),
         SessionResponse::Created {
-            session: phenix_core::SessionRecord {
+            session: SessionRecord {
                 id: SessionId::parse("root").unwrap(),
             },
         }

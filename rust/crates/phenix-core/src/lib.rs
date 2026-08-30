@@ -67,12 +67,11 @@ pub use activation::{
     ActiveResolvedGraph, ResolvedHarnessActivation, ResolvedHarnessActivationError,
 };
 pub use agent::{
-    context_service, model_inference_service, session_service, skill_service, tool_service,
-    ContextCommand, ContextDescriptor, ContextResourceKind, ContextResourceRevision,
-    ContextResponse, ContextScope, ModelInferenceRequest, ModelInferenceResponse, SessionCommand,
-    SessionInput, SessionInputKind, SessionRecord, SessionResponse, SkillCommand, SkillDefinition,
-    SkillResponse, ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE,
-    MODEL_INFERENCE_SERVICE, SESSION_SERVICE, SKILL_SERVICE, TOOL_SERVICE,
+    context_service, model_inference_service, skill_service, tool_service, ContextCommand,
+    ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextResponse, ContextScope,
+    ModelInferenceRequest, ModelInferenceResponse, SkillCommand, SkillDefinition, SkillResponse,
+    ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE, MODEL_INFERENCE_SERVICE,
+    SKILL_SERVICE, TOOL_SERVICE,
 };
 pub use authority::Authority;
 pub use component::{

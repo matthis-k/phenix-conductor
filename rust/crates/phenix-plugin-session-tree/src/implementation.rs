@@ -1,11 +1,13 @@
 use crate::session_tree_component_id;
 use phenix_core::{
-    session_service, Authority, CapabilityId, ComponentInterface, DurableSchema, LayerResult,
-    NamespaceTransaction, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionCommand,
-    SessionId, SessionRecord, SessionResponse, TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, LayerResult, NamespaceTransaction,
+    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionId, TransactionOp,
 };
-use phenix_plugin_sessions::{SessionInterface, SessionMutationInterface};
+use phenix_plugin_sessions::{
+    session_service, SessionCommand, SessionInterface, SessionMutationInterface, SessionRecord,
+    SessionResponse,
+};
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_TREE_SERVICE: &str = "phenix.session-tree@1";

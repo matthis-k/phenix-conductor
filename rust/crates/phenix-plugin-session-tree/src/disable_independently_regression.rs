@@ -1,9 +1,12 @@
 use crate::{session_tree_service, SessionTreeCommand};
 use phenix_core::{
-    session_service, Authority, Kernel, KernelConfig, PhenixValue, Project, ResolvedHarness,
-    ResolvedHarnessActivation, SessionCommand, SessionId, SessionResponse,
+    Authority, Kernel, KernelConfig, PhenixValue, Project, ResolvedHarness,
+    ResolvedHarnessActivation, SessionId,
 };
-use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
+use phenix_plugin_sessions::{
+    session_component_manifest, session_factory, session_manifest, session_service, SessionCommand,
+    SessionRecord, SessionResponse,
+};
 
 #[test]
 fn flat_sessions_remain_available_when_session_tree_is_omitted() {
@@ -40,7 +43,7 @@ fn flat_sessions_remain_available_when_session_tree_is_omitted() {
     assert_eq!(
         SessionResponse::try_from(Project(&output)).unwrap(),
         SessionResponse::Created {
-            session: phenix_core::SessionRecord { id: session_id },
+            session: SessionRecord { id: session_id },
         }
     );
 

@@ -5,10 +5,13 @@ use crate::{
 use phenix_core::{
     Authority, BackendFeature, DurableSchema, Kernel, KernelConfig, LocalPersistence,
     NamespaceTransaction, PersistenceBackend, PersistenceError, PhenixValue, PluginId, Project,
-    ResolvedHarness, ResolvedHarnessActivation, ResourceNamespace, SchemaMigration, SessionCommand,
-    SessionId, SessionResponse, TransactionOp,
+    ResolvedHarness, ResolvedHarnessActivation, ResourceNamespace, SchemaMigration, SessionId,
+    TransactionOp,
 };
-use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
+use phenix_plugin_sessions::{
+    session_component_manifest, session_factory, session_manifest, session_service, SessionCommand,
+    SessionResponse,
+};
 use std::{
     collections::BTreeSet,
     fs,
@@ -139,7 +142,7 @@ fn kernel_with(path: &PathBuf) -> Kernel {
 fn invoke_session(kernel: &mut Kernel, command: SessionCommand) {
     kernel
         .invoke(
-            &phenix_core::session_service(),
+            &session_service(),
             &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority(),
             None,
@@ -151,7 +154,7 @@ fn session_exists(kernel: &mut Kernel, id: &str) -> bool {
     let command = SessionCommand::Get { id: session_id(id) };
     let output = kernel
         .invoke(
-            &phenix_core::session_service(),
+            &session_service(),
             &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority(),
             None,
@@ -328,7 +331,7 @@ fn combined_child_session_and_lineage_operation_commits_as_one_semantic_operatio
     };
     let child = restored
         .invoke(
-            &phenix_core::session_service(),
+            &session_service(),
             &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority(),
             None,
