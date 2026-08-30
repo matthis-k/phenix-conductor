@@ -438,20 +438,20 @@ fn derive_enum(
                 let type_fields = fields.iter().map(|(field, ty)| {
                     let name = field.to_string();
                     quote! {
-                        payload.insert(
+                        (
                             ::phenix_core::Key::parse(#name).expect("Rust field name is a valid structural key"),
                             <#ty as ::phenix_core::ValueCodec>::phenix_type(),
-                        );
+                        )
                     }
                 });
                 let pattern_fields = fields.iter().map(|(field, _)| field);
                 let value_fields = fields.iter().map(|(field, _)| {
                     let name = field.to_string();
                     quote! {
-                        payload.insert(
+                        (
                             ::phenix_core::Key::parse(#name).expect("Rust field name is a valid structural key"),
                             ::phenix_core::ValueCodec::to_value(#field),
-                        );
+                        )
                     }
                 });
                 let decode_fields = fields.iter().map(|(field, ty)| {
@@ -461,17 +461,22 @@ fn derive_enum(
                     }
                 });
                 type_arms.push(quote! {
-                    let mut payload = ::std::collections::BTreeMap::new();
-                    #(#type_fields)*
-                    variants.insert(#key, ::phenix_core::PhenixSchema::Table(payload));
+                    variants.insert(
+                        #key,
+                        ::phenix_core::PhenixSchema::Table(::std::collections::BTreeMap::from([
+                            #(#type_fields),*
+                        ])),
+                    );
                 });
                 encode_arms.push(quote! {
                     Self::#variant_ident { #(#pattern_fields),* } => {
-                        let mut payload = ::std::collections::BTreeMap::new();
-                        #(#value_fields)*
                         ::phenix_core::PhenixValue::Variant {
                             tag: #key,
-                            value: Box::new(::phenix_core::PhenixValue::Table(payload)),
+                            value: Box::new(::phenix_core::PhenixValue::Table(
+                                ::std::collections::BTreeMap::from([
+                                    #(#value_fields),*
+                                ]),
+                            )),
                         }
                     }
                 });
