@@ -1,7 +1,10 @@
-use crate::{execution_manifest, EXECUTION_SERVICE};
+use crate::{
+    execution_manifest, AgentLoopCommand, AgentLoopResponse, ModelInvokeCommand,
+    ModelInvokeResponse, AGENT_LOOP_SERVICE, EXECUTION_SERVICE, MODEL_ROUTING_SERVICE,
+};
 use phenix_core::{
-    Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface, ComponentManifest,
-    InterfaceId, PluginId,
+    Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
+    ComponentManifest, InterfaceId, PluginId,
 };
 
 const EXECUTION_COMPONENT: &str = "phenix.execution";
@@ -22,6 +25,31 @@ impl ComponentInterface for ExecutionInterface {
     }
 }
 
+pub struct AgentLoopInterface;
+
+impl ComponentInterface for AgentLoopInterface {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(AGENT_LOOP_SERVICE).expect("static agent loop interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<AgentLoopCommand, AgentLoopResponse>()
+    }
+}
+
+pub(crate) struct ModelRoutingInterface;
+
+impl ComponentInterface for ModelRoutingInterface {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(MODEL_ROUTING_SERVICE)
+            .expect("static model routing interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<ModelInvokeCommand, ModelInvokeResponse>()
+    }
+}
+
 #[must_use]
 pub fn execution_component_id() -> ComponentId {
     ComponentId::parse(EXECUTION_COMPONENT).expect("static component id is valid")
@@ -29,17 +57,31 @@ pub fn execution_component_id() -> ComponentId {
 
 #[must_use]
 pub fn execution_component_manifest(maximum_authority: Authority) -> ComponentManifest {
+    let model_authority = maximum_authority.clone();
     let authority = execution_manifest(maximum_authority).maximum_authority;
     ComponentManifest {
         id: execution_component_id(),
         owner: PluginId::parse(EXECUTION_PLUGIN).expect("static plugin id is valid"),
-        imports: Vec::new(),
-        exports: vec![ComponentExport {
-            interface: ExecutionInterface::interface_id(),
-            schema: ExecutionInterface::schema(),
-            priority: 100,
-            required_authority: persistence_authority(),
+        imports: vec![ComponentImport {
+            interface: ModelRoutingInterface::interface_id(),
+            schema: ModelRoutingInterface::schema(),
+            required: false,
+            authority: model_authority,
         }],
+        exports: vec![
+            ComponentExport {
+                interface: ExecutionInterface::interface_id(),
+                schema: ExecutionInterface::schema(),
+                priority: 100,
+                required_authority: persistence_authority(),
+            },
+            ComponentExport {
+                interface: AgentLoopInterface::interface_id(),
+                schema: AgentLoopInterface::schema(),
+                priority: 100,
+                required_authority: Authority::default(),
+            },
+        ],
         maximum_authority: authority,
     }
 }
@@ -81,6 +123,30 @@ mod tests {
             component.exports[0].required_authority,
             persistence_authority()
         );
+        assert_eq!(
+            component.exports[1].interface,
+            AgentLoopInterface::interface_id()
+        );
+        assert_eq!(
+            component.exports[1].required_authority,
+            Authority::default()
+        );
+        assert_eq!(component.imports.len(), 1);
+        assert!(!component.imports[0].required);
+        assert_eq!(
+            component.imports[0].interface,
+            ModelRoutingInterface::interface_id()
+        );
         assert!(graph.component(&execution_component_id()).is_some());
+    }
+
+    #[test]
+    fn model_import_does_not_inherit_execution_persistence_authority() {
+        let network = CapabilityId::parse("network.model").unwrap();
+        let component = execution_component_manifest(Authority::new([network.clone()]));
+        assert!(component.imports[0].authority.permits(&network));
+        for capability in persistence_authority().capabilities() {
+            assert!(!component.imports[0].authority.permits(capability));
+        }
     }
 }

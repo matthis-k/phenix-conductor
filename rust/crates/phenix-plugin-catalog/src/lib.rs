@@ -35,11 +35,13 @@ pub use phenix_plugin_debug::{
     DEBUG_SERVICE,
 };
 pub use phenix_plugin_execution::{
-    execution_component_id, execution_component_manifest, execution_configuration_service,
-    execution_factory, execution_manifest, execution_service, AgentDefinition, CallablePolicy,
-    CallableRecord, ExecutionAuthority, ExecutionCommand, ExecutionConfigurationCommand,
-    ExecutionConfigurationResponse, ExecutionInterface, ExecutionRecord, ExecutionResponse,
-    ExecutionState, OrchestrationDefinition, OrchestrationNode, WorkerTaskRecord, WorkerTaskState,
+    agent_loop_service, execution_component_id, execution_component_manifest,
+    execution_configuration_service, execution_factory, execution_manifest, execution_service,
+    AgentDefinition, AgentLoopCommand, AgentLoopInterface, AgentLoopPolicy, AgentLoopResponse,
+    AgentLoopUsage, CallablePolicy, CallableRecord, ExecutionAuthority, ExecutionCommand,
+    ExecutionConfigurationCommand, ExecutionConfigurationResponse, ExecutionInterface,
+    ExecutionRecord, ExecutionResponse, ExecutionState, OrchestrationDefinition, OrchestrationNode,
+    WorkerTaskRecord, WorkerTaskState, AGENT_LOOP_SERVICE, DEFAULT_MAX_PARALLEL_TOOL_CALLS,
     EXECUTION_CONFIGURATION_SERVICE, EXECUTION_SERVICE,
 };
 pub use phenix_plugin_frontend::{
