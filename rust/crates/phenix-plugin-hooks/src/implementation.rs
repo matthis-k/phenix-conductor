@@ -15,7 +15,7 @@ const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 
 type ActiveHooks = BTreeSet<(u64, String)>;
 
-phenix_sdk::phenix_plugin! {
+phenix_core::phenix_plugin! {
     "phenix.hooks";
 
     uses {
