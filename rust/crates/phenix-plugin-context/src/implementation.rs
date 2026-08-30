@@ -1,45 +1,37 @@
-use crate::context_component_id;
 use phenix_core::{
     Authority, Bytes, CapabilityId, ComponentInterface, ContextResourceId, ContextRevisionId,
-    DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId, TransactionOp,
+    DurableSchema, PluginExecution, PluginHost, PluginInstance, PluginManifest, ResourceNamespace,
+    ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{
     ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
 };
-use phenix_plugin_execution::{
-    ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
-};
+use phenix_plugin_execution::{ExecutionCommand, ExecutionResponse, ExecutionState};
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const CONTEXT_SERVICE: &str = "phenix.context@1";
-const CONTEXT_PLUGIN: &str = "phenix.context";
 const CONTEXT_NAMESPACE: &str = "phenix.context.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const ALL_RESOURCES_KEY: &str = "resources/@all";
 
-struct ContextSdk<'host, 'runtime> {
-    execution: SdkClient<'host, 'runtime, ExecutionInterface>,
+phenix_core::phenix_plugin! {
+    "phenix.context";
+
+    uses {
+        execution: "phenix.execution@1",
+    }
 }
 
-type ContextPluginContext<'host, 'runtime> =
-    PluginContext<'host, 'runtime, ContextSdk<'host, 'runtime>>;
+type ContextPluginContext<'host, 'runtime> = phenix_plugin::Context<'host, 'runtime>;
 
 fn context<'host, 'runtime>(
     host: &'host PluginHost<'runtime>,
 ) -> ContextPluginContext<'host, 'runtime> {
-    PluginContext::new(
-        host,
-        ContextSdk {
-            execution: SdkClient::new(host, context_component_id()),
-        },
-        (),
-        (),
-    )
+    phenix_plugin::context(host, (), ())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, PhenixValue)]
@@ -154,7 +146,7 @@ pub enum ContextResponse {
 #[must_use]
 pub fn context_manifest() -> PluginManifest {
     PluginManifest {
-        id: PluginId::parse(CONTEXT_PLUGIN).expect("static plugin id is valid"),
+        id: phenix_plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
