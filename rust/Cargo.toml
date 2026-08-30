@@ -10,7 +10,6 @@ members = [
   "crates/phenix-harness",
   "crates/phenix-sdk",
   "crates/phenix-sdk-macros",
-  "crates/phenix-plugin-authoring",
   "crates/phenix-plugin-artifacts",
   "crates/phenix-plugin-basic-agent",
   "crates/phenix-plugin-cli",
