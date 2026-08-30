@@ -1,10 +1,10 @@
 use phenix_core::{
-    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
-    ServiceId, TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, Exact, PhenixValue, PluginContext,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, Project,
+    ResourceNamespace, ServiceContribution, ServiceId, TransactionOp, Type, ValueCodec, ValueError,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, num::NonZeroU64};
 
 pub const LANGUAGE_SERVICE: &str = "phenix.language@1";
 const LANGUAGE_PLUGIN: &str = "phenix.language";
@@ -16,7 +16,7 @@ const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 #[derive(Default)]
 struct LanguageState {
     providers: BTreeMap<String, LanguageProviderEpoch>,
-    diagnostics: BTreeMap<String, LanguageOperationResult>,
+    diagnostics: BTreeMap<String, DiagnosticsResult>,
 }
 
 type LanguageContext<'host, 'runtime, 'state> =
@@ -57,11 +57,84 @@ pub struct LanguageDocumentIdentity {
     pub provenance: DocumentProvenance,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "u64", into = "u64")]
+pub struct ProviderEpoch(NonZeroU64);
+
+impl ProviderEpoch {
+    pub fn new(value: u64) -> Result<Self, &'static str> {
+        value.try_into()
+    }
+
+    #[must_use]
+    pub fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl TryFrom<u64> for ProviderEpoch {
+    type Error = &'static str;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        NonZeroU64::new(value)
+            .map(Self)
+            .ok_or("language provider epoch must be non-zero")
+    }
+}
+
+impl From<ProviderEpoch> for u64 {
+    fn from(value: ProviderEpoch) -> Self {
+        value.get()
+    }
+}
+
+impl ValueCodec for ProviderEpoch {
+    fn phenix_type() -> Type {
+        <u64 as ValueCodec>::phenix_type()
+    }
+
+    fn to_value(&self) -> PhenixValue {
+        <u64 as ValueCodec>::to_value(&self.get())
+    }
+
+    fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
+        let value = <u64 as ValueCodec>::from_value(value)?;
+        Self::try_from(value).map_err(|error| ValueError::InvalidValue(error.into()))
+    }
+
+    fn project_from_value(value: &PhenixValue) -> Result<Self, ValueError> {
+        let value = <u64 as ValueCodec>::project_from_value(value)?;
+        Self::try_from(value).map_err(|error| ValueError::InvalidValue(error.into()))
+    }
+}
+
+impl From<&ProviderEpoch> for PhenixValue {
+    fn from(value: &ProviderEpoch) -> Self {
+        value.to_value()
+    }
+}
+
+impl<'value> TryFrom<Exact<&'value PhenixValue>> for ProviderEpoch {
+    type Error = ValueError;
+
+    fn try_from(value: Exact<&'value PhenixValue>) -> Result<Self, Self::Error> {
+        Self::from_value(value.0)
+    }
+}
+
+impl<'value> TryFrom<Project<&'value PhenixValue>> for ProviderEpoch {
+    type Error = ValueError;
+
+    fn try_from(value: Project<&'value PhenixValue>) -> Result<Self, Self::Error> {
+        Self::project_from_value(value.0)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct LanguageProviderEpoch {
     pub workspace_id: String,
     pub provider_id: String,
-    pub epoch: u64,
+    pub epoch: ProviderEpoch,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
@@ -72,12 +145,29 @@ pub struct LanguageOperationResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum DiagnosticsResult {
+    Diagnostics {
+        payload: serde_json::Value,
+        documents: Vec<LanguageDocumentIdentity>,
+    },
+}
+
+impl DiagnosticsResult {
+    fn documents(&self) -> &[LanguageDocumentIdentity] {
+        match self {
+            Self::Diagnostics { documents, .. } => documents,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct LanguageObservation {
     pub id: String,
     pub execution_id: String,
     pub workspace_id: String,
     pub provider_id: String,
-    pub provider_epoch: u64,
+    pub provider_epoch: ProviderEpoch,
     pub result: LanguageOperationResult,
 }
 
@@ -87,18 +177,18 @@ pub enum LanguageCommand {
     ActivateProvider {
         workspace_id: String,
         provider_id: String,
-        epoch: u64,
+        epoch: ProviderEpoch,
     },
     EndProvider {
         workspace_id: String,
         provider_id: String,
-        epoch: u64,
+        epoch: ProviderEpoch,
     },
     PublishDiagnostics {
         workspace_id: String,
         provider_id: String,
-        epoch: u64,
-        result: LanguageOperationResult,
+        epoch: ProviderEpoch,
+        result: DiagnosticsResult,
     },
     CurrentDiagnostics {
         workspace_id: String,
@@ -108,7 +198,7 @@ pub enum LanguageCommand {
         execution_id: String,
         workspace_id: String,
         provider_id: String,
-        epoch: u64,
+        epoch: ProviderEpoch,
         result: LanguageOperationResult,
     },
     GetObservation {
@@ -123,7 +213,7 @@ pub enum LanguageResponse {
         epoch: Option<LanguageProviderEpoch>,
     },
     Diagnostics {
-        result: Option<LanguageOperationResult>,
+        result: Option<DiagnosticsResult>,
     },
     Observation {
         observation: Option<LanguageObservation>,
@@ -240,10 +330,7 @@ fn handle(
             result,
         } => {
             require_epoch(context, &workspace_id, &provider_id, epoch)?;
-            if result.operation != LanguageOperationKind::Diagnostics {
-                return Err("diagnostic publication must carry a diagnostics operation".into());
-            }
-            validate_result(&result)?;
+            validate_documents(result.documents())?;
             context
                 .plugin
                 .state
@@ -270,7 +357,7 @@ fn handle(
             require_epoch(context, &workspace_id, &provider_id, epoch)?;
             validate_identity("language observation id", &observation_id)?;
             validate_identity("consuming execution id", &execution_id)?;
-            validate_result(&result)?;
+            validate_documents(&result.documents)?;
             let observation = LanguageObservation {
                 id: observation_id,
                 execution_id,
@@ -297,18 +384,15 @@ fn activate_provider(
     context: &mut LanguageContext<'_, '_, '_>,
     workspace_id: String,
     provider_id: String,
-    epoch: u64,
+    epoch: ProviderEpoch,
 ) -> Result<LanguageProviderEpoch, String> {
     validate_identity("workspace id", &workspace_id)?;
     validate_identity("language provider id", &provider_id)?;
-    if epoch == 0 {
-        return Err("language provider epoch must be non-zero".into());
-    }
     if let Some(current) = context.plugin.state.providers.get(&workspace_id) {
         if epoch <= current.epoch {
             return Err(format!(
                 "language provider epoch must advance beyond {}",
-                current.epoch
+                current.epoch.get()
             ));
         }
     }
@@ -330,7 +414,7 @@ fn require_epoch(
     context: &LanguageContext<'_, '_, '_>,
     workspace_id: &str,
     provider_id: &str,
-    epoch: u64,
+    epoch: ProviderEpoch,
 ) -> Result<(), String> {
     validate_identity("workspace id", workspace_id)?;
     validate_identity("language provider id", provider_id)?;
@@ -338,7 +422,8 @@ fn require_epoch(
         Some(active) if active.provider_id == provider_id && active.epoch == epoch => Ok(()),
         Some(active) => Err(format!(
             "ProviderChanged: active provider is {} epoch {}",
-            active.provider_id, active.epoch
+            active.provider_id,
+            active.epoch.get()
         )),
         None => Err("ProviderChanged: no active provider".into()),
     }
@@ -380,8 +465,8 @@ fn read_observation(
         .transpose()
 }
 
-fn validate_result(result: &LanguageOperationResult) -> Result<(), String> {
-    for document in &result.documents {
+fn validate_documents(documents: &[LanguageDocumentIdentity]) -> Result<(), String> {
+    for document in documents {
         validate_identity("language document path", &document.path)?;
         if matches!(document.provenance, DocumentProvenance::WorkspaceBacked)
             && document.file_version.as_deref().is_none_or(str::is_empty)
@@ -453,13 +538,17 @@ mod tests {
         output.project().map_err(|error| error.to_string())
     }
 
-    fn activate(kernel: &mut Kernel, epoch: u64) {
+    fn epoch(value: u64) -> ProviderEpoch {
+        ProviderEpoch::new(value).unwrap()
+    }
+
+    fn activate(kernel: &mut Kernel, value: u64) {
         invoke(
             kernel,
             LanguageCommand::ActivateProvider {
                 workspace_id: "workspace".into(),
                 provider_id: "rust-analyzer".into(),
-                epoch,
+                epoch: epoch(value),
             },
         )
         .unwrap();
@@ -477,6 +566,25 @@ mod tests {
         }
     }
 
+    fn diagnostics_result() -> DiagnosticsResult {
+        DiagnosticsResult::Diagnostics {
+            payload: serde_json::json!({"items": ["result"]}),
+            documents: vec![LanguageDocumentIdentity {
+                path: "src/lib.rs".into(),
+                file_version: Some("sha256:abc".into()),
+                provenance: DocumentProvenance::WorkspaceBacked,
+            }],
+        }
+    }
+
+    #[test]
+    fn zero_provider_epoch_is_rejected_at_decode_boundary() {
+        assert!(ProviderEpoch::new(0).is_err());
+        assert!(serde_json::from_value::<ProviderEpoch>(serde_json::json!(0)).is_err());
+        let value = PhenixValue::U64(0);
+        assert!(ProviderEpoch::try_from(Project(&value)).is_err());
+    }
+
     #[test]
     fn consumed_observations_are_durable_but_provider_and_diagnostics_are_not() {
         let path = temp_db("language-observation");
@@ -488,8 +596,8 @@ mod tests {
                 LanguageCommand::PublishDiagnostics {
                     workspace_id: "workspace".into(),
                     provider_id: "rust-analyzer".into(),
-                    epoch: 1,
-                    result: workspace_result(LanguageOperationKind::Diagnostics),
+                    epoch: epoch(1),
+                    result: diagnostics_result(),
                 },
             )
             .unwrap();
@@ -500,7 +608,7 @@ mod tests {
                     execution_id: "execution-1".into(),
                     workspace_id: "workspace".into(),
                     provider_id: "rust-analyzer".into(),
-                    epoch: 1,
+                    epoch: epoch(1),
                     result: workspace_result(LanguageOperationKind::Definition),
                 },
             )
@@ -546,7 +654,7 @@ mod tests {
                 execution_id: "execution-1".into(),
                 workspace_id: "workspace".into(),
                 provider_id: "rust-analyzer".into(),
-                epoch: 1,
+                epoch: epoch(1),
                 result: workspace_result(LanguageOperationKind::Hover),
             },
         )
@@ -576,7 +684,7 @@ mod tests {
                 execution_id: "execution-1".into(),
                 workspace_id: "workspace".into(),
                 provider_id: "rust-analyzer".into(),
-                epoch: 1,
+                epoch: epoch(1),
                 result: unsaved,
             },
         )
@@ -607,7 +715,7 @@ mod tests {
                 execution_id: "execution-1".into(),
                 workspace_id: "workspace".into(),
                 provider_id: "rust-analyzer".into(),
-                epoch: 1,
+                epoch: epoch(1),
                 result: invalid,
             },
         )
