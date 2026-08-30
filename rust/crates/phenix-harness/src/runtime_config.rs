@@ -278,15 +278,11 @@ fn ensure_routing_profile(
     let command = ModelCommand::GetProfile {
         id: profile.id.clone(),
     };
-    let existing = match invoke_projected::<_, ModelResponse>(
-        harness,
-        &service,
-        &command,
-        &authority,
-    )? {
-        ModelResponse::Profile { profile } => profile,
-        _ => return Err("model routing service returned the wrong profile response".into()),
-    };
+    let existing =
+        match invoke_projected::<_, ModelResponse>(harness, &service, &command, &authority)? {
+            ModelResponse::Profile { profile } => profile,
+            _ => return Err("model routing service returned the wrong profile response".into()),
+        };
 
     match existing {
         Some(existing) if existing == profile => Ok(()),
