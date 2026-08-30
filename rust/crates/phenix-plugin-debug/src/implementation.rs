@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 pub const DEBUG_SERVICE: &str = "phenix.debug@1";
 
-phenix_sdk::phenix_plugin! {
+phenix_core::phenix_plugin! {
     "phenix.debug";
 
     uses {
