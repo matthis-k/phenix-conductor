@@ -11,7 +11,9 @@ use phenix_core::{ComponentId, ComponentInterface, PluginHost};
 use phenix_plugin_context::ContextInterface;
 use phenix_plugin_models::ModelRoutingInterface;
 use phenix_plugin_options::OptionsInterface;
-use phenix_plugin_sessions::{SessionCommand, SessionInterface, SessionRecord, SessionResponse};
+use phenix_plugin_sessions::{
+    SessionCommand, SessionId, SessionInterface, SessionRecord, SessionResponse,
+};
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
@@ -86,13 +88,22 @@ impl<'host, 'runtime> PhenixSdk<'host, 'runtime> {
 #[derive(Debug)]
 pub enum SdkError {
     Invocation(phenix_core::ComponentInvocationError),
-    UnexpectedResponse { operation: &'static str },
+    InvalidIdentifier {
+        kind: &'static str,
+        message: &'static str,
+    },
+    UnexpectedResponse {
+        operation: &'static str,
+    },
 }
 
 impl Display for SdkError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Invocation(error) => Display::fmt(error, f),
+            Self::InvalidIdentifier { kind, message } => {
+                write!(f, "invalid {kind} identifier: {message}")
+            }
             Self::UnexpectedResponse { operation } => {
                 write!(f, "unexpected SDK response while {operation}")
             }
@@ -104,7 +115,7 @@ impl Error for SdkError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Invocation(error) => Some(error),
-            Self::UnexpectedResponse { .. } => None,
+            Self::InvalidIdentifier { .. } | Self::UnexpectedResponse { .. } => None,
         }
     }
 }
@@ -165,9 +176,13 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
         &self,
         id: impl Into<String>,
     ) -> Result<Option<Session<'host, 'runtime>>, SdkError> {
+        let id = SessionId::parse(id.into()).map_err(|message| SdkError::InvalidIdentifier {
+            kind: "session",
+            message,
+        })?;
         let response = self
             .storage
-            .invoke_projected(&SessionCommand::Get { id: id.into() })?;
+            .invoke_projected(&SessionCommand::Get { id })?;
         let SessionResponse::Session { session } = response else {
             return Err(SdkError::UnexpectedResponse {
                 operation: "finding session",
@@ -207,7 +222,7 @@ impl<'host, 'runtime> Session<'host, 'runtime> {
     }
 
     pub fn id(&self) -> &str {
-        &self.record.id
+        self.record.id.as_str()
     }
 
     pub fn record(&self) -> &SessionRecord {
