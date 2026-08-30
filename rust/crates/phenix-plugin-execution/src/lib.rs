@@ -8,6 +8,7 @@ mod configuration_regression;
 #[cfg(test)]
 mod generation_regression;
 mod implementation;
+mod tool_schedule;
 
 pub(crate) use agent_loop::{
     agent_loop_factory, ModelInvokeCommand, ModelInvokeResponse, MODEL_ROUTING_SERVICE,
@@ -25,6 +26,9 @@ pub use configuration::{
 pub use implementation::{
     execution_service, CallableRecord, ExecutionAuthority, ExecutionCommand, ExecutionRecord,
     ExecutionResponse, ExecutionState, WorkerTaskRecord, WorkerTaskState, EXECUTION_SERVICE,
+};
+pub use tool_schedule::{
+    ScheduledToolBatch, ToolCallPlan, ToolConcurrency, ToolScheduler,
 };
 
 use phenix_core::{
