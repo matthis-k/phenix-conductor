@@ -129,13 +129,19 @@ Provider metadata may be retained separately for diagnostics. Replay correctness
 
 ## Validation
 
-Validate before provider invocation:
+Validate the request before provider invocation:
 
 - tool ids are unique in one request
-- each tool call references a declared tool
-- tool arguments satisfy the consumer tool schema before invocation
-- each tool result references a pending call exactly once
 - content parts are supported by the selected provider target
+
+Validate assistant tool calls before tool invocation:
+
+- each tool call references a declared tool
+- tool arguments satisfy the consumer tool schema
+
+Validate tool results before the next provider invocation:
+
+- each tool result references a pending call exactly once
 
 Structural mismatches return errors and emit the existing mismatch event path. They do not panic.
 
