@@ -17,7 +17,7 @@ const WORKSPACE_PLUGIN: &str = "phenix.workspace";
 const WORKSPACE_SHELL: &str = "workspace.shell";
 const SUPPORTED: &[&str] = &["git", "gh", "jj", "rg", "fd", "jq", "nix", "cargo"];
 
-phenix_sdk::phenix_plugin! {
+phenix_core::phenix_plugin! {
     "phenix.cli";
 
     uses {
