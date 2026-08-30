@@ -1,22 +1,28 @@
-use crate::{hook_component_id, ExecutionCommand, ExecutionResponse};
+use crate::{ExecutionCommand, ExecutionResponse};
 use phenix_core::{
-    Authority, CapabilityId, ComponentInterface, DurableSchema, PhenixValue, PluginContext,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
-    SdkClient, ServiceContribution, ServiceId, TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, PhenixValue, PluginExecution,
+    PluginHost, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
+    TransactionOp,
 };
-use phenix_plugin_context::ContextInterface;
-use phenix_plugin_execution::ExecutionInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const HOOK_SERVICE: &str = "phenix.hooks@1";
-const HOOK_PLUGIN: &str = "phenix.hooks";
 const HOOK_NAMESPACE: &str = "phenix.hooks.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 
 type ActiveHooks = BTreeSet<(u64, String)>;
+
+phenix_sdk::phenix_plugin! {
+    "phenix.hooks";
+
+    uses {
+        context: "phenix.context@1",
+        execution: "phenix.execution@1",
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
 enum ContextRequester {
@@ -40,28 +46,14 @@ enum ContextRequest {
     },
 }
 
-struct HookSdk<'host, 'runtime> {
-    context: SdkClient<'host, 'runtime, ContextInterface>,
-    execution: SdkClient<'host, 'runtime, ExecutionInterface>,
-}
-
 type HookContext<'host, 'runtime, 'state> =
-    PluginContext<'host, 'runtime, HookSdk<'host, 'runtime>, (), &'state mut ActiveHooks>;
+    phenix_plugin::Context<'host, 'runtime, (), &'state mut ActiveHooks>;
 
 fn context<'host, 'runtime, 'state>(
     host: &'host PluginHost<'runtime>,
     active: &'state mut ActiveHooks,
 ) -> HookContext<'host, 'runtime, 'state> {
-    let component = hook_component_id();
-    PluginContext::new(
-        host,
-        HookSdk {
-            context: SdkClient::new(host, component.clone()),
-            execution: SdkClient::new(host, component),
-        },
-        (),
-        active,
-    )
+    phenix_plugin::context(host, (), active)
 }
 
 #[derive(
@@ -177,7 +169,7 @@ pub fn hook_manifest(maximum_authority: Authority) -> PluginManifest {
         capability(PERSISTENCE_WRITE),
     ]);
     PluginManifest {
-        id: PluginId::parse(HOOK_PLUGIN).expect("static plugin id is valid"),
+        id: phenix_plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
