@@ -27,9 +27,7 @@ pub use implementation::{
     execution_service, CallableRecord, ExecutionAuthority, ExecutionCommand, ExecutionRecord,
     ExecutionResponse, ExecutionState, WorkerTaskRecord, WorkerTaskState, EXECUTION_SERVICE,
 };
-pub use tool_schedule::{
-    ScheduledToolBatch, ToolCallPlan, ToolConcurrency, ToolScheduler,
-};
+pub use tool_schedule::{ScheduledToolBatch, ToolCallPlan, ToolConcurrency, ToolScheduler};
 
 use phenix_core::{
     Authority, PluginHost, PluginInstance, PluginManifest, ServiceContribution, ServiceId,

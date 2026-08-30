@@ -112,10 +112,7 @@ mod tests {
                     call("read-b", ToolConcurrency::ParallelSafe),
                 ]),
                 ScheduledToolBatch::Exclusive(call("write", ToolConcurrency::Exclusive)),
-                ScheduledToolBatch::Parallel(vec![call(
-                    "read-c",
-                    ToolConcurrency::ParallelSafe,
-                )]),
+                ScheduledToolBatch::Parallel(vec![call("read-c", ToolConcurrency::ParallelSafe,)]),
             ]
         );
     }
