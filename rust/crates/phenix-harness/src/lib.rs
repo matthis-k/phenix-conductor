@@ -488,7 +488,10 @@ impl PhenixHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{CapabilityId, LayerResult, ServiceContribution, ServiceId, ServiceRole};
+    use phenix_core::{
+        CapabilityId, LayerResult, PhenixValue, Project, ServiceContribution, ServiceId,
+        ServiceRole,
+    };
     use phenix_plugin_catalog::{
         artifact_manifest, artifact_service, context_manifest, context_service, planning_manifest,
         planning_service, repository_work_queue_service, session_manifest, session_service,
@@ -749,36 +752,35 @@ mod tests {
             );
         }
 
-        let input = serde_json::to_vec(&RepositoryWorkSnapshot {
+        let snapshot = RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
             issues: Vec::new(),
-        })
-        .unwrap();
-        assert_eq!(
-            harness
-                .invoke(
-                    &repository_work_queue_service(),
-                    &input,
-                    &Authority::default(),
-                    None,
-                )
-                .unwrap(),
-            b"null"
-        );
+        };
+        let input = serde_json::to_vec(&PhenixValue::from(&snapshot)).unwrap();
+        let output = harness
+            .invoke(
+                &repository_work_queue_service(),
+                &input,
+                &Authority::default(),
+                None,
+            )
+            .unwrap();
+        serde_json::from_slice::<PhenixValue>(&output).unwrap();
 
-        let create = serde_json::to_vec(&SessionCommand::Create {
+        let create = serde_json::to_vec(&PhenixValue::from(&SessionCommand::Create {
             id: "session-1".into(),
-        })
+        }))
         .unwrap();
         let response = harness
             .invoke(&session_service(), &create, &session_authority(), None)
             .unwrap();
+        let response: PhenixValue = serde_json::from_slice(&response).unwrap();
         assert!(matches!(
-            serde_json::from_slice::<SessionResponse>(&response).unwrap(),
+            SessionResponse::try_from(Project(&response)).unwrap(),
             SessionResponse::Created { .. }
         ));
 
-        let store = serde_json::to_vec(&ArtifactCommand::Store {
+        let store = serde_json::to_vec(&PhenixValue::from(&ArtifactCommand::Store {
             content: b"readme".to_vec(),
             provenance: ArtifactProvenance {
                 producer: "harness-smoke".into(),
@@ -786,43 +788,46 @@ mod tests {
                 configuration_identity: None,
                 source_observations: BTreeMap::new(),
             },
-        })
+        }))
         .unwrap();
         let response = harness
             .invoke(&artifact_service(), &store, &artifact_authority(), None)
             .unwrap();
+        let response: PhenixValue = serde_json::from_slice(&response).unwrap();
         assert!(matches!(
-            serde_json::from_slice::<ArtifactResponse>(&response).unwrap(),
+            ArtifactResponse::try_from(Project(&response)).unwrap(),
             ArtifactResponse::Stored { reused: false, .. }
         ));
 
-        let register = serde_json::to_vec(&ContextCommand::Register {
+        let register = serde_json::to_vec(&PhenixValue::from(&ContextCommand::Register {
             resource_id: "skill:review".into(),
             kind: ContextResourceKind::Skill,
             source: "skills/review/SKILL.md".into(),
             scope: ContextScope::Workspace,
-            content: b"review".to_vec(),
-        })
+            content: b"review".to_vec().into(),
+        }))
         .unwrap();
         let response = harness
             .invoke(&context_service(), &register, &context_authority(), None)
             .unwrap();
+        let response: PhenixValue = serde_json::from_slice(&response).unwrap();
         assert!(matches!(
-            serde_json::from_slice::<ContextResponse>(&response).unwrap(),
+            ContextResponse::try_from(Project(&response)).unwrap(),
             ContextResponse::Registered { .. }
         ));
 
-        let objective = serde_json::to_vec(&PlanningCommand::CreateObjective {
+        let objective = serde_json::to_vec(&PhenixValue::from(&PlanningCommand::CreateObjective {
             id: "objective-1".into(),
             title: "Use plugin-owned planning".into(),
             parent: None,
-        })
+        }))
         .unwrap();
         let response = harness
             .invoke(&planning_service(), &objective, &planning_authority(), None)
             .unwrap();
+        let response: PhenixValue = serde_json::from_slice(&response).unwrap();
         assert!(matches!(
-            serde_json::from_slice::<PlanningResponse>(&response).unwrap(),
+            PlanningResponse::try_from(Project(&response)).unwrap(),
             PlanningResponse::Objective { objective: Some(_) }
         ));
     }

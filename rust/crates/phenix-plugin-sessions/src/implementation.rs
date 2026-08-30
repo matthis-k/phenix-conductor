@@ -1,12 +1,13 @@
 use phenix_core::{
-    session_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, DurableSchema, InterfaceId, NamespaceTransaction, PluginContext,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
-    ServiceContribution, ServiceId, TransactionOp,
+    session_service, Authority, Bytes, CapabilityId, ComponentExport, ComponentId,
+    ComponentInterface, ComponentManifest, DurableSchema, InterfaceId, NamespaceTransaction,
+    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    ResourceNamespace, ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{
     SessionCommand, SessionInput, SessionInputKind, SessionRecord, SessionResponse, SESSION_SERVICE,
 };
+use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 
 const SESSION_PLUGIN: &str = "phenix.sessions";
@@ -27,21 +28,22 @@ fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> SessionContext
 pub struct SessionInterface;
 
 impl ComponentInterface for SessionInterface {
-    type Request = SessionCommand;
-    type Response = SessionResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(SESSION_SERVICE).expect("static session interface id is valid")
     }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<SessionCommand, SessionResponse>()
+    }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionMutationCommand {
     PrepareCreate { id: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionMutationResponse {
     PreparedCreate {
@@ -53,12 +55,13 @@ pub enum SessionMutationResponse {
 pub struct SessionMutationInterface;
 
 impl ComponentInterface for SessionMutationInterface {
-    type Request = SessionMutationCommand;
-    type Response = SessionMutationResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(SESSION_MUTATION_SERVICE)
             .expect("static session mutation interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<SessionMutationCommand, SessionMutationResponse>()
     }
 }
 
@@ -106,11 +109,13 @@ pub fn session_component_manifest() -> ComponentManifest {
         exports: vec![
             ComponentExport {
                 interface: SessionInterface::interface_id(),
+                schema: SessionInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },
             ComponentExport {
                 interface: SessionMutationInterface::interface_id(),
+                schema: SessionMutationInterface::schema(),
                 priority: 100,
                 required_authority: Authority::default(),
             },
@@ -150,14 +155,28 @@ impl PluginInstance for SessionPlugin {
     ) -> Result<Vec<u8>, String> {
         let context = context(host);
         if service == &session_service() {
-            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let interface = SessionInterface::interface_id();
+            let command = context
+                .kernel
+                .decode_projected::<SessionCommand>(&interface, input)
+                .map_err(|error| error.to_string())?;
             let response = handle_session(&context, command)?;
-            return serde_json::to_vec(&response).map_err(|error| error.to_string());
+            return context
+                .kernel
+                .encode_value(&response)
+                .map_err(|error| error.to_string());
         }
         if service == &session_mutation_service() {
-            let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let interface = SessionMutationInterface::interface_id();
+            let command = context
+                .kernel
+                .decode_projected::<SessionMutationCommand>(&interface, input)
+                .map_err(|error| error.to_string())?;
             let response = handle_mutation(&context, command)?;
-            return serde_json::to_vec(&response).map_err(|error| error.to_string());
+            return context
+                .kernel
+                .encode_value(&response)
+                .map_err(|error| error.to_string());
         }
         Err(format!("unsupported session service: {service}"))
     }
@@ -257,7 +276,7 @@ fn continue_session(
     context: &SessionContext<'_, '_>,
     id: &str,
     kind: SessionInputKind,
-    content: Vec<u8>,
+    content: Bytes,
 ) -> Result<SessionResponse, String> {
     let session = read_session(context, id)?.ok_or_else(|| format!("unknown session: {id}"))?;
     let key = inputs_key(id);
@@ -342,7 +361,7 @@ fn inputs_key(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, LocalPersistence};
+    use phenix_core::{Kernel, KernelConfig, LocalPersistence, PhenixValue, Project};
     use std::{
         fs,
         path::PathBuf,
@@ -354,11 +373,13 @@ mod tests {
     }
 
     fn invoke(kernel: &mut Kernel, command: &SessionCommand) -> Result<SessionResponse, String> {
-        let input = serde_json::to_vec(command).unwrap();
+        let input = serde_json::to_vec(&PhenixValue::from(command)).unwrap();
         let output = kernel
             .invoke(&session_service(), &input, &authority(), None)
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        let output: PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        SessionResponse::try_from(Project(&output)).map_err(|error| error.to_string())
     }
 
     fn kernel_with(path: &PathBuf) -> Kernel {
@@ -400,7 +421,7 @@ mod tests {
                     &SessionCommand::Continue {
                         id: "root".into(),
                         kind,
-                        content,
+                        content: content.into(),
                     },
                 )
                 .unwrap();
@@ -421,12 +442,12 @@ mod tests {
                     SessionInput {
                         sequence: 1,
                         kind: SessionInputKind::Root,
-                        content: b"system".to_vec(),
+                        content: b"system".to_vec().into(),
                     },
                     SessionInput {
                         sequence: 2,
                         kind: SessionInputKind::User,
-                        content: b"hello".to_vec(),
+                        content: b"hello".to_vec().into(),
                     },
                 ],
             }

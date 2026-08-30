@@ -11,6 +11,8 @@ mod composition_metadata;
 mod configuration;
 #[cfg(test)]
 mod configuration_regression;
+mod contract;
+mod contract_wire;
 mod events;
 mod external;
 mod frontend_metadata;
@@ -22,6 +24,7 @@ mod metadata_input;
 mod metadata_inspection;
 mod metadata_reconciliation;
 mod persistence;
+mod persistence_value;
 mod plugin_context;
 mod reconciliation;
 mod reconciliation_inspection;
@@ -29,10 +32,10 @@ mod registry;
 mod resolver;
 mod runtime;
 mod sdk;
+mod std_value;
 mod tasks;
 mod typed_component;
 
-#[cfg(test)]
 extern crate self as phenix_core;
 #[cfg(test)]
 mod component_endpoint_regression;
@@ -86,6 +89,11 @@ pub use configuration::{
     ConfigSourceClass, ConfigurationFrontendMetadata, FrontendConfigContribution,
     FrontendConfigError, ResolvedConfigContribution, ResolvedConfigContributions,
 };
+pub use contract::{
+    Bytes, CallableRef, Contract, ContractId, ContractValue, Exact, HasPhenixSchema, Key,
+    ObjectRef, PhenixContract, PhenixSchema, PhenixValue, Project, ReferenceId,
+    SchemaCompatibility, SchemaMismatch, Type, TypeKind, ValueCodec, ValueError, ValueMatch,
+};
 pub use events::{
     EventBus, EventDispatchReport, EventEnvelope, EventError, EventFailurePolicy, EventHandler,
     EventSubscription, KernelEvent, SubscriptionSpec,
@@ -137,7 +145,10 @@ pub use runtime::{
 };
 pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
 pub use tasks::{CancellationToken, TaskHandle, TaskRuntime};
-pub use typed_component::{ComponentInterface, ComponentInvocationError};
+pub use typed_component::{
+    ComponentInterface, ComponentInvocationError, InterfaceCompatibility, InterfaceSchema,
+    InterfaceSchemaMismatch,
+};
 
 /// Rule used by a configuration frontend for source identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

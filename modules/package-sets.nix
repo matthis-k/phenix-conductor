@@ -25,6 +25,9 @@ let
       '';
     };
 
+  mkEmbeddedPluginPackage =
+    pkgs: package: pkgs.writeTextDir "share/phenix-rust-package/name" "${package}\n";
+
   mkBinaryPackage =
     pkgs: package: binary:
     pkgs.rustPlatform.buildRustPackage {
@@ -97,7 +100,7 @@ let
           name: pluginId:
           self.lib.mkPhenixPlugin {
             inherit pkgs name;
-            package = mkRustPackage pkgs pluginCrates.${name};
+            package = mkEmbeddedPluginPackage pkgs pluginCrates.${name};
             manifest = {
               id = pluginId;
               version = 1;

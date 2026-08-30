@@ -1,3 +1,4 @@
+use crate::{PhenixValue, Type, TypeKind, ValueCodec, ValueError};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Display, Formatter},
@@ -58,6 +59,49 @@ macro_rules! identifier {
             fn try_from(value: String) -> Result<Self, Self::Error> {
                 validate_identifier(&value)?;
                 Ok(Self(value))
+            }
+        }
+
+        impl ValueCodec for $name {
+            fn phenix_type() -> Type {
+                Type::String
+            }
+
+            fn to_value(&self) -> PhenixValue {
+                PhenixValue::String(self.0.clone())
+            }
+
+            fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
+                match value {
+                    PhenixValue::String(value) => Self::parse(value.clone())
+                        .map_err(|error| ValueError::InvalidValue(error.into())),
+                    _ => Err(ValueError::TypeMismatch {
+                        expected: TypeKind::String,
+                        actual: value.kind(),
+                    }),
+                }
+            }
+        }
+
+        impl From<&$name> for PhenixValue {
+            fn from(value: &$name) -> Self {
+                <$name as ValueCodec>::to_value(value)
+            }
+        }
+
+        impl<'value> TryFrom<crate::Exact<&'value PhenixValue>> for $name {
+            type Error = ValueError;
+
+            fn try_from(value: crate::Exact<&'value PhenixValue>) -> Result<Self, Self::Error> {
+                <Self as ValueCodec>::from_value(value.0)
+            }
+        }
+
+        impl<'value> TryFrom<crate::Project<&'value PhenixValue>> for $name {
+            type Error = ValueError;
+
+            fn try_from(value: crate::Project<&'value PhenixValue>) -> Result<Self, Self::Error> {
+                <Self as ValueCodec>::project_from_value(value.0)
             }
         }
     };
@@ -136,6 +180,50 @@ impl TryFrom<String> for InterfaceId {
     }
 }
 
+impl ValueCodec for InterfaceId {
+    fn phenix_type() -> Type {
+        Type::String
+    }
+
+    fn to_value(&self) -> PhenixValue {
+        PhenixValue::String(self.0.clone())
+    }
+
+    fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
+        match value {
+            PhenixValue::String(value) => {
+                Self::parse(value.clone()).map_err(|error| ValueError::InvalidValue(error.into()))
+            }
+            _ => Err(ValueError::TypeMismatch {
+                expected: TypeKind::String,
+                actual: value.kind(),
+            }),
+        }
+    }
+}
+
+impl From<&InterfaceId> for PhenixValue {
+    fn from(value: &InterfaceId) -> Self {
+        <InterfaceId as ValueCodec>::to_value(value)
+    }
+}
+
+impl<'value> TryFrom<crate::Exact<&'value PhenixValue>> for InterfaceId {
+    type Error = ValueError;
+
+    fn try_from(value: crate::Exact<&'value PhenixValue>) -> Result<Self, Self::Error> {
+        <Self as ValueCodec>::from_value(value.0)
+    }
+}
+
+impl<'value> TryFrom<crate::Project<&'value PhenixValue>> for InterfaceId {
+    type Error = ValueError;
+
+    fn try_from(value: crate::Project<&'value PhenixValue>) -> Result<Self, Self::Error> {
+        <Self as ValueCodec>::project_from_value(value.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +253,7 @@ mod tests {
         let encoded = serde_json::to_string(&id).unwrap();
         assert_eq!(encoded, "\"phenix.agent@1\"");
         assert_eq!(serde_json::from_str::<ComponentId>(&encoded).unwrap(), id);
+        assert_eq!(ComponentId::from_value(&id.to_value()).unwrap(), id);
     }
 
     #[test]

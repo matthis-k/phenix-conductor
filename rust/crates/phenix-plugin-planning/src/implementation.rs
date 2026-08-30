@@ -1,7 +1,7 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
-    TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
+    ServiceId, TransactionOp,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,21 +22,21 @@ fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> PlanningContex
     PluginContext::new(host, (), (), ())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct ObjectiveRecord {
     pub id: String,
     pub title: String,
     pub parent: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct PlanStep {
     pub id: String,
     pub description: String,
     pub dependencies: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct PlanRecord {
     pub id: String,
     pub objective_id: String,
@@ -44,7 +44,7 @@ pub struct PlanRecord {
     pub steps: Vec<PlanStep>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct DecisionRecord {
     pub id: String,
     pub objective_id: String,
@@ -54,7 +54,7 @@ pub struct DecisionRecord {
     pub supersedes: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryKind {
     Objective,
@@ -62,7 +62,7 @@ pub enum HistoryKind {
     Decision,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct HistoryEntry {
     pub kind: HistoryKind,
     pub id: String,
@@ -70,7 +70,7 @@ pub struct HistoryEntry {
     pub summary: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum PlanningCommand {
     CreateObjective {
@@ -107,7 +107,7 @@ pub enum PlanningCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum PlanningResponse {
     Objective { objective: Option<ObjectiveRecord> },
@@ -175,9 +175,17 @@ impl PluginInstance for PlanningPlugin {
         if service != &planning_service() {
             return Err(format!("unsupported planning service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host);
+        let interface = crate::PlanningInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<PlanningCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -631,7 +639,7 @@ mod tests {
     }
 
     fn invoke(kernel: &mut Kernel, command: PlanningCommand) -> Result<PlanningResponse, String> {
-        let input = serde_json::to_vec(&command).unwrap();
+        let input = serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap();
         let output = kernel
             .invoke(
                 &planning_service(),
@@ -640,7 +648,9 @@ mod tests {
                 None,
             )
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        let output: phenix_core::PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        output.project().map_err(|error| error.to_string())
     }
 
     #[test]

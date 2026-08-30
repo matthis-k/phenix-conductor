@@ -21,17 +21,20 @@ pub fn session_tree_component_manifest() -> ComponentManifest {
         imports: vec![
             ComponentImport {
                 interface: SessionInterface::interface_id(),
+                schema: SessionInterface::schema(),
                 required: true,
                 authority: authority.clone(),
             },
             ComponentImport {
                 interface: SessionMutationInterface::interface_id(),
+                schema: SessionMutationInterface::schema(),
                 required: true,
                 authority: authority.clone(),
             },
         ],
         exports: vec![ComponentExport {
             interface: SessionTreeInterface::interface_id(),
+            schema: SessionTreeInterface::schema(),
             priority: 100,
             required_authority: authority.clone(),
         }],

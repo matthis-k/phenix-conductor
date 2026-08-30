@@ -1,6 +1,6 @@
 use crate::{
-    Authority, ComponentExport, ComponentId, ComponentManifest, InterfaceId, PluginExecution,
-    PluginId, PluginManifest,
+    Authority, ComponentExport, ComponentId, ComponentManifest, InterfaceCompatibility,
+    InterfaceId, InterfaceSchemaMismatch, PluginExecution, PluginId, PluginManifest,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -31,6 +31,12 @@ pub enum ComponentGraphError {
     MissingRequiredImport {
         component: ComponentId,
         interface: InterfaceId,
+    },
+    IncompatibleRequiredImport {
+        component: ComponentId,
+        interface: InterfaceId,
+        exporter: ComponentId,
+        mismatch: Box<InterfaceSchemaMismatch>,
     },
     ImportNotDeclared {
         component: ComponentId,
@@ -77,6 +83,15 @@ impl Display for ComponentGraphError {
             } => write!(
                 f,
                 "component {component} has unresolved required import {interface}"
+            ),
+            Self::IncompatibleRequiredImport {
+                component,
+                interface,
+                exporter,
+                mismatch,
+            } => write!(
+                f,
+                "component {component} import {interface} is structurally incompatible with exporter {exporter}: {mismatch}"
             ),
             Self::ImportNotDeclared {
                 component,
@@ -225,18 +240,30 @@ impl ResolvedComponentGraph {
                 .attenuate(&manifest.maximum_authority);
             let mut imports = Vec::with_capacity(manifest.imports.len());
             for import in &manifest.imports {
-                let selected = exporters.get(&import.interface).and_then(|candidates| {
-                    candidates.iter().find_map(|(candidate, export)| {
+                let mut selected = None;
+                let mut incompatible = None;
+                if let Some(candidates) = exporters.get(&import.interface) {
+                    for (candidate, export) in candidates {
                         let exporter_owner = &plugins[&candidate.owner];
                         let effective_authority = component_authority
                             .attenuate(&import.authority)
                             .attenuate(&exporter_owner.maximum_authority)
                             .attenuate(&candidate.maximum_authority);
-                        effective_authority
-                            .permits_all(&export.required_authority)
-                            .then_some((*candidate, effective_authority))
-                    })
-                });
+                        if !effective_authority.permits_all(&export.required_authority) {
+                            continue;
+                        }
+                        match import.schema.accepts_provider(&export.schema) {
+                            InterfaceCompatibility::Exact | InterfaceCompatibility::Compatible => {
+                                selected = Some((*candidate, effective_authority));
+                                break;
+                            }
+                            InterfaceCompatibility::Incompatible(mismatch) => {
+                                incompatible
+                                    .get_or_insert_with(|| (candidate.id.clone(), mismatch));
+                            }
+                        }
+                    }
+                }
                 let binding = if let Some((exporter, effective_authority)) = selected {
                     let exporter_owner = &plugins[&exporter.owner];
                     Some(ResolvedImportHandle {
@@ -248,6 +275,14 @@ impl ResolvedComponentGraph {
                         effective_authority,
                     })
                 } else if import.required {
+                    if let Some((exporter, mismatch)) = incompatible {
+                        return Err(ComponentGraphError::IncompatibleRequiredImport {
+                            component: manifest.id.clone(),
+                            interface: import.interface.clone(),
+                            exporter,
+                            mismatch: Box::new(mismatch),
+                        });
+                    }
                     return Err(ComponentGraphError::MissingRequiredImport {
                         component: manifest.id.clone(),
                         interface: import.interface.clone(),
@@ -413,6 +448,7 @@ mod tests {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: interface("phenix.demo@1"),
+                schema: Default::default(),
                 priority,
                 required_authority: Authority::default(),
             }],
@@ -426,6 +462,7 @@ mod tests {
             owner: plugin("plugin-consumer"),
             imports: vec![ComponentImport {
                 interface: interface("phenix.demo@1"),
+                schema: Default::default(),
                 required,
                 authority: authority.clone(),
             }],
@@ -635,11 +672,13 @@ mod tests {
             owner: plugin("plugin-a"),
             imports: vec![ComponentImport {
                 interface: interface_b.clone(),
+                schema: Default::default(),
                 required: true,
                 authority: authority.clone(),
             }],
             exports: vec![ComponentExport {
                 interface: interface_a.clone(),
+                schema: Default::default(),
                 priority: 0,
                 required_authority: authority.clone(),
             }],
@@ -650,11 +689,13 @@ mod tests {
             owner: plugin("plugin-b"),
             imports: vec![ComponentImport {
                 interface: interface_a,
+                schema: Default::default(),
                 required: true,
                 authority: authority.clone(),
             }],
             exports: vec![ComponentExport {
                 interface: interface_b,
+                schema: Default::default(),
                 priority: 0,
                 required_authority: authority.clone(),
             }],
@@ -699,6 +740,170 @@ mod tests {
         assert!(matches!(
             ResolvedComponentGraph::compile([], [component], &Authority::default()),
             Err(ComponentGraphError::UnknownOwningPlugin { .. })
+        ));
+    }
+}
+
+#[cfg(test)]
+mod interface_schema_binding_tests {
+    use super::*;
+    use crate::{InterfaceSchema, Key, PhenixSchema};
+
+    fn key(value: &str) -> Key {
+        Key::parse(value).unwrap()
+    }
+
+    fn table(fields: &[(&str, PhenixSchema)]) -> PhenixSchema {
+        PhenixSchema::Table(
+            fields
+                .iter()
+                .map(|(name, schema)| (key(name), schema.clone()))
+                .collect(),
+        )
+    }
+
+    fn plugin(id: &str) -> PluginManifest {
+        PluginManifest {
+            id: PluginId::parse(id).unwrap(),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: Vec::new(),
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    fn interface() -> InterfaceId {
+        InterfaceId::parse("fixture.schema@1").unwrap()
+    }
+
+    fn consumer(schema: InterfaceSchema) -> ComponentManifest {
+        ComponentManifest {
+            id: ComponentId::parse("consumer").unwrap(),
+            owner: PluginId::parse("consumer-owner").unwrap(),
+            imports: vec![crate::ComponentImport {
+                interface: interface(),
+                schema,
+                required: true,
+                authority: Authority::default(),
+            }],
+            exports: Vec::new(),
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    fn provider(id: &str, priority: i32, schema: InterfaceSchema) -> ComponentManifest {
+        ComponentManifest {
+            id: ComponentId::parse(id).unwrap(),
+            owner: PluginId::parse(format!("{id}-owner")).unwrap(),
+            imports: Vec::new(),
+            exports: vec![crate::ComponentExport {
+                interface: interface(),
+                schema,
+                priority,
+                required_authority: Authority::default(),
+            }],
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    #[test]
+    fn graph_accepts_directionally_compatible_independent_schemas() {
+        let consumer_schema = InterfaceSchema::new(
+            table(&[
+                ("name", PhenixSchema::String),
+                ("detail", PhenixSchema::U64),
+            ]),
+            table(&[("value", PhenixSchema::String)]),
+        );
+        let provider_schema = InterfaceSchema::new(
+            table(&[("name", PhenixSchema::String)]),
+            table(&[
+                ("value", PhenixSchema::String),
+                ("internal", PhenixSchema::U64),
+            ]),
+        );
+        let graph = ResolvedComponentGraph::compile(
+            [plugin("consumer-owner"), plugin("provider-owner")],
+            [
+                consumer(consumer_schema),
+                provider("provider", 10, provider_schema),
+            ],
+            &Authority::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            graph
+                .import_handle(&ComponentId::parse("consumer").unwrap(), &interface())
+                .unwrap()
+                .unwrap()
+                .exporter(),
+            &ComponentId::parse("provider").unwrap()
+        );
+    }
+
+    #[test]
+    fn graph_skips_incompatible_provider_for_lower_priority_compatible_provider() {
+        let consumer_schema = InterfaceSchema::new(
+            table(&[("name", PhenixSchema::String)]),
+            table(&[("value", PhenixSchema::String)]),
+        );
+        let incompatible = InterfaceSchema::new(
+            table(&[("name", PhenixSchema::String)]),
+            table(&[("wrong", PhenixSchema::String)]),
+        );
+        let compatible = consumer_schema.clone();
+        let graph = ResolvedComponentGraph::compile(
+            [
+                plugin("consumer-owner"),
+                plugin("high-owner"),
+                plugin("low-owner"),
+            ],
+            [
+                consumer(consumer_schema),
+                provider("high", 100, incompatible),
+                provider("low", 10, compatible),
+            ],
+            &Authority::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            graph
+                .import_handle(&ComponentId::parse("consumer").unwrap(), &interface())
+                .unwrap()
+                .unwrap()
+                .exporter(),
+            &ComponentId::parse("low").unwrap()
+        );
+    }
+
+    #[test]
+    fn required_import_reports_structural_incompatibility_before_activation() {
+        let consumer_schema = InterfaceSchema::new(
+            table(&[("name", PhenixSchema::String)]),
+            table(&[("value", PhenixSchema::String)]),
+        );
+        let provider_schema = InterfaceSchema::new(
+            table(&[("name", PhenixSchema::String)]),
+            table(&[("wrong", PhenixSchema::String)]),
+        );
+        let error = ResolvedComponentGraph::compile(
+            [plugin("consumer-owner"), plugin("provider-owner")],
+            [
+                consumer(consumer_schema),
+                provider("provider", 10, provider_schema),
+            ],
+            &Authority::default(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ComponentGraphError::IncompatibleRequiredImport { exporter, .. }
+                if exporter == ComponentId::parse("provider").unwrap()
         ));
     }
 }

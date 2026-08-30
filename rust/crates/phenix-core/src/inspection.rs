@@ -314,6 +314,7 @@ mod tests {
                 imports: Vec::new(),
                 exports: vec![ComponentExport {
                     interface: interface.clone(),
+                    schema: Default::default(),
                     priority: 10,
                     required_authority: Authority::new([read.clone()]),
                 }],
@@ -324,6 +325,7 @@ mod tests {
                 owner: consumer.id.clone(),
                 imports: vec![ComponentImport {
                     interface: interface.clone(),
+                    schema: Default::default(),
                     required: true,
                     authority: Authority::new([read.clone(), write.clone()]),
                 }],

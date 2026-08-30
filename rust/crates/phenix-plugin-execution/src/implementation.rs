@@ -1,8 +1,9 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
-    TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
+    ServiceId, TransactionOp,
 };
+use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,7 +23,7 @@ fn context<'host, 'runtime>(
     PluginContext::new(host, (), (), ())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct ExecutionAuthority {
     #[serde(default)]
     pub capabilities: BTreeSet<String>,
@@ -60,7 +61,7 @@ impl ExecutionAuthority {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionState {
     Active,
@@ -68,7 +69,7 @@ pub enum ExecutionState {
     Failed,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct ExecutionRecord {
     pub id: String,
     pub parent_execution: Option<String>,
@@ -77,14 +78,14 @@ pub struct ExecutionRecord {
     pub state: ExecutionState,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct CallableRecord {
     pub id: String,
     pub service: String,
     pub required_authority: ExecutionAuthority,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum WorkerTaskState {
     Pending,
@@ -101,7 +102,7 @@ pub enum WorkerTaskState {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct WorkerTaskRecord {
     pub id: String,
     pub parent_execution: String,
@@ -120,7 +121,7 @@ struct ExecutionProjection {
     tasks: BTreeMap<String, WorkerTaskRecord>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ExecutionCommand {
     CreateExecution {
@@ -176,7 +177,7 @@ pub enum ExecutionCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum ExecutionResponse {
     Execution { execution: ExecutionRecord },
@@ -254,9 +255,17 @@ impl PluginInstance for ExecutionPlugin {
         if service != &execution_service() {
             return Err(format!("unsupported execution service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = execute(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host);
+        let interface = crate::ExecutionInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<ExecutionCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = execute(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -736,15 +745,19 @@ mod tests {
         kernel: &mut Kernel,
         command: &ExecutionCommand,
     ) -> Result<ExecutionResponse, String> {
+        let input = phenix_core::PhenixValue::from(command);
         let output = kernel
             .invoke(
                 &execution_service(),
-                &serde_json::to_vec(command).unwrap(),
+                &serde_json::to_vec(&input).unwrap(),
                 &caller_authority(),
                 None,
             )
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        let output: phenix_core::PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        ExecutionResponse::try_from(phenix_core::Project(&output))
+            .map_err(|error| error.to_string())
     }
 
     fn temp_db(name: &str) -> PathBuf {

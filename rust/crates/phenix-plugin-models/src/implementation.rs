@@ -1,9 +1,11 @@
 use phenix_core::{
-    Authority, CallableId, CapabilityId, DurableSchema, ModelId, PluginContext, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, RoutingProfileId,
-    ServiceContribution, ServiceId, TransactionOp,
+    Authority, Bytes, CallableId, CapabilityId, ComponentInterface, DurableSchema, ModelId,
+    PhenixValue, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, Project, ResourceNamespace, RoutingProfileId, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
+use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,7 +28,7 @@ fn context<'host, 'runtime, 'state>(
     PluginContext::new(host, (), (), authenticated)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct ModelTarget {
     pub provider_plugin: PluginId,
     pub model: ModelId,
@@ -34,7 +36,7 @@ pub struct ModelTarget {
     pub options: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct RoutingProfile {
     pub id: RoutingProfileId,
     pub default_target: ModelTarget,
@@ -42,13 +44,13 @@ pub struct RoutingProfile {
     pub callable_targets: BTreeMap<CallableId, ModelTarget>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct RoutingProfileDescriptor {
     pub id: RoutingProfileId,
     pub providers: Vec<PluginId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ModelCommand {
     RegisterProfile {
@@ -69,11 +71,11 @@ pub enum ModelCommand {
     Invoke {
         profile_id: RoutingProfileId,
         callable_id: Option<CallableId>,
-        input: Vec<u8>,
+        input: Bytes,
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelResponse {
     Profile {
@@ -169,10 +171,17 @@ impl PluginInstance for ModelRoutingPlugin {
         if service != &model_routing_service() {
             return Err(format!("unsupported model routing service: {service}"));
         }
-        let command: ModelCommand =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&mut context(host, &mut self.authenticated), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let mut context = context(host, &mut self.authenticated);
+        let interface = crate::ModelRoutingInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<ModelCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&mut context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -229,7 +238,7 @@ fn handle(
                 ));
             }
             let request = ModelInferenceRequest {
-                model: target.model.as_str().to_owned(),
+                model: target.model.clone(),
                 input,
                 options: target.options.clone(),
             };
@@ -237,13 +246,16 @@ fn handle(
                 .kernel
                 .invoke_service_abi(
                     &model_inference_service(),
-                    &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+                    &serde_json::to_vec(&PhenixValue::from(&request))
+                        .map_err(|error| error.to_string())?,
                     context.call.authority,
                     Some(&target.provider_plugin),
                 )
                 .map_err(|error| error.to_string())?;
-            let response: ModelInferenceResponse =
+            let output: PhenixValue =
                 serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+            let response = ModelInferenceResponse::try_from(Project(&output))
+                .map_err(|error| error.to_string())?;
             Ok(ModelResponse::Inference { target, response })
         }
     }
@@ -357,7 +369,7 @@ fn profile_key(id: &RoutingProfileId) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, LocalPersistence};
+    use phenix_core::{Kernel, KernelConfig, LocalPersistence, PhenixValue, Project};
     use std::{
         fs,
         path::PathBuf,
@@ -404,12 +416,16 @@ mod tests {
         let output = kernel
             .invoke(
                 &model_routing_service(),
-                &serde_json::to_vec(&command).unwrap(),
+                &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
                 &routing_authority(),
                 None,
             )
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        {
+            let output: PhenixValue =
+                serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+            ModelResponse::try_from(Project(&output)).map_err(|error| error.to_string())
+        }
     }
 
     #[test]

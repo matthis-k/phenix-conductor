@@ -1,4 +1,4 @@
-use crate::{workspace_manifest, WorkspaceCommand, WorkspaceResponse, WORKSPACE_SERVICE};
+use crate::{workspace_manifest, WORKSPACE_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
     PluginId,
@@ -10,11 +10,12 @@ const WORKSPACE_PLUGIN: &str = "phenix.workspace";
 pub struct WorkspaceInterface;
 
 impl ComponentInterface for WorkspaceInterface {
-    type Request = WorkspaceCommand;
-    type Response = WorkspaceResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(WORKSPACE_SERVICE).expect("static workspace interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::WorkspaceCommand, crate::WorkspaceResponse>()
     }
 }
 
@@ -31,6 +32,7 @@ pub fn workspace_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: WorkspaceInterface::interface_id(),
+            schema: WorkspaceInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -67,6 +69,7 @@ mod tests {
             owner: PluginId::parse("fixture.workspace-consumer").unwrap(),
             imports: vec![ComponentImport {
                 interface: WorkspaceInterface::interface_id(),
+                schema: WorkspaceInterface::schema(),
                 required: true,
                 authority: authority.clone(),
             }],

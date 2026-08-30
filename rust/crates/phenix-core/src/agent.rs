@@ -1,4 +1,4 @@
-use crate::ServiceId;
+use crate::{Bytes, CallableId, ModelId, ServiceId, SkillId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -8,27 +8,29 @@ pub const TOOL_SERVICE: &str = "phenix.tools@1";
 pub const SKILL_SERVICE: &str = "phenix.skills@1";
 pub const CONTEXT_SERVICE: &str = "phenix.context@1";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    phenix_sdk_macros::PhenixValue, Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionInputKind {
     User,
     Root,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionInput {
     pub sequence: u64,
     pub kind: SessionInputKind,
-    pub content: Vec<u8>,
+    pub content: Bytes,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionRecord {
     pub id: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionCommand {
     Create {
@@ -41,14 +43,14 @@ pub enum SessionCommand {
     Continue {
         id: String,
         kind: SessionInputKind,
-        content: Vec<u8>,
+        content: Bytes,
     },
     Inputs {
         id: String,
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionResponse {
     Created {
@@ -69,70 +71,80 @@ pub enum SessionResponse {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelInferenceRequest {
-    pub model: String,
-    pub input: Vec<u8>,
+    pub model: ModelId,
+    pub input: Bytes,
     #[serde(default)]
     pub options: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelInferenceResponse {
-    pub output: Vec<u8>,
+    pub output: Bytes,
     pub provider_metadata: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolDefinition {
-    pub id: String,
+    pub id: CallableId,
     #[serde(default)]
     pub input_schema: serde_json::Value,
     #[serde(default)]
     pub output_schema: serde_json::Value,
     #[serde(default)]
-    pub output_prefix: Vec<u8>,
+    pub output_prefix: Bytes,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ToolCommand {
     Register { tool: ToolDefinition },
-    Get { id: String },
+    Get { id: CallableId },
     List,
-    Invoke { id: String, input: Vec<u8> },
+    Invoke { id: CallableId, input: Bytes },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum ToolResponse {
     Tool { tool: Option<ToolDefinition> },
     Tools { tools: Vec<ToolDefinition> },
-    Output { output: Vec<u8> },
+    Output { output: Bytes },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SkillDefinition {
-    pub id: String,
-    pub content: Vec<u8>,
+    pub id: SkillId,
+    pub content: Bytes,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum SkillCommand {
     Register { skill: SkillDefinition },
-    Get { id: String },
+    Get { id: SkillId },
     List,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum SkillResponse {
     Skill { skill: Option<SkillDefinition> },
     Skills { skills: Vec<SkillDefinition> },
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    phenix_sdk_macros::PhenixValue,
+    Clone,
+    Debug,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextResourceKind {
     ProjectInstruction,
@@ -141,14 +153,24 @@ pub enum ContextResourceKind {
     External,
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    phenix_sdk_macros::PhenixValue,
+    Clone,
+    Debug,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextScope {
     Workspace,
     PathPrefix(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContextDescriptor {
     pub resource_id: String,
     pub revision: String,
@@ -156,16 +178,16 @@ pub struct ContextDescriptor {
     pub source: String,
     pub scope: ContextScope,
     pub content_identity: String,
-    pub estimated_bytes: usize,
+    pub estimated_bytes: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContextResourceRevision {
     pub descriptor: ContextDescriptor,
-    pub content: Vec<u8>,
+    pub content: Bytes,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ContextCommand {
     Register {
@@ -173,7 +195,7 @@ pub enum ContextCommand {
         kind: ContextResourceKind,
         source: String,
         scope: ContextScope,
-        content: Vec<u8>,
+        content: Bytes,
     },
     Get {
         resource_id: String,
@@ -182,7 +204,7 @@ pub enum ContextCommand {
     List,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum ContextResponse {
     Registered {

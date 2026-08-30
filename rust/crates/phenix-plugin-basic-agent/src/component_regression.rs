@@ -6,9 +6,9 @@ use crate::{
 };
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentGraphError, ComponentId, ComponentImport,
-    ComponentInterface, ComponentManifest, InterfaceId, Kernel, KernelConfig,
-    ModelInferenceRequest, ModelInferenceResponse, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResolvedComponentGraph, ResolvedHarness,
+    ComponentInterface, ComponentManifest, InterfaceId, Kernel, KernelConfig, ModelId,
+    ModelInferenceRequest, ModelInferenceResponse, PhenixValue, PluginExecution, PluginHost,
+    PluginId, PluginInstance, PluginManifest, Project, ResolvedComponentGraph, ResolvedHarness,
     ResolvedHarnessActivation, ResolvedHarnessError, ServiceContribution, ServiceId, ServiceRole,
 };
 use std::collections::BTreeMap;
@@ -31,7 +31,12 @@ impl PluginInstance for Consumer {
         let request: ModelInferenceRequest =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = host
-            .invoke_import::<BasicModelInterface>(&component("fixture.consumer"), &request)
+            .invoke_import::<BasicModelInterface>(
+                &component("fixture.consumer"),
+                &PhenixValue::from(&request),
+            )
+            .map_err(|error| error.to_string())?;
+        let response = ModelInferenceResponse::try_from(Project(&response))
             .map_err(|error| error.to_string())?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
@@ -50,13 +55,13 @@ impl PluginInstance for Replacement {
         _input: &[u8],
         _host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        serde_json::to_vec(&ModelInferenceResponse {
-            output: b"replacement".to_vec(),
+        serde_json::to_vec(&PhenixValue::from(&ModelInferenceResponse {
+            output: b"replacement".to_vec().into(),
             provider_metadata: BTreeMap::from([(
                 "provider".into(),
                 serde_json::json!("fixture.replacement"),
             )]),
-        })
+        }))
         .map_err(|error| error.to_string())
     }
 }
@@ -92,6 +97,7 @@ fn consumer_component() -> ComponentManifest {
         owner: consumer_manifest().id,
         imports: vec![ComponentImport {
             interface: BasicModelInterface::interface_id(),
+            schema: BasicModelInterface::schema(),
             required: true,
             authority: Authority::default(),
         }],
@@ -124,6 +130,7 @@ fn replacement_component() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: BasicModelInterface::interface_id(),
+            schema: BasicModelInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -176,6 +183,7 @@ fn assert_basic_interface_is_replaceable(
         &consumer_plugin,
         vec![ComponentImport {
             interface: interface.clone(),
+            schema: Default::default(),
             required: true,
             authority: consumer_authority.clone(),
         }],
@@ -207,6 +215,7 @@ fn assert_basic_interface_is_replaceable(
         Vec::new(),
         vec![ComponentExport {
             interface: interface.clone(),
+            schema: Default::default(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -300,8 +309,8 @@ fn replacement_component_satisfies_the_same_basic_model_import_without_consumer_
     kernel.activate_all().unwrap();
 
     let request = ModelInferenceRequest {
-        model: "same-request".into(),
-        input: b"hello".to_vec(),
+        model: ModelId::parse("same-request").unwrap(),
+        input: b"hello".to_vec().into(),
         options: BTreeMap::new(),
     };
     let output = kernel
@@ -313,7 +322,7 @@ fn replacement_component_satisfies_the_same_basic_model_import_without_consumer_
         )
         .unwrap();
     let response: ModelInferenceResponse = serde_json::from_slice(&output).unwrap();
-    assert_eq!(response.output, b"replacement");
+    assert_eq!(response.output.as_ref(), b"replacement");
 }
 
 #[test]

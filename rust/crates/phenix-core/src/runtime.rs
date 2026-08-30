@@ -188,8 +188,8 @@ impl<'a> PluginHost<'a> {
     pub fn invoke_import<I: ComponentInterface>(
         &self,
         component: &ComponentId,
-        request: &I::Request,
-    ) -> Result<I::Response, ComponentInvocationError> {
+        request: &crate::PhenixValue,
+    ) -> Result<crate::PhenixValue, ComponentInvocationError> {
         let resolved = self
             .component_graph
             .component(component)
@@ -1439,6 +1439,7 @@ mod tests {
             owner: caller.id.clone(),
             imports: vec![ComponentImport {
                 interface: interface.clone(),
+                schema: Default::default(),
                 required: true,
                 authority: Authority::default(),
             }],
@@ -1451,6 +1452,7 @@ mod tests {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface,
+                schema: Default::default(),
                 priority: 1,
                 required_authority: Authority::default(),
             }],

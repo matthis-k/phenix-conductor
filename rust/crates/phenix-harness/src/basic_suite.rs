@@ -60,10 +60,11 @@ impl PhenixHarness {
 mod tests {
     use super::*;
     use phenix_core::{
-        context_service, model_inference_service, skill_service, tool_service, ContextCommand,
-        ContextResourceKind, ContextResponse, ContextScope, LocalPersistence,
-        ModelInferenceRequest, ModelInferenceResponse, SessionCommand, SessionResponse,
-        SkillCommand, SkillDefinition, SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
+        context_service, model_inference_service, skill_service, tool_service, CallableId,
+        ContextCommand, ContextResourceKind, ContextResponse, ContextScope, LocalPersistence,
+        ModelId, ModelInferenceRequest, ModelInferenceResponse, PhenixValue, Project,
+        SessionCommand, SessionResponse, SkillCommand, SkillDefinition, SkillId, SkillResponse,
+        ToolCommand, ToolDefinition, ToolResponse,
     };
     use phenix_plugin_catalog::session_service;
     use std::{
@@ -98,6 +99,19 @@ mod tests {
             )
             .unwrap();
         serde_json::from_slice(&output).unwrap()
+    }
+
+    fn invoke_session(harness: &mut PhenixHarness, request: &SessionCommand) -> SessionResponse {
+        let output = harness
+            .invoke(
+                &session_service(),
+                &serde_json::to_vec(&PhenixValue::from(request)).unwrap(),
+                &default_suite_authority(),
+                None,
+            )
+            .unwrap();
+        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        SessionResponse::try_from(Project(&output)).unwrap()
     }
 
     #[test]
@@ -149,18 +163,14 @@ mod tests {
             let mut harness = PhenixHarness::basic_suite_with_persistence(persistence).unwrap();
             harness.activate().unwrap();
 
-            let _: SessionResponse = invoke(
-                &mut harness,
-                &session_service(),
-                &SessionCommand::Create { id: "root".into() },
-            );
+            let _ = invoke_session(&mut harness, &SessionCommand::Create { id: "root".into() });
             let _: SkillResponse = invoke(
                 &mut harness,
                 &skill_service(),
                 &SkillCommand::Register {
                     skill: SkillDefinition {
-                        id: "review".into(),
-                        content: b"review carefully".to_vec(),
+                        id: SkillId::parse("review").unwrap(),
+                        content: b"review carefully".to_vec().into(),
                     },
                 },
             );
@@ -169,10 +179,10 @@ mod tests {
                 &tool_service(),
                 &ToolCommand::Register {
                     tool: ToolDefinition {
-                        id: "echo".into(),
+                        id: CallableId::parse("echo").unwrap(),
                         input_schema: serde_json::json!({}),
                         output_schema: serde_json::json!({}),
-                        output_prefix: b"tool:".to_vec(),
+                        output_prefix: b"tool:".to_vec().into(),
                     },
                 },
             );
@@ -184,33 +194,34 @@ mod tests {
                     kind: ContextResourceKind::ProjectDocument,
                     source: "README.md".into(),
                     scope: ContextScope::Workspace,
-                    content: b"project context".to_vec(),
+                    content: b"project context".to_vec().into(),
                 },
             );
             let model: ModelInferenceResponse = invoke(
                 &mut harness,
                 &model_inference_service(),
                 &ModelInferenceRequest {
-                    model: "direct".into(),
-                    input: b"hello".to_vec(),
+                    model: ModelId::parse("direct").unwrap(),
+                    input: b"hello".to_vec().into(),
                     options: BTreeMap::new(),
                 },
             );
-            assert_eq!(model.output, b"hello");
+            assert_eq!(model.output.as_ref(), b"hello");
         }
 
         let persistence = LocalPersistence::open(&path).unwrap();
         let mut restored = PhenixHarness::basic_suite_with_persistence(persistence).unwrap();
         restored.activate().unwrap();
-        let sessions: SessionResponse =
-            invoke(&mut restored, &session_service(), &SessionCommand::List);
+        let sessions = invoke_session(&mut restored, &SessionCommand::List);
         assert!(
             matches!(sessions, SessionResponse::Sessions { sessions } if sessions[0].id == "root")
         );
         let skills: SkillResponse = invoke(&mut restored, &skill_service(), &SkillCommand::List);
-        assert!(matches!(skills, SkillResponse::Skills { skills } if skills[0].id == "review"));
+        assert!(
+            matches!(skills, SkillResponse::Skills { skills } if skills[0].id.as_str() == "review")
+        );
         let tools: ToolResponse = invoke(&mut restored, &tool_service(), &ToolCommand::List);
-        assert!(matches!(tools, ToolResponse::Tools { tools } if tools[0].id == "echo"));
+        assert!(matches!(tools, ToolResponse::Tools { tools } if tools[0].id.as_str() == "echo"));
         let context: ContextResponse =
             invoke(&mut restored, &context_service(), &ContextCommand::List);
         assert!(

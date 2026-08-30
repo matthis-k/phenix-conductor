@@ -6,5 +6,6 @@ publish = false
 
 [dependencies]
 phenix-core = { path = "../phenix-core" }
+phenix-sdk-macros = { path = "../phenix-sdk-macros" }
 serde.workspace = true
 serde_json.workspace = true

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RepositoryPullRequestState {
     Open,
@@ -9,7 +11,9 @@ pub enum RepositoryPullRequestState {
     Closed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RepositoryCheckState {
     Absent,
@@ -30,7 +34,7 @@ impl RepositoryCheckState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct RepositoryValidation {
     pub source: RepositoryCheckState,
     pub rust: RepositoryCheckState,
@@ -70,13 +74,15 @@ impl RepositoryValidation {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct RepositoryChecklistEvidence {
     pub item: String,
     pub proven: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RepositoryDiscussionKind {
     ConversationComment,
@@ -85,7 +91,7 @@ pub enum RepositoryDiscussionKind {
     ReviewThread,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct RepositoryDiscussionEvidence {
     pub id: u64,
     pub kind: RepositoryDiscussionKind,
@@ -95,7 +101,7 @@ pub struct RepositoryDiscussionEvidence {
     pub resolved: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct RepositoryIssueEvidence {
     pub number: u64,
     pub semantic_key: String,
@@ -103,7 +109,7 @@ pub struct RepositoryIssueEvidence {
     pub open: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct RepositoryPullRequestEvidence {
     pub number: u64,
     pub semantic_key: String,
@@ -125,7 +131,7 @@ pub struct RepositoryPullRequestEvidence {
     pub validation: RepositoryValidation,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct RepositoryWorkSnapshot {
     #[serde(default)]
     pub pull_requests: Vec<RepositoryPullRequestEvidence>,

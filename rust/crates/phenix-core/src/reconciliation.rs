@@ -545,6 +545,7 @@ mod tests {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: interface(),
+                schema: Default::default(),
                 priority,
                 required_authority: Authority::default(),
             }],
@@ -558,6 +559,7 @@ mod tests {
             owner: plugin("consumer-owner"),
             imports: vec![ComponentImport {
                 interface: interface(),
+                schema: Default::default(),
                 required: true,
                 authority: Authority::default(),
             }],

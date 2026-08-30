@@ -1,25 +1,54 @@
 use crate::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-    ComponentManifest, InterfaceId, Kernel, KernelConfig, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResolvedHarness, ResolvedHarnessActivation,
-    ServiceContribution, ServiceId, ServiceRole,
+    ComponentManifest, InterfaceId, Kernel, KernelConfig, Key, PhenixValue, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResolvedHarness,
+    ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct EchoRequest {
     value: String,
 }
+
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct EchoResponse {
     provider: String,
     value: String,
 }
 
+fn key(value: &str) -> Key {
+    Key::parse(value.to_owned()).unwrap()
+}
+
+fn echo_value(value: &str) -> PhenixValue {
+    PhenixValue::Table(BTreeMap::from([(
+        key("value"),
+        PhenixValue::String(value.to_owned()),
+    )]))
+}
+
+fn echo_response(provider: &str, value: &str) -> PhenixValue {
+    PhenixValue::Table(BTreeMap::from([
+        (key("provider"), PhenixValue::String(provider.to_owned())),
+        (key("value"), PhenixValue::String(value.to_owned())),
+    ]))
+}
+
+fn decode_echo(value: &PhenixValue) -> Result<EchoResponse, String> {
+    let string = |name| match value.get(name).map_err(|error| error.to_string())? {
+        PhenixValue::String(value) => Ok(value.clone()),
+        other => Err(format!("expected string {name}, got {:?}", other.kind())),
+    };
+    Ok(EchoResponse {
+        provider: string("provider")?,
+        value: string("value")?,
+    })
+}
+
 struct EchoInterface;
 impl ComponentInterface for EchoInterface {
-    type Request = EchoRequest;
-    type Response = EchoResponse;
     fn interface_id() -> InterfaceId {
         InterfaceId::parse("fixture.echo@1").unwrap()
     }
@@ -30,18 +59,20 @@ impl PluginInstance for Provider {
     fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
     }
+
     fn invoke(
         &mut self,
         _service: &ServiceId,
         input: &[u8],
         _host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        let request: EchoRequest = serde_json::from_slice(input).unwrap();
-        serde_json::to_vec(&EchoResponse {
-            provider: self.0.into(),
-            value: request.value,
-        })
-        .map_err(|error| error.to_string())
+        let request: PhenixValue =
+            serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let value = match request.get("value").map_err(|error| error.to_string())? {
+            PhenixValue::String(value) => value.clone(),
+            other => return Err(format!("expected string value, got {:?}", other.kind())),
+        };
+        serde_json::to_vec(&echo_response(self.0, &value)).map_err(|error| error.to_string())
     }
 }
 
@@ -50,32 +81,38 @@ impl PluginInstance for Consumer {
     fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
     }
+
     fn invoke(
         &mut self,
         _service: &ServiceId,
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        let request: EchoRequest = serde_json::from_slice(input).unwrap();
+        let request: EchoRequest =
+            serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = host
-            .invoke_import::<EchoInterface>(&component("consumer"), &request)
+            .invoke_import::<EchoInterface>(&component("consumer"), &echo_value(&request.value))
             .map_err(|error| error.to_string())?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        serde_json::to_vec(&decode_echo(&response)?).map_err(|error| error.to_string())
     }
 }
 
 fn plugin(value: &str) -> PluginId {
     PluginId::parse(value).unwrap()
 }
+
 fn component(value: &str) -> ComponentId {
     ComponentId::parse(value).unwrap()
 }
+
 fn interface(value: &str) -> InterfaceId {
     InterfaceId::parse(value).unwrap()
 }
+
 fn service(value: &str) -> ServiceId {
     ServiceId::parse(value).unwrap()
 }
+
 fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).unwrap()
 }
@@ -109,6 +146,7 @@ fn plugin_host_uses_pre_resolved_typed_binding_instead_of_global_provider_order(
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: interface("fixture.echo@1"),
+                schema: Default::default(),
                 priority: 100,
                 required_authority: Authority::default(),
             }],
@@ -120,6 +158,7 @@ fn plugin_host_uses_pre_resolved_typed_binding_instead_of_global_provider_order(
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: interface("fixture.echo@1"),
+                schema: Default::default(),
                 priority: 1,
                 required_authority: Authority::default(),
             }],
@@ -130,6 +169,7 @@ fn plugin_host_uses_pre_resolved_typed_binding_instead_of_global_provider_order(
             owner: consumer.id.clone(),
             imports: vec![ComponentImport {
                 interface: interface("fixture.echo@1"),
+                schema: Default::default(),
                 required: true,
                 authority: Authority::default(),
             }],
@@ -204,6 +244,7 @@ fn external_component_uses_the_same_typed_binding_and_authority_attenuation() {
             imports: Vec::new(),
             exports: vec![ComponentExport {
                 interface: interface.clone(),
+                schema: Default::default(),
                 priority: 100,
                 required_authority: Authority::new([read.clone()]),
             }],
@@ -214,6 +255,7 @@ fn external_component_uses_the_same_typed_binding_and_authority_attenuation() {
             owner: consumer.id.clone(),
             imports: vec![ComponentImport {
                 interface: interface.clone(),
+                schema: Default::default(),
                 required: true,
                 authority: Authority::new([read.clone(), write]),
             }],

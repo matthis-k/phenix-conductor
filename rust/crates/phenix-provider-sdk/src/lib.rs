@@ -12,22 +12,18 @@ pub use types::*;
 
 use phenix_core::{
     model_inference_service, Authority, CapabilityId, ComponentExport, ComponentId,
-    ComponentInterface, ComponentManifest, InterfaceId, ModelInferenceRequest,
-    ModelInferenceResponse, PluginExecution, PluginId, PluginInstance, PluginManifest,
-    ServiceContribution, ServiceId, ServiceRole, MODEL_INFERENCE_SERVICE,
+    ComponentInterface, ComponentManifest, InterfaceId, PluginExecution, PluginId, PluginInstance,
+    PluginManifest, ServiceContribution, ServiceId, ServiceRole, MODEL_INFERENCE_SERVICE,
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt, sync::Arc};
+use std::sync::Arc;
 
 pub const PROVIDER_AUTH_SERVICE: &str = "phenix.providers.auth@1";
 pub const NETWORK_HTTP_CAPABILITY: &str = "network.http";
 pub const SECRETS_MANAGE_CAPABILITY: &str = "secrets.manage";
 
 pub mod provider {
-    pub use super::{
-        define, Endpoint, EndpointParseError, Protocol, ProtocolAdapter, ProviderBuildError,
-        ProviderDefinition,
-    };
+    pub use super::{Endpoint, EndpointParseError, Protocol, ProtocolAdapter, ProviderDefinition};
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -51,9 +47,6 @@ pub enum ProviderAuthResponse {
 pub struct ProviderAuthInterface;
 
 impl ComponentInterface for ProviderAuthInterface {
-    type Request = ProviderAuthCommand;
-    type Response = ProviderAuthResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(PROVIDER_AUTH_SERVICE).expect("static provider auth interface is valid")
     }
@@ -62,9 +55,6 @@ impl ComponentInterface for ProviderAuthInterface {
 pub struct ProviderModelInterface;
 
 impl ComponentInterface for ProviderModelInterface {
-    type Request = ModelInferenceRequest;
-    type Response = ModelInferenceResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(MODEL_INFERENCE_SERVICE).expect("static model interface is valid")
     }
@@ -73,48 +63,6 @@ impl ComponentInterface for ProviderModelInterface {
 #[must_use]
 pub fn provider_auth_service() -> ServiceId {
     ServiceId::parse(PROVIDER_AUTH_SERVICE).expect("static provider auth service is valid")
-}
-
-pub fn define(
-    plugin_id: impl Into<String>,
-    endpoint: impl AsRef<str>,
-    protocol: impl ProtocolAdapter + 'static,
-    auth: impl Into<auth::Definition>,
-) -> Result<ProviderDefinition, ProviderBuildError> {
-    let id = PluginId::parse(plugin_id.into()).map_err(|_| ProviderBuildError::InvalidPluginId)?;
-    let endpoint = Endpoint::parse(endpoint).map_err(ProviderBuildError::InvalidEndpoint)?;
-    Ok(ProviderDefinition {
-        spec: Arc::new(ProviderSpec {
-            id,
-            endpoint,
-            auth: auth.into(),
-            protocol: Arc::new(protocol),
-        }),
-    })
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ProviderBuildError {
-    InvalidEndpoint(EndpointParseError),
-    InvalidPluginId,
-}
-
-impl fmt::Display for ProviderBuildError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidEndpoint(error) => write!(f, "{error}"),
-            Self::InvalidPluginId => f.write_str("provider plugin id must not be empty"),
-        }
-    }
-}
-
-impl std::error::Error for ProviderBuildError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidEndpoint(error) => Some(error),
-            Self::InvalidPluginId => None,
-        }
-    }
 }
 
 pub(crate) struct ProviderSpec {
@@ -140,6 +88,22 @@ pub struct ProviderDefinition {
 }
 
 impl ProviderDefinition {
+    pub fn new(
+        id: PluginId,
+        endpoint: Endpoint,
+        protocol: impl ProtocolAdapter + 'static,
+        auth: impl Into<auth::Definition>,
+    ) -> Self {
+        Self {
+            spec: Arc::new(ProviderSpec {
+                id,
+                endpoint,
+                auth: auth.into(),
+                protocol: Arc::new(protocol),
+            }),
+        }
+    }
+
     pub fn plugin_id(&self) -> &PluginId {
         &self.spec.id
     }
@@ -201,12 +165,14 @@ impl ProviderDefinition {
     pub fn component_manifest(&self) -> ComponentManifest {
         let mut exports = vec![ComponentExport {
             interface: ProviderModelInterface::interface_id(),
+            schema: ProviderModelInterface::schema(),
             priority: 100,
             required_authority: network_authority(),
         }];
         if self.spec.supports_auth() {
             exports.push(ComponentExport {
                 interface: ProviderAuthInterface::interface_id(),
+                schema: ProviderAuthInterface::schema(),
                 priority: 100,
                 required_authority: secrets_authority(),
             });
@@ -245,7 +211,7 @@ fn capability(value: &str) -> CapabilityId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig};
+    use phenix_core::{Kernel, KernelConfig, ModelInferenceRequest, ModelInferenceResponse};
     use std::{
         collections::BTreeMap,
         io::{Read, Write},
@@ -255,14 +221,13 @@ mod tests {
 
     #[test]
     fn provider_definition_derives_plugin_contracts_from_description() {
-        let definition = provider::define(
-            "provider.example",
-            "https://api.example.com/v1",
+        let definition = ProviderDefinition::new(
+            PluginId::parse("provider.example").unwrap(),
+            Endpoint::parse("https://api.example.com/v1").unwrap(),
             Protocol::OpenAiResponses,
             auth::Definition::api_token(auth::ApiTokenMethod::bearer())
                 .with_oauth(auth::OAuthMethod::bearer()),
-        )
-        .unwrap();
+        );
 
         assert_eq!(definition.plugin_id().as_str(), "provider.example");
         assert_eq!(
@@ -295,13 +260,12 @@ mod tests {
 
     #[test]
     fn unauthenticated_provider_does_not_gain_secret_authority() {
-        let definition = provider::define(
-            "provider.public",
-            "https://api.example.com/v1",
+        let definition = ProviderDefinition::new(
+            PluginId::parse("provider.public").unwrap(),
+            Endpoint::parse("https://api.example.com/v1").unwrap(),
             Protocol::OpenAiResponses,
             auth::Definition::none(),
-        )
-        .unwrap();
+        );
         let manifest = definition.manifest();
         assert_eq!(manifest.services.len(), 1);
         assert!(!manifest
@@ -333,13 +297,12 @@ mod tests {
             .unwrap();
         });
 
-        let definition = provider::define(
-            "provider.local",
-            format!("http://{address}/v1"),
+        let definition = ProviderDefinition::new(
+            PluginId::parse("provider.local").unwrap(),
+            Endpoint::parse(format!("http://{address}/v1")).unwrap(),
             Protocol::OpenAiResponses,
             auth::Definition::none(),
-        )
-        .unwrap();
+        );
         let manifest = definition.manifest();
         let plugin = manifest.id.clone();
         let mut kernel = Kernel::new(KernelConfig::new([manifest]).unwrap());
@@ -352,8 +315,8 @@ mod tests {
             .invoke(
                 &model_inference_service(),
                 &serde_json::to_vec(&ModelInferenceRequest {
-                    model: "model-a".to_owned(),
-                    input: b"hello".to_vec(),
+                    model: phenix_core::ModelId::parse("model-a").unwrap(),
+                    input: b"hello".to_vec().into(),
                     options: BTreeMap::new(),
                 })
                 .unwrap(),
@@ -362,7 +325,7 @@ mod tests {
             )
             .unwrap();
         let response: ModelInferenceResponse = serde_json::from_slice(&output).unwrap();
-        assert_eq!(response.output, b"world");
+        assert_eq!(response.output.as_ref(), b"world");
         assert_eq!(response.provider_metadata["id"], "response-1");
         assert_eq!(response.provider_metadata["protocol"], "openai_responses");
         assert_eq!(

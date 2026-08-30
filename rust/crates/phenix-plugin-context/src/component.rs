@@ -1,4 +1,4 @@
-use crate::{context_manifest, ContextCommand, ContextResponse, CONTEXT_SERVICE};
+use crate::{context_manifest, CONTEXT_SERVICE};
 use phenix_core::{
     ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest,
     InterfaceId, PluginId,
@@ -11,11 +11,12 @@ const CONTEXT_PLUGIN: &str = "phenix.context";
 pub struct ContextInterface;
 
 impl ComponentInterface for ContextInterface {
-    type Request = ContextCommand;
-    type Response = ContextResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(CONTEXT_SERVICE).expect("static context interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::ContextCommand, crate::ContextResponse>()
     }
 }
 
@@ -32,11 +33,13 @@ pub fn context_component_manifest() -> ComponentManifest {
         owner: PluginId::parse(CONTEXT_PLUGIN).expect("static plugin id is valid"),
         imports: vec![ComponentImport {
             interface: ExecutionInterface::interface_id(),
+            schema: ExecutionInterface::schema(),
             required: true,
             authority: authority.clone(),
         }],
         exports: vec![ComponentExport {
             interface: ContextInterface::interface_id(),
+            schema: ContextInterface::schema(),
             priority: 100,
             required_authority: authority.clone(),
         }],

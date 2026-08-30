@@ -1,7 +1,7 @@
 use crate::{session_tree_service, SessionTreeCommand};
 use phenix_core::{
-    session_service, Authority, Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation,
-    SessionCommand, SessionResponse,
+    session_service, Authority, Kernel, KernelConfig, PhenixValue, Project, ResolvedHarness,
+    ResolvedHarnessActivation, SessionCommand, SessionResponse,
 };
 use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
 
@@ -24,19 +24,20 @@ fn flat_sessions_remain_available_when_session_tree_is_omitted() {
         .unwrap();
     kernel.activate_all().unwrap();
 
+    let command = SessionCommand::Create {
+        id: "standalone".into(),
+    };
     let output = kernel
         .invoke(
             &session_service(),
-            &serde_json::to_vec(&SessionCommand::Create {
-                id: "standalone".into(),
-            })
-            .unwrap(),
+            &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
             &authority,
             None,
         )
         .unwrap();
+    let output: PhenixValue = serde_json::from_slice(&output).unwrap();
     assert_eq!(
-        serde_json::from_slice::<SessionResponse>(&output).unwrap(),
+        SessionResponse::try_from(Project(&output)).unwrap(),
         SessionResponse::Created {
             session: phenix_core::SessionRecord {
                 id: "standalone".into(),

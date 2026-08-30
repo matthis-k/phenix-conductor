@@ -4,9 +4,10 @@ use crate::{
 use phenix_core::{
     model_inference_service, Authority, ComponentExport, ComponentId, ComponentImport,
     ComponentInterface, ComponentManifest, ExternalPluginProcess, ExternalSandbox,
-    ExternalTransportConfig, Kernel, KernelConfig, ModelInferenceRequest, ModelInferenceResponse,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResolvedHarness,
-    ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
+    ExternalTransportConfig, Kernel, KernelConfig, ModelId, ModelInferenceRequest,
+    ModelInferenceResponse, PhenixValue, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, Project, ResolvedHarness, ResolvedHarnessActivation, ServiceContribution,
+    ServiceId, ServiceRole,
 };
 use std::{
     collections::BTreeMap,
@@ -36,8 +37,10 @@ impl PluginInstance for Consumer {
         let response = host
             .invoke_import::<BasicModelInterface>(
                 &component("fixture.basic-model-consumer"),
-                &request,
+                &PhenixValue::from(&request),
             )
+            .map_err(|error| error.to_string())?;
+        let response = ModelInferenceResponse::try_from(Project(&response))
             .map_err(|error| error.to_string())?;
         serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
@@ -99,6 +102,7 @@ fn external_component() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: BasicModelInterface::interface_id(),
+            schema: BasicModelInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -129,6 +133,7 @@ fn consumer_component() -> ComponentManifest {
         owner: consumer_manifest().id,
         imports: vec![ComponentImport {
             interface: BasicModelInterface::interface_id(),
+            schema: BasicModelInterface::schema(),
             required: true,
             authority: Authority::default(),
         }],
@@ -174,7 +179,7 @@ fn external_component_replaces_basic_model_without_changing_the_consumer_contrac
         generation=${generation%%,*}
         echo "{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"fixture.external-basic-model\",\"generation\":$generation,\"services\":[{\"service\":\"phenix.models.inference@1\",\"role\":\"terminal\"}]}"
         read request
-        echo "{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[123,34,111,117,116,112,117,116,34,58,91,49,48,49,44,49,50,48,44,49,49,54,44,49,48,49,44,49,49,52,44,49,49,48,44,57,55,44,49,48,56,93,44,34,112,114,111,118,105,100,101,114,95,109,101,116,97,100,97,116,97,34,58,123,34,112,114,111,118,105,100,101,114,34,58,34,101,120,116,101,114,110,97,108,34,125,125]}"
+        echo "{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[123,34,116,121,112,101,34,58,34,116,97,98,108,101,34,44,34,118,97,108,117,101,34,58,123,34,111,117,116,112,117,116,34,58,123,34,116,121,112,101,34,58,34,98,121,116,101,115,34,44,34,118,97,108,117,101,34,58,91,49,48,49,44,49,50,48,44,49,49,54,44,49,48,49,44,49,49,52,44,49,49,48,44,57,55,44,49,48,56,93,125,44,34,112,114,111,118,105,100,101,114,95,109,101,116,97,100,97,116,97,34,58,123,34,116,121,112,101,34,58,34,109,97,112,34,44,34,118,97,108,117,101,34,58,123,34,112,114,111,118,105,100,101,114,34,58,123,34,116,121,112,101,34,58,34,115,116,114,105,110,103,34,44,34,118,97,108,117,101,34,58,34,101,120,116,101,114,110,97,108,34,125,125,125,125,125]}"
         read stop || true
     "#;
     let transport = ExternalTransportConfig::new(
@@ -204,8 +209,8 @@ fn external_component_replaces_basic_model_without_changing_the_consumer_contrac
     kernel.activate_all().unwrap();
 
     let request = ModelInferenceRequest {
-        model: "same-request".into(),
-        input: b"hello".to_vec(),
+        model: ModelId::parse("same-request").unwrap(),
+        input: b"hello".to_vec().into(),
         options: BTreeMap::new(),
     };
     let output = kernel
@@ -217,7 +222,7 @@ fn external_component_replaces_basic_model_without_changing_the_consumer_contrac
         )
         .unwrap();
     let response: ModelInferenceResponse = serde_json::from_slice(&output).unwrap();
-    assert_eq!(response.output, b"external");
+    assert_eq!(response.output.as_ref(), b"external");
     assert_eq!(
         response.provider_metadata.get("provider"),
         Some(&serde_json::json!("external"))

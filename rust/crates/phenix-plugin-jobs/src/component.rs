@@ -1,4 +1,4 @@
-use crate::{job_manifest, JobCommand, JobResponse, JOB_SERVICE};
+use crate::{job_manifest, JOB_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
     PluginId,
@@ -10,11 +10,12 @@ const JOB_PLUGIN: &str = "phenix.jobs";
 pub struct JobInterface;
 
 impl ComponentInterface for JobInterface {
-    type Request = JobCommand;
-    type Response = JobResponse;
-
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(JOB_SERVICE).expect("static job interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<crate::JobCommand, crate::JobResponse>()
     }
 }
 
@@ -31,6 +32,7 @@ pub fn job_component_manifest() -> ComponentManifest {
         imports: Vec::new(),
         exports: vec![ComponentExport {
             interface: JobInterface::interface_id(),
+            schema: JobInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -61,6 +63,7 @@ mod tests {
             owner: PluginId::parse("fixture.job-consumer").unwrap(),
             imports: vec![ComponentImport {
                 interface: JobInterface::interface_id(),
+                schema: JobInterface::schema(),
                 required: true,
                 authority: Authority::default(),
             }],

@@ -1,13 +1,11 @@
 use crate::session_tree_component_id;
 use phenix_core::{
-    session_service, Authority, CapabilityId, DurableSchema, LayerResult, NamespaceTransaction,
-    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionCommand, SessionRecord,
-    SessionResponse, TransactionOp,
+    session_service, Authority, CapabilityId, ComponentInterface, DurableSchema, LayerResult,
+    NamespaceTransaction, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionCommand,
+    SessionRecord, SessionResponse, TransactionOp,
 };
-use phenix_plugin_sessions::{
-    SessionInterface, SessionMutationCommand, SessionMutationInterface, SessionMutationResponse,
-};
+use phenix_plugin_sessions::{SessionInterface, SessionMutationInterface};
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_TREE_SERVICE: &str = "phenix.session-tree@1";
@@ -18,13 +16,13 @@ const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct SessionLineage {
     pub session_id: String,
     pub parent_session_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionTreeCommand {
     CreateChild {
@@ -43,7 +41,7 @@ pub enum SessionTreeCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionTreeResponse {
     ChildCreated {
@@ -109,6 +107,19 @@ fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).expect("static capability is valid")
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+enum SessionMutationRequest {
+    PrepareCreate { id: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+enum SessionMutationResult {
+    PreparedCreate {
+        session: SessionRecord,
+        transaction: NamespaceTransaction,
+    },
+}
+
 struct SessionTreeSdk<'host, 'runtime> {
     sessions: SdkClient<'host, 'runtime, SessionInterface>,
     mutations: SdkClient<'host, 'runtime, SessionMutationInterface>,
@@ -168,9 +179,17 @@ impl PluginInstance for SessionTreePlugin {
         if service != &session_tree_service() {
             return Err(format!("unsupported session-tree service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host);
+        let interface = crate::SessionTreeInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<SessionTreeCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -213,11 +232,13 @@ fn create_child(
     let prepared = context
         .sdk
         .mutations
-        .invoke(&SessionMutationCommand::PrepareCreate {
-            id: session_id.clone(),
-        })
+        .invoke_projected::<SessionMutationRequest, SessionMutationResult>(
+            &SessionMutationRequest::PrepareCreate {
+                id: session_id.clone(),
+            },
+        )
         .map_err(|error| error.to_string())?;
-    let SessionMutationResponse::PreparedCreate {
+    let SessionMutationResult::PreparedCreate {
         session,
         transaction: session_transaction,
     } = prepared;
@@ -327,7 +348,7 @@ fn require_session(
     let response = context
         .sdk
         .sessions
-        .invoke(&SessionCommand::Get { id: id.into() })
+        .invoke_projected(&SessionCommand::Get { id: id.into() })
         .map_err(|error| error.to_string())?;
     match response {
         SessionResponse::Session {
@@ -400,7 +421,8 @@ mod tests {
     use super::*;
     use crate::session_tree_component_manifest;
     use phenix_core::{
-        Kernel, KernelConfig, LocalPersistence, ResolvedHarness, ResolvedHarnessActivation,
+        Kernel, KernelConfig, LocalPersistence, PhenixValue, Project, ResolvedHarness,
+        ResolvedHarnessActivation,
     };
     use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
     use std::{
@@ -469,12 +491,13 @@ mod tests {
         let output = kernel
             .invoke(
                 &session_service(),
-                &serde_json::to_vec(&command).unwrap(),
+                &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
                 &authority(),
                 None,
             )
             .unwrap();
-        serde_json::from_slice(&output).unwrap()
+        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        SessionResponse::try_from(Project(&output)).unwrap()
     }
 
     fn invoke_tree(
@@ -484,12 +507,14 @@ mod tests {
         let output = kernel
             .invoke(
                 &session_tree_service(),
-                &serde_json::to_vec(&command).unwrap(),
+                &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
                 &authority(),
                 None,
             )
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        let output: PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        output.project().map_err(|error| error.to_string())
     }
 
     #[test]

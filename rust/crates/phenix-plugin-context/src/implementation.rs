@@ -1,8 +1,8 @@
 use crate::context_component_id;
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId,
-    TransactionOp,
+    Authority, Bytes, CapabilityId, ComponentInterface, DurableSchema, PluginContext,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
+    SdkClient, ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{
     ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
@@ -10,6 +10,7 @@ pub use phenix_core::{
 use phenix_plugin_execution::{
     ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
 };
+use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -41,13 +42,13 @@ fn context<'host, 'runtime>(
     )
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, PhenixValue)]
 pub struct ExactContextReference {
     pub resource_id: String,
     pub revision: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextInjectionRequester {
     User,
@@ -58,7 +59,7 @@ pub enum ContextInjectionRequester {
     Frontend,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextInjectionLifetime {
     Execution,
@@ -66,7 +67,7 @@ pub enum ContextInjectionLifetime {
     Session,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct ContextInjection {
     pub sequence: u64,
     pub execution_id: String,
@@ -76,25 +77,25 @@ pub struct ContextInjection {
     pub reason: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct ProjectedContextEntry {
     pub injection: ContextInjection,
     pub resource: ContextResourceRevision,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct ExecutionContextProjection {
     pub execution_id: String,
     pub entries: Vec<ProjectedContextEntry>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct RepositoryContextSource {
     pub path: String,
-    pub content: Vec<u8>,
+    pub content: Bytes,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ContextCommand {
     Register {
@@ -102,7 +103,7 @@ pub enum ContextCommand {
         kind: ContextResourceKind,
         source: String,
         scope: ContextScope,
-        content: Vec<u8>,
+        content: Bytes,
     },
     Get {
         resource_id: String,
@@ -126,7 +127,7 @@ pub enum ContextCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum ContextResponse {
     Registered {
@@ -209,9 +210,17 @@ impl PluginInstance for ContextPlugin {
         if service != &context_service() {
             return Err(format!("unsupported context service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host);
+        let interface = crate::ContextInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<ContextCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -278,7 +287,7 @@ fn register_resource(
     kind: ContextResourceKind,
     source: String,
     scope: ContextScope,
-    content: Vec<u8>,
+    content: Bytes,
 ) -> Result<ContextResourceRevision, String> {
     validate_identity("context resource id", &resource_id)?;
     validate_identity("context source", &source)?;
@@ -286,7 +295,9 @@ fn register_resource(
         validate_identity("context path scope", prefix)?;
     }
 
-    let revision = content_hash(&content);
+    let revision = content_hash(content.as_ref());
+    let estimated_bytes = u64::try_from(content.as_ref().len())
+        .map_err(|_| "context resource byte length exceeds u64".to_owned())?;
     let resource = ContextResourceRevision {
         descriptor: ContextDescriptor {
             resource_id: resource_id.clone(),
@@ -295,7 +306,7 @@ fn register_resource(
             source,
             scope,
             content_identity: revision.clone(),
-            estimated_bytes: content.len(),
+            estimated_bytes,
         },
         content,
     };
@@ -457,7 +468,7 @@ fn require_active_execution(
     let response = context
         .sdk
         .execution
-        .invoke(&ExecutionCommand::GetExecution {
+        .invoke_projected::<ExecutionCommand, ExecutionResponse>(&ExecutionCommand::GetExecution {
             id: execution_id.to_owned(),
         })
         .map_err(|error| error.to_string())?;
@@ -609,11 +620,13 @@ mod tests {
     }
 
     fn invoke(kernel: &mut Kernel, command: &ContextCommand) -> Result<ContextResponse, String> {
-        let input = serde_json::to_vec(command).unwrap();
+        let input = serde_json::to_vec(&phenix_core::PhenixValue::from(command)).unwrap();
         let output = kernel
             .invoke(&context_service(), &input, &authority(), None)
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        let output: phenix_core::PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        output.project().map_err(|error| error.to_string())
     }
 
     fn kernel_with(path: &PathBuf) -> Kernel {
@@ -657,7 +670,7 @@ mod tests {
         kernel
             .invoke(
                 &execution_service(),
-                &serde_json::to_vec(&command).unwrap(),
+                &serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap(),
                 &authority(),
                 None,
             )
@@ -695,7 +708,7 @@ mod tests {
                     kind: ContextResourceKind::Skill,
                     source: "skills/review/SKILL.md".into(),
                     scope: ContextScope::Workspace,
-                    content: b"review exactly".to_vec(),
+                    content: b"review exactly".to_vec().into(),
                 },
             )
             .unwrap();
@@ -730,7 +743,10 @@ mod tests {
             ContextResponse::Projection { projection } => {
                 assert_eq!(projection.entries.len(), 1);
                 assert_eq!(projection.entries[0].resource.descriptor, descriptor);
-                assert_eq!(projection.entries[0].resource.content, b"review exactly");
+                assert_eq!(
+                    projection.entries[0].resource.content.as_ref(),
+                    b"review exactly"
+                );
             }
             other => panic!("unexpected response: {other:?}"),
         }
@@ -749,23 +765,23 @@ mod tests {
                     sources: vec![
                         RepositoryContextSource {
                             path: "AGENTS.md".into(),
-                            content: b"root rules".to_vec(),
+                            content: b"root rules".to_vec().into(),
                         },
                         RepositoryContextSource {
                             path: "crates/ui/AGENTS.override.md".into(),
-                            content: b"ui rules".to_vec(),
+                            content: b"ui rules".to_vec().into(),
                         },
                         RepositoryContextSource {
                             path: "CONTRIBUTING.md".into(),
-                            content: b"contribute".to_vec(),
+                            content: b"contribute".to_vec().into(),
                         },
                         RepositoryContextSource {
                             path: "skills/review/SKILL.md".into(),
-                            content: b"review skill".to_vec(),
+                            content: b"review skill".to_vec().into(),
                         },
                         RepositoryContextSource {
                             path: "README.md".into(),
-                            content: b"not automatic context".to_vec(),
+                            content: b"not automatic context".to_vec().into(),
                         },
                     ],
                 },
@@ -801,7 +817,7 @@ mod tests {
                     workspace_id: "ws".into(),
                     sources: vec![RepositoryContextSource {
                         path: "CONTRIBUTING.md".into(),
-                        content: b"changed".to_vec(),
+                        content: b"changed".to_vec().into(),
                     }],
                 },
             )
@@ -839,7 +855,7 @@ mod tests {
                 kind: ContextResourceKind::Skill,
                 source: "skills/bounded/SKILL.md".into(),
                 scope: ContextScope::Workspace,
-                content: b"bounded".to_vec(),
+                content: b"bounded".to_vec().into(),
             },
         )
         .unwrap();
@@ -866,10 +882,12 @@ mod tests {
         kernel
             .invoke(
                 &execution_service(),
-                &serde_json::to_vec(&ExecutionCommand::FinishExecution {
-                    id: "finished".into(),
-                    success: true,
-                })
+                &serde_json::to_vec(&phenix_core::PhenixValue::from(
+                    &ExecutionCommand::FinishExecution {
+                        id: "finished".into(),
+                        success: true,
+                    },
+                ))
                 .unwrap(),
                 &authority(),
                 None,
@@ -914,7 +932,7 @@ mod tests {
                 kind: ContextResourceKind::Skill,
                 source: "skills/manual/SKILL.md".into(),
                 scope: ContextScope::Workspace,
-                content: b"manual".to_vec(),
+                content: b"manual".to_vec().into(),
             },
         )
         .unwrap();

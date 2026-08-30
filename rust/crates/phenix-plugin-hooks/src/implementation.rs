@@ -1,11 +1,8 @@
-use crate::{
-    hook_component_id, ContextCommand, ContextInjectionLifetime, ContextInjectionRequester,
-    ExecutionCommand, ExecutionResponse,
-};
+use crate::{hook_component_id, ExecutionCommand, ExecutionResponse};
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId,
-    TransactionOp,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, PhenixValue, PluginContext,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
+    SdkClient, ServiceContribution, ServiceId, TransactionOp,
 };
 use phenix_plugin_context::ContextInterface;
 use phenix_plugin_execution::ExecutionInterface;
@@ -20,6 +17,28 @@ const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 
 type ActiveHooks = BTreeSet<(u64, String)>;
+
+#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+enum ContextRequester {
+    Hook,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+enum ContextLifetime {
+    Execution,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+enum ContextRequest {
+    Load {
+        execution_id: String,
+        resource_id: String,
+        revision: String,
+        requester: ContextRequester,
+        lifetime: ContextLifetime,
+        reason: String,
+    },
+}
 
 struct HookSdk<'host, 'runtime> {
     context: SdkClient<'host, 'runtime, ContextInterface>,
@@ -45,7 +64,17 @@ fn context<'host, 'runtime, 'state>(
     )
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleEvent {
     ExecutionCreated,
@@ -56,7 +85,7 @@ pub enum LifecycleEvent {
     CallableCompleted,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(rename_all = "snake_case")]
 pub enum HookFailurePolicy {
     Ignore,
@@ -64,7 +93,7 @@ pub enum HookFailurePolicy {
     FailOperation,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum HookAction {
     Observe,
@@ -83,7 +112,7 @@ pub enum HookAction {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct HookDefinition {
     pub id: String,
     pub event: LifecycleEvent,
@@ -93,26 +122,26 @@ pub struct HookDefinition {
     pub failure_policy: HookFailurePolicy,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct HookConfiguration {
     pub revision: String,
     pub hooks: Vec<HookDefinition>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct HookWarning {
     pub hook_id: String,
     pub message: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct HookDispatch {
     pub executed: Vec<String>,
     pub warnings: Vec<HookWarning>,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum HookCommand {
     RegisterConfiguration {
@@ -129,7 +158,7 @@ pub enum HookCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum HookResponse {
     Configuration {
@@ -208,9 +237,17 @@ impl PluginInstance for HookPlugin {
         if service != &hook_service() {
             return Err(format!("unsupported hook service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&mut context(host, &mut self.active), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let mut context = context(host, &mut self.active);
+        let interface = crate::HookInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<HookCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&mut context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -294,25 +331,27 @@ fn execute_action(
         } => context
             .sdk
             .context
-            .invoke(&ContextCommand::Load {
+            .invoke_value(&PhenixValue::from(&ContextRequest::Load {
                 execution_id: execution_id.to_owned(),
                 resource_id: resource_id.clone(),
                 revision: revision.clone(),
-                requester: ContextInjectionRequester::Hook,
-                lifetime: ContextInjectionLifetime::Execution,
+                requester: ContextRequester::Hook,
+                lifetime: ContextLifetime::Execution,
                 reason: reason.clone(),
-            })
+            }))
             .map(|_| ())
             .map_err(|error| error.to_string()),
         HookAction::InvokeCallable { callable_id, input } => {
             let response = context
                 .sdk
                 .execution
-                .invoke(&ExecutionCommand::InvokeCallable {
-                    execution_id: execution_id.to_owned(),
-                    callable_id: callable_id.clone(),
-                    input: input.clone(),
-                })
+                .invoke_projected::<ExecutionCommand, ExecutionResponse>(
+                    &ExecutionCommand::InvokeCallable {
+                        execution_id: execution_id.to_owned(),
+                        callable_id: callable_id.clone(),
+                        input: input.clone(),
+                    },
+                )
                 .map_err(|error| error.to_string())?;
             match response {
                 ExecutionResponse::Invocation { .. } => Ok(()),
@@ -488,15 +527,18 @@ mod tests {
     }
 
     fn invoke(kernel: &mut Kernel, command: HookCommand) -> Result<HookResponse, String> {
+        let input = serde_json::to_vec(&PhenixValue::from(&command)).unwrap();
         let output = kernel
             .invoke(
                 &hook_service(),
-                &serde_json::to_vec(&command).unwrap(),
+                &input,
                 &hook_manifest(Authority::default()).maximum_authority,
                 None,
             )
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        let output: PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        output.project().map_err(|error| error.to_string())
     }
 
     fn observe(id: &str, depends_on: &[&str]) -> HookDefinition {

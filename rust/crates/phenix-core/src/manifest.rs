@@ -1,4 +1,6 @@
-use crate::{Authority, ComponentId, InterfaceId, PluginId, ResourceNamespace, ServiceId};
+use crate::{
+    Authority, ComponentId, InterfaceId, InterfaceSchema, PluginId, ResourceNamespace, ServiceId,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -27,6 +29,8 @@ pub struct ServiceContribution {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ComponentImport {
     pub interface: InterfaceId,
+    #[serde(default)]
+    pub schema: InterfaceSchema,
     pub required: bool,
     pub authority: Authority,
 }
@@ -34,6 +38,8 @@ pub struct ComponentImport {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ComponentExport {
     pub interface: InterfaceId,
+    #[serde(default)]
+    pub schema: InterfaceSchema,
     pub priority: i32,
     pub required_authority: Authority,
 }

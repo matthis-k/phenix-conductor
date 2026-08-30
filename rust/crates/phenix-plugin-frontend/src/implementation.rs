@@ -2,29 +2,30 @@ use crate::{
     frontend_component_id, ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
 };
 use phenix_core::{
-    Authority, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, SdkClient, ServiceContribution, ServiceId,
+    Authority, ComponentInterface, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
 };
+use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const FRONTEND_SERVICE: &str = "phenix.frontend-services@1";
 const FRONTEND_PLUGIN: &str = "phenix.frontend-services";
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct FrontendProviderDescriptor {
     pub id: String,
     #[serde(default)]
     pub capabilities: BTreeSet<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct LiveFrontendProvider {
     pub connection_id: String,
     pub descriptor: FrontendProviderDescriptor,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct FrontendServiceRequest {
     pub correlation_id: u64,
     pub connection_id: String,
@@ -33,13 +34,13 @@ pub struct FrontendServiceRequest {
     pub params: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct FrontendServiceResult {
     pub correlation_id: u64,
     pub result: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum FrontendCommand {
     SetProviders {
@@ -76,7 +77,7 @@ pub enum FrontendCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum FrontendResponse {
     Providers {
@@ -176,9 +177,17 @@ impl PluginInstance for FrontendPlugin {
         if service != &frontend_service() {
             return Err(format!("unsupported frontend service: {service}"));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&mut context(host, &mut self.state), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let mut context = context(host, &mut self.state);
+        let interface = crate::FrontendInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<FrontendCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = handle(&mut context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -373,7 +382,7 @@ fn execution_lookup(
     let response = context
         .sdk
         .execution
-        .invoke(&ExecutionCommand::GetExecution {
+        .invoke_projected::<ExecutionCommand, ExecutionResponse>(&ExecutionCommand::GetExecution {
             id: execution_id.to_owned(),
         })
         .map_err(|error| error.to_string())?;
@@ -425,7 +434,9 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
+    use phenix_core::{
+        Kernel, KernelConfig, PhenixValue, Project, ResolvedHarness, ResolvedHarnessActivation,
+    };
     use phenix_plugin_execution::{
         execution_component_manifest, execution_factory, execution_manifest, execution_service,
         ExecutionAuthority,
@@ -468,12 +479,14 @@ mod tests {
         let output = kernel
             .invoke(
                 &frontend_service(),
-                &serde_json::to_vec(&command).unwrap(),
+                &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
                 &suite_authority(),
                 None,
             )
             .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&output).map_err(|error| error.to_string())
+        let output: PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        FrontendResponse::try_from(Project(&output)).map_err(|error| error.to_string())
     }
 
     fn execution(kernel: &mut Kernel, id: &str, parent: Option<&str>) {
@@ -491,7 +504,7 @@ mod tests {
         kernel
             .invoke(
                 &execution_service(),
-                &serde_json::to_vec(&command).unwrap(),
+                &serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap(),
                 &suite_authority(),
                 None,
             )
