@@ -3,7 +3,7 @@ use phenix_core::{
     session_service, Authority, CapabilityId, ComponentInterface, DurableSchema, LayerResult,
     NamespaceTransaction, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionCommand,
-    SessionRecord, SessionResponse, TransactionOp,
+    SessionId, SessionRecord, SessionResponse, TransactionOp,
 };
 use phenix_plugin_sessions::{SessionInterface, SessionMutationInterface};
 use serde::{Deserialize, Serialize};
@@ -18,26 +18,26 @@ const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct SessionLineage {
-    pub session_id: String,
-    pub parent_session_id: Option<String>,
+    pub session_id: SessionId,
+    pub parent_session_id: Option<SessionId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionTreeCommand {
     CreateChild {
-        session_id: String,
-        parent_session_id: String,
+        session_id: SessionId,
+        parent_session_id: SessionId,
     },
     Link {
-        session_id: String,
-        parent_session_id: Option<String>,
+        session_id: SessionId,
+        parent_session_id: Option<SessionId>,
     },
     Parent {
-        session_id: String,
+        session_id: SessionId,
     },
     Children {
-        parent_session_id: Option<String>,
+        parent_session_id: Option<SessionId>,
     },
 }
 
@@ -52,10 +52,10 @@ pub enum SessionTreeResponse {
         lineage: SessionLineage,
     },
     Parent {
-        parent_session_id: Option<String>,
+        parent_session_id: Option<SessionId>,
     },
     Children {
-        session_ids: Vec<String>,
+        session_ids: Vec<SessionId>,
     },
 }
 
@@ -109,7 +109,7 @@ fn capability(value: &str) -> CapabilityId {
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
 enum SessionMutationRequest {
-    PrepareCreate { id: String },
+    PrepareCreate { id: SessionId },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -211,15 +211,15 @@ fn handle(
                 .and_then(|lineage| lineage.parent_session_id),
         }),
         SessionTreeCommand::Children { parent_session_id } => Ok(SessionTreeResponse::Children {
-            session_ids: read_children(context, parent_session_id.as_deref())?,
+            session_ids: read_children(context, parent_session_id.as_ref())?,
         }),
     }
 }
 
 fn create_child(
     context: &SessionTreeContext<'_, '_>,
-    session_id: String,
-    parent_session_id: String,
+    session_id: SessionId,
+    parent_session_id: SessionId,
 ) -> Result<SessionTreeResponse, String> {
     if session_id == parent_session_id {
         return Err("session cannot be its own parent".into());
@@ -285,12 +285,12 @@ fn create_child(
 
 fn link(
     context: &SessionTreeContext<'_, '_>,
-    session_id: String,
-    parent_session_id: Option<String>,
+    session_id: SessionId,
+    parent_session_id: Option<SessionId>,
 ) -> Result<SessionTreeResponse, String> {
     require_session(context, &session_id)?;
-    if let Some(parent) = parent_session_id.as_deref() {
-        if parent == session_id {
+    if let Some(parent) = parent_session_id.as_ref() {
+        if parent == &session_id {
             return Err("session cannot be its own parent".into());
         }
         require_session(context, parent)?;
@@ -306,7 +306,7 @@ fn link(
         session_id: session_id.clone(),
         parent_session_id: parent_session_id.clone(),
     };
-    let children_key = children_key(parent_session_id.as_deref());
+    let children_key = children_key(parent_session_id.as_ref());
     let old_children = read_raw(context, &children_key)?;
     let mut children = decode_ids(old_children.as_deref())?;
     children.push(session_id.clone());
@@ -343,12 +343,12 @@ fn link(
 
 fn require_session(
     context: &SessionTreeContext<'_, '_>,
-    id: &str,
+    id: &SessionId,
 ) -> Result<SessionRecord, String> {
     let response = context
         .sdk
         .sessions
-        .invoke_projected(&SessionCommand::Get { id: id.into() })
+        .invoke_projected(&SessionCommand::Get { id: id.clone() })
         .map_err(|error| error.to_string())?;
     match response {
         SessionResponse::Session {
@@ -363,12 +363,12 @@ fn require_session(
 
 fn would_cycle(
     context: &SessionTreeContext<'_, '_>,
-    child: &str,
-    parent: &str,
+    child: &SessionId,
+    parent: &SessionId,
 ) -> Result<bool, String> {
-    let mut cursor = Some(parent.to_owned());
+    let mut cursor = Some(parent.clone());
     while let Some(id) = cursor {
-        if id == child {
+        if &id == child {
             return Ok(true);
         }
         cursor = read_lineage(context, &id)?.and_then(|lineage| lineage.parent_session_id);
@@ -378,7 +378,7 @@ fn would_cycle(
 
 fn read_lineage(
     context: &SessionTreeContext<'_, '_>,
-    id: &str,
+    id: &SessionId,
 ) -> Result<Option<SessionLineage>, String> {
     read_raw(context, &lineage_key(id))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
@@ -387,8 +387,8 @@ fn read_lineage(
 
 fn read_children(
     context: &SessionTreeContext<'_, '_>,
-    parent: Option<&str>,
-) -> Result<Vec<String>, String> {
+    parent: Option<&SessionId>,
+) -> Result<Vec<SessionId>, String> {
     decode_ids(read_raw(context, &children_key(parent))?.as_deref())
 }
 
@@ -399,17 +399,17 @@ fn read_raw(context: &SessionTreeContext<'_, '_>, key: &str) -> Result<Option<Ve
         .map_err(|error| error.to_string())
 }
 
-fn decode_ids(value: Option<&[u8]>) -> Result<Vec<String>, String> {
+fn decode_ids(value: Option<&[u8]>) -> Result<Vec<SessionId>, String> {
     value
         .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
         .unwrap_or_else(|| Ok(Vec::new()))
 }
 
-fn lineage_key(id: &str) -> String {
+fn lineage_key(id: &SessionId) -> String {
     format!("lineage/{id}")
 }
 
-fn children_key(parent: Option<&str>) -> String {
+fn children_key(parent: Option<&SessionId>) -> String {
     match parent {
         Some(parent) => format!("children/{parent}"),
         None => "children/@root".into(),
@@ -430,6 +430,10 @@ mod tests {
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    fn session(value: &str) -> SessionId {
+        SessionId::parse(value).unwrap()
+    }
 
     fn authority() -> Authority {
         Authority::new(
@@ -520,22 +524,24 @@ mod tests {
     #[test]
     fn lineage_is_optional_and_durable_without_changing_flat_session_identity() {
         let path = temp_db("session-tree");
+        let root = session("root");
+        let child = session("child");
         {
             let mut kernel = kernel_with(&path);
-            invoke_session(&mut kernel, SessionCommand::Create { id: "root".into() });
-            invoke_session(&mut kernel, SessionCommand::Create { id: "child".into() });
+            invoke_session(&mut kernel, SessionCommand::Create { id: root.clone() });
+            invoke_session(&mut kernel, SessionCommand::Create { id: child.clone() });
             assert_eq!(
                 invoke_tree(
                     &mut kernel,
                     SessionTreeCommand::Link {
-                        session_id: "root".into(),
+                        session_id: root.clone(),
                         parent_session_id: None,
                     },
                 )
                 .unwrap(),
                 SessionTreeResponse::Lineage {
                     lineage: SessionLineage {
-                        session_id: "root".into(),
+                        session_id: root.clone(),
                         parent_session_id: None,
                     },
                 }
@@ -543,15 +549,15 @@ mod tests {
             invoke_tree(
                 &mut kernel,
                 SessionTreeCommand::Link {
-                    session_id: "child".into(),
-                    parent_session_id: Some("root".into()),
+                    session_id: child.clone(),
+                    parent_session_id: Some(root.clone()),
                 },
             )
             .unwrap();
             assert_eq!(
-                invoke_session(&mut kernel, SessionCommand::Get { id: "child".into() },),
+                invoke_session(&mut kernel, SessionCommand::Get { id: child.clone() }),
                 SessionResponse::Session {
-                    session: Some(SessionRecord { id: "child".into() }),
+                    session: Some(SessionRecord { id: child.clone() }),
                 }
             );
         }
@@ -561,24 +567,24 @@ mod tests {
             invoke_tree(
                 &mut restored,
                 SessionTreeCommand::Children {
-                    parent_session_id: Some("root".into()),
+                    parent_session_id: Some(root.clone()),
                 },
             )
             .unwrap(),
             SessionTreeResponse::Children {
-                session_ids: vec!["child".into()],
+                session_ids: vec![child.clone()],
             }
         );
         assert_eq!(
             invoke_tree(
                 &mut restored,
                 SessionTreeCommand::Parent {
-                    session_id: "child".into(),
+                    session_id: child,
                 },
             )
             .unwrap(),
             SessionTreeResponse::Parent {
-                parent_session_id: Some("root".into()),
+                parent_session_id: Some(root),
             }
         );
         let _ = fs::remove_file(path);
@@ -588,12 +594,17 @@ mod tests {
     fn lineage_rejects_missing_sessions() {
         let path = temp_db("session-tree-missing");
         let mut kernel = kernel_with(&path);
-        invoke_session(&mut kernel, SessionCommand::Create { id: "root".into() });
+        invoke_session(
+            &mut kernel,
+            SessionCommand::Create {
+                id: session("root"),
+            },
+        );
         assert!(invoke_tree(
             &mut kernel,
             SessionTreeCommand::Link {
-                session_id: "missing".into(),
-                parent_session_id: Some("root".into()),
+                session_id: session("missing"),
+                parent_session_id: Some(session("root")),
             },
         )
         .unwrap_err()
