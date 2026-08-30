@@ -4,8 +4,8 @@ use crate::{
     EventError, EventTypeId, GraphGenerationId, KernelConfig, KernelError, KernelEvent,
     KernelPolicyIdentity, LocalPersistence, NamespaceTransaction, PersistenceBackend,
     PluginExecution, PluginId, PluginManifest, ResolvedComponentGraph, ResolvedServiceChain,
-    ResourceNamespace, SchemaMigration, ServiceId, ServiceRole, SkillResourceMetadata, TaskHandle,
-    TaskRuntime, TransactionOp,
+    ResourceNamespace, SchemaMigration, ServiceId, ServiceRole, SkillResourceMetadata, TaskRuntime,
+    TaskScope, TransactionOp,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},

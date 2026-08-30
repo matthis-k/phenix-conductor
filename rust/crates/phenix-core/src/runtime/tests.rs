@@ -29,6 +29,15 @@ impl PluginInstance for MarkerPlugin {
     }
 }
 
+struct StartupTaskScopePlugin;
+
+impl PluginInstance for StartupTaskScopePlugin {
+    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
+        assert!(host.task_scope().is_none());
+        Ok(())
+    }
+}
+
 struct EchoPlugin;
 
 impl PluginInstance for EchoPlugin {
@@ -99,6 +108,26 @@ fn kernel_only_boots_without_agent_domain_services() {
     let mut kernel = Kernel::kernel_only();
     kernel.activate_all().unwrap();
     assert_eq!(kernel.config().manifests().count(), 0);
+}
+
+#[test]
+fn startup_host_without_resolved_graph_exposes_no_task_scope() {
+    let startup = PluginManifest {
+        id: plugin("startup"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: Vec::new(),
+        maximum_authority: Authority::default(),
+    };
+    let mut kernel = Kernel::new(KernelConfig::new([startup]).unwrap());
+    kernel
+        .register_embedded_factory(plugin("startup"), || Box::new(StartupTaskScopePlugin))
+        .unwrap();
+
+    assert!(kernel.graph_generation().is_none());
+    kernel.activate_all().unwrap();
 }
 
 #[test]

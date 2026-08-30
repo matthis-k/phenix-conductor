@@ -162,18 +162,12 @@ impl<'a> PluginHost<'a> {
         })
     }
 
-    pub fn spawn_task<T, F>(&self, requested_authority: &Authority, worker: F) -> TaskHandle<T>
-    where
-        T: Send + 'static,
-        F: FnOnce(crate::CancellationToken) -> T + Send + 'static,
-    {
-        self.tasks.spawn(
-            self.graph_generation
-                .expect("plugin host task spawn requires a resolved graph generation"),
+    pub fn task_scope(&self) -> Option<TaskScope<'_>> {
+        Some(TaskScope::new(
+            self.tasks,
+            self.graph_generation?,
             self.authority,
-            requested_authority,
-            worker,
-        )
+        ))
     }
 
     pub fn dispatch_event(
