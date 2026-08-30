@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod agent_loop;
+#[cfg(test)]
+mod agent_loop_regression;
 mod component;
 mod configuration;
 #[cfg(test)]
@@ -8,6 +11,11 @@ mod configuration_regression;
 mod generation_regression;
 mod implementation;
 
+pub use agent_loop::{
+    agent_loop_service, AgentLoopCommand, AgentLoopPolicy, AgentLoopResponse, AgentLoopUsage,
+    AGENT_LOOP_SERVICE, DEFAULT_MAX_PARALLEL_TOOL_CALLS,
+};
+pub(crate) use agent_loop::{ModelInvokeCommand, ModelInvokeResponse, MODEL_ROUTING_SERVICE};
 pub use component::*;
 pub use configuration::{
     execution_configuration_service, AgentDefinition, CallablePolicy,
@@ -32,6 +40,12 @@ pub fn execution_manifest(maximum_authority: Authority) -> PluginManifest {
         priority: 100,
         required_authority: Authority::default(),
     });
+    manifest.services.push(ServiceContribution {
+        role: phenix_core::ServiceRole::Terminal,
+        service: agent_loop::agent_loop_service(),
+        priority: 100,
+        required_authority: Authority::default(),
+    });
     manifest
         .resource_namespaces
         .push(configuration::execution_configuration_namespace());
@@ -43,18 +57,21 @@ pub fn execution_factory() -> Box<dyn PluginInstance> {
     Box::new(ExecutionPackagePlugin {
         execution: implementation::execution_factory(),
         configuration: configuration::configuration_factory(),
+        agent_loop: agent_loop::agent_loop_factory(),
     })
 }
 
 struct ExecutionPackagePlugin {
     execution: Box<dyn PluginInstance>,
     configuration: Box<dyn PluginInstance>,
+    agent_loop: Box<dyn PluginInstance>,
 }
 
 impl PluginInstance for ExecutionPackagePlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
         self.execution.start(host)?;
-        self.configuration.start(host)
+        self.configuration.start(host)?;
+        self.agent_loop.start(host)
     }
 
     fn invoke(
@@ -66,11 +83,15 @@ impl PluginInstance for ExecutionPackagePlugin {
         if service == &configuration::execution_configuration_service() {
             return self.configuration.invoke(service, input, host);
         }
+        if service == &agent_loop::agent_loop_service() {
+            return self.agent_loop.invoke(service, input, host);
+        }
 
         self.execution.invoke(service, input, host)
     }
 
     fn stop(&mut self) -> Result<(), String> {
+        self.agent_loop.stop()?;
         self.configuration.stop()?;
         self.execution.stop()
     }
