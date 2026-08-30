@@ -4,6 +4,7 @@ use phenix_core::{PluginId, PluginManifest};
 
 mod component;
 mod implementation;
+mod prompt;
 
 pub use component::*;
 pub use implementation::{
@@ -11,6 +12,10 @@ pub use implementation::{
     ContextInjectionLifetime, ContextInjectionRequester, ContextResourceKind,
     ContextResourceRevision, ContextResponse, ContextScope, ExactContextReference,
     ExecutionContextProjection, ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
+};
+pub use prompt::{
+    assemble_prompt, PromptAssembly, PromptSection, PromptSectionKind, PromptSectionRole,
+    PHENIX_HARNESS_IDENTITY,
 };
 
 /// Context loads validate execution liveness through `phenix.execution`.
