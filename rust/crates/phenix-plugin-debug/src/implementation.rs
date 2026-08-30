@@ -26,10 +26,10 @@ pub enum DebugCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-pub struct DiagnosticEntry {
-    pub available: bool,
-    pub value: serde_json::Value,
-    pub error: Option<String>,
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum DiagnosticEntry {
+    Available { value: serde_json::Value },
+    Unavailable { error: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
@@ -68,7 +68,7 @@ pub fn debug_factory() -> Box<dyn PluginInstance> {
 
 #[must_use]
 pub fn debug_service() -> ServiceId {
-    ServiceId::parse(DEBUG_SERVICE).expect("static service id is valid")
+    ServiceId::parse(DEBUG_SERVICE).expect("static debug service id is valid")
 }
 
 struct DebugSdk<'host, 'runtime> {
@@ -200,31 +200,16 @@ fn probe<I, Request>(
 
 fn response_entry(response: PhenixValue) -> DiagnosticEntry {
     match serde_json::to_value(response) {
-        Ok(value) => DiagnosticEntry {
-            available: true,
-            value,
-            error: None,
-        },
-        Err(error) => DiagnosticEntry {
-            available: false,
-            value: serde_json::Value::Null,
-            error: Some(format!("invalid diagnostic service response: {error}")),
+        Ok(value) => DiagnosticEntry::Available { value },
+        Err(error) => DiagnosticEntry::Unavailable {
+            error: format!("invalid diagnostic service response: {error}"),
         },
     }
 }
 
 fn error_entry(error: ComponentInvocationError) -> DiagnosticEntry {
-    match error {
-        error @ ComponentInvocationError::UnboundImport { .. } => DiagnosticEntry {
-            available: false,
-            value: serde_json::Value::Null,
-            error: Some(error.to_string()),
-        },
-        error => DiagnosticEntry {
-            available: false,
-            value: serde_json::Value::Null,
-            error: Some(error.to_string()),
-        },
+    DiagnosticEntry::Unavailable {
+        error: error.to_string(),
     }
 }
 
@@ -269,8 +254,17 @@ mod tests {
             .unwrap();
         let output: PhenixValue = serde_json::from_slice(&output).unwrap();
         let DebugResponse::Snapshot { snapshot } = output.project().unwrap();
-        assert!(snapshot.services["sessions"].available);
-        assert!(!snapshot.services["context"].available);
-        assert!(!snapshot.services["models"].available);
+        assert!(matches!(
+            snapshot.services["sessions"],
+            DiagnosticEntry::Available { .. }
+        ));
+        assert!(matches!(
+            snapshot.services["context"],
+            DiagnosticEntry::Unavailable { .. }
+        ));
+        assert!(matches!(
+            snapshot.services["models"],
+            DiagnosticEntry::Unavailable { .. }
+        ));
     }
 }

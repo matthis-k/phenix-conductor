@@ -1,4 +1,4 @@
-use phenix_core::{PhenixValue, Project, ValueError};
+use phenix_core::{ContextResourceId, PhenixValue, Project, SessionId, ValueError};
 use phenix_plugin_catalog::{
     ContextCommand, ContextResourceKind, ContextResponse, ContextScope, PlanningCommand,
     PlanningResponse, SessionCommand, SessionRecord, SessionResponse,
@@ -66,19 +66,21 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
     ));
     let _ = fs::remove_file(&state);
 
+    let session_id = SessionId::parse("process-session").unwrap();
+    let context_id = ContextResourceId::parse("process:context").unwrap();
     let first = run_harness(
         &state,
         &[
             serde_json::json!({
                 "id": 1,
                 "service": "phenix.sessions@1",
-                "input": structural_input(&SessionCommand::Create { id: "process-session".into() })
+                "input": structural_input(&SessionCommand::Create { id: session_id.clone() })
             }),
             serde_json::json!({
                 "id": 2,
                 "service": "phenix.context@1",
                 "input": structural_input(&ContextCommand::Register {
-                    resource_id: "process:context".into(),
+                    resource_id: context_id.clone(),
                     kind: ContextResourceKind::External,
                     source: "process-roundtrip".into(),
                     scope: ContextScope::Workspace,
@@ -102,7 +104,7 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
         structural_output::<SessionResponse>(&first[0]["output"]),
         SessionResponse::Created {
             session: SessionRecord {
-                id: "process-session".into()
+                id: session_id.clone()
             },
         }
     );
@@ -110,7 +112,7 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
     let ContextResponse::Registered { resource } = structural_output(&first[1]["output"]) else {
         panic!("context register returned the wrong response")
     };
-    assert_eq!(resource.descriptor.resource_id, "process:context");
+    assert_eq!(resource.descriptor.resource_id, context_id);
     assert_eq!(first[2]["status"], "ok");
     let PlanningResponse::Objective {
         objective: Some(objective),
@@ -126,7 +128,7 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
             serde_json::json!({
                 "id": 4,
                 "service": "phenix.sessions@1",
-                "input": structural_input(&SessionCommand::Get { id: "process-session".into() })
+                "input": structural_input(&SessionCommand::Get { id: session_id.clone() })
             }),
             serde_json::json!({
                 "id": 5,
@@ -145,9 +147,7 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
     assert_eq!(
         structural_output::<SessionResponse>(&second[0]["output"]),
         SessionResponse::Session {
-            session: Some(SessionRecord {
-                id: "process-session".into()
-            }),
+            session: Some(SessionRecord { id: session_id }),
         }
     );
     assert_eq!(second[1]["status"], "ok");
@@ -156,7 +156,7 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
     };
     assert!(descriptors
         .iter()
-        .any(|descriptor| descriptor.resource_id == "process:context"));
+        .any(|descriptor| descriptor.resource_id.as_str() == "process:context"));
     assert_eq!(second[2]["status"], "ok");
     let PlanningResponse::Objective {
         objective: Some(objective),

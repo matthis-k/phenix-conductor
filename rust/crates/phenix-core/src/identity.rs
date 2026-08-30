@@ -121,6 +121,9 @@ identifier!(CallableId);
 identifier!(ModelId);
 identifier!(RoutingProfileId);
 identifier!(SkillId);
+identifier!(SessionId);
+identifier!(ContextResourceId);
+identifier!(ContextRevisionId);
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(try_from = "String")]
@@ -262,6 +265,8 @@ mod tests {
         assert!(serde_json::from_str::<PluginId>("\"\"").is_err());
         assert!(serde_json::from_str::<CallableId>("\"has space\"").is_err());
         assert!(serde_json::from_str::<ModelId>("\"\"").is_err());
+        assert!(serde_json::from_str::<SessionId>("\"\"").is_err());
+        assert!(serde_json::from_str::<ContextResourceId>("\"has space\"").is_err());
         assert!(serde_json::from_str::<InterfaceId>("\"unversioned\"").is_err());
         assert!(serde_json::from_str::<InterfaceId>("\"phenix.models@inference@1\"").is_err());
         assert!(serde_json::from_str::<InterfaceId>("\"phenix.models.inference@0\"").is_err());

@@ -20,11 +20,11 @@ const WORKSPACE_GIT: &str = "workspace.git";
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 
 type WorkspaceContext<'host, 'runtime, 'state> =
-    PluginContext<'host, 'runtime, (), (), &'state PathBuf>;
+    PluginContext<'host, 'runtime, (), (), &'state Path>;
 
 fn context<'host, 'runtime, 'state>(
     host: &'host PluginHost<'runtime>,
-    root: &'state PathBuf,
+    root: &'state Path,
 ) -> WorkspaceContext<'host, 'runtime, 'state> {
     PluginContext::new(host, (), (), root)
 }
@@ -234,12 +234,13 @@ fn read(context: &WorkspaceContext<'_, '_, '_>, path: String) -> Result<Workspac
     require(context, WORKSPACE_READ)?;
     let resolved = resolve(context, &path)?;
     let bytes = fs::read(&resolved).map_err(|error| format!("read {path}: {error}"))?;
-    let content = String::from_utf8(bytes.clone())
+    let version = version_for_bytes(&bytes);
+    let content = String::from_utf8(bytes)
         .map_err(|_| format!("workspace read requires UTF-8 text: {path}"))?;
     Ok(WorkspaceResponse::Read {
         path,
         content,
-        version: version_for_bytes(&bytes),
+        version,
     })
 }
 

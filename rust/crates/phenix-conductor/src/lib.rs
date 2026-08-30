@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+use phenix_client::ServiceOutput;
 use phenix_client::{ServiceRequest, ServiceResponse};
 use phenix_core::{
     Authority, GraphGenerationId, Kernel, KernelError, PluginManifest, ResolvedHarness,
@@ -282,8 +284,10 @@ mod tests {
         );
         assert!(matches!(
             invoke_fixture(&mut conductor),
-            ServiceResponse::Ok { output: Some(output), .. }
-                if output == serde_json::json!({"provider": "primary"})
+            ServiceResponse::Ok {
+                output: ServiceOutput::Json { output },
+                ..
+            } if output == serde_json::json!({"provider": "primary"})
         ));
     }
 
@@ -295,13 +299,17 @@ mod tests {
 
         assert!(matches!(
             invoke_fixture(&mut primary),
-            ServiceResponse::Ok { output: Some(output), .. }
-                if output == serde_json::json!({"provider": "primary"})
+            ServiceResponse::Ok {
+                output: ServiceOutput::Json { output },
+                ..
+            } if output == serde_json::json!({"provider": "primary"})
         ));
         assert!(matches!(
             invoke_fixture(&mut replacement),
-            ServiceResponse::Ok { output: Some(output), .. }
-                if output == serde_json::json!({"provider": "replacement"})
+            ServiceResponse::Ok {
+                output: ServiceOutput::Json { output },
+                ..
+            } if output == serde_json::json!({"provider": "replacement"})
         ));
     }
 }

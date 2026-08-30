@@ -32,10 +32,11 @@ mod tests {
     use super::*;
     use phenix_core::{
         context_service, model_inference_service, skill_service, tool_service, Authority,
-        CallableId, ComponentInterface, ContextCommand, ContextResourceKind, ContextResponse,
-        ContextScope, Kernel, KernelConfig, LocalPersistence, ModelId, ModelInferenceRequest,
-        ModelInferenceResponse, ResolvedHarness, ResolvedHarnessActivation, SkillCommand,
-        SkillDefinition, SkillId, SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
+        CallableId, ComponentInterface, ContextCommand, ContextResourceId, ContextResourceKind,
+        ContextResponse, ContextScope, Kernel, KernelConfig, LocalPersistence, ModelId,
+        ModelInferenceRequest, ModelInferenceResponse, ResolvedHarness, ResolvedHarnessActivation,
+        SkillCommand, SkillDefinition, SkillId, SkillResponse, ToolCommand, ToolDefinition,
+        ToolResponse,
     };
     use std::{
         collections::BTreeMap,
@@ -212,7 +213,7 @@ mod tests {
                 &mut first,
                 &context_service(),
                 &ContextCommand::Register {
-                    resource_id: "readme".into(),
+                    resource_id: ContextResourceId::parse("readme").unwrap(),
                     kind: ContextResourceKind::ProjectDocument,
                     source: "README.md".into(),
                     scope: ContextScope::Workspace,
@@ -244,7 +245,7 @@ mod tests {
         let context: ContextResponse =
             invoke(&mut restored, &context_service(), &ContextCommand::List);
         assert!(
-            matches!(context, ContextResponse::Resources { descriptors } if descriptors[0].resource_id == "readme")
+            matches!(context, ContextResponse::Resources { descriptors } if descriptors[0].resource_id.as_str() == "readme")
         );
         let _ = fs::remove_file(path);
     }

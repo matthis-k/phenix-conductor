@@ -25,16 +25,21 @@ pub struct ServiceRequest {
     pub input: Value,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ServiceOutput {
+    Json { output: Value },
+    Bytes { output_bytes: Vec<u8> },
+}
+
 /// Canonical response produced by the supported Harness service wire.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ServiceResponse {
     Ok {
         id: Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        output: Option<Value>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        output_bytes: Option<Vec<u8>>,
+        #[serde(flatten)]
+        output: ServiceOutput,
     },
     Error {
         id: Value,
@@ -47,8 +52,7 @@ impl ServiceResponse {
     pub fn json(id: Value, output: Value) -> Self {
         Self::Ok {
             id,
-            output: Some(output),
-            output_bytes: None,
+            output: ServiceOutput::Json { output },
         }
     }
 
@@ -56,8 +60,9 @@ impl ServiceResponse {
     pub fn bytes(id: Value, output: Vec<u8>) -> Self {
         Self::Ok {
             id,
-            output: None,
-            output_bytes: Some(output),
+            output: ServiceOutput::Bytes {
+                output_bytes: output,
+            },
         }
     }
 

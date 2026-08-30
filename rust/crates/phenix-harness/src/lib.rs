@@ -489,8 +489,8 @@ impl PhenixHarness {
 mod tests {
     use super::*;
     use phenix_core::{
-        CapabilityId, LayerResult, PhenixValue, Project, ServiceContribution, ServiceId,
-        ServiceRole,
+        CapabilityId, ContextResourceId, ContextRevisionId, LayerResult, PhenixValue, Project,
+        ServiceContribution, ServiceId, ServiceRole, SessionId,
     };
     use phenix_plugin_catalog::{
         artifact_manifest, artifact_service, context_manifest, context_service, planning_manifest,
@@ -697,7 +697,7 @@ mod tests {
         harness.activate().unwrap();
         assert_eq!(harness.kernel().config().manifests().count(), 0);
         let input = serde_json::to_vec(&SessionCommand::Get {
-            id: "missing".into(),
+            id: SessionId::parse("missing").unwrap(),
         })
         .unwrap();
         assert!(harness
@@ -768,7 +768,7 @@ mod tests {
         serde_json::from_slice::<PhenixValue>(&output).unwrap();
 
         let create = serde_json::to_vec(&PhenixValue::from(&SessionCommand::Create {
-            id: "session-1".into(),
+            id: SessionId::parse("session-1").unwrap(),
         }))
         .unwrap();
         let response = harness
@@ -800,7 +800,7 @@ mod tests {
         ));
 
         let register = serde_json::to_vec(&PhenixValue::from(&ContextCommand::Register {
-            resource_id: "skill:review".into(),
+            resource_id: ContextResourceId::parse("skill:review").unwrap(),
             kind: ContextResourceKind::Skill,
             source: "skills/review/SKILL.md".into(),
             scope: ContextScope::Workspace,
@@ -853,7 +853,10 @@ mod tests {
             .unwrap();
         let mut harness = builder.build().unwrap();
         harness.activate().unwrap();
-        let input = serde_json::to_vec(&SessionCommand::Get { id: "x".into() }).unwrap();
+        let input = serde_json::to_vec(&SessionCommand::Get {
+            id: SessionId::parse("x").unwrap(),
+        })
+        .unwrap();
         assert_eq!(
             harness
                 .invoke(&session_service(), &input, &Authority::default(), None)
@@ -904,8 +907,8 @@ mod tests {
     #[test]
     fn mock_qml_context_provider_contributes_through_the_same_service_contract() {
         let qml_descriptor = ContextDescriptor {
-            resource_id: "qml:Main.qml".into(),
-            revision: "qml-revision".into(),
+            resource_id: ContextResourceId::parse("qml:Main.qml").unwrap(),
+            revision: ContextRevisionId::parse("qml-revision").unwrap(),
             kind: ContextResourceKind::External,
             source: "Main.qml".into(),
             scope: ContextScope::Workspace,

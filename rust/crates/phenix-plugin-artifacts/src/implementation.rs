@@ -80,6 +80,13 @@ pub struct RevalidationRecord {
     pub provenance: String,
 }
 
+impl RevalidationRecord {
+    #[must_use]
+    pub fn reusable(&self) -> bool {
+        self.verdict == RevalidationVerdict::StillValid
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ArtifactCommand {
@@ -132,8 +139,12 @@ pub enum ArtifactResponse {
     },
     Revalidated {
         record: RevalidationRecord,
-        reusable: bool,
     },
+}
+
+struct StoredArtifact {
+    artifact: ArtifactRecord,
+    reused: bool,
 }
 
 #[must_use]
@@ -267,13 +278,22 @@ fn store(
     content: Vec<u8>,
     provenance: ArtifactProvenance,
 ) -> Result<ArtifactResponse, String> {
+    let StoredArtifact { artifact, reused } = store_artifact(context, content, provenance)?;
+    Ok(ArtifactResponse::Stored { artifact, reused })
+}
+
+fn store_artifact(
+    context: &ArtifactContext<'_, '_>,
+    content: Vec<u8>,
+    provenance: ArtifactProvenance,
+) -> Result<StoredArtifact, String> {
     let content_identity = exact_content_identity(&content);
     let id = format!("artifact:{content_identity}");
     if let Some(existing) = read_record(context, &id)? {
         if existing.content_identity != content_identity || existing.content != content {
             return Err(format!("artifact identity collision: {id}"));
         }
-        return Ok(ArtifactResponse::Stored {
+        return Ok(StoredArtifact {
             artifact: existing,
             reused: true,
         });
@@ -301,7 +321,7 @@ fn store(
             ],
         )
         .map_err(|error| error.to_string())?;
-    Ok(ArtifactResponse::Stored {
+    Ok(StoredArtifact {
         artifact,
         reused: false,
     })
@@ -345,7 +365,7 @@ fn record_read(
         });
     }
 
-    let artifact = match store(
+    let artifact = store_artifact(
         context,
         content,
         ArtifactProvenance {
@@ -354,10 +374,8 @@ fn record_read(
             configuration_identity: Some(provider.configuration_identity.clone()),
             source_observations: dependencies.clone(),
         },
-    )? {
-        ArtifactResponse::Stored { artifact, .. } => artifact,
-        _ => unreachable!("store returns stored artifact"),
-    };
+    )?
+    .artifact;
     let request_identity = normalized_request_identity(&request)?;
     let result = ReadResultRecord {
         id: read_result_identity(
@@ -487,10 +505,7 @@ fn revalidate(
             }],
         )
         .map_err(|error| error.to_string())?;
-    Ok(ArtifactResponse::Revalidated {
-        reusable: verdict == RevalidationVerdict::StillValid,
-        record,
-    })
+    Ok(ArtifactResponse::Revalidated { record })
 }
 
 fn normalized_request_identity(request: &NormalizedReadRequest) -> Result<String, String> {
@@ -779,7 +794,7 @@ mod tests {
         );
         assert!(matches!(
             still_valid,
-            ArtifactResponse::Revalidated { reusable: true, .. }
+            ArtifactResponse::Revalidated { record } if record.reusable()
         ));
 
         let unknown = invoke(
@@ -794,10 +809,7 @@ mod tests {
         );
         assert!(matches!(
             unknown,
-            ArtifactResponse::Revalidated {
-                reusable: false,
-                ..
-            }
+            ArtifactResponse::Revalidated { record } if !record.reusable()
         ));
     }
 }

@@ -362,20 +362,12 @@ fn supported_harness_routes_first_party_domains_through_kernel_services() {
         .as_object()
         .unwrap()
         .values()
-        .all(|entry| entry["available"] == true));
+        .all(|entry| entry["state"] == "available"));
 
-    let cli = ServiceId::parse("phenix.cli.discover@1").unwrap();
-    let request = CliProbeRequest {
-        name: "not-a-supported-cli".into(),
-    };
-    let error = harness
-        .invoke(
-            &cli,
-            &serde_json::to_vec(&PhenixValue::from(&request)).unwrap(),
-            &default_suite_authority(),
-            None,
-        )
-        .unwrap_err();
+    let error = serde_json::from_value::<CliProbeRequest>(json!({
+        "name": "not-a-supported-cli"
+    }))
+    .unwrap_err();
     assert!(error.to_string().contains("unsupported CLI probe target"));
 }
 

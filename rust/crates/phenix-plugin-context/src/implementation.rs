@@ -1,8 +1,8 @@
 use crate::context_component_id;
 use phenix_core::{
-    Authority, Bytes, CapabilityId, ComponentInterface, DurableSchema, PluginContext,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
-    SdkClient, ServiceContribution, ServiceId, TransactionOp,
+    Authority, Bytes, CapabilityId, ComponentInterface, ContextResourceId, ContextRevisionId,
+    DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId, TransactionOp,
 };
 pub use phenix_core::{
     ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
@@ -44,8 +44,8 @@ fn context<'host, 'runtime>(
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, PhenixValue)]
 pub struct ExactContextReference {
-    pub resource_id: String,
-    pub revision: String,
+    pub resource_id: ContextResourceId,
+    pub revision: ContextRevisionId,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
@@ -99,15 +99,15 @@ pub struct RepositoryContextSource {
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ContextCommand {
     Register {
-        resource_id: String,
+        resource_id: ContextResourceId,
         kind: ContextResourceKind,
         source: String,
         scope: ContextScope,
         content: Bytes,
     },
     Get {
-        resource_id: String,
-        revision: String,
+        resource_id: ContextResourceId,
+        revision: ContextRevisionId,
     },
     List,
     DiscoverRepository {
@@ -116,8 +116,8 @@ pub enum ContextCommand {
     },
     Load {
         execution_id: String,
-        resource_id: String,
-        revision: String,
+        resource_id: ContextResourceId,
+        revision: ContextRevisionId,
         requester: ContextInjectionRequester,
         lifetime: ContextInjectionLifetime,
         reason: String,
@@ -283,13 +283,12 @@ fn handle(
 
 fn register_resource(
     context: &ContextPluginContext<'_, '_>,
-    resource_id: String,
+    resource_id: ContextResourceId,
     kind: ContextResourceKind,
     source: String,
     scope: ContextScope,
     content: Bytes,
 ) -> Result<ContextResourceRevision, String> {
-    validate_identity("context resource id", &resource_id)?;
     validate_identity("context source", &source)?;
     if let ContextScope::PathPrefix(prefix) = &scope {
         validate_identity("context path scope", prefix)?;
@@ -305,7 +304,7 @@ fn register_resource(
             kind,
             source,
             scope,
-            content_identity: revision.clone(),
+            content_identity: revision.as_str().to_owned(),
             estimated_bytes,
         },
         content,
@@ -383,9 +382,12 @@ fn discover_repository(
             ContextResourceKind::Skill => "skill",
             ContextResourceKind::External => unreachable!(),
         };
+        let resource_id =
+            ContextResourceId::parse(format!("{prefix}:{workspace_id}:{}", source.path))
+                .map_err(str::to_owned)?;
         let resource = register_resource(
             context,
-            format!("{prefix}:{workspace_id}:{}", source.path),
+            resource_id,
             kind,
             source.path,
             scope,
@@ -413,8 +415,8 @@ fn project_file_kind(path: &str) -> Option<ContextResourceKind> {
 fn load_context(
     context: &ContextPluginContext<'_, '_>,
     execution_id: String,
-    resource_id: String,
-    revision: String,
+    resource_id: ContextResourceId,
+    revision: ContextRevisionId,
     requester: ContextInjectionRequester,
     lifetime: ContextInjectionLifetime,
     reason: String,
@@ -524,8 +526,8 @@ fn project_context(
 
 fn read_resource(
     context: &ContextPluginContext<'_, '_>,
-    resource_id: &str,
-    revision: &str,
+    resource_id: &ContextResourceId,
+    revision: &ContextRevisionId,
 ) -> Result<Option<ContextResourceRevision>, String> {
     read_raw(context, &resource_key(resource_id, revision))?
         .map(|value| serde_json::from_slice(&value).map_err(|error| error.to_string()))
@@ -569,7 +571,7 @@ fn decode_injections(value: Option<&[u8]>) -> Result<Vec<ContextInjection>, Stri
         .unwrap_or_else(|| Ok(Vec::new()))
 }
 
-fn resource_key(resource_id: &str, revision: &str) -> String {
+fn resource_key(resource_id: &ContextResourceId, revision: &ContextRevisionId) -> String {
     format!("resource/{resource_id}/{revision}")
 }
 
@@ -585,9 +587,10 @@ fn validate_identity(label: &str, value: &str) -> Result<(), String> {
     }
 }
 
-fn content_hash(content: &[u8]) -> String {
+fn content_hash(content: &[u8]) -> ContextRevisionId {
     let digest = Sha256::digest(content);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    let value: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    ContextRevisionId::parse(value).expect("sha256 hex is a valid context revision")
 }
 
 fn file_name(path: &str) -> &str {
@@ -704,7 +707,7 @@ mod tests {
             let response = invoke(
                 &mut kernel,
                 &ContextCommand::Register {
-                    resource_id: "skill:review".into(),
+                    resource_id: ContextResourceId::parse("skill:review").unwrap(),
                     kind: ContextResourceKind::Skill,
                     source: "skills/review/SKILL.md".into(),
                     scope: ContextScope::Workspace,
@@ -851,7 +854,7 @@ mod tests {
         let registered = invoke(
             &mut kernel,
             &ContextCommand::Register {
-                resource_id: "skill:bounded".into(),
+                resource_id: ContextResourceId::parse("skill:bounded").unwrap(),
                 kind: ContextResourceKind::Skill,
                 source: "skills/bounded/SKILL.md".into(),
                 scope: ContextScope::Workspace,
@@ -928,7 +931,7 @@ mod tests {
         let registered = invoke(
             &mut kernel,
             &ContextCommand::Register {
-                resource_id: "skill:manual".into(),
+                resource_id: ContextResourceId::parse("skill:manual").unwrap(),
                 kind: ContextResourceKind::Skill,
                 source: "skills/manual/SKILL.md".into(),
                 scope: ContextScope::Workspace,

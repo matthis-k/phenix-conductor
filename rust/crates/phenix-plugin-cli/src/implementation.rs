@@ -5,7 +5,10 @@ use phenix_core::{
 use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    fmt::{self, Display, Formatter},
+};
 
 pub const CLI_DISCOVER_SERVICE: &str = "phenix.cli.discover@1";
 pub const CLI_VERSION_SERVICE: &str = "phenix.cli.version@1";
@@ -32,9 +35,90 @@ fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> CliContext<'ho
     )
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+pub struct CliName(String);
+
+impl CliName {
+    pub fn parse(value: impl Into<String>) -> Result<Self, String> {
+        value.into().try_into()
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for CliName {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if SUPPORTED.contains(&value.as_str()) {
+            Ok(Self(value))
+        } else {
+            Err(format!("unsupported CLI probe target: {value}"))
+        }
+    }
+}
+
+impl Display for CliName {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl phenix_core::ValueCodec for CliName {
+    fn phenix_type() -> phenix_core::Type {
+        phenix_core::Type::String
+    }
+
+    fn to_value(&self) -> phenix_core::PhenixValue {
+        phenix_core::PhenixValue::String(self.0.clone())
+    }
+
+    fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> {
+        let value = String::try_from(phenix_core::Exact(value))?;
+        Self::try_from(value).map_err(phenix_core::ValueError::InvalidValue)
+    }
+
+    fn project_from_value(
+        value: &phenix_core::PhenixValue,
+    ) -> Result<Self, phenix_core::ValueError> {
+        let value = String::try_from(phenix_core::Project(value))?;
+        Self::try_from(value).map_err(phenix_core::ValueError::InvalidValue)
+    }
+}
+
+impl From<&CliName> for phenix_core::PhenixValue {
+    fn from(value: &CliName) -> Self {
+        <CliName as phenix_core::ValueCodec>::to_value(value)
+    }
+}
+
+impl<'value> TryFrom<phenix_core::Exact<&'value phenix_core::PhenixValue>> for CliName {
+    type Error = phenix_core::ValueError;
+
+    fn try_from(
+        value: phenix_core::Exact<&'value phenix_core::PhenixValue>,
+    ) -> Result<Self, Self::Error> {
+        <Self as phenix_core::ValueCodec>::from_value(value.0)
+    }
+}
+
+impl<'value> TryFrom<phenix_core::Project<&'value phenix_core::PhenixValue>> for CliName {
+    type Error = phenix_core::ValueError;
+
+    fn try_from(
+        value: phenix_core::Project<&'value phenix_core::PhenixValue>,
+    ) -> Result<Self, Self::Error> {
+        <Self as phenix_core::ValueCodec>::project_from_value(value.0)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct CliProbeRequest {
-    pub name: String,
+    pub name: CliName,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
@@ -57,7 +141,7 @@ pub enum CliAuthState {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct CliDescriptor {
-    pub name: String,
+    pub name: CliName,
     pub availability: CliAvailability,
     pub executable_identity: Option<String>,
     pub version: Option<String>,
@@ -125,25 +209,17 @@ fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).expect("static capability is valid")
 }
 
-fn validate_target(name: &str) -> Result<(), String> {
-    if SUPPORTED.contains(&name) {
-        Ok(())
-    } else {
-        Err(format!("unsupported CLI probe target: {name}"))
-    }
-}
-
-fn probe_capabilities(name: &str) -> BTreeSet<String> {
+fn probe_capabilities(name: &CliName) -> BTreeSet<String> {
     let mut capabilities = BTreeSet::from(["discover".to_owned(), "version".to_owned()]);
-    if name == "gh" {
+    if name.as_str() == "gh" {
         capabilities.insert("auth_state".to_owned());
     }
     capabilities
 }
 
-fn descriptor(name: &str, availability: CliAvailability) -> CliDescriptor {
+fn descriptor(name: &CliName, availability: CliAvailability) -> CliDescriptor {
     CliDescriptor {
-        name: name.to_owned(),
+        name: name.clone(),
         availability,
         executable_identity: None,
         version: None,
@@ -163,8 +239,7 @@ fn shell(context: &CliContext<'_, '_>, command: String) -> Result<WorkspaceRespo
         .map_err(|error| error.to_string())
 }
 
-fn discover(context: &CliContext<'_, '_>, name: &str) -> Result<CliDescriptor, String> {
-    validate_target(name)?;
+fn discover(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescriptor, String> {
     let response = match shell(context, format!("command -v -- {name}")) {
         Ok(response) => response,
         Err(error) if error.contains(WORKSPACE_SHELL) || error.contains("authority") => {
@@ -191,7 +266,7 @@ fn discover(context: &CliContext<'_, '_>, name: &str) -> Result<CliDescriptor, S
     Ok(result)
 }
 
-fn version(context: &CliContext<'_, '_>, name: &str) -> Result<CliDescriptor, String> {
+fn version(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescriptor, String> {
     let mut result = discover(context, name)?;
     if result.availability != CliAvailability::Available {
         return Ok(result);
@@ -215,9 +290,9 @@ fn version(context: &CliContext<'_, '_>, name: &str) -> Result<CliDescriptor, St
     Ok(result)
 }
 
-fn auth_state(context: &CliContext<'_, '_>, name: &str) -> Result<CliDescriptor, String> {
+fn auth_state(context: &CliContext<'_, '_>, name: &CliName) -> Result<CliDescriptor, String> {
     let mut result = discover(context, name)?;
-    if name != "gh" {
+    if name.as_str() != "gh" {
         result.auth_state = Some(CliAuthState::Unsupported);
         return Ok(result);
     }
@@ -338,12 +413,10 @@ mod tests {
     fn invoke(
         kernel: &mut Kernel,
         service: ServiceId,
-        name: &str,
+        name: CliName,
         authority: Authority,
     ) -> Result<CliDescriptor, String> {
-        let request = CliProbeRequest {
-            name: name.to_owned(),
-        };
+        let request = CliProbeRequest { name };
         let input = serde_json::to_vec(&PhenixValue::from(&request)).unwrap();
         let output = kernel
             .invoke(&service, &input, &authority, None)
@@ -370,17 +443,10 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_target_is_rejected_before_shell_execution() {
-        let shell = Authority::new([capability(WORKSPACE_SHELL)]);
-        let mut kernel = kernel(shell.clone());
-        let error = invoke(
-            &mut kernel,
-            cli_discover_service(),
-            "git;touch-pwned",
-            shell,
-        )
-        .unwrap_err();
-        assert!(error.contains("unsupported CLI probe target"));
+    fn unsupported_target_is_rejected_while_parsing() {
+        let value = PhenixValue::String("git;touch-pwned".into());
+        let error = CliName::try_from(Project(&value)).unwrap_err();
+        assert!(error.to_string().contains("unsupported CLI probe target"));
     }
 
     #[test]
@@ -389,7 +455,7 @@ mod tests {
         let result = invoke(
             &mut kernel,
             cli_discover_service(),
-            "git",
+            CliName::parse("git").unwrap(),
             Authority::default(),
         )
         .unwrap();
@@ -401,7 +467,13 @@ mod tests {
     fn non_gh_auth_probe_is_typed_unsupported() {
         let shell = Authority::new([capability(WORKSPACE_SHELL)]);
         let mut kernel = kernel(shell.clone());
-        let result = invoke(&mut kernel, cli_auth_state_service(), "git", shell).unwrap();
+        let result = invoke(
+            &mut kernel,
+            cli_auth_state_service(),
+            CliName::parse("git").unwrap(),
+            shell,
+        )
+        .unwrap();
         assert_eq!(result.auth_state, Some(CliAuthState::Unsupported));
     }
 }
