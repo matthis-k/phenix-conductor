@@ -63,8 +63,8 @@ mod tests {
         context_service, model_inference_service, skill_service, tool_service, CallableId,
         ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
         LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse, PhenixValue,
-        Project, SessionCommand, SessionId, SessionResponse, SkillCommand, SkillDefinition, SkillId,
-        SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
+        Project, SessionCommand, SessionId, SessionResponse, SkillCommand, SkillDefinition,
+        SkillId, SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
     };
     use phenix_plugin_catalog::session_service;
     use std::{

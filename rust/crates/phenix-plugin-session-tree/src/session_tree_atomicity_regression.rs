@@ -218,10 +218,7 @@ fn rejected_reparent_does_not_partially_mutate_lineage_indexes() {
     let path = temp_db();
     let mut kernel = kernel_with(&path);
     for id in ["root-a", "root-b", "child"] {
-        invoke_session(
-            &mut kernel,
-            SessionCommand::Create { id: session_id(id) },
-        );
+        invoke_session(&mut kernel, SessionCommand::Create { id: session_id(id) });
     }
 
     invoke_tree(
@@ -259,10 +256,7 @@ fn rejected_cycle_does_not_partially_mutate_lineage_indexes() {
     let path = temp_db();
     let mut kernel = kernel_with(&path);
     for id in ["root", "child"] {
-        invoke_session(
-            &mut kernel,
-            SessionCommand::Create { id: session_id(id) },
-        );
+        invoke_session(&mut kernel, SessionCommand::Create { id: session_id(id) });
     }
 
     invoke_tree(
