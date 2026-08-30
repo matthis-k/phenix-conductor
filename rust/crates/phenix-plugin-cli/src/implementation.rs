@@ -1,8 +1,8 @@
 use phenix_core::{
-    Authority, CapabilityId, ComponentInterface, PluginContext, PluginExecution, PluginHost,
-    PluginId, PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
+    Authority, CapabilityId, ComponentInterface, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ServiceContribution, ServiceId,
 };
-use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
+use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceResponse};
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -13,26 +13,22 @@ use std::{
 pub const CLI_DISCOVER_SERVICE: &str = "phenix.cli.discover@1";
 pub const CLI_VERSION_SERVICE: &str = "phenix.cli.version@1";
 pub const CLI_AUTH_STATE_SERVICE: &str = "phenix.cli.auth-state@1";
-const CLI_PLUGIN: &str = "phenix.cli";
 const WORKSPACE_PLUGIN: &str = "phenix.workspace";
 const WORKSPACE_SHELL: &str = "workspace.shell";
 const SUPPORTED: &[&str] = &["git", "gh", "jj", "rg", "fd", "jq", "nix", "cargo"];
 
-struct CliSdk<'host, 'runtime> {
-    workspace: SdkClient<'host, 'runtime, WorkspaceInterface>,
+phenix_sdk::phenix_plugin! {
+    "phenix.cli";
+
+    uses {
+        workspace: "phenix.workspace@1",
+    }
 }
 
-type CliContext<'host, 'runtime> = PluginContext<'host, 'runtime, CliSdk<'host, 'runtime>>;
+type CliContext<'host, 'runtime> = phenix_plugin::Context<'host, 'runtime>;
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> CliContext<'host, 'runtime> {
-    PluginContext::new(
-        host,
-        CliSdk {
-            workspace: SdkClient::new(host, crate::cli_component_id()),
-        },
-        (),
-        (),
-    )
+    phenix_plugin::context(host, (), ())
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -154,7 +150,7 @@ pub struct CliDescriptor {
 pub fn cli_manifest(maximum_authority: Authority) -> PluginManifest {
     let shell = Authority::new([capability(WORKSPACE_SHELL)]);
     PluginManifest {
-        id: plugin(CLI_PLUGIN),
+        id: phenix_plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: vec![plugin(WORKSPACE_PLUGIN)],
