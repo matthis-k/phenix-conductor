@@ -5,7 +5,10 @@ use phenix_core::{
 use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, fmt::{self, Display, Formatter}};
+use std::{
+    collections::BTreeSet,
+    fmt::{self, Display, Formatter},
+};
 
 pub const CLI_DISCOVER_SERVICE: &str = "phenix.cli.discover@1";
 pub const CLI_VERSION_SERVICE: &str = "phenix.cli.version@1";
@@ -74,9 +77,7 @@ impl phenix_core::ValueCodec for CliName {
         phenix_core::PhenixValue::String(self.0.clone())
     }
 
-    fn from_value(
-        value: &phenix_core::PhenixValue,
-    ) -> Result<Self, phenix_core::ValueError> {
+    fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> {
         let value = String::try_from(phenix_core::Exact(value))?;
         Self::try_from(value).map_err(phenix_core::ValueError::InvalidValue)
     }
