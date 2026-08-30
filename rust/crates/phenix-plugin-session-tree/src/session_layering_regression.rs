@@ -1,7 +1,7 @@
 use crate::{session_tree_factory, session_tree_manifest};
 use phenix_core::{
     session_service, Authority, Kernel, KernelConfig, KernelError, LayerPolicy, PhenixValue,
-    PluginId, Project, ServiceParticipantOutcome, SessionCommand, SessionResponse,
+    PluginId, Project, ServiceParticipantOutcome, SessionCommand, SessionId, SessionResponse,
 };
 use phenix_plugin_sessions::{session_factory, session_manifest};
 
@@ -41,7 +41,9 @@ fn configured_kernel(layer: LayerPolicy) -> Kernel {
 }
 
 fn create(kernel: &mut Kernel, id: &str) -> SessionResponse {
-    let command = SessionCommand::Create { id: id.into() };
+    let command = SessionCommand::Create {
+        id: SessionId::parse(id).unwrap(),
+    };
     let output = kernel
         .invoke(
             &session_service(),
@@ -68,7 +70,9 @@ fn configured_session_tree_layer_delegates_to_flat_session_terminal() {
     assert_eq!(
         create(&mut kernel, "root"),
         SessionResponse::Created {
-            session: phenix_core::SessionRecord { id: "root".into() },
+            session: phenix_core::SessionRecord {
+                id: SessionId::parse("root").unwrap(),
+            },
         }
     );
 
