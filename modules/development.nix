@@ -70,6 +70,12 @@
           label = "phenix-domain / context_serialization";
         }
         {
+          id = "sdk-plugin-authoring";
+          package = "phenix-plugin-sdk";
+          test = "plugin_authoring";
+          label = "phenix-plugin-sdk / plugin_authoring";
+        }
+        {
           id = "harness-component-graph";
           package = "phenix-harness";
           test = "component_graph";
