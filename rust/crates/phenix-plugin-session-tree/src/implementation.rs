@@ -1,20 +1,26 @@
-use crate::session_tree_component_id;
 use phenix_core::{
     session_service, Authority, CapabilityId, ComponentInterface, DurableSchema, LayerResult,
-    NamespaceTransaction, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionCommand,
-    SessionId, SessionRecord, SessionResponse, TransactionOp,
+    NamespaceTransaction, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    ResourceNamespace, ServiceContribution, ServiceId, SessionCommand, SessionId, SessionRecord,
+    SessionResponse, TransactionOp,
 };
-use phenix_plugin_sessions::{SessionInterface, SessionMutationInterface};
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_TREE_SERVICE: &str = "phenix.session-tree@1";
-const SESSION_TREE_PLUGIN: &str = "phenix.session-tree";
 const SESSION_TREE_NAMESPACE: &str = "phenix.session-tree.state";
 const SESSION_PLUGIN: &str = "phenix.sessions";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
+
+phenix_core::phenix_plugin! {
+    "phenix.session-tree";
+
+    uses {
+        sessions: "phenix.sessions@1",
+        mutations: "phenix.sessions.mutation@1",
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct SessionLineage {
@@ -62,7 +68,7 @@ pub enum SessionTreeResponse {
 #[must_use]
 pub fn session_tree_manifest() -> PluginManifest {
     PluginManifest {
-        id: PluginId::parse(SESSION_TREE_PLUGIN).expect("static plugin id is valid"),
+        id: phenix_plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: vec![PluginId::parse(SESSION_PLUGIN).expect("static plugin id")],
@@ -120,27 +126,12 @@ enum SessionMutationResult {
     },
 }
 
-struct SessionTreeSdk<'host, 'runtime> {
-    sessions: SdkClient<'host, 'runtime, SessionInterface>,
-    mutations: SdkClient<'host, 'runtime, SessionMutationInterface>,
-}
-
-type SessionTreeContext<'host, 'runtime> =
-    PluginContext<'host, 'runtime, SessionTreeSdk<'host, 'runtime>>;
+type SessionTreeContext<'host, 'runtime> = phenix_plugin::Context<'host, 'runtime>;
 
 fn context<'host, 'runtime>(
     host: &'host PluginHost<'runtime>,
 ) -> SessionTreeContext<'host, 'runtime> {
-    let component = session_tree_component_id();
-    PluginContext::new(
-        host,
-        SessionTreeSdk {
-            sessions: SdkClient::new(host, component.clone()),
-            mutations: SdkClient::new(host, component),
-        },
-        (),
-        (),
-    )
+    phenix_plugin::context(host, (), ())
 }
 
 struct SessionTreePlugin;
@@ -254,7 +245,7 @@ fn create_child(
     children.sort();
     children.dedup();
     let tree_transaction = NamespaceTransaction {
-        owner: PluginId::parse(SESSION_TREE_PLUGIN).expect("static plugin id is valid"),
+        owner: phenix_plugin::plugin_id(),
         namespace: session_tree_namespace(),
         operations: vec![
             TransactionOp::AssertValue {
