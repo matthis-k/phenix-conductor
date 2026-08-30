@@ -5,3 +5,4 @@ mod implementation;
 
 pub use contract::*;
 pub use implementation::*;
+pub use phenix_core::SessionId;
