@@ -1,0 +1,9 @@
+[package]
+name = "phenix-plugin-authoring"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+phenix-core = { path = "../phenix-core" }
+serde_json.workspace = true
