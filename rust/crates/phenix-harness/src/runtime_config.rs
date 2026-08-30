@@ -226,17 +226,16 @@ fn apply_configuration(
     configuration: RuntimeConfiguration,
 ) -> Result<(), Box<dyn Error>> {
     let authority = default_suite_authority();
-    let execution_service = execution_configuration_service();
 
     for agent in configuration.agents {
-        let command = ExecutionConfigurationCommand::RegisterAgent { agent };
+        let output = harness.invoke(
+            &execution_configuration_service(),
+            &serde_json::to_vec(&ExecutionConfigurationCommand::RegisterAgent { agent })?,
+            &authority,
+            None,
+        )?;
         if !matches!(
-            invoke_projected::<_, ExecutionConfigurationResponse>(
-                harness,
-                &execution_service,
-                &command,
-                &authority,
-            )?,
+            serde_json::from_slice::<ExecutionConfigurationResponse>(&output)?,
             ExecutionConfigurationResponse::Agent { agent: Some(_) }
         ) {
             return Err("execution configuration service rejected agent registration".into());
@@ -244,14 +243,16 @@ fn apply_configuration(
     }
 
     for orchestration in configuration.orchestrations {
-        let command = ExecutionConfigurationCommand::RegisterOrchestration { orchestration };
+        let output = harness.invoke(
+            &execution_configuration_service(),
+            &serde_json::to_vec(&ExecutionConfigurationCommand::RegisterOrchestration {
+                orchestration,
+            })?,
+            &authority,
+            None,
+        )?;
         if !matches!(
-            invoke_projected::<_, ExecutionConfigurationResponse>(
-                harness,
-                &execution_service,
-                &command,
-                &authority,
-            )?,
+            serde_json::from_slice::<ExecutionConfigurationResponse>(&output)?,
             ExecutionConfigurationResponse::Orchestration {
                 orchestration: Some(_)
             }
@@ -359,13 +360,15 @@ mod tests {
         harness: &mut PhenixHarness,
         command: ExecutionConfigurationCommand,
     ) -> ExecutionConfigurationResponse {
-        invoke_projected(
-            harness,
-            &execution_configuration_service(),
-            &command,
-            &default_suite_authority(),
-        )
-        .unwrap()
+        let output = harness
+            .invoke(
+                &execution_configuration_service(),
+                &serde_json::to_vec(&command).unwrap(),
+                &default_suite_authority(),
+                None,
+            )
+            .unwrap();
+        serde_json::from_slice(&output).unwrap()
     }
 
     #[test]
