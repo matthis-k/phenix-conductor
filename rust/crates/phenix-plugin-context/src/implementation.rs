@@ -382,11 +382,9 @@ fn discover_repository(
             ContextResourceKind::Skill => "skill",
             ContextResourceKind::External => unreachable!(),
         };
-        let resource_id = ContextResourceId::parse(format!(
-            "{prefix}:{workspace_id}:{}",
-            source.path
-        ))
-        .map_err(str::to_owned)?;
+        let resource_id =
+            ContextResourceId::parse(format!("{prefix}:{workspace_id}:{}", source.path))
+                .map_err(str::to_owned)?;
         let resource = register_resource(
             context,
             resource_id,
