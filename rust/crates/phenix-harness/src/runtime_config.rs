@@ -1,4 +1,7 @@
-use phenix_core::{CallableId, ModelId, PluginId, RoutingProfileId};
+use phenix_core::{
+    Authority, CallableId, ModelId, PhenixValue, PluginId, Project, RoutingProfileId, ServiceId,
+    ValueError,
+};
 use phenix_harness::{default_suite_authority, PhenixHarness};
 use phenix_plugin_catalog::{
     execution_configuration_service, model_routing_service, options_service, AgentDefinition,
@@ -134,17 +137,17 @@ pub(super) fn apply_startup_settings(
         return Err("startup settings require the phenix.options plugin".into());
     }
 
-    let output = harness.invoke(
+    let command = OptionCommand::Configure {
+        file_values,
+        nix_values,
+        precedence,
+    };
+    match invoke_projected::<_, OptionResponse>(
+        harness,
         &service,
-        &serde_json::to_vec(&OptionCommand::Configure {
-            file_values,
-            nix_values,
-            precedence,
-        })?,
+        &command,
         &default_suite_authority(),
-        None,
-    )?;
-    match serde_json::from_slice::<OptionResponse>(&output)? {
+    )? {
         OptionResponse::Configured { .. } => Ok(()),
         _ => Err("options service rejected startup settings".into()),
     }
@@ -193,6 +196,22 @@ fn settings_assignments(settings: SettingsConfiguration) -> Vec<OptionAssignment
     values
 }
 
+fn invoke_projected<Request, Response>(
+    harness: &mut PhenixHarness,
+    service: &ServiceId,
+    request: &Request,
+    authority: &Authority,
+) -> Result<Response, Box<dyn Error>>
+where
+    for<'value> PhenixValue: From<&'value Request>,
+    for<'value> Response: TryFrom<Project<&'value PhenixValue>, Error = ValueError>,
+{
+    let input = PhenixValue::from(request);
+    let output = harness.invoke(service, &serde_json::to_vec(&input)?, authority, None)?;
+    let output: PhenixValue = serde_json::from_slice(&output)?;
+    Ok(Response::try_from(Project(&output))?)
+}
+
 pub(super) fn apply_runtime_config(
     harness: &mut PhenixHarness,
     path: &Path,
@@ -207,16 +226,17 @@ fn apply_configuration(
     configuration: RuntimeConfiguration,
 ) -> Result<(), Box<dyn Error>> {
     let authority = default_suite_authority();
+    let execution_service = execution_configuration_service();
 
     for agent in configuration.agents {
-        let output = harness.invoke(
-            &execution_configuration_service(),
-            &serde_json::to_vec(&ExecutionConfigurationCommand::RegisterAgent { agent })?,
-            &authority,
-            None,
-        )?;
+        let command = ExecutionConfigurationCommand::RegisterAgent { agent };
         if !matches!(
-            serde_json::from_slice::<ExecutionConfigurationResponse>(&output)?,
+            invoke_projected::<_, ExecutionConfigurationResponse>(
+                harness,
+                &execution_service,
+                &command,
+                &authority,
+            )?,
             ExecutionConfigurationResponse::Agent { agent: Some(_) }
         ) {
             return Err("execution configuration service rejected agent registration".into());
@@ -224,16 +244,14 @@ fn apply_configuration(
     }
 
     for orchestration in configuration.orchestrations {
-        let output = harness.invoke(
-            &execution_configuration_service(),
-            &serde_json::to_vec(&ExecutionConfigurationCommand::RegisterOrchestration {
-                orchestration,
-            })?,
-            &authority,
-            None,
-        )?;
+        let command = ExecutionConfigurationCommand::RegisterOrchestration { orchestration };
         if !matches!(
-            serde_json::from_slice::<ExecutionConfigurationResponse>(&output)?,
+            invoke_projected::<_, ExecutionConfigurationResponse>(
+                harness,
+                &execution_service,
+                &command,
+                &authority,
+            )?,
             ExecutionConfigurationResponse::Orchestration {
                 orchestration: Some(_)
             }
@@ -256,17 +274,16 @@ fn ensure_routing_profile(
     profile: RoutingProfile,
 ) -> Result<(), Box<dyn Error>> {
     let authority = default_suite_authority();
+    let service = model_routing_service();
     let command = ModelCommand::GetProfile {
         id: profile.id.clone(),
     };
-    let output = harness.invoke(
-        &model_routing_service(),
-        &serde_json::to_vec(&phenix_core::PhenixValue::from(&command))?,
+    let existing = match invoke_projected::<_, ModelResponse>(
+        harness,
+        &service,
+        &command,
         &authority,
-        None,
-    )?;
-    let output: phenix_core::PhenixValue = serde_json::from_slice(&output)?;
-    let existing = match ModelResponse::try_from(phenix_core::Project(&output))? {
+    )? {
         ModelResponse::Profile { profile } => profile,
         _ => return Err("model routing service returned the wrong profile response".into()),
     };
@@ -276,15 +293,8 @@ fn ensure_routing_profile(
         Some(_) => Err(format!("routing profile identity is immutable: {}", profile.id).into()),
         None => {
             let command = ModelCommand::RegisterProfile { profile };
-            let output = harness.invoke(
-                &model_routing_service(),
-                &serde_json::to_vec(&phenix_core::PhenixValue::from(&command))?,
-                &authority,
-                None,
-            )?;
-            let output: phenix_core::PhenixValue = serde_json::from_slice(&output)?;
             if matches!(
-                ModelResponse::try_from(phenix_core::Project(&output))?,
+                invoke_projected::<_, ModelResponse>(harness, &service, &command, &authority)?,
                 ModelResponse::Profile { profile: Some(_) }
             ) {
                 Ok(())
@@ -353,15 +363,13 @@ mod tests {
         harness: &mut PhenixHarness,
         command: ExecutionConfigurationCommand,
     ) -> ExecutionConfigurationResponse {
-        let output = harness
-            .invoke(
-                &execution_configuration_service(),
-                &serde_json::to_vec(&command).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
-            .unwrap();
-        serde_json::from_slice(&output).unwrap()
+        invoke_projected(
+            harness,
+            &execution_configuration_service(),
+            &command,
+            &default_suite_authority(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -395,17 +403,15 @@ mod tests {
         let command = ModelCommand::GetProfile {
             id: RoutingProfileId::parse("router.test").unwrap(),
         };
-        let output = harness
-            .invoke(
-                &model_routing_service(),
-                &serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
-            .unwrap();
-        let output: phenix_core::PhenixValue = serde_json::from_slice(&output).unwrap();
+        let output: ModelResponse = invoke_projected(
+            &mut harness,
+            &model_routing_service(),
+            &command,
+            &default_suite_authority(),
+        )
+        .unwrap();
         assert!(matches!(
-            ModelResponse::try_from(phenix_core::Project(&output)).unwrap(),
+            output,
             ModelResponse::Profile { profile: Some(_) }
         ));
     }
