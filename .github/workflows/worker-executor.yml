@@ -54,8 +54,12 @@ jobs:
 
           expected_head, commit_message, patch = match.groups()
           patch_bytes = patch.encode()
-          if not patch_bytes or len(patch_bytes) > 1_048_576:
-              raise SystemExit("patch must be between 1 byte and 1 MiB")
+          if not patch_bytes:
+              raise SystemExit("patch must not be empty")
+          if not patch_bytes.endswith(b"\n"):
+              patch_bytes += b"\n"
+          if len(patch_bytes) > 1_048_576:
+              raise SystemExit("patch must be at most 1 MiB")
           if b"\x00" in patch_bytes:
               raise SystemExit("binary patches are not supported")
 
@@ -88,7 +92,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ steps.pr.outputs.head_sha }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Apply exact-head patch
         run: |
@@ -166,9 +170,9 @@ jobs:
         run: |
           set -euo pipefail
           if test "$CHANGED" = true; then
-            gh pr comment "$PR_NUMBER" --body "Worker executor succeeded. Maintenance was stable before commit \`$COMMIT_SHA\`; exact-head CI was dispatched."
+            gh issue comment "$PR_NUMBER" --body "Worker executor succeeded. Maintenance was stable before commit \`$COMMIT_SHA\`; exact-head CI was dispatched."
           else
-            gh pr comment "$PR_NUMBER" --body "Worker executor succeeded with no resulting tree change; no commit was created."
+            gh issue comment "$PR_NUMBER" --body "Worker executor succeeded with no resulting tree change; no commit was created."
           fi
 
       - name: Report failure
@@ -177,4 +181,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.issue.number }}
         run: |
-          gh pr comment "$PR_NUMBER" --body "Worker executor failed. No successful executor push is implied. Inspect run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh issue comment "$PR_NUMBER" --body "Worker executor failed. No successful executor push is implied. Inspect run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
