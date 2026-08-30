@@ -104,9 +104,9 @@ pub use external::{
 };
 pub use frontend_metadata::FrontendMetadataResolutionError;
 pub use identity::{
-    CallableId, CapabilityId, ComponentId, ConfigurationFrontendId, EventTypeId, InterfaceId,
-    ModelId, PluginId, ResourceNamespace, RoutingProfileId, SdkNamespace, SdkResourceId, ServiceId,
-    SkillId, SubscriptionId,
+    CallableId, CapabilityId, ComponentId, ConfigurationFrontendId, ContextResourceId,
+    ContextRevisionId, EventTypeId, InterfaceId, ModelId, PluginId, ResourceNamespace,
+    RoutingProfileId, SdkNamespace, SdkResourceId, ServiceId, SessionId, SkillId, SubscriptionId,
 };
 pub use inspection::ResolvedHarnessInspection;
 pub use live_reconciliation::LiveReconciliationError;
