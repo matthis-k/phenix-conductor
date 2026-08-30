@@ -578,9 +578,7 @@ mod tests {
         assert_eq!(
             invoke_tree(
                 &mut restored,
-                SessionTreeCommand::Parent {
-                    session_id: child,
-                },
+                SessionTreeCommand::Parent { session_id: child },
             )
             .unwrap(),
             SessionTreeResponse::Parent {
