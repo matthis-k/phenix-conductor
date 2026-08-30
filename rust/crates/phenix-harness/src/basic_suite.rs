@@ -61,10 +61,10 @@ mod tests {
     use super::*;
     use phenix_core::{
         context_service, model_inference_service, skill_service, tool_service, CallableId,
-        ContextCommand, ContextResourceKind, ContextResponse, ContextScope, LocalPersistence,
-        ModelId, ModelInferenceRequest, ModelInferenceResponse, PhenixValue, Project,
-        SessionCommand, SessionResponse, SkillCommand, SkillDefinition, SkillId, SkillResponse,
-        ToolCommand, ToolDefinition, ToolResponse,
+        ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
+        LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse, PhenixValue,
+        Project, SessionCommand, SessionId, SessionResponse, SkillCommand, SkillDefinition, SkillId,
+        SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
     };
     use phenix_plugin_catalog::session_service;
     use std::{
@@ -163,7 +163,12 @@ mod tests {
             let mut harness = PhenixHarness::basic_suite_with_persistence(persistence).unwrap();
             harness.activate().unwrap();
 
-            let _ = invoke_session(&mut harness, &SessionCommand::Create { id: "root".into() });
+            let _ = invoke_session(
+                &mut harness,
+                &SessionCommand::Create {
+                    id: SessionId::parse("root").unwrap(),
+                },
+            );
             let _: SkillResponse = invoke(
                 &mut harness,
                 &skill_service(),
@@ -190,7 +195,7 @@ mod tests {
                 &mut harness,
                 &context_service(),
                 &ContextCommand::Register {
-                    resource_id: "project".into(),
+                    resource_id: ContextResourceId::parse("project").unwrap(),
                     kind: ContextResourceKind::ProjectDocument,
                     source: "README.md".into(),
                     scope: ContextScope::Workspace,
@@ -214,7 +219,7 @@ mod tests {
         restored.activate().unwrap();
         let sessions = invoke_session(&mut restored, &SessionCommand::List);
         assert!(
-            matches!(sessions, SessionResponse::Sessions { sessions } if sessions[0].id == "root")
+            matches!(sessions, SessionResponse::Sessions { sessions } if sessions[0].id.as_str() == "root")
         );
         let skills: SkillResponse = invoke(&mut restored, &skill_service(), &SkillCommand::List);
         assert!(
@@ -225,7 +230,7 @@ mod tests {
         let context: ContextResponse =
             invoke(&mut restored, &context_service(), &ContextCommand::List);
         assert!(
-            matches!(context, ContextResponse::Resources { descriptors } if descriptors[0].resource_id == "project")
+            matches!(context, ContextResponse::Resources { descriptors } if descriptors[0].resource_id.as_str() == "project")
         );
         let _ = fs::remove_file(path);
     }
