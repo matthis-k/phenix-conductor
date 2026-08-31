@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[package.metadata.phenix]
+role = "assembly"
+
 [dependencies]
 phenix-core = { path = "../phenix-core" }
 phenix-plugin-artifacts = { path = "../phenix-plugin-artifacts" }

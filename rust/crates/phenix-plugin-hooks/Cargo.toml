@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[package.metadata.phenix]
+role = "runtime-plugin"
+
+[package.metadata.phenix.contract-debt]
+phenix-plugin-context = "Move the consumed context contract to its neutral owner."
+phenix-plugin-execution = "Move the consumed execution contract to its neutral owner."
+
 [dependencies]
 phenix-core = { path = "../phenix-core" }
 phenix-sdk-macros = { path = "../phenix-sdk-macros" }

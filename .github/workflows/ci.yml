@@ -44,6 +44,9 @@ jobs:
       - name: "Actionlint"
         run: nix run .#phenix-maintenance-command-e0c2105ec1ec -- check source actionlint
 
+      - name: "Plugin architecture"
+        run: nix run .#phenix-maintenance-command-da4d8b6b0d46 -- check source plugin-architecture
+
       - name: "Test target classification"
         run: nix run .#phenix-maintenance-command-fe564e52f93c -- check source test-targets
 
