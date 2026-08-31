@@ -1,9 +1,9 @@
 use super::*;
-use phenix_core::{
-    CapabilityId, Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation,
-};
+use phenix_core::{CapabilityId, Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
 use phenix_plugin_context::{context_component_manifest, context_factory, context_manifest};
-use phenix_plugin_execution::{execution_component_manifest, execution_factory, execution_manifest};
+use phenix_plugin_execution::{
+    execution_component_manifest, execution_factory, execution_manifest,
+};
 use phenix_plugin_options::{
     options_component_manifest, options_factory, options_manifest, options_service, OptionScope,
 };
