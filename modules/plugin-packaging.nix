@@ -292,6 +292,7 @@ in
       };
       defaultPluginNames = [
         "artifacts"
+        "api"
         "command-toolbelt"
         "context"
         "debug"
@@ -304,7 +305,6 @@ in
         "options"
         "planning"
         "repository-workers"
-        "sdk"
         "session-tree"
         "sessions"
         "workspace"
@@ -440,7 +440,7 @@ in
             printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Resolve","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"context":{"type":"table","value":{"session":{"type":"option","value":null},"agent":{"type":"option","value":null}}}}}}}}' \
               | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-option.json"
             assert_option "$TMPDIR/settings-option.json" false Nix
-            printf '%s\n' '{"id":2,"service":"phenix.sdk.config@1","input":{"type":"variant","value":{"tag":"Read","value":{"type":"table","value":{"path":{"type":"string","value":"settings.json"}}}}}}' \
+            printf '%s\n' '{"id":2,"service":"phenix.api.config@1","input":{"type":"variant","value":{"tag":"Read","value":{"type":"table","value":{"path":{"type":"string","value":"settings.json"}}}}}}' \
               | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-config.json"
             jq -e '.status == "ok" and .output.type == "variant" and .output.value.tag == "File" and ((.output.value.value.value.content.value | implode | fromjson).global["session.auto_create"] == true)' \
               "$TMPDIR/settings-config.json" >/dev/null

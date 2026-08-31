@@ -1,6 +1,14 @@
 #![forbid(unsafe_code)]
 
 pub use phenix_core::{ContextResourceId, ContextRevisionId, SessionId};
+pub use phenix_plugin_api::{
+    sdk_component_id, sdk_component_manifest, sdk_config_service, sdk_contribution, sdk_factory,
+    sdk_manifest, sdk_session_service, sdk_skills_service, sdk_tools_service, SdkConfigCommand,
+    SdkConfigInterface, SdkConfigResponse, SdkSessionCommand, SdkSessionInterface,
+    SdkSessionResponse, SdkSkill, SdkSkillCommand, SdkSkillResponse, SdkSkillSummary,
+    SdkSkillsInterface, SdkTool, SdkToolCommand, SdkToolResponse, SdkToolsInterface, SDK_COMPONENT,
+    SDK_CONFIG_SERVICE, SDK_PLUGIN, SDK_SESSION_SERVICE, SDK_SKILLS_SERVICE, SDK_TOOLS_SERVICE,
+};
 pub use phenix_plugin_artifacts::{
     artifact_component_id, artifact_component_manifest, artifact_factory, artifact_manifest,
     artifact_service, ArtifactCommand, ArtifactInterface, ArtifactProvenance, ArtifactRecord,
@@ -98,14 +106,6 @@ pub use phenix_plugin_repository_workers::{
     RepositoryPullRequestState, RepositorySelectionReason, RepositoryValidation,
     RepositoryWorkPriority, RepositoryWorkSelection, RepositoryWorkSnapshot,
     RepositoryWorkerInterface, RepositoryWorkerQueue, REPOSITORY_WORK_QUEUE_SERVICE,
-};
-pub use phenix_plugin_sdk::{
-    sdk_component_id, sdk_component_manifest, sdk_config_service, sdk_contribution, sdk_factory,
-    sdk_manifest, sdk_session_service, sdk_skills_service, sdk_tools_service, SdkConfigCommand,
-    SdkConfigInterface, SdkConfigResponse, SdkSessionCommand, SdkSessionInterface,
-    SdkSessionResponse, SdkSkill, SdkSkillCommand, SdkSkillResponse, SdkSkillSummary,
-    SdkSkillsInterface, SdkTool, SdkToolCommand, SdkToolResponse, SdkToolsInterface, SDK_COMPONENT,
-    SDK_CONFIG_SERVICE, SDK_PLUGIN, SDK_SESSION_SERVICE, SDK_SKILLS_SERVICE, SDK_TOOLS_SERVICE,
 };
 pub use phenix_plugin_session_tree::{
     session_tree_component_id, session_tree_component_manifest, session_tree_factory,

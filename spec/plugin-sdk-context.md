@@ -4,11 +4,11 @@ Status: implementation contract.
 
 ## Purpose
 
-Define the runtime boundary between a plugin instance, the kernel, and the selected SDK.
+Define the runtime boundary between a plugin instance, the kernel, and typed SDK clients.
 
-The core `PluginInstance` ABI receives `PluginHost`. A plugin callback immediately projects that host and its instance data into `PluginContext`. Business logic receives the context instead of `PluginHost`.
+The Core `PluginInstance` ABI receives `PluginHost`. A plugin callback projects that host and its instance data into `PluginContext`. Business logic receives the context instead of `PluginHost`.
 
-Generic context types live in `phenix-core`. The default `PhenixSdk` remains in `phenix-plugin-sdk`.
+Generic context types live in `phenix-core`. The default `PhenixSdk` and `phenix_context` helper live in the passive `phenix-sdk` library. The optional `phenix-plugin-api` runtime plugin provides convenience services used by some default SDK clients.
 
 ## Runtime context
 
@@ -29,22 +29,22 @@ PluginContext
 
 The fields have distinct roles:
 
-- `kernel`: scoped access to generic kernel mechanisms. It is not a mutable `Kernel` reference.
-- `sdk`: typed userspace clients bound to the component handling the callback.
-- `plugin`: the current plugin identity plus the settings and state view selected by the plugin instance.
-- `call`: metadata scoped to the current kernel-mediated callback.
+- `kernel`: scoped access to generic kernel mechanisms;
+- `sdk`: typed userspace clients bound to the component handling the callback;
+- `plugin`: current plugin identity plus the settings and state view selected by the plugin instance;
+- `call`: metadata for the current kernel-mediated callback.
 
-`PluginContext` always borrows the live `PluginHost`. Its `Settings` and `State` slots are generic. A stateful plugin normally supplies `&Settings` and `&mut State`. A stateless plugin may supply `()`. A plugin with process-local resources may supply another callback-scoped handle.
+`PluginContext` borrows the live `PluginHost`. Its `Settings` and `State` slots are generic. A stateful plugin normally supplies `&Settings` and `&mut State`. A stateless plugin may supply `()`.
 
-The context does not create a second owner for plugin state. The dynamic `PluginInstance` remains responsible for its live state and constructs a fresh context for each host-backed callback.
+The context does not create another owner for plugin state. The dynamic `PluginInstance` owns live state and constructs a fresh context for each host-backed callback.
 
-The core `stop` callback has no host, so it cannot construct a runtime context. Stop logic works directly with data owned by the plugin instance.
+The Core `stop` callback has no host, so it cannot construct a runtime context. Stop logic works directly with instance-owned data.
 
 ## ABI adapter
 
-`PluginInstance` methods are the runtime ABI adapter. They should parse the request, construct the appropriate context, call business logic, and serialize the response.
+`PluginInstance` methods are the runtime ABI adapter. They parse the request, construct the context, call business logic, and serialize the response.
 
-Business logic should not receive `PluginHost`. This keeps host access grouped into four explicit surfaces:
+Business logic should use these explicit capabilities:
 
 ```text
 ctx.kernel  generic kernel mechanisms
@@ -53,15 +53,15 @@ ctx.plugin  current plugin data
 ctx.call    current call metadata
 ```
 
-A plugin may define a local context alias and an SDK dependency struct for its declared imports. This makes unavailable dependencies absent from the business-logic type.
+A plugin may define a local context alias and SDK dependency struct for its declared imports. Unavailable dependencies then remain absent from the business-logic type.
 
-The `phenix_context` helper constructs a context with the default `PhenixSdk`. The caller still chooses which settings and state view to place in `ctx.plugin`.
+`phenix_context` constructs a context with `PhenixSdk`. The caller still chooses the settings and state view placed in `ctx.plugin`.
 
 ## SDK access
 
-The selected SDK belongs to the environment around the plugin, so it is part of `PluginContext`.
+`PhenixSdk` is an authoring type, not a runtime plugin. Constructing it registers nothing and selects no provider.
 
-The default Phenix SDK exposes typed clients such as:
+The default SDK exposes typed clients such as:
 
 ```text
 ctx.sdk.sessions
@@ -73,7 +73,9 @@ ctx.sdk.options
 ctx.sdk.config
 ```
 
-A client is scoped to the component handling the callback. Constructing the SDK does not bypass dependency checks. Each invocation still goes through that component's declared import, resolved provider, and effective authority.
+Some helpers call standard domain interfaces directly. Convenience operations such as session policy, tool registration, skill registration, and config reads use interfaces provided by `phenix-plugin-api` when that plugin is selected and bound.
+
+Each invocation still goes through the caller component's declared import, resolved provider, and effective authority. A missing API plugin therefore produces the ordinary missing or unbound dependency failure. `PhenixSdk` does not provide an in-process fallback.
 
 Plugins can add typed SDK contracts and access them through:
 
@@ -81,15 +83,15 @@ Plugins can add typed SDK contracts and access them through:
 let testing = ctx.sdk.require::<TestingSdk>();
 ```
 
-The returned client is only useful if the caller component declared and resolved the matching import. The kernel rejects undeclared or unbound calls.
+The returned client is usable only when the caller component declared and resolved the matching import.
 
 ## Cross-plugin data
 
 Plugin-owned settings, state, internal resources, and implementation objects are private.
 
-Another plugin may access data only through an explicitly exported typed contract. The provider owns the underlying state and decides which operations and values the contract exposes.
+Another plugin may access data only through an exported typed contract. The provider owns the state and decides which operations and values the contract exposes.
 
-The normal form for stateful data is a typed SDK handle:
+Stateful data normally crosses the boundary as a typed handle:
 
 ```rust
 let testing = ctx.sdk.require::<TestingSdk>();
@@ -97,37 +99,23 @@ let run = testing.runs().find("run-123")?;
 let result = run.result()?;
 ```
 
-`run` is a consumer-side capability object. It contains stable identity plus a scoped client back to the provider. It is not a shared reference to provider internals.
+`run` contains stable identity plus a scoped client back to the provider. It is not a shared reference to provider internals.
 
 ## SDK objects
 
-SDK contracts may expose two kinds of objects.
+Self-contained immutable values may cross by value. Stateful or behavioral objects cross as capability objects with stable identity and a typed client.
 
-### Value objects
+Operations remain kernel-mediated. Handles are callback-scoped because their clients borrow the current runtime host. Persistent plugin state stores stable object identity and reacquires a client on the next callback.
 
-Self-contained immutable data may cross the contract boundary by value.
-
-Examples include session summaries, model information, artifact metadata, and test results.
-
-### Capability objects
-
-Stateful or behavioral objects cross the boundary as typed handles.
-
-Examples include sessions, artifacts, workers, terminals, and test runs.
-
-A capability object carries stable identity and a typed client. Operations remain kernel-mediated, so provider resolution and authority checks still apply. Handles are callback-scoped because their clients borrow the current runtime host. Persistent plugin state should store stable object identity and reacquire a client on the next callback.
-
-Raw Rust references to another plugin's internal state are not part of an SDK contract.
+Raw Rust references to another plugin's internal state are not SDK contracts.
 
 ## Recursive calls
 
 An SDK call may invoke another plugin, and that provider may perform further SDK calls.
 
-Each provider constructs a fresh `PluginContext` for its host-backed callback. The kernel remains responsible for authority attenuation, component bindings, provenance, and cycle protection across the call chain.
+Each provider constructs a fresh `PluginContext` for its host-backed callback. The kernel owns authority attenuation, component bindings, provenance, and cycle protection across the call chain.
 
 ## Ownership split
-
-The runtime split is:
 
 ```text
 phenix-core
@@ -137,9 +125,15 @@ phenix-core
   SdkContract
   SdkObject
 
-phenix-plugin-sdk
+phenix-sdk                  passive-library
   PhenixSdk
   phenix_context
+  authoring helpers
+
+phenix-plugin-api           runtime-plugin
+  phenix.api component
+  API convenience services
+  phenix SDK contribution
 
 plugin crate
   PluginInstance ABI adapter
@@ -151,15 +145,15 @@ A plugin may have multiple components. Component callbacks bind SDK clients to t
 
 ## Invariants
 
-- Core owns generic plugin execution and generic context mechanisms.
-- The SDK crate owns the default Phenix userspace namespace and authoring helper.
-- A plugin instance remains the single owner of its mutable instance state.
-- A context carries an explicit settings and state view. It does not invent or copy hidden state.
+- Core owns generic plugin execution and context mechanisms.
+- `phenix-sdk` owns default Rust SDK authoring types and activates nothing.
+- `phenix-plugin-api` owns optional runtime convenience behavior.
+- A plugin instance remains the single owner of mutable instance state.
+- A context carries an explicit settings and state view.
 - Plugin business logic receives `PluginContext`, not `PluginHost`.
 - Typed component imports are available through `ctx.sdk`.
 - Cross-plugin access requires an explicit typed import and remains kernel-mediated.
-- Plugin-owned state is private by default.
 - Stateful SDK objects are handles, not shared provider-internal references.
-- Generic kernel mechanisms are available through `ctx.kernel`, never an unrestricted mutable kernel reference.
+- Generic kernel mechanisms are available through `ctx.kernel`.
 - Call authority and graph generation are available through `ctx.call`.
 - Recursive SDK calls cannot expand effective authority.

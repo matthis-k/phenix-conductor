@@ -28,7 +28,7 @@ members = [
   "crates/phenix-plugin-planning",
   "crates/phenix-plugin-providers",
   "crates/phenix-plugin-repository-workers",
-  "crates/phenix-plugin-sdk",
+  "crates/phenix-plugin-api",
   "crates/phenix-plugin-sessions",
   "crates/phenix-plugin-session-tree",
   "crates/phenix-plugin-workspace",

@@ -71,9 +71,9 @@
         }
         {
           id = "sdk-plugin-authoring";
-          package = "phenix-plugin-sdk";
+          package = "phenix-sdk";
           test = "plugin_authoring";
-          label = "phenix-plugin-sdk / plugin_authoring";
+          label = "phenix-sdk / plugin_authoring";
         }
         {
           id = "harness-component-graph";

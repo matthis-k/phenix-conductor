@@ -1,18 +1,39 @@
 #![forbid(unsafe_code)]
 
+extern crate self as phenix_plugin_context;
+extern crate self as phenix_plugin_models;
+extern crate self as phenix_plugin_options;
+extern crate self as phenix_plugin_sessions;
+
+mod api;
+mod authoring;
+pub mod contracts;
 mod providers;
 
+pub use api::*;
+pub use authoring::*;
+pub use contracts::*;
 pub use phenix_core::{
     Bytes, CallableRef, Contract, ContractId, ContractValue, Exact, Key, ObjectRef, PhenixContract,
     PhenixSchema, PhenixValue, PluginId, Project, ReferenceId, Type, TypeKind, ValueError,
 };
-pub use phenix_plugin_sdk::*;
 pub use phenix_provider_sdk::{
     ApiTokenSource, Auth, AuthDescriptor, AuthKind, EnvironmentVariable, ProviderAuthCommand,
     ProviderAuthInterface, ProviderAuthResponse, ProviderError, RateLimits,
 };
 pub use phenix_sdk_macros::{PhenixContract, PhenixValue};
 pub use providers::{Provider, ProviderSdkError, ProviderSdkExt, Providers};
+
+#[cfg(test)]
+pub(crate) use phenix_plugin_api::{sdk_component_manifest, sdk_factory, sdk_manifest};
+#[cfg(test)]
+pub(crate) use phenix_plugin_options_test::{
+    options_component_manifest, options_factory, options_manifest,
+};
+#[cfg(test)]
+pub(crate) use phenix_plugin_sessions_test::{
+    session_component_manifest, session_factory, session_manifest,
+};
 
 pub mod auth {
     pub use phenix_provider_sdk::auth::*;
