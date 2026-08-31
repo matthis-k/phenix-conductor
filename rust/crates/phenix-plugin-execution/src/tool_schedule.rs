@@ -91,6 +91,11 @@ mod tests {
     }
 
     #[test]
+    fn default_scheduler_uses_harness_parallel_limit() {
+        assert_eq!(ToolScheduler::default().max_parallel_calls().get(), 10);
+    }
+
+    #[test]
     fn tools_are_exclusive_unless_the_call_is_declared_parallel_safe() {
         assert_eq!(ToolConcurrency::default(), ToolConcurrency::Exclusive);
     }

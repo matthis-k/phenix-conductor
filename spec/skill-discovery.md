@@ -14,14 +14,14 @@ Canonical format: <https://agentskills.io/specification>
 
 A skill is a directory with `SKILL.md` at its root. Optional `scripts/`, `references/`, `assets/`, and other files remain part of the same immutable skill revision.
 
-Phenix validates required Agent Skills metadata before cataloging the skill. At minimum:
+Phenix validates the complete canonical Agent Skills frontmatter constraints for the supported specification revision before cataloging the skill. The portable required fields are:
 
 - `name`
 - `description`
 
-The skill name must match the package directory according to the Agent Skills format.
+Validation includes the canonical name syntax and length, description length, and parent-directory match.
 
-Unknown optional metadata is retained. Unsupported metadata does not silently acquire Phenix semantics.
+Portable optional fields keep their canonical types and constraints. Values under the portable `metadata` map are retained as opaque strings. Unsupported metadata does not silently acquire Phenix semantics.
 
 ## Discovery roots
 
