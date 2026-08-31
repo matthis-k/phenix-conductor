@@ -1,0 +1,330 @@
+version = 1
+
+[[spec]]
+path = "spec/acp-stdio.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/adapter-acp.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/application-integration-terminology.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/binding-lua.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/client-sdk-acp.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/configuration-frontends.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-core/src/runtime/reconciliation.rs"]
+note = "Graph generations and reconciliation exist; arbitrary configuration frontends and the full canonical contribution boundary are not complete."
+
+[[spec]]
+path = "spec/context-artifacts-pruning.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/context-catalog.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-context/src/implementation.rs"]
+note = "Context catalog behavior exists in part; ownership must converge on neutral contracts from plugin-hygiene.md."
+
+[[spec]]
+path = "spec/context-compaction.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/decisions-history.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-domain/src/workspace/decisions.rs", "rust/crates/phenix-plugin-planning/src/implementation.rs"]
+
+[[spec]]
+path = "spec/execution-context-projection.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-plugin-context/src/implementation.rs", "rust/crates/phenix-plugin-context/src/prompt.rs"]
+
+[[spec]]
+path = "spec/frontend-services.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-frontend/src/implementation.rs"]
+note = "Frontend service behavior exists; stable host-interface ownership from runtime-host-interfaces.md is not complete."
+
+[[spec]]
+path = "spec/language-intelligence.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-language/src/implementation.rs"]
+
+[[spec]]
+path = "spec/language-service.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-language/src/implementation.rs"]
+
+[[spec]]
+path = "spec/lifecycle-hooks.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-hooks/src/implementation.rs", "rust/crates/phenix-plugin-hooks/src/ownership_regression.rs"]
+note = "Hook behavior exists; compile-time contract dependencies still violate plugin-hygiene.md."
+
+[[spec]]
+path = "spec/model-turn-protocol.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/objectives.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-domain/src/workspace/objectives.rs", "rust/crates/phenix-plugin-planning/src/implementation.rs"]
+
+[[spec]]
+path = "spec/observability.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/persistent-terminals-jobs.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-jobs/src/implementation.rs"]
+
+[[spec]]
+path = "spec/plans.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-domain/src/workspace/plans.rs", "rust/crates/phenix-plugin-planning/src/implementation.rs"]
+
+[[spec]]
+path = "spec/plugin-artifact-readers.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-plugin-artifacts/src/implementation.rs"]
+
+[[spec]]
+path = "spec/plugin-authoring-macro.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-sdk/tests/plugin_authoring.rs"]
+note = "The macro behavior is covered, but authoring ownership moves from phenix-plugin-sdk to phenix-sdk under plugin-hygiene.md."
+
+[[spec]]
+path = "spec/plugin-cli.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-cli/src/implementation.rs"]
+note = "This document describes runtime command discovery. The user-facing CLI is an application under application-integration-terminology.md and PR #438; the runtime plugin should be renamed command-toolbelt."
+
+[[spec]]
+path = "spec/plugin-context.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-context/src/implementation.rs"]
+note = "Context behavior stays plugin-owned, while stable contracts and shared identifiers move to neutral Core/domain ownership."
+
+[[spec]]
+path = "spec/plugin-contributions.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-core/src/registry.rs", "rust/crates/phenix-core/src/persistence.rs"]
+note = "Generic contribution mechanisms exist. Broken prerequisite references and ownership wording must be normalized."
+
+[[spec]]
+path = "spec/plugin-durable-data.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-core/src/persistence.rs"]
+
+[[spec]]
+path = "spec/plugin-embedded-runtime.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-core/src/runtime.rs"]
+note = "Current embedded execution exists. PR #446 defines the next runtime-neutral plugin-management model."
+
+[[spec]]
+path = "spec/plugin-events.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-core/src/events.rs", "rust/crates/phenix-plugin-sdk/tests/plugin_authoring.rs"]
+
+[[spec]]
+path = "spec/plugin-external-runtime.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-core/src/external.rs", "rust/crates/phenix-core/src/external_layer_conformance_regression.rs"]
+note = "Existing external runtime behavior remains supported while PR #446 replaces runtime-specific ownership with runtime bridges."
+
+[[spec]]
+path = "spec/plugin-host.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-core/src/runtime/host.rs"]
+note = "Host mechanics exist. The document references removed prerequisites and predates the stable runtime/host interface target."
+
+[[spec]]
+path = "spec/plugin-hygiene.md"
+state = "target"
+enforcement = "none"
+note = "Accepted ownership migration from #445. Current main still violates several required dependency and packaging rules."
+
+[[spec]]
+path = "spec/plugin-options.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-options/src/lib.rs"]
+note = "Option storage and precedence remain valid. Feature-specific defaults must move to their owning plugins under plugin-hygiene.md."
+
+[[spec]]
+path = "spec/plugin-persistence.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-core/src/persistence.rs"]
+note = "Persistence behavior exists, but the document references a removed plugin-kernel-primitives.md prerequisite."
+
+[[spec]]
+path = "spec/plugin-resolution.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-core/src/registry.rs", "rust/crates/phenix-core/src/runtime/dispatch.rs"]
+note = "Resolver behavior exists, but the document references removed prerequisites and predates stable interface bindings."
+
+[[spec]]
+path = "spec/plugin-sdk-context.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-core/src/plugin_context.rs"]
+note = "Runtime context behavior exists. Authoring helpers and default SDK ownership must move to phenix-sdk or an explicitly named runtime API plugin."
+
+[[spec]]
+path = "spec/plugin-sdk.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-sdk/src/authoring/context.rs"]
+note = "The current crate mixes authoring and runtime facade roles. plugin-hygiene.md requires the authoring role in phenix-sdk."
+
+[[spec]]
+path = "spec/plugin-service-layering.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-core/src/service_layer_dispatch_regression.rs", "rust/crates/phenix-core/src/external_layer_conformance_regression.rs"]
+
+[[spec]]
+path = "spec/plugin-sessions.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-sessions/src/implementation.rs"]
+note = "Session behavior stays plugin-owned. Shared session identity belongs in phenix-domain under plugin-hygiene.md."
+
+[[spec]]
+path = "spec/plugin-threading.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-core/src/tasks.rs", "rust/crates/phenix-core/src/runtime.rs"]
+
+[[spec]]
+path = "spec/process-confinement.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/provider-protocol-sdk.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-models/src/implementation.rs"]
+note = "Provider authoring and error normalization exist. Credential storage is transitional until secrets.md is implemented."
+
+[[spec]]
+path = "spec/runtime-host-interfaces.md"
+state = "target"
+enforcement = "none"
+note = "Accepted stable domain/host interface architecture from #444."
+
+[[spec]]
+path = "spec/scheduled-work.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/secrets.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/skill-discovery.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/structural-plugin-contracts.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-plugin-sdk/tests/plugin_authoring.rs", "rust/crates/phenix-core/src/lib.rs"]
+
+[[spec]]
+path = "spec/transport-socket.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/web-access.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/worker-pr-runtime.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-repository-workers/src/implementation.rs"]
+note = "Repository-driven worker behavior exists, but the document references a removed worker-pr-handoffs.md prerequisite."
+
+[[spec]]
+path = "spec/worker-profile-runtime.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-execution/src/implementation.rs"]
+note = "Worker profiles exist in execution machinery, but the document references a removed workers.md prerequisite."
+
+[[spec]]
+path = "spec/worker-results-verification.md"
+state = "target"
+enforcement = "none"
+
+[[spec]]
+path = "spec/worker-task-dag.md"
+state = "transitional"
+enforcement = "partial"
+enforced_by = ["rust/crates/phenix-plugin-execution/src/implementation.rs"]
+
+[[spec]]
+path = "spec/worker-task-runtime.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-plugin-execution/src/implementation.rs", "rust/crates/phenix-plugin-execution/src/generation_regression.rs"]
+
+[[spec]]
+path = "spec/workspace-persistence.md"
+state = "implemented"
+enforcement = "strong"
+enforced_by = ["rust/crates/phenix-core/src/persistence.rs"]
+note = "Physical workspace storage remains canonical while product-domain schemas migrate to plugin-owned durable namespaces."
