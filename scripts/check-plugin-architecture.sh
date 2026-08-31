@@ -5,7 +5,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root/rust"
 
 errors="$({
-  cargo metadata --format-version 1 --no-deps |
+  cargo metadata --format-version 1 --no-deps --locked |
     jq -r '
       .packages as $packages
       | ($packages | map({ key: .name, value: (.metadata.phenix.role // null) }) | from_entries) as $roles
