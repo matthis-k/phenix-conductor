@@ -241,8 +241,8 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: "Phenix ACP smoke"
-        run: nix run .#phenix-maintenance-command-f2591028a001 -- test product phenix-acp
+      - name: "Phenix product smoke"
+        run: nix run .#phenix-maintenance-command-ea5b764cc0a0 -- test product phenix
 
       - name: "Plugin packaging"
         run: nix run .#phenix-maintenance-command-ae31e29afa95 -- test product plugin-packaging
