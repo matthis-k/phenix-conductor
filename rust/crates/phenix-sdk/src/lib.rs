@@ -1,18 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod api;
 mod authoring;
 mod providers;
 
+pub use api::*;
 pub use authoring::*;
 pub use phenix_core::{
     Bytes, CallableRef, Contract, ContractId, ContractValue, Exact, Key, ObjectRef, PhenixContract,
     PhenixSchema, PhenixValue, PluginId, Project, ReferenceId, Type, TypeKind, ValueError,
-};
-pub use phenix_plugin_api::{
-    SdkConfigCommand, SdkConfigInterface, SdkConfigPath, SdkConfigResponse, SdkSessionCommand,
-    SdkSessionInterface, SdkSessionResponse, SdkSkill, SdkSkillCommand, SdkSkillResponse,
-    SdkSkillSummary, SdkSkillsInterface, SdkTool, SdkToolCommand, SdkToolResponse,
-    SdkToolsInterface,
 };
 pub use phenix_provider_sdk::{
     ApiTokenSource, Auth, AuthDescriptor, AuthKind, EnvironmentVariable, ProviderAuthCommand,
