@@ -14,14 +14,20 @@ Canonical format: <https://agentskills.io/specification>
 
 A skill is a directory with `SKILL.md` at its root. Optional `scripts/`, `references/`, `assets/`, and other files remain part of the same immutable skill revision.
 
-Phenix validates the complete canonical Agent Skills frontmatter constraints for the supported specification revision before cataloging the skill. The portable required fields are:
+Phenix validates the complete canonical Agent Skills frontmatter constraints for the supported specification revision before cataloging the skill.
 
-- `name`
-- `description`
+Canonical frontmatter fields:
 
-Validation includes the canonical name syntax and length, description length, and parent-directory match.
+- `name` is required, 1-64 characters, and contains only lowercase ASCII letters, digits, and hyphens. It cannot start or end with a hyphen, contain consecutive hyphens, or differ from the parent directory name.
+- `description` is required, non-empty, and at most 1024 characters. It describes what the skill does and when to use it.
+- `license` is optional. It names the license or references a bundled license file.
+- `compatibility` is optional and, when present, is 1-500 characters of environment requirements.
+- `metadata` is optional and is a map from string keys to string values. This is the portable extension point for additional properties.
+- `allowed-tools` is optional, experimental, and is a space-separated string of tools.
 
-Portable optional fields keep their canonical types and constraints. Values under the portable `metadata` map are retained as opaque strings. Unsupported metadata does not silently acquire Phenix semantics.
+Other top-level frontmatter keys are not portable fields for this supported specification revision. Phenix-specific extensions belong under namespaced keys in `metadata` unless a later supported Agent Skills revision defines them.
+
+Validation follows the selected Agent Skills specification revision as one contract. Implementations may use the reference validator or equivalent checks, but must not accept a looser Phenix-specific subset.
 
 ## Discovery roots
 
