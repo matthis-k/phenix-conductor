@@ -9,11 +9,14 @@ role = "passive-library"
 
 [dependencies]
 phenix-core = { path = "../phenix-core" }
-phenix-plugin-api = { path = "../phenix-plugin-api" }
 phenix-plugin-context = { path = "../phenix-plugin-context" }
 phenix-plugin-models = { path = "../phenix-plugin-models" }
 phenix-plugin-options = { path = "../phenix-plugin-options" }
 phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }
 phenix-provider-sdk = { path = "../phenix-provider-sdk" }
 phenix-sdk-macros = { path = "../phenix-sdk-macros" }
+serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+phenix-plugin-api = { path = "../phenix-plugin-api" }
