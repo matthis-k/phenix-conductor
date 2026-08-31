@@ -96,6 +96,8 @@ let
       }) pluginCrateValues
     )
   );
+  hasLegacyCliIdentity =
+    pluginIds ? cli || builtins.elem "phenix.cli" (builtins.attrValues pluginIds);
 
   pluginRole =
     package:
@@ -105,7 +107,9 @@ let
     manifest.package.metadata.phenix.role or null;
 
   checkedPluginCrates =
-    if builtins.length pluginCrateValues != builtins.length uniquePluginCrates then
+    if hasLegacyCliIdentity then
+      throw "phenixPlugins must use command-toolbelt rather than the legacy cli runtime identity"
+    else if builtins.length pluginCrateValues != builtins.length uniquePluginCrates then
       throw "phenixPlugins entries must use unique implementation packages"
     else
       builtins.mapAttrs (
