@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use phenix_core::{
     model_inference_service, Authority, ComponentExport, ComponentId, ComponentInterface,
     ComponentManifest, InterfaceId, ModelInferenceRequest, ModelInferenceResponse, PluginExecution,
