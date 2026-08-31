@@ -16,7 +16,7 @@ pub use phenix_plugin_basic_agent::{
     BASIC_CONTEXT_COMPONENT, BASIC_CONTEXT_PLUGIN, BASIC_MODEL_COMPONENT, BASIC_MODEL_PLUGIN,
     BASIC_SKILLS_COMPONENT, BASIC_SKILLS_PLUGIN, BASIC_TOOLS_COMPONENT, BASIC_TOOLS_PLUGIN,
 };
-pub use phenix_plugin_cli::{
+pub use phenix_plugin_command_toolbelt::{
     cli_auth_state_service, cli_component_id, cli_component_manifest, cli_discover_service,
     cli_factory, cli_manifest, cli_version_service, CliAuthState, CliAuthStateInterface,
     CliAvailability, CliDescriptor, CliDiscoverInterface, CliName, CliProbeRequest,

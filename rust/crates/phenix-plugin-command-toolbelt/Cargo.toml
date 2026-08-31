@@ -1,5 +1,5 @@
 [package]
-name = "phenix-plugin-cli"
+name = "phenix-plugin-command-toolbelt"
 version = "0.1.0"
 edition = "2021"
 publish = false
