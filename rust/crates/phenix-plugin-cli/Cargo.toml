@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[package.metadata.phenix]
+role = "runtime-plugin"
+
+[package.metadata.phenix.contract-debt]
+phenix-plugin-workspace = "Move the consumed workspace contract to its neutral owner."
+
 [dependencies]
 phenix-core = { path = "../phenix-core" }
 phenix-sdk-macros = { path = "../phenix-sdk-macros" }
