@@ -144,7 +144,7 @@ pub use runtime::{
     ServiceParticipantOutcome, ServiceParticipantProvenance,
 };
 pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
-pub use tasks::{CancellationToken, TaskHandle, TaskRuntime};
+pub use tasks::{CancellationToken, TaskHandle, TaskRuntime, TaskScope};
 pub use typed_component::{
     ComponentInterface, ComponentInvocationError, InterfaceCompatibility, InterfaceSchema,
     InterfaceSchemaMismatch,
