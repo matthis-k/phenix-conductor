@@ -1,13 +1,10 @@
 #![forbid(unsafe_code)]
 
-mod authoring;
-pub use authoring::*;
-
 use phenix_core::{
     Authority, Bytes, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-    ComponentManifest, ContextResourceId, InterfaceId, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, SdkContribution, SdkNamespace, SdkResourceId,
-    ServiceContribution, ServiceId, ServiceRole,
+    ComponentManifest, ContextResourceId, InterfaceId, PluginContext, PluginExecution, PluginHost,
+    PluginId, PluginInstance, PluginManifest, SdkClient, SdkContribution, SdkNamespace,
+    SdkResourceId, ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_plugin_context::{
     ContextCommand, ContextDescriptor, ContextInterface, ContextResourceKind,
@@ -31,12 +28,12 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub const SDK_PLUGIN: &str = "phenix.sdk";
-pub const SDK_COMPONENT: &str = "phenix.sdk";
-pub const SDK_SESSION_SERVICE: &str = "phenix.sdk.sessions@1";
-pub const SDK_TOOLS_SERVICE: &str = "phenix.sdk.tools@1";
-pub const SDK_SKILLS_SERVICE: &str = "phenix.sdk.skills@1";
-pub const SDK_CONFIG_SERVICE: &str = "phenix.sdk.config@1";
+pub const SDK_PLUGIN: &str = "phenix.api";
+pub const SDK_COMPONENT: &str = "phenix.api";
+pub const SDK_SESSION_SERVICE: &str = "phenix.api.sessions@1";
+pub const SDK_TOOLS_SERVICE: &str = "phenix.api.tools@1";
+pub const SDK_SKILLS_SERVICE: &str = "phenix.api.skills@1";
+pub const SDK_CONFIG_SERVICE: &str = "phenix.api.config@1";
 
 struct SdkDependencies<'host, 'runtime> {
     sessions: SdkClient<'host, 'runtime, SessionInterface>,
@@ -862,6 +859,16 @@ mod tests {
             CapabilityId::parse("kernel.persistence.read").unwrap(),
             CapabilityId::parse("kernel.persistence.write").unwrap(),
         ])
+    }
+
+    #[test]
+    fn runtime_identity_is_api() {
+        assert_eq!(SDK_PLUGIN, "phenix.api");
+        assert_eq!(SDK_COMPONENT, "phenix.api");
+        assert_eq!(SDK_SESSION_SERVICE, "phenix.api.sessions@1");
+        assert_eq!(SDK_TOOLS_SERVICE, "phenix.api.tools@1");
+        assert_eq!(SDK_SKILLS_SERVICE, "phenix.api.skills@1");
+        assert_eq!(SDK_CONFIG_SERVICE, "phenix.api.config@1");
     }
 
     #[test]

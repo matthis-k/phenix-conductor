@@ -1876,6 +1876,10 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-sdk",
+ "phenix-plugin-context",
+ "phenix-plugin-models",
+ "phenix-plugin-options",
+ "phenix-plugin-sessions",
  "phenix-provider-sdk",
  "phenix-sdk-macros",
  "serde_json",

@@ -99,7 +99,7 @@ pub use phenix_plugin_repository_workers::{
     RepositoryWorkPriority, RepositoryWorkSelection, RepositoryWorkSnapshot,
     RepositoryWorkerInterface, RepositoryWorkerQueue, REPOSITORY_WORK_QUEUE_SERVICE,
 };
-pub use phenix_plugin_sdk::{
+pub use phenix_plugin_api::{
     sdk_component_id, sdk_component_manifest, sdk_config_service, sdk_contribution, sdk_factory,
     sdk_manifest, sdk_session_service, sdk_skills_service, sdk_tools_service, SdkConfigCommand,
     SdkConfigInterface, SdkConfigResponse, SdkSessionCommand, SdkSessionInterface,

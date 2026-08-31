@@ -4,9 +4,16 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[package.metadata.phenix]
+role = "passive-library"
+
 [dependencies]
 phenix-core = { path = "../phenix-core" }
-phenix-plugin-sdk = { path = "../phenix-plugin-sdk" }
+phenix-plugin-api = { path = "../phenix-plugin-api" }
+phenix-plugin-context = { path = "../phenix-plugin-context" }
+phenix-plugin-models = { path = "../phenix-plugin-models" }
+phenix-plugin-options = { path = "../phenix-plugin-options" }
+phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }
 phenix-provider-sdk = { path = "../phenix-provider-sdk" }
 phenix-sdk-macros = { path = "../phenix-sdk-macros" }
 serde_json.workspace = true

@@ -2,7 +2,6 @@ mod context;
 mod plugin;
 
 pub use context::*;
-pub use phenix_sdk_macros::{PhenixContract, PhenixValue};
 pub use plugin::{EventEmitError, EventEmitter, EventName, TypedSdkClient};
 
 #[doc(hidden)]

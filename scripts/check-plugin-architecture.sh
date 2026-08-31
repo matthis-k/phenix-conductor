@@ -12,7 +12,7 @@ errors="$({
       | (
           [
             $packages[]
-            | select(.name == "phenix-plugin-cli")
+            | select((.name == "phenix-plugin-cli") or (.name == "phenix-plugin-sdk"))
             | "legacy runtime plugin package is forbidden: \(.name)"
           ]
           +
