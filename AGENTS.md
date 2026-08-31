@@ -1,103 +1,57 @@
 # Phenix AI repository instructions
 
-This repository contains the generic Phenix runtime, conductor, shared client contracts, independently packaged first-party plugins, Harness product assembly, ACP boundary, and backend adapters. Treat executable Rust and deterministic tests as authoritative. Do not restore deleted UI crates, Neovim plugin code, Pi extensions, TypeScript runtime paths, or compatibility owners.
+Treat executable code and deterministic tests as authoritative. `README.md` owns current architecture and subsystem boundaries. `DEVELOPMENT.md` owns the human-facing development and validation surface. `config/phenix/` owns supported product configuration and skills.
 
-## Source of truth
-
-Use this order:
-
-1. Executable Rust code and deterministic tests.
-2. `README.md` for current architecture and subsystem boundaries.
-3. `config/phenix/` for supported product configuration and skills.
-4. This file for repository working rules.
-
-When documentation and code disagree, fix or remove the stale documentation in the same change.
-
-## Architecture discipline
-
-- `phenix-core` owns generic plugin mechanisms, hosting, persistence enforcement, authority attenuation, events, tasks, and service resolution. It owns no first-party agent fallback.
-- `phenix-client` owns canonical client/server request, response, event, capability, and serialization contracts.
-- `phenix-conductor` owns the generic configured server process and client transport. A zero-plugin conductor exposes no first-party services.
-- Focused `phenix-plugin-*` crates own first-party session, context, execution, planning, workspace, routing, language, frontend-service, hook, job, debug, and repository-worker semantics.
-- `phenix-plugin-catalog` is only a thin embedded-factory catalog. It owns no durable state or product policy.
-- `phenix-harness` owns supported product assembly, plugin selection, grants, persistence location, provider policy, runtime configuration, skills, and resources.
-- `phenix-acp` is an adapter to `phenix-client`. ACP types do not own application semantics or durable state.
-- Frontends remain clients. Rendering, input handling, editor integration, and frontend packaging belong in frontend repositories.
-
-The supported product path is a configured conductor plus selected plugins through `phenix-harness`. Alternate or omitted services use the ordinary plugin resolver. No core or conductor compatibility registry may restore a missing first-party service.
-
-`phenix-kernel`, `phenix-protocol`, and `phenix-plugin-suite` are superseded package names. Remove remaining aliases instead of preserving them as compatibility surfaces.
+Fix or remove documentation that disagrees with the current tree in the same change.
 
 ## Change discipline
 
-- Remove superseded APIs and compatibility paths instead of maintaining parallel versions.
+- Remove superseded APIs, aliases, and compatibility paths instead of maintaining parallel versions.
 - Prefer an existing platform or library abstraction when it expresses the required semantics.
 - Keep semantic names even when using a library type internally.
 - Make invalid states unrepresentable. Prefer enums, newtypes, non-zero types, ownership, and constructors over correlated strings, booleans, options, or later checks.
-- Parse, don't validate. Convert external, configuration, and wire inputs into invariant-bearing types at the boundary. Once parsed, internal code assumes local invariants. Reserve resolution checks for facts that depend on other runtime state.
-- Use guard clauses and early returns for errors, unsupported cases, and exceptional branches. Keep the success path shallow and linear.
-- Keep the common success path short. Derive state where possible; remove intermediate representations or branches that exist only to support validation.
+- Parse, don't validate. Convert external, configuration, and wire inputs into invariant-bearing types at the boundary. Reserve later checks for facts that depend on runtime state.
+- Use guard clauses and early returns for errors and exceptional cases. Keep the success path short, shallow, and linear.
+- Derive state where possible. Remove intermediate representations and branches that do not carry required behavior.
 - Preserve typed errors at subsystem boundaries. Do not collapse actionable failures into generic exit states.
-- Add focused regression tests for behavioral fixes and integration tests for cross-boundary behavior.
-- Keep implementation-specific invariants close to the code and tests that enforce them instead of creating speculative documents.
-- Keep plugin dependencies explicit. A plugin may depend on another plugin when the service dependency is real, but it must not load unrelated first-party implementations.
+- Keep implementation-specific invariants next to the code and tests that enforce them instead of creating speculative documents.
+- Keep plugin dependencies explicit. A plugin may depend on another plugin for a real service dependency, but must not load unrelated first-party implementations.
+
+Before finishing an implementation, ask whether new code can be deleted, an existing abstraction can replace it, branches can be merged, stored state can be derived, intermediate representations can be removed, or custom error handling can become ordinary propagation.
 
 ## Rust implementation discipline
 
-Use Canonical's Rust best practices as the primary external Rust reference. Use `mre/idiomatic-rust` as a curated index to idiomatic Rust guidance, and follow the linked primary source when adopting a rule. Repository architecture and established local conventions take precedence.
+Use Canonical's Rust best practices as the primary external Rust reference. Use `mre/idiomatic-rust` as an index to primary guidance. Repository architecture and established local conventions take precedence.
 
-- Use exhaustive pattern matching on internal enums and relevant structs when new variants or fields must force a compiler error at each decision point.
-- Keep foreign serialization shapes at the boundary. Deserialize into boundary types, then parse or convert into internal domain types. External formats must not dictate core representation.
-- Prefer standard conversion traits when their semantics fit: `From`, `TryFrom`, `FromStr`, `AsRef`, and their corresponding blanket conversions. Avoid ad hoc conversion methods that encode the same contract.
-- Model semantic modes and state machines with enums or state-specific types. Use booleans only for genuinely binary facts that do not carry future states or extra meaning.
-- Use newtypes for identifiers, units, validated values, and other domain concepts that should not be interchangeable as bare `String`, integers, or tuples.
-- Keep values immutable by default. Scope mutability to construction or the smallest block that needs it. Prefer returning a value over out-parameters or mutation used only to shuttle data between branches.
-- Keep production code panic-free for user, configuration, network, persistence, and runtime failures. Prefer invariant-bearing types, `?`, and typed errors. Preserve useful source context across subsystem boundaries. Use `expect` only for programmer-proven invariants and state the invariant in the message.
-- Treat file length as a refactoring signal, not a hard limit. Around 250 lines calls for a cohesion review. Around 500 lines strongly favors splitting by responsibility unless one module is clearly easier to understand. Keep resulting modules cohesive instead of splitting at arbitrary line boundaries.
-- Keep generic bounds and lifetime parameters no broader than required. Hide incidental generic parameters with ordinary Rust API patterns when that makes the call site simpler.
-- Prefer borrowed inputs when the callee only needs a view and owned outputs when ownership transfers. Do not clone only to satisfy the borrow checker when a simpler ownership shape removes the clone.
-- Prefer iterator adapters when they make ownership, filtering, or error propagation clearer. Use an ordinary loop when it is easier to read or needs explicit control flow.
-- For `Result<()>` success paths, propagate fallible work with `?` and use an explicit `Ok(())` when it makes the no-information success case clear.
-- Keep helper and boundary-only types in the narrowest useful scope. Promote them only when multiple callers share the same concept.
-- Public Rust APIs should follow the Rust API Guidelines where they apply: conventional trait implementations, predictable ownership, useful derives, and names that match Rust conventions.
+- Use exhaustive matching when new variants or fields should force compiler errors at decision points.
+- Keep foreign serialization shapes at the boundary. Parse them into internal domain types.
+- Prefer standard conversion traits when their semantics fit: `From`, `TryFrom`, `FromStr`, `AsRef`, and their blanket conversions.
+- Model semantic modes and state machines with enums or state-specific types. Use booleans only for genuinely binary facts.
+- Use newtypes for identifiers, units, validated values, and other concepts that should not be interchangeable.
+- Keep values immutable by default. Scope mutability narrowly and prefer returning values over mutation used only to move data between branches.
+- Keep production code panic-free for user, configuration, network, persistence, and runtime failures. Prefer invariant-bearing types, `?`, and typed errors. Use `expect` only for programmer-proven invariants and state the invariant in the message.
+- Treat file length as a cohesion signal. Around 250 lines warrants review. Around 500 lines strongly favors splitting by responsibility unless one module is clearly easier to understand.
+- Keep generic bounds and lifetimes no broader than required.
+- Prefer borrowed inputs for views and owned outputs when ownership transfers. Do not clone only to satisfy an avoidable ownership shape.
+- Prefer iterators when they make ownership, filtering, or propagation clearer. Use loops when explicit control flow reads better.
+- Keep helper and boundary-only types in the narrowest useful scope.
+- Follow the Rust API Guidelines for public APIs where applicable.
 
 ## Testing discipline
 
-Tests validate behavior, not declarations.
+Test behavior, not declarations.
 
-- Ordinary Nix configuration is allowed to be misconfigured. The build or run that consumes it is the meaningful validation boundary.
+- Prove behavior at the highest practical deterministic boundary. Use unit tests for local invariants, integration tests for crate or API boundaries, system tests for process and protocol behavior, and product tests for realized packaging behavior.
+- Prefer reusable deterministic fixtures over ad hoc mocks when behavior crosses runtime boundaries.
 - Do not mirror Nix options, package selections, file declarations, or literal configuration values into tests merely to assert that the source says the same thing twice.
-- Direct Nix tests are appropriate when the Nix expression itself is nontrivial reusable program logic such as composition, transformation, ordering, or precedence.
+- Test Nix expressions directly when the expression itself contains reusable program logic such as composition, transformation, ordering, or precedence.
 - Product checks should build, start, execute, or otherwise exercise realized outputs.
-- Keep a behavior in one canonical execution layer. Product derivations must not rerun the Cargo behavioral suites.
+- Keep each behavior in one canonical execution layer. Product derivations must not rerun Cargo behavioral suites.
 - Frontend-specific product tests belong in the frontend repository.
+- Add focused regressions for behavioral fixes and integration coverage for cross-boundary behavior.
 
-## Maintenance
+## Verification
 
-The flake owns the development shell, product packages, package smoke checks, and one declarative maintenance provider. Do not add a second development-environment lock or task graph.
+Use the focused maintenance boundary while iterating and run `maintenance all` before final handoff. The current command surface and test ownership rules are documented in `DEVELOPMENT.md` and declared in `modules/development.nix`.
 
-The provider is exposed as `packages.<system>.phenix-maintenance`; its generated executable is `maintenance`. The Nix command tree is authoritative for command behavior and CI topology. The committed GitHub workflow is generated from that declaration and must stay synchronized with it.
-
-```sh
-nix develop
-maintenance fix
-maintenance all
-```
-
-Validation is separated by boundary:
-
-- `maintenance check source`: formatting, Nix static analysis, workflow syntax and synchronization, and Cargo test-target classification;
-- `maintenance check rust`: Clippy and static Rust validation;
-- `maintenance test unit`: in-crate tests;
-- `maintenance test doc`: Rust documentation tests;
-- `maintenance test integration`: crate and API integration targets;
-- `maintenance test system`: black-box conductor, Harness, process, and protocol targets;
-- `maintenance test product`: realized conductor, Harness, client, and package behavior.
-
-CI granularity is declarative. A CI-enabled maintenance command is a visible step. Commands with the same `ci.stage` share a GitHub job, while distinct stages become distinct jobs. Prefer leaf commands when individual failure attribution is useful.
-
-Every Cargo integration-test target must be explicitly classified under integration or system maintenance commands. Compiler errors, judgment-bearing lint findings, test failures, runtime failures, and Nix build failures are never auto-repaired.
-
-## Required verification
-
-Before considering a change complete, run the relevant focused layer while iterating and `maintenance all` before final handoff. Do not weaken a check to make transitional code pass. Fix the current implementation or remove the obsolete surface that the check protected.
+Do not weaken a check to make transitional code pass. Fix the implementation or remove the obsolete surface the check protected.

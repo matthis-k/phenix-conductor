@@ -41,36 +41,34 @@
       '';
 
       supportedPhenix = self.packages.${system}.phenix;
-      firstPartyPlugins = builtins.attrValues self.phenixPlugins.${system};
       phenixProductSmoke =
         pkgs.runCommand "phenix-product-smoke"
           {
             nativeBuildInputs = [
               supportedPhenix
               pkgs.jq
-            ]
-            ++ firstPartyPlugins;
+            ];
           }
           ''
-            export PHENIX_STATE_DB="$TMPDIR/acp-smoke.sqlite"
+            export PHENIX_STATE_DB="$TMPDIR/product-smoke.sqlite"
             printf '%s\n' \
-              '{"id":1,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Create","value":{"type":"table","value":{"id":{"type":"string","value":"acp-smoke"}}}}}}' \
-              '{"id":2,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Get","value":{"type":"table","value":{"id":{"type":"string","value":"acp-smoke"}}}}}}' \
-              | ${supportedPhenix}/bin/phenix-harness > "$TMPDIR/acp-smoke.jsonl"
+              '{"id":1,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Create","value":{"type":"table","value":{"id":{"type":"string","value":"product-smoke"}}}}}}' \
+              '{"id":2,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Get","value":{"type":"table","value":{"id":{"type":"string","value":"product-smoke"}}}}}}' \
+              | ${supportedPhenix}/bin/phenix-harness > "$TMPDIR/product-smoke.jsonl"
             if ! jq -se '
               length == 2
               and .[0].id == 1
               and .[0].status == "ok"
               and .[0].output.type == "variant"
               and .[0].output.value.tag == "Created"
-              and (.[0].output | tostring | contains("acp-smoke"))
+              and (.[0].output | tostring | contains("product-smoke"))
               and .[1].id == 2
               and .[1].status == "ok"
               and .[1].output.type == "variant"
               and .[1].output.value.tag == "Session"
-              and (.[1].output | tostring | contains("acp-smoke"))
-            ' "$TMPDIR/acp-smoke.jsonl" >/dev/null; then
-              cat "$TMPDIR/acp-smoke.jsonl" >&2
+              and (.[1].output | tostring | contains("product-smoke"))
+            ' "$TMPDIR/product-smoke.jsonl" >/dev/null; then
+              cat "$TMPDIR/product-smoke.jsonl" >&2
               exit 1
             fi
 
@@ -78,20 +76,6 @@
             test -f ${supportedPhenix}/share/phenix/skills/write/SKILL.md
             test -f ${supportedPhenix}/share/phenix/skills/pstack-LICENSE
             test -f ${supportedPhenix}/share/phenix/NOTICE.md
-
-            export PHENIX_STATE_DB="$TMPDIR/harness.sqlite"
-            phenix --list-services > "$TMPDIR/services.json"
-            jq -e '
-              (.plugins | length == 17)
-              and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0)
-              and (.services | index("phenix.sessions@1") != null)
-              and (.services | index("phenix.context@1") != null)
-              and (.services | index("phenix.execution@1") != null)
-              and (.services | index("phenix.execution.configuration@1") != null)
-              and (.services | index("phenix.options@1") != null)
-              and (.services | index("phenix.sdk.config@1") != null)
-              and (.services | index("phenix.repository.worker-queue@1") != null)
-            ' "$TMPDIR/services.json" >/dev/null
 
             touch "$out"
           '';

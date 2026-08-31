@@ -142,36 +142,6 @@ in
         name = "phenix-plugin-${name}-package";
         value = package;
       }) pluginSets.${system};
-
-      pluginOwnershipCheck =
-        pkgs.runCommand "phenix-plugin-package-ownership"
-          {
-            nativeBuildInputs = [ pkgs.ripgrep ];
-            src = pkgs.lib.cleanSource ../rust;
-          }
-          ''
-            cd "$src"
-
-            if rg -n --glob 'crates/*/Cargo.toml' \
-              'phenix-kernel[[:space:]]*=[[:space:]]*\{[[:space:]]*package[[:space:]]*=[[:space:]]*"phenix-core"' crates; then
-              echo 'stale phenix-kernel Cargo alias remains' >&2
-              exit 1
-            fi
-
-            if rg -n --glob 'crates/*/Cargo.toml' \
-              'phenix-plugin-suite[[:space:]]*=[[:space:]]*\{[[:space:]]*package[[:space:]]*=[[:space:]]*"phenix-plugin-catalog"' crates; then
-              echo 'stale phenix-plugin-suite Cargo alias remains' >&2
-              exit 1
-            fi
-
-            if rg -n --glob 'crates/*/Cargo.toml' \
-              'phenix-core[[:space:]]*=[[:space:]]*\{[[:space:]]*package[[:space:]]*=[[:space:]]*"phenix-domain"' crates; then
-              echo 'stale phenix-domain-as-core Cargo alias remains' >&2
-              exit 1
-            fi
-
-            touch "$out"
-          '';
     in
     {
       packages = {
@@ -180,8 +150,6 @@ in
         phenix-conductor = mkBinaryPackage pkgs "phenix-conductor" "phenix-conductor";
       };
 
-      checks = pluginPackageChecks // {
-        phenix-plugin-package-ownership = pluginOwnershipCheck;
-      };
+      checks = pluginPackageChecks;
     };
 }

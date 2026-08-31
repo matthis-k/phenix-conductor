@@ -7,7 +7,6 @@ use phenix_plugin_catalog::{
     basic_tools_component_manifest, basic_tools_factory, basic_tools_manifest,
     session_component_manifest, session_factory, session_manifest,
 };
-use std::collections::BTreeSet;
 
 impl HarnessBuilder {
     pub fn with_basic_suite() -> Result<Self, KernelError> {
@@ -28,19 +27,6 @@ impl HarnessBuilder {
             builder.add_component(component);
         }
         Ok(builder)
-    }
-
-    pub fn basic_suite_plugin_ids() -> BTreeSet<String> {
-        [
-            session_manifest(),
-            basic_model_manifest(),
-            basic_tools_manifest(),
-            basic_skills_manifest(),
-            basic_context_manifest(),
-        ]
-        .into_iter()
-        .map(|manifest| manifest.id.as_str().to_owned())
-        .collect()
     }
 }
 
@@ -68,7 +54,7 @@ mod tests {
     };
     use phenix_plugin_catalog::{session_service, SessionCommand, SessionResponse};
     use std::{
-        collections::BTreeMap,
+        collections::{BTreeMap, BTreeSet},
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
@@ -112,22 +98,6 @@ mod tests {
             .unwrap();
         let output: PhenixValue = serde_json::from_slice(&output).unwrap();
         SessionResponse::try_from(Project(&output)).unwrap()
-    }
-
-    #[test]
-    fn basic_suite_contains_only_independently_selected_basic_agent_plugins() {
-        assert_eq!(
-            HarnessBuilder::basic_suite_plugin_ids(),
-            BTreeSet::from([
-                "phenix.sessions".into(),
-                "phenix.basic-model".into(),
-                "phenix.basic-tools".into(),
-                "phenix.basic-skills".into(),
-                "phenix.basic-context".into(),
-            ])
-        );
-        assert!(!HarnessBuilder::basic_suite_plugin_ids().contains("phenix.models"));
-        assert!(!HarnessBuilder::basic_suite_plugin_ids().contains("phenix.context"));
     }
 
     #[test]

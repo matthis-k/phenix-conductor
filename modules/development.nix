@@ -210,7 +210,7 @@
 
       maintenance = maintenanceLib.mkMaintenance {
         name = "maintenance";
-        description = "Phenix ACP maintenance";
+        description = "Phenix maintenance";
         ci.github = {
           enable = true;
           outputName = "phenix-maintenance";
@@ -544,18 +544,18 @@
               };
 
               product = {
-                description = "Installed ACP behavior and package realization";
+                description = "Installed product behavior and package realization";
                 order = [
-                  "phenix-acp"
+                  "phenix"
                   "plugin-packaging"
                   "stitch-runtime"
                   "stitch-mcp"
                 ];
                 commands = {
-                  phenix-acp = mkProductCommand {
+                  phenix = mkProductCommand {
                     check = "phenix-product-smoke";
-                    description = "Run the installed Phenix ACP smoke fixture";
-                    stepName = "Phenix ACP smoke";
+                    description = "Run the installed Phenix product smoke fixture";
+                    stepName = "Phenix product smoke";
                   };
                   plugin-packaging = mkProductCommand {
                     check = "phenix-plugin-packaging";
@@ -621,7 +621,7 @@
       apps = maintenanceOutputs.apps.${system};
 
       devShells.default = pkgs.mkShell {
-        name = "phenix-acp-dev";
+        name = "phenix-dev";
         packages = [
           pkgs.actionlint
           pkgs.bubblewrap
@@ -646,7 +646,7 @@
         shellHook = ''
           ${maintenancePackage.shellHook}
 
-          echo "phenix-acp dev shell"
+          echo "phenix dev shell"
           echo "  all:          maintenance all"
           echo "  static:       maintenance check"
           echo "  tests:        maintenance test"
