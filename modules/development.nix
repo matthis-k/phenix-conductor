@@ -247,6 +247,7 @@
                   "rust-format"
                   "statix"
                   "actionlint"
+                  "plugin-architecture"
                   "test-targets"
                   "workflow-sync"
                 ];
@@ -316,6 +317,23 @@
                       find .github/workflows -type f \
                         \( -name '*.yml' -o -name '*.yaml' \) -print0 |
                         xargs -0 -r actionlint
+                    '';
+                  };
+
+                  plugin-architecture = {
+                    description = "Plugin package roles and runtime dependency boundaries";
+                    ci = sourceCi // {
+                      stepName = "Plugin architecture";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.bash
+                      pkgs.cargo
+                      pkgs.git
+                      pkgs.jq
+                    ];
+                    exec = ''
+                      ${repositoryRoot}
+                      bash scripts/check-plugin-architecture.sh
                     '';
                   };
 
