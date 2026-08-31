@@ -20,7 +20,7 @@ Process execution must use an explicit confinement mode. A caller must not gain 
 
 ## Defaults
 
-- New process requests use `read_only` unless the caller requests a narrower mode or has explicit authority for `workspace_write`.
+- New process requests use `read_only`. `workspace_write` is selected only when the caller explicitly requests it and has the required authority.
 - Network access is denied unless authority grants the required network capability.
 - The workspace is the only project filesystem visible to confined commands.
 - `.git` stays read-only unless the call has explicit Git write authority.

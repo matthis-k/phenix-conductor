@@ -1,0 +1,405 @@
+use super::*;
+use crate::{
+    ComponentExport, ComponentImport, ComponentManifest, InterfaceId, PluginManifest,
+    ServiceContribution,
+};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+fn plugin(value: &str) -> PluginId {
+    PluginId::parse(value).unwrap()
+}
+
+fn capability(value: &str) -> CapabilityId {
+    CapabilityId::parse(value).unwrap()
+}
+
+fn service(value: &str) -> ServiceId {
+    ServiceId::parse(value).unwrap()
+}
+
+struct MarkerPlugin(Arc<AtomicBool>);
+impl PluginInstance for MarkerPlugin {
+    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
+        assert_eq!(host.plugin().as_str(), "embedded");
+        self.0.store(true, Ordering::Release);
+        Ok(())
+    }
+}
+
+struct StartupTaskScopePlugin;
+
+impl PluginInstance for StartupTaskScopePlugin {
+    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
+        assert!(host.task_scope().is_none());
+        Ok(())
+    }
+}
+
+struct EchoPlugin;
+
+impl PluginInstance for EchoPlugin {
+    fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn invoke(
+        &mut self,
+        _service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        if host.authority().permits(&capability("fs.write")) {
+            return Err("provider regained caller write authority".into());
+        }
+        Ok(input.to_vec())
+    }
+}
+
+struct PersistencePlugin {
+    namespace: ResourceNamespace,
+}
+
+impl PluginInstance for PersistencePlugin {
+    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
+        host.register_durable_schema(&DurableSchema::new(self.namespace.clone(), 1))
+            .map_err(|error| error.to_string())?;
+        host.transact_durable(
+            &self.namespace,
+            &[TransactionOp::Put {
+                key: "seed".into(),
+                value: b"ready".to_vec(),
+            }],
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn invoke(
+        &mut self,
+        _service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        match input {
+            b"read" => host
+                .read_durable(&self.namespace, "seed")
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "missing seed".to_owned()),
+            b"write" => {
+                host.transact_durable(
+                    &self.namespace,
+                    &[TransactionOp::Put {
+                        key: "changed".into(),
+                        value: b"yes".to_vec(),
+                    }],
+                )
+                .map_err(|error| error.to_string())?;
+                Ok(b"written".to_vec())
+            }
+            _ => Err("unsupported input".into()),
+        }
+    }
+}
+
+#[test]
+fn kernel_only_boots_without_agent_domain_services() {
+    let mut kernel = Kernel::kernel_only();
+    kernel.activate_all().unwrap();
+    assert_eq!(kernel.config().manifests().count(), 0);
+}
+
+#[test]
+fn startup_host_without_resolved_graph_exposes_no_task_scope() {
+    let startup = PluginManifest {
+        id: plugin("startup"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: Vec::new(),
+        maximum_authority: Authority::default(),
+    };
+    let mut kernel = Kernel::new(KernelConfig::new([startup]).unwrap());
+    kernel
+        .register_embedded_factory(plugin("startup"), || Box::new(StartupTaskScopePlugin))
+        .unwrap();
+
+    assert!(kernel.graph_generation().is_none());
+    kernel.activate_all().unwrap();
+}
+
+#[test]
+fn embedded_and_resource_only_plugins_share_lifecycle_contract() {
+    let marker = Arc::new(AtomicBool::new(false));
+    let embedded = PluginManifest {
+        id: plugin("embedded"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: Vec::new(),
+        maximum_authority: Authority::default(),
+    };
+    let mut resources = PluginManifest::resource_only(plugin("resources"));
+    resources
+        .resource_namespaces
+        .push(ResourceNamespace::parse("resources.static").unwrap());
+
+    let mut kernel = Kernel::new(KernelConfig::new([resources, embedded]).unwrap());
+    let marker_for_factory = Arc::clone(&marker);
+    kernel
+        .register_embedded_factory(plugin("embedded"), move || {
+            Box::new(MarkerPlugin(Arc::clone(&marker_for_factory)))
+        })
+        .unwrap();
+
+    kernel.activate_all().unwrap();
+
+    assert!(marker.load(Ordering::Acquire));
+    assert_eq!(kernel.state(&plugin("embedded")), Some(PluginState::Active));
+    assert_eq!(
+        kernel.state(&plugin("resources")),
+        Some(PluginState::Active)
+    );
+    assert_eq!(
+        kernel
+            .config()
+            .resource_owner(&ResourceNamespace::parse("resources.static").unwrap()),
+        Some(&plugin("resources"))
+    );
+}
+
+#[test]
+fn invocation_uses_caller_authority_attenuated_by_provider_grant() {
+    let read = capability("fs.read");
+    let write = capability("fs.write");
+    let provider = PluginManifest {
+        id: plugin("echo"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: vec![ServiceContribution {
+            role: crate::ServiceRole::Terminal,
+            service: service("echo@1"),
+            priority: 1,
+            required_authority: Authority::new([read.clone()]),
+        }],
+        resource_namespaces: Vec::new(),
+        maximum_authority: Authority::new([read.clone()]),
+    };
+    let mut kernel = Kernel::new(KernelConfig::new([provider]).unwrap());
+    kernel
+        .register_embedded_factory(plugin("echo"), || Box::new(EchoPlugin))
+        .unwrap();
+    kernel.activate_all().unwrap();
+
+    let output = kernel
+        .invoke(
+            &service("echo@1"),
+            b"hello",
+            &Authority::new([read, write]),
+            None,
+        )
+        .unwrap();
+    assert_eq!(output, b"hello");
+}
+
+#[test]
+fn persistence_host_rechecks_effective_authority_on_every_call() {
+    let schema = capability(PERSISTENCE_SCHEMA);
+    let read = capability(PERSISTENCE_READ);
+    let write = capability(PERSISTENCE_WRITE);
+    let namespace = ResourceNamespace::parse("storage.state").unwrap();
+    let provider = PluginManifest {
+        id: plugin("storage"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: vec![ServiceContribution {
+            role: crate::ServiceRole::Terminal,
+            service: service("storage@1"),
+            priority: 1,
+            required_authority: Authority::default(),
+        }],
+        resource_namespaces: vec![namespace.clone()],
+        maximum_authority: Authority::new([schema.clone(), read.clone(), write.clone()]),
+    };
+    let mut kernel = Kernel::new(KernelConfig::new([provider]).unwrap());
+    kernel
+        .register_embedded_factory(plugin("storage"), move || {
+            Box::new(PersistencePlugin {
+                namespace: namespace.clone(),
+            })
+        })
+        .unwrap();
+    kernel.activate_all().unwrap();
+
+    assert_eq!(
+        kernel
+            .invoke(
+                &service("storage@1"),
+                b"read",
+                &Authority::new([read.clone()]),
+                None,
+            )
+            .unwrap(),
+        b"ready"
+    );
+
+    let error = kernel
+        .invoke(
+            &service("storage@1"),
+            b"write",
+            &Authority::new([read, write]),
+            None,
+        )
+        .unwrap();
+    assert_eq!(error, b"written");
+
+    let denied = kernel
+        .invoke(
+            &service("storage@1"),
+            b"write",
+            &Authority::new([capability(PERSISTENCE_READ)]),
+            None,
+        )
+        .unwrap_err();
+    assert!(matches!(denied, KernelError::ServiceInvoke { .. }));
+    assert!(denied.to_string().contains(PERSISTENCE_WRITE));
+}
+
+#[test]
+fn multi_namespace_transaction_requires_write_authority_on_foreign_typed_import() {
+    let write = capability(PERSISTENCE_WRITE);
+    let caller_namespace = ResourceNamespace::parse("caller.state").unwrap();
+    let owner_namespace = ResourceNamespace::parse("owner.state").unwrap();
+    let interface = InterfaceId::parse("fixture.owner.persistence@1").unwrap();
+    let caller = PluginManifest {
+        id: plugin("caller"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: vec![caller_namespace.clone()],
+        maximum_authority: Authority::new([write.clone()]),
+    };
+    let owner = PluginManifest {
+        id: plugin("owner"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: vec![owner_namespace.clone()],
+        maximum_authority: Authority::new([write.clone()]),
+    };
+    let caller_component = ComponentManifest {
+        id: ComponentId::parse("caller.component").unwrap(),
+        owner: caller.id.clone(),
+        imports: vec![ComponentImport {
+            interface: interface.clone(),
+            schema: Default::default(),
+            required: true,
+            authority: Authority::default(),
+        }],
+        exports: Vec::new(),
+        maximum_authority: caller.maximum_authority.clone(),
+    };
+    let owner_component = ComponentManifest {
+        id: ComponentId::parse("owner.component").unwrap(),
+        owner: owner.id.clone(),
+        imports: Vec::new(),
+        exports: vec![ComponentExport {
+            interface,
+            schema: Default::default(),
+            priority: 1,
+            required_authority: Authority::default(),
+        }],
+        maximum_authority: owner.maximum_authority.clone(),
+    };
+    let graph = ResolvedComponentGraph::compile(
+        [caller.clone(), owner.clone()],
+        [caller_component, owner_component],
+        &Authority::new([write.clone()]),
+    )
+    .unwrap();
+    let kernel = Kernel::new(KernelConfig::new([caller.clone(), owner.clone()]).unwrap());
+    let caller_plugin = caller.id;
+    let authority = Authority::new([write]);
+    let host = PluginHost {
+        graph_generation: kernel.graph_generation(),
+        component_graph: &graph,
+        config: kernel.config(),
+        states: &kernel.states,
+        instances: &kernel.instances,
+        plugin: &caller_plugin,
+        authority: &authority,
+        call_stack: BTreeSet::from([caller_plugin.clone()]),
+        events: &kernel.events,
+        tasks: &kernel.tasks,
+        persistence: &kernel.persistence,
+        provenance: &kernel.provenance,
+        continuation: None,
+        active_services: BTreeSet::new(),
+    };
+    let denied = host
+        .transact_durable_many(&[
+            NamespaceTransaction {
+                owner: caller_plugin.clone(),
+                namespace: caller_namespace,
+                operations: Vec::new(),
+            },
+            NamespaceTransaction {
+                owner: owner.id,
+                namespace: owner_namespace,
+                operations: vec![TransactionOp::Put {
+                    key: "forbidden".into(),
+                    value: b"write".to_vec(),
+                }],
+            },
+        ])
+        .unwrap_err();
+    assert!(matches!(denied, KernelError::HostOperationDenied { .. }));
+    assert!(denied
+        .to_string()
+        .contains("without authorized typed import"));
+}
+
+#[test]
+fn persistence_host_rejects_unowned_namespace_before_backend_access() {
+    let namespace = ResourceNamespace::parse("owned.state").unwrap();
+    let other_namespace = ResourceNamespace::parse("other.state").unwrap();
+    let owner = PluginManifest {
+        id: plugin("owner"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: vec![namespace],
+        maximum_authority: Authority::new([capability(PERSISTENCE_SCHEMA)]),
+    };
+    let kernel = Kernel::new(KernelConfig::new([owner]).unwrap());
+    let authority = Authority::new([capability(PERSISTENCE_SCHEMA)]);
+    let owner_plugin = plugin("owner");
+    let host = PluginHost {
+        graph_generation: kernel.graph_generation(),
+        component_graph: kernel.component_graph(),
+        config: kernel.config(),
+        states: &kernel.states,
+        instances: &kernel.instances,
+        plugin: &owner_plugin,
+        authority: &authority,
+        call_stack: BTreeSet::from([owner_plugin.clone()]),
+        events: &kernel.events,
+        tasks: &kernel.tasks,
+        persistence: &kernel.persistence,
+        provenance: &kernel.provenance,
+        continuation: None,
+        active_services: BTreeSet::new(),
+    };
+    assert!(matches!(
+        host.register_durable_schema(&DurableSchema::new(other_namespace, 1)),
+        Err(KernelError::HostOperationDenied { .. })
+    ));
+}

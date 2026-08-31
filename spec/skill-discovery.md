@@ -14,14 +14,20 @@ Canonical format: <https://agentskills.io/specification>
 
 A skill is a directory with `SKILL.md` at its root. Optional `scripts/`, `references/`, `assets/`, and other files remain part of the same immutable skill revision.
 
-Phenix validates required Agent Skills metadata before cataloging the skill. At minimum:
+Phenix validates the complete canonical Agent Skills frontmatter constraints for the supported specification revision before cataloging the skill.
 
-- `name`
-- `description`
+Canonical frontmatter fields:
 
-The skill name must match the package directory according to the Agent Skills format.
+- `name` is required, 1-64 characters, and contains only lowercase ASCII letters, digits, and hyphens. It cannot start or end with a hyphen, contain consecutive hyphens, or differ from the parent directory name.
+- `description` is required, non-empty, and at most 1024 characters. It describes what the skill does and when to use it.
+- `license` is optional. It names the license or references a bundled license file.
+- `compatibility` is optional and, when present, is 1-500 characters of environment requirements.
+- `metadata` is optional and is a map from string keys to string values. This is the portable extension point for additional properties.
+- `allowed-tools` is optional, experimental, and is a space-separated string of tools.
 
-Unknown optional metadata is retained. Unsupported metadata does not silently acquire Phenix semantics.
+Other top-level frontmatter keys are not portable fields for this supported specification revision. Phenix-specific extensions belong under namespaced keys in `metadata` unless a later supported Agent Skills revision defines them.
+
+Validation follows the selected Agent Skills specification revision as one contract. Implementations may use the reference validator or equivalent checks, but must not accept a looser Phenix-specific subset.
 
 ## Discovery roots
 

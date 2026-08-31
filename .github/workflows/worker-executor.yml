@@ -1,0 +1,184 @@
+name: Worker patch executor
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: worker-patch-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == github.repository_owner &&
+      startsWith(github.event.comment.body, '<!-- phenix-worker-patch-v1 -->')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Parse worker request
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          marker = "<!-- phenix-worker-patch-v1 -->"
+          body = os.environ["COMMENT_BODY"]
+          if not body.startswith(marker):
+              raise SystemExit("missing worker request marker")
+
+          request = body[len(marker):].lstrip("\r\n")
+          match = re.fullmatch(
+              r"expected_head: ([0-9a-f]{40})\r?\n"
+              r"commit_message: ([^\r\n]{1,200})\r?\n"
+              r"---BEGIN PATCH---\r?\n"
+              r"(.*)"
+              r"\r?\n---END PATCH---\s*",
+              request,
+              re.DOTALL,
+          )
+          if match is None:
+              raise SystemExit("invalid worker request format")
+
+          expected_head, commit_message, patch = match.groups()
+          patch_bytes = patch.encode()
+          if not patch_bytes:
+              raise SystemExit("patch must not be empty")
+          if not patch_bytes.endswith(b"\n"):
+              patch_bytes += b"\n"
+          if len(patch_bytes) > 1_048_576:
+              raise SystemExit("patch must be at most 1 MiB")
+          if b"\x00" in patch_bytes:
+              raise SystemExit("binary patches are not supported")
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          (temp / "expected-head").write_text(expected_head)
+          (temp / "commit-message").write_text(commit_message)
+          (temp / "worker.patch").write_bytes(patch_bytes)
+          PY
+
+      - name: Resolve exact live PR head
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+
+          head_repo="$(jq -r '.head.repo.full_name' "$RUNNER_TEMP/pr.json")"
+          head_ref="$(jq -r '.head.ref' "$RUNNER_TEMP/pr.json")"
+          head_sha="$(jq -r '.head.sha' "$RUNNER_TEMP/pr.json")"
+          expected_head="$(cat "$RUNNER_TEMP/expected-head")"
+
+          test "$head_repo" = "$GITHUB_REPOSITORY"
+          test "$head_sha" = "$expected_head"
+
+          echo "head_ref=$head_ref" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+          fetch-depth: 1
+
+      - name: Apply exact-head patch
+        run: |
+          set -euo pipefail
+          git apply --check "$RUNNER_TEMP/worker.patch"
+          git apply "$RUNNER_TEMP/worker.patch"
+          git diff --check
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Apply maintenance before commit
+        run: |
+          set -euo pipefail
+
+          stable=false
+          for _ in 1 2 3 4; do
+            git add -N .
+            before="$(git diff --binary HEAD | sha256sum | cut -d' ' -f1)"
+            nix run .#phenix-maintenance-command-1c6e6c4c02e5 -- fix
+            git add -N .
+            after="$(git diff --binary HEAD | sha256sum | cut -d' ' -f1)"
+            if test "$before" = "$after"; then
+              stable=true
+              break
+            fi
+          done
+
+          test "$stable" = true
+          git diff --check
+
+      - name: Commit and push validated patch
+        id: commit
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          EXPECTED_HEAD: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+
+          remote_head="$(git ls-remote origin "refs/heads/$HEAD_REF" | cut -f1)"
+          test "$remote_head" = "$EXPECTED_HEAD"
+
+          git config user.name "phenix-worker"
+          git config user.email "phenix-worker@users.noreply.github.com"
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "$(cat "$RUNNER_TEMP/commit-message")"
+          git push origin "HEAD:$HEAD_REF"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch exact-head CI
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+        run: gh workflow run ci.yml --ref "$HEAD_REF"
+
+      - name: Report success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          COMMIT_SHA: ${{ steps.commit.outputs.commit_sha }}
+          CHANGED: ${{ steps.commit.outputs.changed }}
+        run: |
+          set -euo pipefail
+          if test "$CHANGED" = true; then
+            gh issue comment "$PR_NUMBER" --body "Worker executor succeeded. Maintenance was stable before commit \`$COMMIT_SHA\`; exact-head CI was dispatched."
+          else
+            gh issue comment "$PR_NUMBER" --body "Worker executor succeeded with no resulting tree change; no commit was created."
+          fi
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$PR_NUMBER" --body "Worker executor failed. No successful executor push is implied. Inspect run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
