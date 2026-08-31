@@ -1593,9 +1593,45 @@ name = "phenix-plugin-basic-agent"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-plugin-basic-context",
+ "phenix-plugin-basic-model",
+ "phenix-plugin-basic-skills",
+ "phenix-plugin-basic-tools",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "phenix-plugin-basic-context"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-basic-model"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde_json",
+]
+
+[[package]]
+name = "phenix-plugin-basic-skills"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde_json",
+]
+
+[[package]]
+name = "phenix-plugin-basic-tools"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "serde_json",
 ]
 
 [[package]]

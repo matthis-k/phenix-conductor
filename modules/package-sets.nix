@@ -76,17 +76,26 @@ let
     workspace = "phenix.workspace";
   };
 
-  basicPluginNames = [
-    "basic-context"
-    "basic-model"
-    "basic-skills"
-    "basic-tools"
-  ];
+  basicPluginCrates = {
+    basic-context = "phenix-plugin-basic-context";
+    basic-model = "phenix-plugin-basic-model";
+    basic-skills = "phenix-plugin-basic-skills";
+    basic-tools = "phenix-plugin-basic-tools";
+  };
 
   pluginCrates = builtins.mapAttrs (
-    name: _:
-    if builtins.elem name basicPluginNames then "phenix-plugin-basic-agent" else "phenix-plugin-${name}"
+    name: _: basicPluginCrates.${name} or "phenix-plugin-${name}"
   ) pluginIds;
+
+  pluginCrateValues = builtins.attrValues pluginCrates;
+  uniquePluginCrates = builtins.attrNames (
+    builtins.listToAttrs (
+      map (package: {
+        name = package;
+        value = true;
+      }) pluginCrateValues
+    )
+  );
 
   pluginRole =
     package:
@@ -95,16 +104,20 @@ let
     in
     manifest.package.metadata.phenix.role or null;
 
-  checkedPluginCrates = builtins.mapAttrs (
-    name: package:
-    let
-      role = pluginRole package;
-    in
-    if role == "runtime-plugin" then
-      package
+  checkedPluginCrates =
+    if builtins.length pluginCrateValues != builtins.length uniquePluginCrates then
+      throw "phenixPlugins entries must use unique implementation packages"
     else
-      throw "phenixPlugins.${name} uses ${package} with role ${builtins.toJSON role}; expected runtime-plugin"
-  ) pluginCrates;
+      builtins.mapAttrs (
+        name: package:
+        let
+          role = pluginRole package;
+        in
+        if role == "runtime-plugin" then
+          package
+        else
+          throw "phenixPlugins.${name} uses ${package} with role ${builtins.toJSON role}; expected runtime-plugin"
+      ) pluginCrates;
 
   pluginSets = builtins.listToAttrs (
     map (
