@@ -2,7 +2,7 @@ use crate::{
     Authority, ComponentId, ComponentInterface, ComponentInvocationError, DurableSchema,
     EventDispatchReport, EventError, EventTypeId, Exact, GraphGenerationId, InterfaceId,
     KernelError, NamespaceTransaction, PhenixValue, PluginHost, PluginId, Project,
-    ResourceNamespace, SchemaMigration, ServiceId, TaskHandle, TransactionOp, ValueError,
+    ResourceNamespace, SchemaMigration, ServiceId, TaskScope, TransactionOp, ValueError,
 };
 use std::marker::PhantomData;
 
@@ -89,12 +89,8 @@ impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
         self.host.continue_service(input, requested_authority)
     }
 
-    pub fn spawn_task<T, F>(&self, requested_authority: &Authority, worker: F) -> TaskHandle<T>
-    where
-        T: Send + 'static,
-        F: FnOnce(crate::CancellationToken) -> T + Send + 'static,
-    {
-        self.host.spawn_task(requested_authority, worker)
+    pub fn task_scope(&self) -> Option<TaskScope<'_>> {
+        self.host.task_scope()
     }
 
     pub fn dispatch_event(
