@@ -118,7 +118,9 @@ The application-integration terminology is enforced at package boundaries:
 - transport choice cannot create a parallel runtime package category;
 - the prerelease `phenixClients` compatibility category is removed when its remaining consumers move to the canonical application/client-SDK model.
 
-The terminal CLI is the first required migration case. Its application package must not be represented as `phenix.cli` in the runtime plugin set. Runtime command discovery remains separate plugin behavior.
+The terminal CLI migration follows `application-cli.md`, which is the canonical source for application and command-toolbelt identities.
+
+Repository enforcement must reject the legacy runtime package `phenix-plugin-cli`, runtime plugin/component ID `phenix.cli`, `phenix.cli.*` service IDs, and a `phenixPlugins.${system}.cli` entry. Rename the runtime package, plugin ID, component ID, and service IDs together. Keep no prerelease compatibility alias.
 
 ## Runtime bridge enforcement
 
@@ -153,7 +155,7 @@ Apply enforcement in small changes:
 1. add package-role metadata and the dependency gate with exact current contract debt;
 2. add package-set role validation and expose current packaging violations;
 3. move shared contracts to neutral owners and delete debt entries as edges disappear;
-4. reclassify SDK, CLI, catalog, provider bundles, and basic default packages;
+4. reclassify SDK, command toolbelt, catalog, provider bundles, and basic default packages;
 5. add the runtime-bridge behavioral tests as the management API lands;
 6. finish with zero contract debt and no packaging exceptions.
 
@@ -170,6 +172,7 @@ Architecture enforcement is complete when:
 - `phenixPlugins` contains runtime plugins only;
 - independently specified default plugins have independent package ownership;
 - the terminal CLI, SDKs, bindings, client SDKs, transports, catalogs, and presets are absent from the runtime plugin set unless they independently export runtime behavior;
+- runtime command probing matches the canonical command-toolbelt identity in `application-cli.md`;
 - runtime-bridge invariants are covered by behavioral tests;
 - exact-head Source, Rust, Product, and Maintenance validation passes.
 
