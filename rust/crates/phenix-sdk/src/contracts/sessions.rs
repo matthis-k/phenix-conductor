@@ -1,10 +1,12 @@
-use phenix_core::{Bytes, ComponentInterface, InterfaceId, ServiceId};
 pub use phenix_core::SessionId;
+use phenix_core::{Bytes, ComponentInterface, InterfaceId, ServiceId};
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_SERVICE: &str = "phenix.sessions@1";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionInputKind {
     User,

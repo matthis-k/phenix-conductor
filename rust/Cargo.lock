@@ -1868,8 +1868,6 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-api",
- "phenix-plugin-context",
- "phenix-plugin-models",
  "phenix-plugin-options",
  "phenix-plugin-sessions",
  "phenix-provider-sdk",

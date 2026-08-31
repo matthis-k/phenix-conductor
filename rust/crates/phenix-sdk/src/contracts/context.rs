@@ -9,14 +9,24 @@ use serde::{Deserialize, Serialize};
 pub const CONTEXT_SERVICE: &str = "phenix.context@1";
 
 #[derive(
-    Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    phenix_sdk_macros::PhenixValue,
 )]
 pub struct ExactContextReference {
     pub resource_id: ContextResourceId,
     pub revision: ContextRevisionId,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextInjectionRequester {
     User,
@@ -27,7 +37,9 @@ pub enum ContextInjectionRequester {
     Frontend,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextInjectionLifetime {
     Execution,
