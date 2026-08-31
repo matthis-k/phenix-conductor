@@ -82,6 +82,27 @@ mod tests {
     use phenix_plugin_workspace::{workspace_component_manifest, workspace_manifest};
 
     #[test]
+    fn command_toolbelt_uses_canonical_runtime_identity() {
+        assert_eq!(
+            cli_manifest(Authority::default()).id.as_str(),
+            "phenix.command-toolbelt"
+        );
+        assert_eq!(cli_component_id().as_str(), "phenix.command-toolbelt");
+        assert_eq!(
+            crate::cli_discover_service().as_str(),
+            "phenix.command-toolbelt.discover@1"
+        );
+        assert_eq!(
+            crate::cli_version_service().as_str(),
+            "phenix.command-toolbelt.version@1"
+        );
+        assert_eq!(
+            crate::cli_auth_state_service().as_str(),
+            "phenix.command-toolbelt.auth-state@1"
+        );
+    }
+
+    #[test]
     fn cli_requires_workspace_binding_before_activation() {
         let shell = Authority::new([CapabilityId::parse(WORKSPACE_SHELL).unwrap()]);
         let error = ResolvedComponentGraph::compile(

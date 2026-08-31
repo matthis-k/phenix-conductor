@@ -12,6 +12,12 @@ errors="$({
       | (
           [
             $packages[]
+            | select(.name == "phenix-plugin-cli")
+            | "legacy runtime plugin package is forbidden: \(.name)"
+          ]
+          +
+          [
+            $packages[]
             | select(.name | startswith("phenix-plugin-"))
             | select((.metadata.phenix.role // "") == "")
             | "missing plugin package role: \(.name)"
