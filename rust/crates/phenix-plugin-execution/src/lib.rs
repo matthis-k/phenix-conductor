@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod agent_loop;
+#[cfg(test)]
+mod agent_loop_regression;
 mod component;
 mod configuration;
 #[cfg(test)]
@@ -10,13 +12,11 @@ mod generation_regression;
 mod implementation;
 mod tool_schedule;
 
-pub(crate) use agent_loop::{
-    agent_loop_factory, ModelInvokeCommand, ModelInvokeResponse, MODEL_ROUTING_SERVICE,
-};
 pub use agent_loop::{
     agent_loop_service, AgentLoopCommand, AgentLoopPolicy, AgentLoopResponse, AgentLoopUsage,
     AGENT_LOOP_SERVICE, DEFAULT_MAX_PARALLEL_TOOL_CALLS,
 };
+pub(crate) use agent_loop::{ModelInvokeCommand, ModelInvokeResponse, MODEL_ROUTING_SERVICE};
 pub use component::*;
 pub use configuration::{
     execution_configuration_service, AgentDefinition, CallablePolicy,
