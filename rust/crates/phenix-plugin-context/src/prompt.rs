@@ -220,4 +220,48 @@ mod tests {
         assert_eq!(assembly.sections.len(), 2);
         assert_eq!(assembly.sections[1].source, "AGENTS.md");
     }
+
+    #[test]
+    fn fixed_identity_is_present_without_context() {
+        let assembly = assemble_prompt(&ExecutionContextProjection {
+            execution_id: "exec".into(),
+            entries: Vec::new(),
+        });
+
+        assert_eq!(assembly.sections.len(), 1);
+        let identity = &assembly.sections[0];
+        assert_eq!(identity.role, PromptSectionRole::Instruction);
+        assert_eq!(identity.kind, PromptSectionKind::HarnessIdentity);
+        assert_eq!(identity.source, "phenix");
+        assert_eq!(identity.reference, None);
+        assert_eq!(
+            identity.content,
+            PHENIX_HARNESS_IDENTITY.as_bytes().to_vec().into()
+        );
+    }
+
+    #[test]
+    fn exact_reference_breaks_same_class_sequence_ties() {
+        let first = entry(1, "a", ContextResourceKind::Skill, "z-source");
+        let second = entry(1, "b", ContextResourceKind::Skill, "a-source");
+
+        let left = assemble_prompt(&ExecutionContextProjection {
+            execution_id: "exec".into(),
+            entries: vec![second.clone(), first.clone()],
+        });
+        let right = assemble_prompt(&ExecutionContextProjection {
+            execution_id: "exec".into(),
+            entries: vec![first, second],
+        });
+
+        assert_eq!(left, right);
+        assert_eq!(
+            left.sections
+                .iter()
+                .skip(1)
+                .map(|section| section.source.as_str())
+                .collect::<Vec<_>>(),
+            vec!["z-source", "a-source"]
+        );
+    }
 }
