@@ -88,6 +88,24 @@ let
     if builtins.elem name basicPluginNames then "phenix-plugin-basic-agent" else "phenix-plugin-${name}"
   ) pluginIds;
 
+  pluginRole =
+    package:
+    let
+      manifest = builtins.fromTOML (builtins.readFile (../rust/crates + "/${package}/Cargo.toml"));
+    in
+    manifest.package.metadata.phenix.role or null;
+
+  checkedPluginCrates = builtins.mapAttrs (
+    name: package:
+    let
+      role = pluginRole package;
+    in
+    if role == "runtime-plugin" then
+      package
+    else
+      throw "phenixPlugins.${name} uses ${package} with role ${builtins.toJSON role}; expected runtime-plugin"
+  ) pluginCrates;
+
   pluginSets = builtins.listToAttrs (
     map (
       system:
@@ -100,7 +118,7 @@ let
           name: pluginId:
           self.lib.mkPhenixPlugin {
             inherit pkgs name;
-            package = mkEmbeddedPluginPackage pkgs pluginCrates.${name};
+            package = mkEmbeddedPluginPackage pkgs checkedPluginCrates.${name};
             manifest = {
               id = pluginId;
               version = 1;
