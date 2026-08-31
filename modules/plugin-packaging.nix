@@ -464,6 +464,7 @@ in
 
             export PHENIX_STATE_DB="$TMPDIR/external-layer.sqlite"
             "${externalLayerComposition}/bin/phenix" --list-services > "$TMPDIR/external-layer-services.json"
+            jq -e '(.plugins | index("fixture.session-layer")) != null' "$TMPDIR/external-layer-services.json" >/dev/null
             printf '%s\n' '{"id":1,"service":"phenix.sessions@1","input":{"type":"variant","value":{"tag":"Get","value":{"type":"table","value":{"id":{"type":"string","value":"missing"}}}}}}' \
               | "${externalLayerComposition}/bin/phenix" > "$TMPDIR/external-layer.json"
             jq -e '.status == "ok" and .output.external_layer == true' "$TMPDIR/external-layer.json" >/dev/null
