@@ -292,7 +292,7 @@ in
       };
       defaultPluginNames = [
         "artifacts"
-        "cli"
+        "command-toolbelt"
         "context"
         "debug"
         "execution"

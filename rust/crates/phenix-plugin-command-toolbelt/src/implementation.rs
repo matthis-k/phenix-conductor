@@ -10,10 +10,10 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-pub const CLI_DISCOVER_SERVICE: &str = "phenix.cli.discover@1";
-pub const CLI_VERSION_SERVICE: &str = "phenix.cli.version@1";
-pub const CLI_AUTH_STATE_SERVICE: &str = "phenix.cli.auth-state@1";
-const CLI_PLUGIN: &str = "phenix.cli";
+pub const CLI_DISCOVER_SERVICE: &str = "phenix.command-toolbelt.discover@1";
+pub const CLI_VERSION_SERVICE: &str = "phenix.command-toolbelt.version@1";
+pub const CLI_AUTH_STATE_SERVICE: &str = "phenix.command-toolbelt.auth-state@1";
+const CLI_PLUGIN: &str = "phenix.command-toolbelt";
 const WORKSPACE_PLUGIN: &str = "phenix.workspace";
 const WORKSPACE_SHELL: &str = "workspace.shell";
 const SUPPORTED: &[&str] = &["git", "gh", "jj", "rg", "fd", "jq", "nix", "cargo"];

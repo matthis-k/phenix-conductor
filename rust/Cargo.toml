@@ -15,7 +15,7 @@ members = [
   "crates/phenix-plugin-basic-model",
   "crates/phenix-plugin-basic-skills",
   "crates/phenix-plugin-basic-tools",
-  "crates/phenix-plugin-cli",
+  "crates/phenix-plugin-command-toolbelt",
   "crates/phenix-plugin-context",
   "crates/phenix-plugin-debug",
   "crates/phenix-plugin-execution",

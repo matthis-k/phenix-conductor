@@ -58,7 +58,7 @@ let
     basic-model = "phenix.basic-model";
     basic-skills = "phenix.basic-skills";
     basic-tools = "phenix.basic-tools";
-    cli = "phenix.cli";
+    command-toolbelt = "phenix.command-toolbelt";
     context = "phenix.context";
     debug = "phenix.debug";
     execution = "phenix.execution";

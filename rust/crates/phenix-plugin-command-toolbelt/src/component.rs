@@ -5,8 +5,8 @@ use phenix_core::{
 };
 use phenix_plugin_workspace::WorkspaceInterface;
 
-const CLI_COMPONENT: &str = "phenix.cli";
-const CLI_PLUGIN: &str = "phenix.cli";
+const CLI_COMPONENT: &str = "phenix.command-toolbelt";
+const CLI_PLUGIN: &str = "phenix.command-toolbelt";
 const WORKSPACE_SHELL: &str = "workspace.shell";
 
 pub struct CliDiscoverInterface;

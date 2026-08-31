@@ -1641,7 +1641,7 @@ dependencies = [
  "phenix-core",
  "phenix-plugin-artifacts",
  "phenix-plugin-basic-agent",
- "phenix-plugin-cli",
+ "phenix-plugin-command-toolbelt",
  "phenix-plugin-context",
  "phenix-plugin-debug",
  "phenix-plugin-execution",
@@ -1661,7 +1661,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "phenix-plugin-cli"
+name = "phenix-plugin-command-toolbelt"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
