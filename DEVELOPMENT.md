@@ -1,16 +1,12 @@
 # Development
 
-The flake is the single owner of the development toolchain, maintenance provider, Nix package checks, and shipped Harness products. There is no separate devenv environment or lockfile.
-
-Repository maintenance is declared once in Nix through `phenix-flake-ci` and materialized as `packages.<system>.phenix-maintenance`. The generated executable is `maintenance`; local development, git hooks, and CI invoke the same command implementations.
+The flake owns the development toolchain, maintenance commands, package checks, and shipped Harness products. Repository maintenance is declared in `modules/development.nix` through `phenix-flake-ci`. Local development, git hooks, and CI use the same generated command implementations.
 
 ## Development shell
 
 ```sh
 nix develop
 ```
-
-The shell contains Rust, Nix, actionlint, Statix, Stitch, and generated maintenance tooling.
 
 ## Canonical commands
 
@@ -26,79 +22,61 @@ Run the complete read-only validation graph:
 maintenance all
 ```
 
-Run one boundary or focused layer directly:
+Stable validation boundaries are:
 
 | Command | Boundary |
 | --- | --- |
-| `maintenance check source` | Source formatting, Nix static analysis, workflow syntax/synchronization, and Cargo test-target classification |
-| `maintenance check rust` | Rust static analysis with Clippy; this is the compile/type-check gate |
-| `maintenance test unit` | In-crate library/binary unit tests |
+| `maintenance check source` | Formatting, source analysis, workflow synchronization, and test-target classification |
+| `maintenance check rust` | Rust static analysis and compile/type-check gate |
+| `maintenance test unit` | In-crate tests |
 | `maintenance test doc` | Rust documentation tests |
-| `maintenance test integration` | Cargo integration-test targets that exercise crate/API boundaries |
-| `maintenance test system` | Black-box Harness/process/protocol tests across real Rust binaries and deterministic fixtures |
+| `maintenance test integration` | Crate and API integration targets |
+| `maintenance test system` | Black-box Harness, process, and protocol targets |
 | `maintenance test product` | Realized Harness and packaged-product behavior |
 
-Aggregate nodes run their children in declared order. Leaf commands can also be selected directly, for example `maintenance test integration phenix-acp-repeated-prompts` or `maintenance test product phenix-acp`.
+The current leaf commands and CI layout come from `modules/development.nix`. Use the generated command help instead of copying leaf names into documentation.
 
 ## Test ownership
 
-Each behavior has one canonical test layer.
+Each behavior has one canonical test layer. Prove it at the highest practical deterministic boundary.
 
 ### Unit and documentation
 
-Unit tests live with the Rust crate/module they exercise and avoid process or package boundaries. They are executed by `maintenance test unit`. Rust documentation tests are a separate `maintenance test doc` leaf so CI can attribute their failures independently.
+Use unit tests for pure or local invariants. Keep documentation tests separate so failures remain attributable.
 
 ### Integration
 
-Ordinary Cargo targets under `crates/*/tests/` are integration tests when they exercise a crate through its public API or join several internal components. Each target is represented by a maintenance leaf beneath `maintenance test integration`.
+Use integration tests for public crate APIs or behavior spanning several internal components without requiring the complete process boundary.
 
-`maintenance check source test-targets` compares Cargo metadata with the explicit integration/system target declarations. Adding a new Cargo integration target therefore requires classifying it rather than silently folding it into an opaque test command.
+Every Cargo integration-test target must be explicitly classified under the integration or system maintenance boundary. Source validation checks that classification against Cargo metadata.
 
 ### System
 
-`maintenance test system` owns Harness subprocess/protocol tests. This is the end-to-end Rust application boundary: real supported Phenix binaries and deterministic fixtures, with no external credentials.
+Use system tests for externally observable Rust runtime behavior across real supported binaries or process/protocol boundaries. Prefer deterministic reusable fixtures and no external credentials.
 
 ### Product
 
-`maintenance test product` owns realized Harness/package behavior. The `phenix-acp` leaf retains ACP boundary smoke coverage while the product check exercises the installed Harness. Stitch runtime/package validation remains separate.
+Use product tests only for behavior introduced by application composition, packaging, wrappers, or installed artifacts. Keep adapter-specific boundary tests separate when they exercise a real adapter contract.
 
-Frontend product behavior belongs to the frontend repository, currently `matthis-k/phenix-nvim` for Neovim.
-
-Product derivations do not rerun the Rust unit/integration/system suites. Cargo owns Rust behavioral tests; the product layer owns behavior that exists only after application composition/packaging.
+Frontend product behavior belongs in the frontend repository. Product derivations do not rerun Rust unit, integration, or system suites.
 
 ## Nix testing rule
 
-Ordinary Nix configuration is not duplicated into assertions.
+Do not duplicate ordinary Nix configuration into assertions. When a package, wrapper, application, or system is misconfigured, the build or run that consumes the configuration is usually the useful failure boundary.
 
-If a package, wrapper, application, or system is misconfigured, the build/run that consumes that configuration is the useful failure boundary. Do not add checks that restate selected options, package names, file declarations, or literal values merely to prove the declaration was written.
+Test Nix expressions directly when the expression itself contains reusable program logic such as composition, transformation, ordering, or precedence.
 
-Direct tests of Nix expressions are reserved for Nix that is itself nontrivial reusable program logic: composition libraries, transformations, ordering/precedence rules, generated aggregates, and similar machinery.
+## CI and generated workflow
 
-For the same reason this repository does not carry a generic `nix flake check --no-build` source gate. Every maintenance command already requires the flake/maintenance declaration to evaluate, and product commands realize the outputs whose configuration matters.
+`modules/development.nix` is authoritative for maintenance behavior and CI presentation. `.github/workflows/ci.yml` is a generated projection and must remain synchronized with that declaration.
 
-## CI provider
-
-The Nix maintenance declaration controls both what runs and how granularly it is presented in CI. Reusable command/rendering machinery comes from the `phenix-flake-ci` input; Phenix keeps its source, Rust, integration, system, and product policy in `modules/development.nix`.
-
-A command opts into CI with `ci.enable`. An enabled command is one visible CI step. `ci.stage` assigns that step to a job; commands with the same stage share a job, while different stages become different jobs.
-
-Rust leaves remain in one `Rust` job so they share `CARGO_HOME` and `CARGO_TARGET_DIR`, while Clippy, unit tests, doc tests, every declared Cargo integration/system target, and product checks remain separately attributable steps.
-
-GitHub Actions must know its topology before runtime execution, so `phenix-flake-ci` renders `.github/workflows/ci.yml` from the Nix declaration. The committed YAML is a generated projection, not a second command graph. `maintenance check source workflow-sync` evaluates the generated workflow and fails if the committed file differs.
-
-The final `Maintenance checks` job remains the aggregate required status.
+Do not document generated job topology in prose. It changes with the declaration and is checked mechanically.
 
 ## Pre-commit
 
-The maintenance declaration enables the shared `phenix-flake-ci` pre-commit integration with `gitHooks.preCommit = [ "fix" ]`. Entering `nix develop` installs that generated hook into the repository's Git directory.
+The development shell installs the shared maintenance pre-commit integration. It runs deterministic normalization on the staged paths. Outside the shell, the generated hook may enter `nix develop` to run the same maintenance command.
 
-The hook records the paths staged before `maintenance fix`, applies deterministic normalization, re-stages only those original paths, and runs `git diff --cached --check`. Outside the development shell it falls back to:
-
-```sh
-nix develop --command maintenance fix
-```
-
-Compiler errors, judgment-bearing lint findings, test failures, runtime failures, and Nix build failures are never auto-repaired.
+Compiler errors, lint findings that require judgment, test failures, runtime failures, and Nix build failures are never auto-repaired.
 
 ## Stitch
 

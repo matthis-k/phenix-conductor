@@ -32,7 +32,7 @@
       ];
 
       imports = [
-        ./modules/phenix-acp.nix
+        ./modules/harness-product.nix
         ./modules/plugin-packaging.nix
         ./modules/package-sets.nix
         ./modules/development.nix

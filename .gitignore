@@ -1,22 +1,14 @@
 # Build outputs
-/target/
-/node_modules/
 result
 result-*
 
 # Local development state
 /.cache/
-/.pi-subagents
 /.direnv/
-.phenix-agent-state/
 .pre-commit-config.yaml
 
 # Diagnostics
 *.log
 *.log.*
-
-# Generated QA output
-/.phenix-qa/
-/qa-results/
 
 rust/target/

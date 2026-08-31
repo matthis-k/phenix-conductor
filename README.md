@@ -1,10 +1,8 @@
 # Phenix AI
 
-This repository owns the generic Phenix runtime, conductor, shared client contracts, independently packaged first-party plugins, client adapters, and the supported Harness product. The current GitHub repository name is temporary.
+This repository owns the generic Phenix runtime, conductor, shared client contracts, independently packaged first-party plugins, client adapters, and the supported Harness product.
 
-The Neovim frontend lives in `matthis-k/phenix-nvim`. This repository does not own editor windows, input handling, transcript presentation, Neovim packaging, or frontend-specific tests.
-
-The project is under active architectural development. Replace obsolete contracts instead of preserving compatibility layers.
+The Neovim frontend lives in `matthis-k/phenix-nvim`. This repository owns server-side behavior and frontend-neutral contracts.
 
 ## Architecture
 
@@ -50,17 +48,15 @@ First-party `phenix-plugin-*` crates own Phenix agent-domain services through th
 | `phenix-acp` | ACP adapter to `phenix-client` |
 | `phenix-backend-*` | Provider/backend adapters |
 
-There is no UI crate or Neovim plugin in this repository.
-
 ## Product composition
 
 The normal `phenix` package is the supported Harness composition. It is built through the same public package interfaces available to users.
 
 Nix exposes independently packaged first-party plugins through `phenixPlugins.<system>.*` and client adapters through `phenixClients.<system>.*`. `wrappers.phenix.wrap` and `lib.mkPhenix` assemble a conductor with an explicit plugin selection. Omitting a plugin removes its service unless another selected provider supplies the same contract.
 
-The resolved component graph is the canonical runtime composition for component imports. A `ComponentExport` identifies the executable endpoint; it does not need a duplicate terminal `ServiceContribution`. Plugin service contributions remain available for ordinary service dispatch and explicit interposition layers. Embedded and external hosts execute the same graph-selected component identity, and development reconciliation replaces the kernel configuration, component graph, resources, and generation as one resolved runtime topology.
+The resolved component graph is the canonical runtime composition for component imports. A `ComponentExport` identifies the executable endpoint. It does not need a duplicate terminal `ServiceContribution`. Plugin service contributions remain available for ordinary service dispatch and explicit interposition layers. Embedded and external hosts execute the same graph-selected component identity. Development reconciliation replaces kernel configuration, component graph, resources, and generation as one resolved runtime topology.
 
-Plugin-owned durable state is canonical. Core enforces namespace ownership, migrations, transactions, and authority without interpreting first-party domain rows.
+Plugin-owned durable state is canonical. Core enforces namespace ownership, migrations, transactions, and authority without interpreting first-party domain rows. Process-local handles, connections, caches, and provider generations are disposable and must not become durable identity.
 
 ### Product configuration and skills
 
@@ -86,8 +82,6 @@ The flake exposes:
 - `lib.mkPhenixClient`;
 - `lib.mkPhenix`.
 
-`phenix-kernel`, `phenix-protocol`, and `phenix-plugin-suite` are superseded names. Do not restore them as competing package owners.
-
 ## Protocol and provider boundaries
 
 Frontends and protocol adapters reach configured conductor services through the canonical client contract. They do not own durable application state.
@@ -102,7 +96,9 @@ Authentication and provider selection are plugin and Harness concerns. They must
 - Keep one durable owner per semantic domain.
 - Parse external data at boundaries and keep invalid runtime states difficult to represent internally.
 - Preserve typed failure modes across configuration, transport, protocol, plugin, and provider boundaries.
-- Authority only attenuates across plugin, task, retry, event, persistence, and provider boundaries.
+- Effective authority is the intersection of caller authority, provider maximum authority, and invocation restrictions.
+- Apply the same authority attenuation to direct calls, plugin calls, retries, events, tasks, persistence, workspace operations, and external plugins.
+- Resource-only plugins cannot execute code.
 - Zero-plugin mode has no hidden first-party fallbacks.
 - First-party plugins use the same contracts as alternate plugins.
 - Do not add parallel frontend-to-agent protocols or duplicate orchestration registries.
@@ -119,4 +115,4 @@ maintenance all
 
 Validation is separated into source, Rust, integration/system, realized product, Nix composition, and Maintenance boundaries. Product validation exercises installed conductor and Harness compositions. Frontend behavior is tested in frontend repositories.
 
-See `DEVELOPMENT.md` for focused validation commands and `rust/ARCHITECTURE.md` for the current ownership model.
+See `DEVELOPMENT.md` for focused validation commands and test-boundary guidance.

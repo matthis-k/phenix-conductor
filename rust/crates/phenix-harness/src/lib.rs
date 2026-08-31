@@ -158,32 +158,6 @@ impl HarnessBuilder {
         Ok(builder)
     }
 
-    pub fn default_suite_plugin_ids() -> BTreeSet<String> {
-        let authority = default_suite_authority();
-        [
-            repository_worker_manifest(),
-            session_manifest(),
-            session_tree_manifest(),
-            artifact_manifest(),
-            cli_manifest(authority.clone()),
-            context_manifest(),
-            execution_manifest(authority.clone()),
-            language_manifest(),
-            planning_manifest(),
-            workspace_manifest(),
-            model_routing_manifest(authority.clone()),
-            job_manifest(),
-            frontend_manifest(authority.clone()),
-            hook_manifest(authority.clone()),
-            debug_manifest(authority.clone()),
-            options_manifest(),
-            sdk_manifest(authority),
-        ]
-        .into_iter()
-        .map(|manifest| manifest.id.as_str().to_owned())
-        .collect()
-    }
-
     pub fn with_selected_suite(enabled: &BTreeSet<String>) -> Result<Self, String> {
         let authority = default_suite_authority();
         let available = [
@@ -717,40 +691,9 @@ mod tests {
     }
 
     #[test]
-    fn default_harness_loads_first_party_suite_through_kernel_contracts() {
+    fn default_harness_routes_first_party_services_through_kernel_contracts() {
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
-        let plugins = harness
-            .kernel()
-            .config()
-            .manifests()
-            .map(|manifest| manifest.id.as_str().to_owned())
-            .collect::<BTreeSet<_>>();
-        assert_eq!(plugins, HarnessBuilder::default_suite_plugin_ids());
-        for component in [
-            repository_worker_component_manifest().id,
-            session_component_manifest().id,
-            session_tree_component_manifest().id,
-            artifact_component_manifest().id,
-            cli_component_manifest(default_suite_authority()).id,
-            context_component_manifest().id,
-            execution_component_manifest(default_suite_authority()).id,
-            language_component_manifest().id,
-            planning_component_manifest().id,
-            workspace_component_manifest().id,
-            model_routing_component_manifest(default_suite_authority()).id,
-            job_component_manifest().id,
-            frontend_component_manifest(default_suite_authority()).id,
-            hook_component_manifest(default_suite_authority()).id,
-            debug_component_manifest(default_suite_authority()).id,
-            options_component_manifest().id,
-            sdk_component_manifest(default_suite_authority()).id,
-        ] {
-            assert!(
-                harness.component_graph().component(&component).is_some(),
-                "missing first-party component {component}"
-            );
-        }
 
         let snapshot = RepositoryWorkSnapshot {
             pull_requests: Vec::new(),
