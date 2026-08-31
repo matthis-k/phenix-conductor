@@ -4,16 +4,8 @@ Status: specification only. Implement after repository cleanup.
 
 ## Terminology
 
-Phenix uses these terms consistently:
-
-- **Application**: user-facing software such as Neovim, a terminal CLI, or a browser UI.
-- **Protocol**: the message contract between an application and Phenix.
-- **Adapter**: the Phenix-side implementation of an external protocol.
-- **Client SDK**: reusable application-side code for speaking a protocol.
-- **Binding**: a language-native API over a client SDK.
-- **Transport**: the mechanism that moves protocol bytes or messages.
-
-The terminal CLI is an application. It is not a Phenix runtime plugin.
+Use the canonical terms from [Application integration terminology](application-integration-terminology.md).
+The terminal CLI is an Application. It is not a Phenix runtime plugin.
 
 ## Goal
 
