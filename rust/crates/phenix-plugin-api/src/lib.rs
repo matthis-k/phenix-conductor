@@ -336,7 +336,7 @@ fn open_session(
     if let Some(session) = existing {
         if resolve_bool(context, "session.reuse_existing", &option_context)? {
             return Ok(SdkSessionResponse::Opened {
-                session,
+                session: phenix_sdk::SessionRecord { id: session.id },
                 created: false,
             });
         }
@@ -358,7 +358,7 @@ fn open_session(
         .map_err(|error| error.to_string())?
     {
         SessionResponse::Created { session } => Ok(SdkSessionResponse::Opened {
-            session,
+            session: phenix_sdk::SessionRecord { id: session.id },
             created: true,
         }),
         response => Err(format!("unexpected session create response: {response:?}")),
