@@ -3,11 +3,11 @@ use phenix_core::{
     PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
     ServiceId, TransactionOp,
 };
+use phenix_sdk::JOB_SERVICE;
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-pub const JOB_SERVICE: &str = "phenix.jobs@1";
 const JOB_PLUGIN: &str = "phenix.jobs";
 const JOB_NAMESPACE: &str = "phenix.jobs.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";

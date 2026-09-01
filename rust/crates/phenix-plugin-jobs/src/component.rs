@@ -1,23 +1,11 @@
-use crate::{job_manifest, JOB_SERVICE};
+use crate::job_manifest;
 use phenix_core::{
-    Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
-    PluginId,
+    Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, PluginId,
 };
+use phenix_sdk::JobInterface;
 
 const JOB_COMPONENT: &str = "phenix.jobs";
 const JOB_PLUGIN: &str = "phenix.jobs";
-
-pub struct JobInterface;
-
-impl ComponentInterface for JobInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(JOB_SERVICE).expect("static job interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<crate::JobCommand, crate::JobResponse>()
-    }
-}
 
 #[must_use]
 pub fn job_component_id() -> ComponentId {
