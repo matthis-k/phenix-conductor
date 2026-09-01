@@ -25,12 +25,6 @@ pub use configuration::{
 };
 pub use tool_schedule::{ScheduledToolBatch, ToolCallPlan, ToolConcurrency, ToolScheduler};
 
-pub(crate) use phenix_sdk::{
-    execution_service, CallableRecord, ExecutionAuthority, ExecutionCommand, ExecutionInterface,
-    ExecutionRecord, ExecutionResponse, ExecutionState, WorkerTaskRecord, WorkerTaskState,
-    EXECUTION_SERVICE,
-};
-
 use phenix_core::{
     Authority, PluginHost, PluginInstance, PluginManifest, ServiceContribution, ServiceId,
 };
