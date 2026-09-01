@@ -8,10 +8,8 @@ use phenix_core::{
     ResolvedHarness, ResolvedHarnessActivation, ResourceNamespace, SchemaMigration, SessionId,
     TransactionOp,
 };
-use phenix_plugin_sessions::{
-    session_component_manifest, session_factory, session_manifest, session_service, SessionCommand,
-    SessionResponse,
-};
+use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
+use phenix_sdk::{session_service, SessionCommand, SessionResponse};
 use std::{
     collections::BTreeSet,
     fs,
