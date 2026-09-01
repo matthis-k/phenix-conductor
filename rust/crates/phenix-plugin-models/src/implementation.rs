@@ -1,16 +1,15 @@
 use phenix_core::{
-    Authority, Bytes, CallableId, CapabilityId, ComponentInterface, DurableSchema, ModelId,
-    PhenixValue, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, Project, ResourceNamespace, RoutingProfileId, ServiceContribution, ServiceId,
-    TransactionOp,
+    Authority, CallableId, CapabilityId, ComponentInterface, DurableSchema, PhenixValue,
+    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, Project,
+    ResourceNamespace, RoutingProfileId, ServiceContribution, ServiceId, TransactionOp,
 };
-pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
-use phenix_sdk_macros::PhenixValue;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use phenix_sdk::{
+    model_inference_service, model_routing_service, ModelCommand, ModelInferenceRequest,
+    ModelInferenceResponse, ModelResponse, ModelRoutingInterface, ModelTarget, RoutingProfile,
+    RoutingProfileDescriptor,
+};
+use std::collections::BTreeSet;
 
-pub const MODEL_ROUTING_SERVICE: &str = "phenix.models.routing@1";
-pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";
 const MODEL_ROUTING_PLUGIN: &str = "phenix.models";
 const MODEL_NAMESPACE: &str = "phenix.models.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
@@ -26,75 +25,6 @@ fn context<'host, 'runtime, 'state>(
     authenticated: &'state mut BTreeSet<PluginId>,
 ) -> ModelContext<'host, 'runtime, 'state> {
     PluginContext::new(host, (), (), authenticated)
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct ModelTarget {
-    pub provider_plugin: PluginId,
-    pub model: ModelId,
-    #[serde(default)]
-    pub options: BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct RoutingProfile {
-    pub id: RoutingProfileId,
-    pub default_target: ModelTarget,
-    #[serde(default)]
-    pub callable_targets: BTreeMap<CallableId, ModelTarget>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct RoutingProfileDescriptor {
-    pub id: RoutingProfileId,
-    pub providers: Vec<PluginId>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "operation", rename_all = "snake_case")]
-pub enum ModelCommand {
-    RegisterProfile {
-        profile: RoutingProfile,
-    },
-    GetProfile {
-        id: RoutingProfileId,
-    },
-    ListProfiles,
-    SetProviderAuthenticated {
-        provider_plugin: PluginId,
-        authenticated: bool,
-    },
-    Resolve {
-        profile_id: RoutingProfileId,
-        callable_id: Option<CallableId>,
-    },
-    Invoke {
-        profile_id: RoutingProfileId,
-        callable_id: Option<CallableId>,
-        input: Bytes,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ModelResponse {
-    Profile {
-        profile: Option<RoutingProfile>,
-    },
-    Profiles {
-        profiles: Vec<RoutingProfileDescriptor>,
-    },
-    Authentication {
-        provider_plugin: PluginId,
-        authenticated: bool,
-    },
-    Target {
-        target: ModelTarget,
-    },
-    Inference {
-        target: ModelTarget,
-        response: ModelInferenceResponse,
-    },
 }
 
 #[must_use]
@@ -131,16 +61,6 @@ pub fn model_routing_factory() -> Box<dyn PluginInstance> {
     Box::new(ModelRoutingPlugin::default())
 }
 
-#[must_use]
-pub fn model_routing_service() -> ServiceId {
-    ServiceId::parse(MODEL_ROUTING_SERVICE).expect("static service id is valid")
-}
-
-#[must_use]
-pub fn model_inference_service() -> ServiceId {
-    ServiceId::parse(MODEL_INFERENCE_SERVICE).expect("static service id is valid")
-}
-
 fn model_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(MODEL_NAMESPACE).expect("static namespace is valid")
 }
@@ -172,7 +92,7 @@ impl PluginInstance for ModelRoutingPlugin {
             return Err(format!("unsupported model routing service: {service}"));
         }
         let mut context = context(host, &mut self.authenticated);
-        let interface = crate::ModelRoutingInterface::interface_id();
+        let interface = ModelRoutingInterface::interface_id();
         let command = context
             .kernel
             .decode_projected::<ModelCommand>(&interface, input)
@@ -369,8 +289,9 @@ fn profile_key(id: &RoutingProfileId) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, LocalPersistence, PhenixValue, Project};
+    use phenix_core::{Kernel, KernelConfig, LocalPersistence, ModelId, PhenixValue, Project};
     use std::{
+        collections::BTreeMap,
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
@@ -421,11 +342,9 @@ mod tests {
                 None,
             )
             .map_err(|error| error.to_string())?;
-        {
-            let output: PhenixValue =
-                serde_json::from_slice(&output).map_err(|error| error.to_string())?;
-            ModelResponse::try_from(Project(&output)).map_err(|error| error.to_string())
-        }
+        let output: PhenixValue =
+            serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+        ModelResponse::try_from(Project(&output)).map_err(|error| error.to_string())
     }
 
     #[test]
