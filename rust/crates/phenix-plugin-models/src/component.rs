@@ -1,27 +1,15 @@
-use crate::{model_routing_manifest, MODEL_ROUTING_SERVICE};
+use crate::model_routing_manifest;
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface, ComponentManifest,
-    InterfaceId, PluginId,
+    PluginId,
 };
+use phenix_sdk::{ModelRoutingInterface, MODEL_ROUTING_SERVICE};
 
 const MODEL_ROUTING_COMPONENT: &str = "phenix.models";
 const MODEL_ROUTING_PLUGIN: &str = "phenix.models";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
-
-pub struct ModelRoutingInterface;
-
-impl ComponentInterface for ModelRoutingInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(MODEL_ROUTING_SERVICE)
-            .expect("static model routing interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<crate::ModelCommand, crate::ModelResponse>()
-    }
-}
 
 #[must_use]
 pub fn model_routing_component_id() -> ComponentId {
