@@ -3,10 +3,13 @@ use phenix_core::{
     PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
     ServiceId, TransactionOp,
 };
+use phenix_sdk::{
+    DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord, PlanStep,
+    PlanningCommand, PlanningResponse, PLANNING_SERVICE,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const PLANNING_SERVICE: &str = "phenix.planning@1";
 const PLANNING_PLUGIN: &str = "phenix.planning";
 const PLANNING_NAMESPACE: &str = "phenix.planning.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
@@ -20,100 +23,6 @@ type PlanningContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> PlanningContext<'host, 'runtime> {
     PluginContext::new(host, (), (), ())
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-pub struct ObjectiveRecord {
-    pub id: String,
-    pub title: String,
-    pub parent: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-pub struct PlanStep {
-    pub id: String,
-    pub description: String,
-    pub dependencies: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-pub struct PlanRecord {
-    pub id: String,
-    pub objective_id: String,
-    pub goal: String,
-    pub steps: Vec<PlanStep>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-pub struct DecisionRecord {
-    pub id: String,
-    pub objective_id: String,
-    pub statement: String,
-    pub rationale: String,
-    pub dependencies: Vec<String>,
-    pub supersedes: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-#[serde(rename_all = "snake_case")]
-pub enum HistoryKind {
-    Objective,
-    Plan,
-    Decision,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-pub struct HistoryEntry {
-    pub kind: HistoryKind,
-    pub id: String,
-    pub objective_id: String,
-    pub summary: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-#[serde(tag = "operation", rename_all = "snake_case")]
-pub enum PlanningCommand {
-    CreateObjective {
-        id: String,
-        title: String,
-        parent: Option<String>,
-    },
-    CreatePlan {
-        id: String,
-        objective_id: String,
-        goal: String,
-        steps: Vec<PlanStep>,
-    },
-    RecordDecision {
-        id: String,
-        objective_id: String,
-        statement: String,
-        rationale: String,
-        dependencies: Vec<String>,
-        supersedes: Option<String>,
-    },
-    GetObjective {
-        id: String,
-    },
-    GetPlan {
-        id: String,
-    },
-    GetDecision {
-        id: String,
-    },
-    SearchHistory {
-        objective_id: Option<String>,
-        query: String,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
-#[serde(tag = "response", rename_all = "snake_case")]
-pub enum PlanningResponse {
-    Objective { objective: Option<ObjectiveRecord> },
-    Plan { plan: Option<PlanRecord> },
-    Decision { decision: Option<DecisionRecord> },
-    History { entries: Vec<HistoryEntry> },
 }
 
 #[must_use]

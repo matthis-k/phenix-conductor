@@ -5,6 +5,9 @@ edition = "2021"
 publish = false
 autotests = false
 
+[package.metadata.phenix]
+role = "passive-library"
+
 [dependencies]
 phenix-sdk-macros = { path = "../phenix-sdk-macros" }
 rusqlite.workspace = true

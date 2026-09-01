@@ -7,12 +7,10 @@ use phenix_core::{
     PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, SdkClient,
     ServiceContribution, ServiceId,
 };
-use phenix_plugin_context::ContextInterface;
-use phenix_plugin_frontend::FrontendInterface;
-use phenix_plugin_jobs::JobInterface;
-use phenix_plugin_models::ModelRoutingInterface;
-use phenix_plugin_planning::PlanningInterface;
-use phenix_plugin_sessions::SessionInterface;
+use phenix_sdk::{
+    ContextInterface, FrontendInterface, JobInterface, ModelRoutingInterface, PlanningInterface,
+    SessionInterface,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

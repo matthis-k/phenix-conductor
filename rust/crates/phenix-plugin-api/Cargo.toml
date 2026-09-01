@@ -7,19 +7,13 @@ publish = false
 [package.metadata.phenix]
 role = "runtime-plugin"
 
-[package.metadata.phenix.contract-debt]
-phenix-plugin-context = "Move the consumed context contract to its neutral owner."
-phenix-plugin-execution = "Move the consumed execution contract to its neutral owner."
-phenix-plugin-models = "Move the consumed models contract to its neutral owner."
-phenix-plugin-options = "Move the consumed options contract to its neutral owner."
-phenix-plugin-sessions = "Move the consumed sessions contract to its neutral owner."
-
 [dependencies]
 phenix-core = { path = "../phenix-core" }
-phenix-plugin-context = { path = "../phenix-plugin-context" }
-phenix-plugin-execution = { path = "../phenix-plugin-execution" }
-phenix-plugin-models = { path = "../phenix-plugin-models" }
-phenix-plugin-options = { path = "../phenix-plugin-options" }
-phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }
 phenix-sdk = { path = "../phenix-sdk" }
 serde_json.workspace = true
+
+[dev-dependencies]
+phenix-plugin-context = { path = "../phenix-plugin-context" }
+phenix-plugin-execution = { path = "../phenix-plugin-execution" }
+phenix-plugin-options = { path = "../phenix-plugin-options" }
+phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }

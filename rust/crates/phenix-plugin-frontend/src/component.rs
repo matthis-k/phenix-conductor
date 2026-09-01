@@ -1,24 +1,12 @@
-use crate::{frontend_manifest, FRONTEND_SERVICE};
+use crate::frontend_manifest;
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-    ComponentManifest, InterfaceId, PluginId,
+    ComponentManifest, PluginId,
 };
-use phenix_plugin_execution::ExecutionInterface;
+use phenix_sdk::{ExecutionInterface, FrontendInterface};
 
 const FRONTEND_COMPONENT: &str = "phenix.frontend-services";
 const FRONTEND_PLUGIN: &str = "phenix.frontend-services";
-
-pub struct FrontendInterface;
-
-impl ComponentInterface for FrontendInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(FRONTEND_SERVICE).expect("static frontend interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<crate::FrontendCommand, crate::FrontendResponse>()
-    }
-}
 
 #[must_use]
 pub fn frontend_component_id() -> ComponentId {

@@ -2,7 +2,7 @@ use phenix_core::{
     Authority, CapabilityId, ComponentInterface, PluginContext, PluginExecution, PluginHost,
     PluginId, PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
 };
-use phenix_plugin_workspace::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
+use phenix_sdk::{WorkspaceCommand, WorkspaceInterface, WorkspaceResponse};
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::{

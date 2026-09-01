@@ -1,13 +1,14 @@
 use phenix_core::{
-    Authority, CapabilityId, DurableSchema, InterfaceId, PluginContext, PluginExecution,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
     PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
     ServiceId, TransactionOp,
 };
-use phenix_sdk_macros::PhenixValue;
-use serde::{Deserialize, Serialize};
+use phenix_sdk::{
+    JobCommand, JobInterface, JobResponse, RuntimeResourceKind, RuntimeResourceRecord,
+    RuntimeResourceState, JOB_SERVICE,
+};
 use std::collections::BTreeSet;
 
-pub const JOB_SERVICE: &str = "phenix.jobs@1";
 const JOB_PLUGIN: &str = "phenix.jobs";
 const JOB_NAMESPACE: &str = "phenix.jobs.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
@@ -19,76 +20,6 @@ type JobContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> JobContext<'host, 'runtime> {
     PluginContext::new(host, (), (), ())
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeResourceKind {
-    Terminal,
-    Job,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeResourceState {
-    Running,
-    Exited { code: Option<i32> },
-    Revoked { reason: String },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct RuntimeResourceRecord {
-    pub id: String,
-    pub kind: RuntimeResourceKind,
-    pub owner_execution: String,
-    pub promoted_to_workspace: bool,
-    pub authority: BTreeSet<String>,
-    pub state: RuntimeResourceState,
-    pub output_references: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "operation", rename_all = "snake_case")]
-pub enum JobCommand {
-    Create {
-        id: String,
-        kind: RuntimeResourceKind,
-        owner_execution: String,
-        authority: BTreeSet<String>,
-    },
-    Promote {
-        id: String,
-    },
-    Complete {
-        id: String,
-        code: Option<i32>,
-        output_references: Vec<String>,
-    },
-    ExecutionTerminated {
-        execution_id: String,
-    },
-    NarrowAuthority {
-        execution_id: String,
-        authority: BTreeSet<String>,
-    },
-    Get {
-        id: String,
-    },
-    List,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "response", rename_all = "snake_case")]
-pub enum JobResponse {
-    Resource {
-        resource: Option<RuntimeResourceRecord>,
-    },
-    Resources {
-        resources: Vec<RuntimeResourceRecord>,
-    },
-    Affected {
-        resources: Vec<RuntimeResourceRecord>,
-    },
 }
 
 #[must_use]
@@ -123,10 +54,6 @@ pub fn job_service() -> ServiceId {
     ServiceId::parse(JOB_SERVICE).expect("static service id is valid")
 }
 
-fn job_interface() -> InterfaceId {
-    InterfaceId::parse(JOB_SERVICE).expect("static job interface id is valid")
-}
-
 fn job_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(JOB_NAMESPACE).expect("static namespace is valid")
 }
@@ -157,7 +84,7 @@ impl PluginInstance for JobPlugin {
         let context = context(host);
         let command = context
             .kernel
-            .decode_projected::<JobCommand>(&job_interface(), input)
+            .decode_projected::<JobCommand>(&JobInterface::interface_id(), input)
             .map_err(|error| error.to_string())?;
         let response = handle(&context, command)?;
         context

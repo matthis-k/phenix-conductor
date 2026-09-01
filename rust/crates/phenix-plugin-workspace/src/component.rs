@@ -1,23 +1,11 @@
-use crate::{workspace_manifest, WORKSPACE_SERVICE};
+use crate::workspace_manifest;
 use phenix_core::{
-    Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
-    PluginId,
+    Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, PluginId,
 };
+use phenix_sdk::WorkspaceInterface;
 
 const WORKSPACE_COMPONENT: &str = "phenix.workspace";
 const WORKSPACE_PLUGIN: &str = "phenix.workspace";
-
-pub struct WorkspaceInterface;
-
-impl ComponentInterface for WorkspaceInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(WORKSPACE_SERVICE).expect("static workspace interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<crate::WorkspaceCommand, crate::WorkspaceResponse>()
-    }
-}
 
 #[must_use]
 pub fn workspace_component_id() -> ComponentId {

@@ -1,18 +1,17 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{PluginId, PluginManifest};
+pub use phenix_sdk::{
+    ContextInjection, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceKind,
+    ContextScope, ExactContextReference, ExecutionContextProjection, ProjectedContextEntry,
+};
 
 mod component;
 mod implementation;
 mod prompt;
 
 pub use component::*;
-pub use implementation::{
-    context_factory, context_service, ContextCommand, ContextDescriptor, ContextInjection,
-    ContextInjectionLifetime, ContextInjectionRequester, ContextResourceKind,
-    ContextResourceRevision, ContextResponse, ContextScope, ExactContextReference,
-    ExecutionContextProjection, ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
-};
+pub use implementation::context_factory;
 pub use prompt::{
     assemble_prompt, PromptAssembly, PromptSection, PromptSectionKind, PromptSectionRole,
     PHENIX_HARNESS_IDENTITY,

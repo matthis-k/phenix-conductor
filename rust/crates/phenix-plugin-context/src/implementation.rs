@@ -4,17 +4,15 @@ use phenix_core::{
     DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId, TransactionOp,
 };
-pub use phenix_core::{
-    ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextScope,
+use phenix_sdk::{
+    context_service, ContextCommand, ContextDescriptor, ContextInjection, ContextInjectionLifetime,
+    ContextInjectionRequester, ContextInterface, ContextResourceKind, ContextResourceRevision,
+    ContextResponse, ContextScope, ExactContextReference, ExecutionCommand,
+    ExecutionContextProjection, ExecutionInterface, ExecutionResponse, ExecutionState,
+    ProjectedContextEntry, RepositoryContextSource,
 };
-use phenix_plugin_execution::{
-    ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
-};
-use phenix_sdk_macros::PhenixValue;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const CONTEXT_SERVICE: &str = "phenix.context@1";
 const CONTEXT_PLUGIN: &str = "phenix.context";
 const CONTEXT_NAMESPACE: &str = "phenix.context.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
@@ -42,115 +40,6 @@ fn context<'host, 'runtime>(
     )
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, PhenixValue)]
-pub struct ExactContextReference {
-    pub resource_id: ContextResourceId,
-    pub revision: ContextRevisionId,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(rename_all = "snake_case")]
-pub enum ContextInjectionRequester {
-    User,
-    Agent,
-    Orchestration,
-    ContextPolicy,
-    Hook,
-    Frontend,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(rename_all = "snake_case")]
-pub enum ContextInjectionLifetime {
-    Execution,
-    Objective,
-    Session,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct ContextInjection {
-    pub sequence: u64,
-    pub execution_id: String,
-    pub source: ExactContextReference,
-    pub requester: ContextInjectionRequester,
-    pub lifetime: ContextInjectionLifetime,
-    pub reason: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct ProjectedContextEntry {
-    pub injection: ContextInjection,
-    pub resource: ContextResourceRevision,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct ExecutionContextProjection {
-    pub execution_id: String,
-    pub entries: Vec<ProjectedContextEntry>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct RepositoryContextSource {
-    pub path: String,
-    pub content: Bytes,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "operation", rename_all = "snake_case")]
-pub enum ContextCommand {
-    Register {
-        resource_id: ContextResourceId,
-        kind: ContextResourceKind,
-        source: String,
-        scope: ContextScope,
-        content: Bytes,
-    },
-    Get {
-        resource_id: ContextResourceId,
-        revision: ContextRevisionId,
-    },
-    List,
-    DiscoverRepository {
-        workspace_id: String,
-        sources: Vec<RepositoryContextSource>,
-    },
-    Load {
-        execution_id: String,
-        resource_id: ContextResourceId,
-        revision: ContextRevisionId,
-        requester: ContextInjectionRequester,
-        lifetime: ContextInjectionLifetime,
-        reason: String,
-    },
-    Project {
-        execution_id: String,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "result", rename_all = "snake_case")]
-pub enum ContextResponse {
-    Registered {
-        resource: ContextResourceRevision,
-    },
-    Resource {
-        resource: Option<ContextResourceRevision>,
-    },
-    Resources {
-        descriptors: Vec<ContextDescriptor>,
-    },
-    Discovered {
-        descriptors: Vec<ContextDescriptor>,
-    },
-    Loaded {
-        injection: ContextInjection,
-        resource: ContextResourceRevision,
-    },
-    Projection {
-        projection: ExecutionContextProjection,
-    },
-}
-
 #[must_use]
 pub fn context_manifest() -> PluginManifest {
     PluginManifest {
@@ -176,11 +65,6 @@ pub fn context_manifest() -> PluginManifest {
 #[must_use]
 pub fn context_factory() -> Box<dyn PluginInstance> {
     Box::new(ContextPlugin)
-}
-
-#[must_use]
-pub fn context_service() -> ServiceId {
-    ServiceId::parse(CONTEXT_SERVICE).expect("static service id is valid")
 }
 
 fn context_namespace() -> ResourceNamespace {
@@ -211,7 +95,7 @@ impl PluginInstance for ContextPlugin {
             return Err(format!("unsupported context service: {service}"));
         }
         let context = context(host);
-        let interface = crate::ContextInterface::interface_id();
+        let interface = ContextInterface::interface_id();
         let command = context
             .kernel
             .decode_projected::<ContextCommand>(&interface, input)
@@ -609,9 +493,9 @@ mod tests {
         ResolvedHarnessActivation,
     };
     use phenix_plugin_execution::{
-        execution_component_manifest, execution_factory, execution_manifest, execution_service,
-        ExecutionAuthority,
+        execution_component_manifest, execution_factory, execution_manifest,
     };
+    use phenix_sdk::{execution_service, ExecutionAuthority};
     use std::{
         fs,
         path::PathBuf,
