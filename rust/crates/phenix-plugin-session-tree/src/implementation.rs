@@ -4,9 +4,9 @@ use phenix_core::{
     PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
     ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionId, TransactionOp,
 };
-use phenix_plugin_sessions::SessionMutationInterface;
 use phenix_sdk::{
-    session_service, SessionCommand, SessionInterface, SessionRecord, SessionResponse,
+    session_service, SessionCommand, SessionInterface, SessionMutationCommand,
+    SessionMutationInterface, SessionMutationResponse, SessionRecord, SessionResponse,
 };
 use serde::{Deserialize, Serialize};
 
@@ -107,19 +107,6 @@ fn session_tree_namespace() -> ResourceNamespace {
 
 fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).expect("static capability is valid")
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
-enum SessionMutationRequest {
-    PrepareCreate { id: SessionId },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
-enum SessionMutationResult {
-    PreparedCreate {
-        session: SessionRecord,
-        transaction: NamespaceTransaction,
-    },
 }
 
 struct SessionTreeSdk<'host, 'runtime> {
@@ -234,13 +221,13 @@ fn create_child(
     let prepared = context
         .sdk
         .mutations
-        .invoke_projected::<SessionMutationRequest, SessionMutationResult>(
-            &SessionMutationRequest::PrepareCreate {
+        .invoke_projected::<SessionMutationCommand, SessionMutationResponse>(
+            &SessionMutationCommand::PrepareCreate {
                 id: session_id.clone(),
             },
         )
         .map_err(|error| error.to_string())?;
-    let SessionMutationResult::PreparedCreate {
+    let SessionMutationResponse::PreparedCreate {
         session,
         transaction: session_transaction,
     } = prepared;
