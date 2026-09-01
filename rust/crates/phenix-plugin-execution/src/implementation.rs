@@ -198,7 +198,8 @@ fn mutate(
             ensure_new_execution(state, &id)?;
             let parent = active_execution(state, &parent_execution)?.clone();
             let requested = parse_execution_authority(&requested_authority)?;
-            let caller_limited = execution_authority_from(&context.call.authority.attenuate(&requested));
+            let caller_limited =
+                execution_authority_from(&context.call.authority.attenuate(&requested));
             let authority = attenuate_execution_authority(&parent.authority, &caller_limited)?;
             let execution = ExecutionRecord {
                 id: id.clone(),
@@ -273,7 +274,8 @@ fn mutate(
                 return Err("worker task dependencies contain a cycle".into());
             }
             let requested = parse_execution_authority(&requested_authority)?;
-            let caller_limited = execution_authority_from(&context.call.authority.attenuate(&requested));
+            let caller_limited =
+                execution_authority_from(&context.call.authority.attenuate(&requested));
             let delegated_authority =
                 attenuate_execution_authority(&parent.authority, &caller_limited)?;
             let task = WorkerTaskRecord {
