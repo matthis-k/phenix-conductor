@@ -5,9 +5,10 @@ use phenix_plugin_execution::{
     execution_component_manifest, execution_factory, execution_manifest,
 };
 use phenix_plugin_options::{
-    options_component_manifest, options_factory, options_manifest, options_service, OptionScope,
+    options_component_manifest, options_factory, options_manifest, options_service,
 };
 use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
+use phenix_sdk::OptionScope;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 struct TempDirectory(PathBuf);
