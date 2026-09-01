@@ -1789,7 +1789,7 @@ name = "phenix-plugin-planning"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
- "phenix-sdk-macros",
+ "phenix-sdk",
  "serde",
  "serde_json",
  "sha2",

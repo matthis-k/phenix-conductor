@@ -88,10 +88,6 @@ pub use phenix_plugin_planning::{
     planning_component_id, planning_component_manifest, planning_factory, planning_manifest,
     planning_service,
 };
-pub use phenix_sdk::{
-    DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord, PlanStep,
-    PlanningCommand, PlanningInterface, PlanningResponse, PLANNING_SERVICE,
-};
 pub use phenix_plugin_providers::{
     common_provider_definitions, providers_manifest, ProviderPreset, COMMON_PROVIDERS,
     PROVIDERS_PLUGIN,
@@ -126,4 +122,8 @@ pub use phenix_sdk::{
     ContextInjectionRequester, ContextInterface, ContextResourceKind, ContextResourceRevision,
     ContextResponse, ContextScope, ExactContextReference, ExecutionContextProjection,
     ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
+};
+pub use phenix_sdk::{
+    DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord, PlanStep,
+    PlanningCommand, PlanningInterface, PlanningResponse, PLANNING_SERVICE,
 };

@@ -1,7 +1,5 @@
 use crate::planning_manifest;
-use phenix_core::{
-    ComponentExport, ComponentId, ComponentInterface, ComponentManifest, PluginId,
-};
+use phenix_core::{ComponentExport, ComponentId, ComponentInterface, ComponentManifest, PluginId};
 use phenix_sdk::PlanningInterface;
 
 const PLANNING_COMPONENT: &str = "phenix.planning";
