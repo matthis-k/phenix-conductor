@@ -1,15 +1,15 @@
-use crate::{
-    frontend_component_id, ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
-    FrontendCommand, FrontendProviderDescriptor, FrontendResponse, FrontendServiceRequest,
-    FrontendServiceResult, LiveFrontendProvider,
-};
+use crate::frontend_component_id;
 use phenix_core::{
     Authority, ComponentInterface, PluginContext, PluginExecution, PluginHost, PluginId,
     PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
 };
+use phenix_sdk::{
+    ExecutionCommand, ExecutionInterface, ExecutionRecord, ExecutionResponse, ExecutionState,
+    FrontendCommand, FrontendInterface, FrontendProviderDescriptor, FrontendResponse,
+    FrontendServiceRequest, FrontendServiceResult, LiveFrontendProvider, FRONTEND_SERVICE,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use phenix_sdk::FRONTEND_SERVICE;
 const FRONTEND_PLUGIN: &str = "phenix.frontend-services";
 
 #[must_use]
@@ -98,7 +98,7 @@ impl PluginInstance for FrontendPlugin {
             return Err(format!("unsupported frontend service: {service}"));
         }
         let mut context = context(host, &mut self.state);
-        let interface = crate::FrontendInterface::interface_id();
+        let interface = FrontendInterface::interface_id();
         let command = context
             .kernel
             .decode_projected::<FrontendCommand>(&interface, input)
@@ -298,7 +298,7 @@ fn begin_call(
 fn execution_lookup(
     context: &FrontendContext<'_, '_, '_>,
     execution_id: &str,
-) -> Result<Option<crate::ExecutionRecord>, String> {
+) -> Result<Option<ExecutionRecord>, String> {
     let response = context
         .sdk
         .execution
@@ -359,8 +359,8 @@ mod tests {
     };
     use phenix_plugin_execution::{
         execution_component_manifest, execution_factory, execution_manifest, execution_service,
-        ExecutionAuthority,
     };
+    use phenix_sdk::ExecutionAuthority;
 
     fn kernel() -> Kernel {
         let execution_manifest = execution_manifest(Authority::default());
