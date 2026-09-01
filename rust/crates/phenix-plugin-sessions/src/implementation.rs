@@ -4,17 +4,18 @@ use crate::{
 };
 use phenix_core::{
     Authority, Bytes, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, DurableSchema, InterfaceId, NamespaceTransaction, PluginContext,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
-    ServiceContribution, ServiceId, SessionId, TransactionOp,
+    ComponentManifest, DurableSchema, NamespaceTransaction, PluginContext, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
+    ServiceId, SessionId, TransactionOp,
 };
-use phenix_sdk_macros::PhenixValue;
-use serde::{Deserialize, Serialize};
+use phenix_sdk::{
+    session_mutation_service, SessionMutationCommand, SessionMutationInterface,
+    SessionMutationResponse,
+};
 
 const SESSION_PLUGIN: &str = "phenix.sessions";
 const SESSION_COMPONENT: &str = "phenix.sessions";
 const SESSION_NAMESPACE: &str = "phenix.sessions.state";
-pub const SESSION_MUTATION_SERVICE: &str = "phenix.sessions.mutation@1";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
@@ -24,39 +25,6 @@ type SessionContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> SessionContext<'host, 'runtime> {
     PluginContext::new(host, (), (), ())
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SessionMutationCommand {
-    PrepareCreate { id: SessionId },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SessionMutationResponse {
-    PreparedCreate {
-        session: SessionRecord,
-        transaction: NamespaceTransaction,
-    },
-}
-
-pub struct SessionMutationInterface;
-
-impl ComponentInterface for SessionMutationInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(SESSION_MUTATION_SERVICE)
-            .expect("static session mutation interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<SessionMutationCommand, SessionMutationResponse>()
-    }
-}
-
-#[must_use]
-pub fn session_mutation_service() -> ServiceId {
-    ServiceId::parse(SESSION_MUTATION_SERVICE).expect("static session mutation service id is valid")
 }
 
 #[must_use]
