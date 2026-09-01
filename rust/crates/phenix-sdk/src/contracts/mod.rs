@@ -4,6 +4,7 @@ pub mod frontend;
 pub mod jobs;
 pub mod models;
 pub mod options;
+pub mod planning;
 pub mod sessions;
 pub mod workspace;
 
@@ -13,5 +14,6 @@ pub use frontend::*;
 pub use jobs::*;
 pub use models::*;
 pub use options::*;
+pub use planning::*;
 pub use sessions::*;
 pub use workspace::*;
