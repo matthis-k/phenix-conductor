@@ -1,11 +1,12 @@
-use crate::{
-    execution_factory, execution_manifest, execution_service, ExecutionAuthority, ExecutionCommand,
-    ExecutionRecord, ExecutionResponse, WorkerTaskRecord,
-};
+use crate::{execution_factory, execution_manifest};
 use phenix_core::{
     Authority, CapabilityId, ConfigContribution, ConfigContributionSource, ConfigNamespace,
     ConfigurationFrontendId, Kernel, KernelConfig, LocalPersistence, PhenixValue, Project,
     ResolvedHarness, ResolvedHarnessActivation,
+};
+use phenix_sdk::{
+    execution_service, ExecutionAuthority, ExecutionCommand, ExecutionRecord, ExecutionResponse,
+    WorkerTaskRecord,
 };
 use std::{
     fs,
