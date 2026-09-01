@@ -1,10 +1,6 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{PluginId, PluginManifest};
-pub use phenix_sdk::{
-    ContextInjection, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceKind,
-    ContextScope, ExactContextReference, ExecutionContextProjection, ProjectedContextEntry,
-};
 
 mod component;
 mod implementation;
