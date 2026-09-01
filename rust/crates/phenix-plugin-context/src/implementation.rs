@@ -493,9 +493,9 @@ mod tests {
         ResolvedHarnessActivation,
     };
     use phenix_plugin_execution::{
-        execution_component_manifest, execution_factory, execution_manifest, execution_service,
-        ExecutionAuthority,
+        execution_component_manifest, execution_factory, execution_manifest,
     };
+    use phenix_sdk::{execution_service, ExecutionAuthority};
     use std::{
         fs,
         path::PathBuf,
