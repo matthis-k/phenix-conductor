@@ -358,9 +358,9 @@ mod tests {
         Kernel, KernelConfig, PhenixValue, Project, ResolvedHarness, ResolvedHarnessActivation,
     };
     use phenix_plugin_execution::{
-        execution_component_manifest, execution_factory, execution_manifest, execution_service,
-        ExecutionAuthority,
+        execution_component_manifest, execution_factory, execution_manifest,
     };
+    use phenix_sdk::{execution_service, ExecutionAuthority};
 
     fn kernel() -> Kernel {
         let execution_manifest = execution_manifest(Authority::default());
