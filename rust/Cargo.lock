@@ -1575,11 +1575,6 @@ name = "phenix-plugin-api"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
- "phenix-plugin-context",
- "phenix-plugin-execution",
- "phenix-plugin-models",
- "phenix-plugin-options",
- "phenix-plugin-sessions",
  "phenix-sdk",
  "serde_json",
 ]
@@ -1665,6 +1660,7 @@ dependencies = [
  "phenix-plugin-session-tree",
  "phenix-plugin-sessions",
  "phenix-plugin-workspace",
+ "phenix-sdk",
 ]
 
 [[package]]
@@ -1673,6 +1669,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-workspace",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",
@@ -1685,6 +1682,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-execution",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",
@@ -1696,12 +1694,10 @@ name = "phenix-plugin-debug"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
- "phenix-plugin-context",
- "phenix-plugin-frontend",
  "phenix-plugin-jobs",
- "phenix-plugin-models",
  "phenix-plugin-planning",
  "phenix-plugin-sessions",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",
@@ -1725,6 +1721,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-execution",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",
@@ -1738,6 +1735,7 @@ dependencies = [
  "phenix-core",
  "phenix-plugin-context",
  "phenix-plugin-execution",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",
@@ -1823,6 +1821,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-plugin-sessions",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",
@@ -1833,6 +1832,7 @@ name = "phenix-plugin-sessions"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",
@@ -1844,6 +1844,7 @@ name = "phenix-plugin-workspace"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",

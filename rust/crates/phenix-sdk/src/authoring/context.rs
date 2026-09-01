@@ -1,6 +1,7 @@
 use crate::{
-    SdkConfigInterface, SdkSessionCommand, SdkSessionInterface, SdkSessionResponse,
-    SdkSkillsInterface, SdkToolsInterface,
+    ContextInterface, ModelRoutingInterface, OptionsInterface, SdkConfigInterface,
+    SdkSessionCommand, SdkSessionInterface, SdkSessionResponse, SdkSkillsInterface,
+    SdkToolsInterface, SessionCommand, SessionId, SessionInterface, SessionRecord, SessionResponse,
 };
 #[cfg(test)]
 use phenix_core::Authority;
@@ -8,12 +9,6 @@ pub use phenix_core::{
     CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,
 };
 use phenix_core::{ComponentId, ComponentInterface, PluginHost};
-use phenix_plugin_context::ContextInterface;
-use phenix_plugin_models::ModelRoutingInterface;
-use phenix_plugin_options::OptionsInterface;
-use phenix_plugin_sessions::{
-    SessionCommand, SessionId, SessionInterface, SessionRecord, SessionResponse,
-};
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
@@ -239,14 +234,15 @@ impl<'host, 'runtime> Session<'host, 'runtime> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{sdk_component_manifest, sdk_factory, sdk_manifest};
+    use crate::{
+        options_component_manifest, options_factory, options_manifest, sdk_component_manifest,
+        sdk_factory, sdk_manifest, session_component_manifest, session_factory, session_manifest,
+    };
     use phenix_core::{
         CapabilityId, ComponentExport, ComponentImport, ComponentManifest, InterfaceId, Kernel,
         KernelConfig, PluginExecution, PluginId, PluginInstance, PluginManifest, ResolvedHarness,
         ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
     };
-    use phenix_plugin_options::{options_component_manifest, options_factory, options_manifest};
-    use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
     use phenix_sdk_macros::PhenixValue;
     use serde::{Deserialize, Serialize};
 

@@ -1,6 +1,6 @@
 use crate::{
-    session_service, SessionCommand, SessionInput, SessionInputKind, SessionRecord,
-    SessionResponse, SESSION_SERVICE,
+    session_service, SessionCommand, SessionInput, SessionInputKind, SessionInterface,
+    SessionRecord, SessionResponse,
 };
 use phenix_core::{
     Authority, Bytes, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
@@ -24,18 +24,6 @@ type SessionContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> SessionContext<'host, 'runtime> {
     PluginContext::new(host, (), (), ())
-}
-
-pub struct SessionInterface;
-
-impl ComponentInterface for SessionInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(SESSION_SERVICE).expect("static session interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<SessionCommand, SessionResponse>()
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]

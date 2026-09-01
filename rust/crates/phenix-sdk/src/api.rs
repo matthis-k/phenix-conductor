@@ -1,5 +1,5 @@
+use crate::SessionRecord;
 use phenix_core::{Bytes, ComponentInterface, InterfaceId};
-use phenix_plugin_sessions::SessionRecord;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,

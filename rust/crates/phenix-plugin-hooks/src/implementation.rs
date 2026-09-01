@@ -4,8 +4,8 @@ use phenix_core::{
     PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
     SdkClient, ServiceContribution, ServiceId, TransactionOp,
 };
-use phenix_plugin_context::ContextInterface;
 use phenix_plugin_execution::ExecutionInterface;
+use phenix_sdk::ContextInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 

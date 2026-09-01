@@ -3,7 +3,7 @@ use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginId,
 };
-use phenix_plugin_workspace::WorkspaceInterface;
+use phenix_sdk::WorkspaceInterface;
 
 const CLI_COMPONENT: &str = "phenix.command-toolbelt";
 const CLI_PLUGIN: &str = "phenix.command-toolbelt";

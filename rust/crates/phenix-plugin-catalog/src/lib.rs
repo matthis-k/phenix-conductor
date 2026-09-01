@@ -32,10 +32,6 @@ pub use phenix_plugin_command_toolbelt::{
 };
 pub use phenix_plugin_context::{
     context_component_id, context_component_manifest, context_factory, context_manifest,
-    context_service, ContextCommand, ContextDescriptor, ContextInjection, ContextInjectionLifetime,
-    ContextInjectionRequester, ContextInterface, ContextResourceKind, ContextResourceRevision,
-    ContextResponse, ContextScope, ExactContextReference, ExecutionContextProjection,
-    ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
 };
 pub use phenix_plugin_debug::{
     debug_component_id, debug_component_manifest, debug_factory, debug_manifest, debug_service,
@@ -121,4 +117,10 @@ pub use phenix_plugin_workspace::{
     workspace_component_id, workspace_component_manifest, workspace_factory, workspace_factory_for,
     workspace_manifest, workspace_service, WorkspaceCommand, WorkspaceFileVersion,
     WorkspaceInterface, WorkspaceResponse, WorkspaceSearchMatch, WORKSPACE_SERVICE,
+};
+pub use phenix_sdk::{
+    context_service, ContextCommand, ContextDescriptor, ContextInjection, ContextInjectionLifetime,
+    ContextInjectionRequester, ContextInterface, ContextResourceKind, ContextResourceRevision,
+    ContextResponse, ContextScope, ExactContextReference, ExecutionContextProjection,
+    ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
 };

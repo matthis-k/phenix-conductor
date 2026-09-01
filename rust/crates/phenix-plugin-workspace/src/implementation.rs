@@ -2,8 +2,10 @@ use phenix_core::{
     Authority, CapabilityId, ComponentInterface, PluginContext, PluginExecution, PluginHost,
     PluginId, PluginInstance, PluginManifest, ServiceContribution, ServiceId,
 };
-use phenix_sdk_macros::PhenixValue;
-use serde::{Deserialize, Serialize};
+use phenix_sdk::{
+    WorkspaceCommand, WorkspaceFileVersion, WorkspaceInterface, WorkspaceResponse,
+    WorkspaceSearchMatch, WORKSPACE_SERVICE,
+};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -11,7 +13,6 @@ use std::{
     process::Command,
 };
 
-pub const WORKSPACE_SERVICE: &str = "phenix.workspace@1";
 const WORKSPACE_PLUGIN: &str = "phenix.workspace";
 const WORKSPACE_READ: &str = "workspace.read";
 const WORKSPACE_WRITE: &str = "workspace.write";
@@ -27,66 +28,6 @@ fn context<'host, 'runtime, 'state>(
     root: &'state Path,
 ) -> WorkspaceContext<'host, 'runtime, 'state> {
     PluginContext::new(host, (), (), root)
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum WorkspaceFileVersion {
-    Absent,
-    Present { content_hash: String },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct WorkspaceSearchMatch {
-    pub path: String,
-    pub line: u64,
-    pub text: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "operation", rename_all = "snake_case")]
-pub enum WorkspaceCommand {
-    Read {
-        path: String,
-    },
-    Write {
-        path: String,
-        content: String,
-        expected_version: WorkspaceFileVersion,
-    },
-    Search {
-        needle: String,
-        path: Option<String>,
-        case_sensitive: bool,
-    },
-    Shell {
-        command: String,
-    },
-    Git {
-        arguments: Vec<String>,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "response", rename_all = "snake_case")]
-pub enum WorkspaceResponse {
-    Read {
-        path: String,
-        content: String,
-        version: WorkspaceFileVersion,
-    },
-    Written {
-        path: String,
-        version: WorkspaceFileVersion,
-    },
-    Search {
-        matches: Vec<WorkspaceSearchMatch>,
-    },
-    Process {
-        exit_code: i32,
-        stdout: String,
-        stderr: String,
-    },
 }
 
 #[must_use]
@@ -164,7 +105,7 @@ impl PluginInstance for WorkspacePlugin {
             return Err(format!("unsupported workspace service: {service}"));
         }
         let context = context(host, &self.root);
-        let interface = crate::WorkspaceInterface::interface_id();
+        let interface = WorkspaceInterface::interface_id();
         let command = context
             .kernel
             .decode_projected::<WorkspaceCommand>(&interface, input)

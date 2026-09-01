@@ -1,24 +1,12 @@
-use crate::{context_manifest, CONTEXT_SERVICE};
+use crate::context_manifest;
 use phenix_core::{
-    ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest,
-    InterfaceId, PluginId,
+    ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest, PluginId,
 };
 use phenix_plugin_execution::ExecutionInterface;
+use phenix_sdk::ContextInterface;
 
 const CONTEXT_COMPONENT: &str = "phenix.context";
 const CONTEXT_PLUGIN: &str = "phenix.context";
-
-pub struct ContextInterface;
-
-impl ComponentInterface for ContextInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(CONTEXT_SERVICE).expect("static context interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<crate::ContextCommand, crate::ContextResponse>()
-    }
-}
 
 #[must_use]
 pub fn context_component_id() -> ComponentId {
@@ -69,7 +57,7 @@ mod tests {
             error,
             ComponentGraphError::MissingRequiredImport { component, interface }
                 if component == context_component_id()
-                    && interface == ExecutionInterface::interface_id()
+                    && interface == ContextInterface::interface_id()
         ));
     }
 

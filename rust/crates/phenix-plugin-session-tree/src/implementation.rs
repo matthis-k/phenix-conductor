@@ -4,9 +4,9 @@ use phenix_core::{
     PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
     ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionId, TransactionOp,
 };
-use phenix_plugin_sessions::{
-    session_service, SessionCommand, SessionInterface, SessionMutationInterface, SessionRecord,
-    SessionResponse,
+use phenix_plugin_sessions::SessionMutationInterface;
+use phenix_sdk::{
+    session_service, SessionCommand, SessionInterface, SessionRecord, SessionResponse,
 };
 use serde::{Deserialize, Serialize};
 

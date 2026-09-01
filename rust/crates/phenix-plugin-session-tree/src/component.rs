@@ -2,7 +2,8 @@ use crate::SessionTreeInterface;
 use phenix_core::{
     ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest, PluginId,
 };
-use phenix_plugin_sessions::{session_manifest, SessionInterface, SessionMutationInterface};
+use phenix_plugin_sessions::{session_manifest, SessionMutationInterface};
+use phenix_sdk::SessionInterface;
 
 const SESSION_TREE_COMPONENT: &str = "phenix.session-tree";
 const SESSION_TREE_PLUGIN: &str = "phenix.session-tree";

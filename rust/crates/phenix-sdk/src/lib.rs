@@ -1,10 +1,5 @@
 #![forbid(unsafe_code)]
 
-extern crate self as phenix_plugin_context;
-extern crate self as phenix_plugin_models;
-extern crate self as phenix_plugin_options;
-extern crate self as phenix_plugin_sessions;
-
 mod api;
 mod authoring;
 pub mod contracts;
