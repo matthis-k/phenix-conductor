@@ -60,9 +60,7 @@ pub use phenix_plugin_hooks::{
     HookInterface, HookResponse, HookWarning, LifecycleEvent, HOOK_SERVICE,
 };
 pub use phenix_plugin_jobs::{
-    job_component_id, job_component_manifest, job_factory, job_manifest, job_service, JobCommand,
-    JobInterface, JobResponse, RuntimeResourceKind, RuntimeResourceRecord, RuntimeResourceState,
-    JOB_SERVICE,
+    job_component_id, job_component_manifest, job_factory, job_manifest, job_service,
 };
 pub use phenix_plugin_language::{
     language_component_id, language_component_manifest, language_factory, language_manifest,
@@ -121,7 +119,8 @@ pub use phenix_sdk::{
     context_service, ContextCommand, ContextDescriptor, ContextInjection, ContextInjectionLifetime,
     ContextInjectionRequester, ContextInterface, ContextResourceKind, ContextResourceRevision,
     ContextResponse, ContextScope, ExactContextReference, ExecutionContextProjection,
-    ProjectedContextEntry, RepositoryContextSource, CONTEXT_SERVICE,
+    JobCommand, JobInterface, JobResponse, ProjectedContextEntry, RepositoryContextSource,
+    RuntimeResourceKind, RuntimeResourceRecord, RuntimeResourceState, CONTEXT_SERVICE, JOB_SERVICE,
 };
 pub use phenix_sdk::{
     DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord, PlanStep,
