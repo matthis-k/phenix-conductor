@@ -1,9 +1,8 @@
-use crate::SessionTreeInterface;
+use crate::{session_tree_manifest, SessionTreeInterface};
 use phenix_core::{
     ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest, PluginId,
 };
-use phenix_plugin_sessions::{session_manifest, SessionMutationInterface};
-use phenix_sdk::SessionInterface;
+use phenix_sdk::{SessionInterface, SessionMutationInterface};
 
 const SESSION_TREE_COMPONENT: &str = "phenix.session-tree";
 const SESSION_TREE_PLUGIN: &str = "phenix.session-tree";
@@ -15,7 +14,7 @@ pub fn session_tree_component_id() -> ComponentId {
 
 #[must_use]
 pub fn session_tree_component_manifest() -> ComponentManifest {
-    let authority = session_manifest().maximum_authority;
+    let authority = session_tree_manifest().maximum_authority;
     ComponentManifest {
         id: session_tree_component_id(),
         owner: PluginId::parse(SESSION_TREE_PLUGIN).expect("static plugin id is valid"),
@@ -46,7 +45,6 @@ pub fn session_tree_component_manifest() -> ComponentManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session_tree_manifest;
     use phenix_core::{ComponentGraphError, ResolvedComponentGraph};
     use phenix_plugin_sessions::{session_component_manifest, session_manifest};
 
