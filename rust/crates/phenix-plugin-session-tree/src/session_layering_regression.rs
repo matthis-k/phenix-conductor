@@ -3,10 +3,8 @@ use phenix_core::{
     Authority, Kernel, KernelConfig, KernelError, LayerPolicy, PhenixValue, PluginId, Project,
     ServiceParticipantOutcome, SessionId,
 };
-use phenix_plugin_sessions::{
-    session_factory, session_manifest, session_service, SessionCommand, SessionRecord,
-    SessionResponse,
-};
+use phenix_plugin_sessions::{session_factory, session_manifest};
+use phenix_sdk::{session_service, SessionCommand, SessionRecord, SessionResponse};
 
 fn authority() -> Authority {
     Authority::new(
