@@ -1746,10 +1746,7 @@ version = "0.1.0"
 dependencies = [
  "phenix-core",
  "phenix-sdk",
- "phenix-sdk-macros",
- "serde",
  "serde_json",
- "sha2",
 ]
 
 [[package]]
