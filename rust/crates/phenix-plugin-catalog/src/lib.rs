@@ -40,13 +40,11 @@ pub use phenix_plugin_debug::{
 };
 pub use phenix_plugin_execution::{
     agent_loop_service, execution_component_id, execution_component_manifest,
-    execution_configuration_service, execution_factory, execution_manifest, execution_service,
-    AgentDefinition, AgentLoopCommand, AgentLoopInterface, AgentLoopPolicy, AgentLoopResponse,
-    AgentLoopUsage, CallablePolicy, CallableRecord, ExecutionAuthority, ExecutionCommand,
-    ExecutionConfigurationCommand, ExecutionConfigurationResponse, ExecutionInterface,
-    ExecutionRecord, ExecutionResponse, ExecutionState, OrchestrationDefinition, OrchestrationNode,
-    WorkerTaskRecord, WorkerTaskState, AGENT_LOOP_SERVICE, DEFAULT_MAX_PARALLEL_TOOL_CALLS,
-    EXECUTION_CONFIGURATION_SERVICE, EXECUTION_SERVICE,
+    execution_configuration_service, execution_factory, execution_manifest, AgentDefinition,
+    AgentLoopCommand, AgentLoopInterface, AgentLoopPolicy, AgentLoopResponse, AgentLoopUsage,
+    CallablePolicy, ExecutionConfigurationCommand, ExecutionConfigurationResponse,
+    OrchestrationDefinition, OrchestrationNode, AGENT_LOOP_SERVICE,
+    DEFAULT_MAX_PARALLEL_TOOL_CALLS, EXECUTION_CONFIGURATION_SERVICE,
 };
 pub use phenix_plugin_frontend::{
     frontend_component_id, frontend_component_manifest, frontend_factory, frontend_manifest,
@@ -116,11 +114,14 @@ pub use phenix_plugin_workspace::{
     WorkspaceInterface, WorkspaceResponse, WorkspaceSearchMatch, WORKSPACE_SERVICE,
 };
 pub use phenix_sdk::{
-    context_service, ContextCommand, ContextDescriptor, ContextInjection, ContextInjectionLifetime,
-    ContextInjectionRequester, ContextInterface, ContextResourceKind, ContextResourceRevision,
-    ContextResponse, ContextScope, ExactContextReference, ExecutionContextProjection, JobCommand,
-    JobInterface, JobResponse, ProjectedContextEntry, RepositoryContextSource, RuntimeResourceKind,
-    RuntimeResourceRecord, RuntimeResourceState, CONTEXT_SERVICE, JOB_SERVICE,
+    context_service, execution_service, CallableRecord, ContextCommand, ContextDescriptor,
+    ContextInjection, ContextInjectionLifetime, ContextInjectionRequester, ContextInterface,
+    ContextResourceKind, ContextResourceRevision, ContextResponse, ContextScope, ExactContextReference,
+    ExecutionAuthority, ExecutionCommand, ExecutionContextProjection, ExecutionInterface,
+    ExecutionRecord, ExecutionResponse, ExecutionState, JobCommand, JobInterface, JobResponse,
+    ProjectedContextEntry, RepositoryContextSource, RuntimeResourceKind, RuntimeResourceRecord,
+    RuntimeResourceState, WorkerTaskRecord, WorkerTaskState, CONTEXT_SERVICE, EXECUTION_SERVICE,
+    JOB_SERVICE,
 };
 pub use phenix_sdk::{
     DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord, PlanStep,

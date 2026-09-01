@@ -3,11 +3,13 @@ use phenix_core::{
     PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
     ServiceId, TransactionOp,
 };
-use phenix_sdk_macros::PhenixValue;
+use phenix_sdk::{
+    execution_service, CallableRecord, ExecutionAuthority, ExecutionCommand, ExecutionInterface,
+    ExecutionRecord, ExecutionResponse, ExecutionState, WorkerTaskRecord, WorkerTaskState,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const EXECUTION_SERVICE: &str = "phenix.execution@1";
 const EXECUTION_PLUGIN: &str = "phenix.execution";
 const EXECUTION_NAMESPACE: &str = "phenix.execution.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
@@ -23,95 +25,30 @@ fn context<'host, 'runtime>(
     PluginContext::new(host, (), (), ())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct ExecutionAuthority {
-    #[serde(default)]
-    pub capabilities: BTreeSet<String>,
+fn parse_execution_authority(value: &ExecutionAuthority) -> Result<Authority, String> {
+    value
+        .capabilities
+        .iter()
+        .map(|value| CapabilityId::parse(value).map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()
+        .map(Authority::new)
 }
 
-impl ExecutionAuthority {
-    #[must_use]
-    pub fn new(capabilities: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self {
-            capabilities: capabilities.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    fn parse(&self) -> Result<Authority, String> {
-        self.capabilities
-            .iter()
-            .map(|value| CapabilityId::parse(value).map_err(|error| error.to_string()))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Authority::new)
-    }
-
-    fn from_authority(authority: &Authority) -> Self {
-        Self {
-            capabilities: authority
-                .capabilities()
-                .map(|capability| capability.as_str().to_owned())
-                .collect(),
-        }
-    }
-
-    fn attenuate(&self, requested: &Self) -> Result<Self, String> {
-        Ok(Self::from_authority(
-            &self.parse()?.attenuate(&requested.parse()?),
-        ))
-    }
+fn execution_authority_from(authority: &Authority) -> ExecutionAuthority {
+    ExecutionAuthority::new(
+        authority
+            .capabilities()
+            .map(|capability| capability.as_str().to_owned()),
+    )
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutionState {
-    Active,
-    Completed,
-    Failed,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct ExecutionRecord {
-    pub id: String,
-    pub parent_execution: Option<String>,
-    pub graph_generation: String,
-    pub authority: ExecutionAuthority,
-    pub state: ExecutionState,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct CallableRecord {
-    pub id: String,
-    pub service: String,
-    pub required_authority: ExecutionAuthority,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum WorkerTaskState {
-    Pending,
-    Running {
-        execution_id: String,
-    },
-    Completed {
-        execution_id: String,
-        result_refs: Vec<String>,
-    },
-    Failed {
-        execution_id: String,
-        cause: String,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-pub struct WorkerTaskRecord {
-    pub id: String,
-    pub parent_execution: String,
-    pub graph_generation: String,
-    pub description: String,
-    #[serde(default)]
-    pub depends_on: BTreeSet<String>,
-    pub delegated_authority: ExecutionAuthority,
-    pub state: WorkerTaskState,
+fn attenuate_execution_authority(
+    authority: &ExecutionAuthority,
+    requested: &ExecutionAuthority,
+) -> Result<ExecutionAuthority, String> {
+    Ok(execution_authority_from(
+        &parse_execution_authority(authority)?.attenuate(&parse_execution_authority(requested)?),
+    ))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -119,74 +56,6 @@ struct ExecutionProjection {
     executions: BTreeMap<String, ExecutionRecord>,
     callables: BTreeMap<String, CallableRecord>,
     tasks: BTreeMap<String, WorkerTaskRecord>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "operation", rename_all = "snake_case")]
-pub enum ExecutionCommand {
-    CreateExecution {
-        id: String,
-        requested_authority: ExecutionAuthority,
-    },
-    DelegateExecution {
-        parent_execution: String,
-        id: String,
-        requested_authority: ExecutionAuthority,
-    },
-    GetExecution {
-        id: String,
-    },
-    FinishExecution {
-        id: String,
-        success: bool,
-    },
-    RegisterCallable {
-        id: String,
-        service: String,
-        required_authority: ExecutionAuthority,
-    },
-    InvokeCallable {
-        execution_id: String,
-        callable_id: String,
-        input: Vec<u8>,
-    },
-    CreateTask {
-        id: String,
-        parent_execution: String,
-        description: String,
-        depends_on: BTreeSet<String>,
-        requested_authority: ExecutionAuthority,
-    },
-    RunnableTasks,
-    StartTask {
-        task_id: String,
-        execution_id: String,
-    },
-    CompleteTask {
-        task_id: String,
-        execution_id: String,
-        result_refs: Vec<String>,
-    },
-    FailTask {
-        task_id: String,
-        execution_id: String,
-        cause: String,
-    },
-    GetTask {
-        id: String,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
-#[serde(tag = "response", rename_all = "snake_case")]
-pub enum ExecutionResponse {
-    Execution { execution: ExecutionRecord },
-    ExecutionLookup { execution: Option<ExecutionRecord> },
-    Callable { callable: CallableRecord },
-    Invocation { output: Vec<u8> },
-    Task { task: WorkerTaskRecord },
-    TaskLookup { task: Option<WorkerTaskRecord> },
-    RunnableTasks { task_ids: Vec<String> },
 }
 
 #[must_use]
@@ -223,11 +92,6 @@ pub fn execution_factory() -> Box<dyn PluginInstance> {
     Box::new(ExecutionPlugin)
 }
 
-#[must_use]
-pub fn execution_service() -> ServiceId {
-    ServiceId::parse(EXECUTION_SERVICE).expect("static service id is valid")
-}
-
 fn execution_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(EXECUTION_NAMESPACE).expect("static namespace is valid")
 }
@@ -256,7 +120,7 @@ impl PluginInstance for ExecutionPlugin {
             return Err(format!("unsupported execution service: {service}"));
         }
         let context = context(host);
-        let interface = crate::ExecutionInterface::interface_id();
+        let interface = ExecutionInterface::interface_id();
         let command = context
             .kernel
             .decode_projected::<ExecutionCommand>(&interface, input)
@@ -307,12 +171,8 @@ fn mutate(
         } => {
             validate_identity("execution id", &id)?;
             ensure_new_execution(state, &id)?;
-            let effective = ExecutionAuthority::from_authority(
-                &context
-                    .call
-                    .authority
-                    .attenuate(&requested_authority.parse()?),
-            );
+            let requested = parse_execution_authority(&requested_authority)?;
+            let effective = execution_authority_from(&context.call.authority.attenuate(&requested));
             let graph_generation = context
                 .call
                 .graph_generation
@@ -337,13 +197,9 @@ fn mutate(
             validate_identity("execution id", &id)?;
             ensure_new_execution(state, &id)?;
             let parent = active_execution(state, &parent_execution)?.clone();
-            let caller_limited = ExecutionAuthority::from_authority(
-                &context
-                    .call
-                    .authority
-                    .attenuate(&requested_authority.parse()?),
-            );
-            let authority = parent.authority.attenuate(&caller_limited)?;
+            let requested = parse_execution_authority(&requested_authority)?;
+            let caller_limited = execution_authority_from(&context.call.authority.attenuate(&requested));
+            let authority = attenuate_execution_authority(&parent.authority, &caller_limited)?;
             let execution = ExecutionRecord {
                 id: id.clone(),
                 parent_execution: Some(parent_execution),
@@ -378,7 +234,7 @@ fn mutate(
         } => {
             validate_identity("callable id", &id)?;
             ServiceId::parse(&service).map_err(|error| error.to_string())?;
-            required_authority.parse()?;
+            parse_execution_authority(&required_authority)?;
             let callable = CallableRecord {
                 id: id.clone(),
                 service,
@@ -416,13 +272,10 @@ fn mutate(
             if creates_cycle(&state.tasks, &id, &depends_on) {
                 return Err("worker task dependencies contain a cycle".into());
             }
-            let caller_limited = ExecutionAuthority::from_authority(
-                &context
-                    .call
-                    .authority
-                    .attenuate(&requested_authority.parse()?),
-            );
-            let delegated_authority = parent.authority.attenuate(&caller_limited)?;
+            let requested = parse_execution_authority(&requested_authority)?;
+            let caller_limited = execution_authority_from(&context.call.authority.attenuate(&requested));
+            let delegated_authority =
+                attenuate_execution_authority(&parent.authority, &caller_limited)?;
             let task = WorkerTaskRecord {
                 id: id.clone(),
                 parent_execution,
@@ -549,8 +402,8 @@ fn invoke_callable(
         .callables
         .get(callable_id)
         .ok_or_else(|| format!("unknown callable: {callable_id}"))?;
-    let required = callable.required_authority.parse()?;
-    if !execution.authority.parse()?.permits_all(&required)
+    let required = parse_execution_authority(&callable.required_authority)?;
+    if !parse_execution_authority(&execution.authority)?.permits_all(&required)
         || !context.call.authority.permits_all(&required)
     {
         return Err(format!("callable authority denied: {callable_id}"));

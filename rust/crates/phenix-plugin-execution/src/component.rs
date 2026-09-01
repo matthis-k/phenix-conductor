@@ -1,29 +1,18 @@
 use crate::{
     execution_manifest, AgentLoopCommand, AgentLoopResponse, ModelInvokeCommand,
-    ModelInvokeResponse, AGENT_LOOP_SERVICE, EXECUTION_SERVICE, MODEL_ROUTING_SERVICE,
+    ModelInvokeResponse, AGENT_LOOP_SERVICE, MODEL_ROUTING_SERVICE,
 };
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginId,
 };
+use phenix_sdk::ExecutionInterface;
 
 const EXECUTION_COMPONENT: &str = "phenix.execution";
 const EXECUTION_PLUGIN: &str = "phenix.execution";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
-
-pub struct ExecutionInterface;
-
-impl ComponentInterface for ExecutionInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(EXECUTION_SERVICE).expect("static execution interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<crate::ExecutionCommand, crate::ExecutionResponse>()
-    }
-}
 
 pub struct AgentLoopInterface;
 
