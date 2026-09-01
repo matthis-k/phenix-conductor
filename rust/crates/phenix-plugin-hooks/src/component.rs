@@ -3,8 +3,7 @@ use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginId,
 };
-use phenix_plugin_execution::ExecutionInterface;
-use phenix_sdk::ContextInterface;
+use phenix_sdk::{ContextInterface, ExecutionInterface};
 
 const HOOK_COMPONENT: &str = "phenix.hooks";
 const HOOK_PLUGIN: &str = "phenix.hooks";

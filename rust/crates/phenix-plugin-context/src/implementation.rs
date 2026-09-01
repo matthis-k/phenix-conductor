@@ -4,13 +4,11 @@ use phenix_core::{
     DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResourceNamespace, SdkClient, ServiceContribution, ServiceId, TransactionOp,
 };
-use phenix_plugin_execution::{
-    ExecutionCommand, ExecutionInterface, ExecutionResponse, ExecutionState,
-};
 use phenix_sdk::{
     context_service, ContextCommand, ContextDescriptor, ContextInjection, ContextInjectionLifetime,
     ContextInjectionRequester, ContextInterface, ContextResourceKind, ContextResourceRevision,
-    ContextResponse, ContextScope, ExactContextReference, ExecutionContextProjection,
+    ContextResponse, ContextScope, ExactContextReference, ExecutionCommand,
+    ExecutionContextProjection, ExecutionInterface, ExecutionResponse, ExecutionState,
     ProjectedContextEntry, RepositoryContextSource,
 };
 use sha2::{Digest, Sha256};

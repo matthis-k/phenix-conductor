@@ -2,8 +2,7 @@ use crate::context_manifest;
 use phenix_core::{
     ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest, PluginId,
 };
-use phenix_plugin_execution::ExecutionInterface;
-use phenix_sdk::ContextInterface;
+use phenix_sdk::{ContextInterface, ExecutionInterface};
 
 const CONTEXT_COMPONENT: &str = "phenix.context";
 const CONTEXT_PLUGIN: &str = "phenix.context";
