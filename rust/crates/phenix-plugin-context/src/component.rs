@@ -56,7 +56,7 @@ mod tests {
             error,
             ComponentGraphError::MissingRequiredImport { component, interface }
                 if component == context_component_id()
-                    && interface == ContextInterface::interface_id()
+                    && interface == ExecutionInterface::interface_id()
         ));
     }
 
