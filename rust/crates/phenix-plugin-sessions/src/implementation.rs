@@ -1,7 +1,3 @@
-use crate::{
-    session_service, SessionCommand, SessionInput, SessionInputKind, SessionInterface,
-    SessionRecord, SessionResponse,
-};
 use phenix_core::{
     Authority, Bytes, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
     ComponentManifest, DurableSchema, NamespaceTransaction, PluginContext, PluginExecution,
@@ -9,8 +5,9 @@ use phenix_core::{
     ServiceId, SessionId, TransactionOp,
 };
 use phenix_sdk::{
-    session_mutation_service, SessionMutationCommand, SessionMutationInterface,
-    SessionMutationResponse,
+    session_mutation_service, session_service, SessionCommand, SessionInput, SessionInputKind,
+    SessionInterface, SessionMutationCommand, SessionMutationInterface, SessionMutationResponse,
+    SessionRecord, SessionResponse,
 };
 
 const SESSION_PLUGIN: &str = "phenix.sessions";
