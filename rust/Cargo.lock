@@ -1694,7 +1694,6 @@ name = "phenix-plugin-debug"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
- "phenix-plugin-jobs",
  "phenix-plugin-planning",
  "phenix-plugin-sessions",
  "phenix-sdk",
@@ -1747,6 +1746,7 @@ name = "phenix-plugin-jobs"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk",
  "phenix-sdk-macros",
  "serde",
  "serde_json",
