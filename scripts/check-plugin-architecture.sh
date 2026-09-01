@@ -50,28 +50,23 @@ errors="$({
           [
             $packages[] as $package
             | select(($package.metadata.phenix.role // null) == "runtime-plugin")
-            | ($package.metadata.phenix["contract-debt"] // {}) as $debt
             | ($package.metadata.phenix["implementation-dependencies"] // {}) as $implementation
             | $package.dependencies[] as $dependency
             | select(($dependency.kind == null) or ($dependency.kind == "build"))
             | select($roles[$dependency.name] == "runtime-plugin")
-            | select(((($debt | has($dependency.name)) or ($implementation | has($dependency.name)))) | not)
+            | select(($implementation | has($dependency.name)) | not)
             | "undeclared runtime plugin dependency: \($package.name) -> \($dependency.name)"
           ]
           +
           [
             $packages[] as $package
-            | ($package.metadata.phenix["contract-debt"] // {}) as $debt
-            | ($package.metadata.phenix["implementation-dependencies"] // {}) as $implementation
-            | $debt
-            | keys[] as $dependency
-            | select($implementation | has($dependency))
-            | "plugin dependency cannot be both contract debt and implementation sharing: \($package.name) -> \($dependency)"
+            | select((($package.metadata.phenix // {}) | has("contract-debt")))
+            | "migration-only contract-debt metadata is forbidden: \($package.name)"
           ]
           +
           [
             $packages[] as $package
-            | (($package.metadata.phenix["contract-debt"] // {}) + ($package.metadata.phenix["implementation-dependencies"] // {}))
+            | ($package.metadata.phenix["implementation-dependencies"] // {})
             | to_entries[] as $declaration
             | select(
                 [
@@ -86,7 +81,7 @@ errors="$({
           +
           [
             $packages[] as $package
-            | (($package.metadata.phenix["contract-debt"] // {}) + ($package.metadata.phenix["implementation-dependencies"] // {}))
+            | ($package.metadata.phenix["implementation-dependencies"] // {})
             | to_entries[] as $declaration
             | select((($declaration.value | type) != "string") or (($declaration.value | length) == 0))
             | "plugin dependency declaration needs a reason: \($package.name) -> \($declaration.key)"
@@ -105,17 +100,17 @@ if [[ -n "$errors" ]]; then
 fi
 
 if [[ -z "${PHENIX_PLUGIN_ARCHITECTURE_FIXTURE_MODE:-}" ]]; then
-  fixture='{"packages":[{"name":"phenix-plugin-a","metadata":{"phenix":{"role":"runtime-plugin","contract-debt":{"phenix-plugin-b":"legacy contract"},"implementation-dependencies":{"phenix-plugin-b":"shared implementation"}}},"dependencies":[{"name":"phenix-plugin-b","kind":null}]},{"name":"phenix-plugin-b","metadata":{"phenix":{"role":"runtime-plugin"}},"dependencies":[]}]}'
+  fixture='{"packages":[{"name":"phenix-plugin-a","metadata":{"phenix":{"role":"runtime-plugin","contract-debt":{}}},"dependencies":[]}]}'
   if fixture_errors="$(
     PHENIX_PLUGIN_ARCHITECTURE_METADATA_JSON="$fixture" \
       PHENIX_PLUGIN_ARCHITECTURE_FIXTURE_MODE=1 \
       bash "$repo_root/scripts/check-plugin-architecture.sh" 2>&1
   )"; then
-    printf '%s\n' "plugin architecture fixture unexpectedly passed: overlapping dependency declarations" >&2
+    printf '%s\n' "plugin architecture fixture unexpectedly passed: migration-only contract-debt metadata" >&2
     exit 1
   fi
 
-  expected="plugin dependency cannot be both contract debt and implementation sharing: phenix-plugin-a -> phenix-plugin-b"
+  expected="migration-only contract-debt metadata is forbidden: phenix-plugin-a"
   if [[ "$fixture_errors" != *"$expected"* ]]; then
     printf '%s\n' "plugin architecture fixture failed for the wrong reason" >&2
     printf '%s\n' "$fixture_errors" >&2
