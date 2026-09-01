@@ -86,8 +86,11 @@ pub use phenix_plugin_options::{
 };
 pub use phenix_plugin_planning::{
     planning_component_id, planning_component_manifest, planning_factory, planning_manifest,
-    planning_service, DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord,
-    PlanStep, PlanningCommand, PlanningInterface, PlanningResponse, PLANNING_SERVICE,
+    planning_service,
+};
+pub use phenix_sdk::{
+    DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord, PlanStep,
+    PlanningCommand, PlanningInterface, PlanningResponse, PLANNING_SERVICE,
 };
 pub use phenix_plugin_providers::{
     common_provider_definitions, providers_manifest, ProviderPreset, COMMON_PROVIDERS,

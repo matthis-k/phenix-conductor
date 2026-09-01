@@ -3,9 +3,9 @@ use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixSchema, PluginId,
 };
-use phenix_plugin_planning::PlanningInterface;
 use phenix_sdk::{
-    ContextInterface, FrontendInterface, JobInterface, ModelRoutingInterface, SessionInterface,
+    ContextInterface, FrontendInterface, JobInterface, ModelRoutingInterface, PlanningInterface,
+    SessionInterface,
 };
 
 const DEBUG_COMPONENT: &str = "phenix.debug";
