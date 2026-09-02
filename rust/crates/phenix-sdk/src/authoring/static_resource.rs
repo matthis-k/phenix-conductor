@@ -46,6 +46,7 @@ pub trait StaticResourceDefinition {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaticResourceDescriptor {
+    pub id: ResourceNamespace,
     pub schema: DurableSchema,
     pub field: &'static str,
     pub resource_type: &'static str,
@@ -82,8 +83,10 @@ impl StaticResourceDescriptor {
     ) -> Self {
         let resource_type = std::any::type_name::<<F as StaticResourceField>::Resource>();
         let version = <F::Resource as StaticResourceDefinition>::schema_version();
+        let schema = DurableSchema::requiring(namespace.clone(), version, features);
         Self {
-            schema: DurableSchema::requiring(namespace, version, features),
+            id: namespace,
+            schema,
             field,
             resource_type,
             migrations: <F::Resource as StaticResourceDefinition>::migrations(),
@@ -116,6 +119,7 @@ mod tests {
             [BackendFeature::Transactions],
         );
 
+        assert_eq!(resource.id.as_str(), "fixture.resource-owner.plans");
         assert_eq!(
             resource.schema.namespace.as_str(),
             "fixture.resource-owner.plans"
