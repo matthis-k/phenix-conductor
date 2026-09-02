@@ -1,5 +1,7 @@
 # Repository-driven worker PR enforcement
 
+temporary: true
+
 `spec/worker-pr-handoffs.md` remains normative for PR lifecycle and handoff semantics. This slice implements repository-driven work discovery and enforcement.
 
 ## Work sources

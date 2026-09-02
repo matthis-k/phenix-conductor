@@ -1,5 +1,7 @@
 # Worker profile runtime implementation
 
+temporary: true
+
 `spec/workers.md` remains normative for worker identity and profile semantics. This slice implements those semantics on top of first-class execution context projection.
 
 ## Contract

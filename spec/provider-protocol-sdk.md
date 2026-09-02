@@ -1,6 +1,6 @@
 # Provider protocol SDK
 
-Status: first-party userspace SDK contract.
+status: implemented
 
 ## Purpose
 

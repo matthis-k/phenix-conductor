@@ -1,5 +1,7 @@
 # Worker task DAG runtime implementation
 
+temporary: true
+
 `spec/worker-task-dag.md` is normative for task semantics. This slice implements durable worker tasks, deterministic runnable state, child execution creation, exact result references, replay, and relational persistence.
 
 ## Contract

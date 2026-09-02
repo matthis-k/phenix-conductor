@@ -1,5 +1,7 @@
 # Adaptive worker task DAG
 
+status: implemented
+
 ## Purpose
 
 Phenix derives specialist worker executions from the active objective and enacted plan rather than maintaining a fixed team. This specification defines how the workflow agent and conductor turn bounded work into an explicit worker DAG.
