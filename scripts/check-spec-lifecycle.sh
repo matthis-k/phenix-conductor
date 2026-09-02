@@ -20,7 +20,7 @@ check_file() {
     return
   fi
   case "$status" in
-    specification-only|partial|enforced) ;;
+    specification-only|implemented|partial|enforced) ;;
     '') fail "$file: missing status metadata in first 24 lines"; return ;;
     *) fail "$file: invalid status '$status'"; return ;;
   esac
