@@ -10,7 +10,7 @@ coverage:
 
 ## Status
 
-Implementation slice for converging Phenix dynamic values, plugin calls, language bindings, and generic invocation surfaces onto one structural boundary model.
+Current contract for Phenix dynamic values, plugin calls, language bindings, and generic invocation surfaces.
 
 ## Goal
 
@@ -133,56 +133,6 @@ A plugin may serialize typed state as JSON bytes inside its private durable name
 
 Persisted domain state must not become `serde_json::Value` merely because JSON is the storage codec.
 
-## Current migration inventory
-
-The implementation must review and converge at least these current surfaces.
-
-### Core configuration
-
-`phenix-core/src/configuration.rs` currently carries configuration contributions and resolved contributions as `serde_json::Value`.
-
-Foreign configuration frontends should lower values into `PhenixValue`. A configuration consumer parses its known namespace into its local typed configuration as early as possible.
-
-### Frontend services
-
-`phenix-plugin-frontend` currently carries generic method parameters and results as `serde_json::Value`.
-
-Generic frontend invocation data should use `PhenixValue`. Once the target method or action is resolved, the receiver parses its local request type.
-
-### Execution configuration
-
-`phenix-plugin-execution/src/configuration.rs` currently deserializes service bytes directly into Rust commands and exposes callable schemas as `serde_json::Value`.
-
-Move the service onto the normal structural component boundary. Decode to `PhenixValue`, parse the typed command, execute typed logic, and encode the typed response. Callable schemas use `PhenixSchema` or another canonical neutral schema type.
-
-### Model and tool contracts
-
-Model options, provider metadata, and tool schemas currently contain `serde_json::Value` in canonical contracts.
-
-Use typed values where semantics are known. Use `PhenixValue` for intentionally open provider metadata and options. Use `PhenixSchema` for structural tool and callable schemas.
-
-Provider-specific options are parsed into provider-local invariant-bearing types at the provider boundary.
-
-### Language plugin
-
-Language operation and diagnostic payloads currently retain `serde_json::Value` inside domain records.
-
-Prefer operation-specific typed variants. When a payload is intentionally open because an external language protocol owns the shape, lower it to `PhenixValue` before it enters generic Phenix state.
-
-### Hooks
-
-Hook metadata currently uses `serde_json::Value`, and a statically known context call uses raw `invoke_value`.
-
-Use `PhenixValue` for intentionally open metadata. Use typed invocation for statically known plugin contracts.
-
-### Debug surfaces
-
-Debug services and canonical debug bundles currently convert generic results or execution outputs into `serde_json::Value` before serialization.
-
-Keep canonical debug data typed or structural. JSON serializers perform JSON conversion at the output boundary.
-
-Debug probing may remain a genuinely dynamic consumer and may use raw structural invocation when the probed response type is intentionally unknown.
-
 ## Source enforcement
 
 Add deterministic source checks for the mechanically enforceable subset of this rule.
@@ -215,7 +165,7 @@ Add coverage proving:
 
 ## Completion
 
-This slice is complete when:
+This contract is complete when:
 
 - `PhenixValue` is the only canonical dynamic Phenix data representation;
 - foreign values terminate at their adapters;
@@ -225,6 +175,5 @@ This slice is complete when:
 - JSON values remain only where JSON itself is the external format or serializer boundary;
 - plugin consumers do not depend on provider implementation crates for shared contracts;
 - tool and callable structural schemas use canonical Phenix schema vocabulary;
-- the current migration inventory is converged or intentionally documented as an explicit external-format exception;
 - deterministic source checks and behavioral regressions prevent recurrence;
 - exact-head Source, Rust, Product, and Maintenance validation is green.
