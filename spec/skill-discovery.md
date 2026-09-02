@@ -1,6 +1,6 @@
 # Skill discovery
 
-Status: proposed
+status: specification-only
 
 ## Goal
 
