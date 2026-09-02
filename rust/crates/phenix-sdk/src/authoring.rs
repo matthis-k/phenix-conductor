@@ -17,7 +17,9 @@ pub use static_component::{
 };
 pub use static_config::{StaticPluginConfigDescriptor, StaticPluginConfiguration};
 pub use static_import::{
-    Call, Optional, Required, StaticComponentImport, StaticComponentImports, StaticImportField,
+    Call, Emit, Host, Optional, Required, StaticComponentEvent, StaticComponentHost,
+    StaticComponentImport, StaticComponentImports, StaticEventField, StaticHostField,
+    StaticImportField,
 };
 pub use static_resource::{
     Durable, StaticPluginResources, StaticResourceDefinition, StaticResourceDescriptor,
