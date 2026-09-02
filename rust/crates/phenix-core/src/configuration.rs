@@ -248,7 +248,7 @@ impl ResolvedConfigContributions {
             let candidate = ResolvedConfigContribution {
                 namespace: contribution.namespace,
                 contract_version: contribution.contract_version,
-                value: contribution.value.into(),
+                value: contribution.value,
                 attributions: vec![attribution.clone()],
                 granted_authority,
             };
