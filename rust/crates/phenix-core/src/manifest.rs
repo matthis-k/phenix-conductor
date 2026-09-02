@@ -1,13 +1,26 @@
 use crate::{
-    Authority, ComponentId, InterfaceId, InterfaceSchema, PluginId, ResourceNamespace, ServiceId,
+    Authority, ComponentId, InterfaceId, InterfaceSchema, PluginId, ResourceNamespace, RuntimeId,
+    ServiceId,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PluginArtifact {
+    pub locator: String,
+    pub revision: String,
+    #[serde(default)]
+    pub configuration: BTreeMap<String, serde_json::Value>,
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PluginExecution {
     Embedded,
-    External { executable: String },
+    Runtime {
+        runtime: RuntimeId,
+        artifact: PluginArtifact,
+    },
     ResourceOnly,
 }
 
@@ -87,8 +100,16 @@ mod tests {
         let manifest = PluginManifest {
             id: PluginId::parse("third-party").unwrap(),
             version: 7,
-            execution: PluginExecution::External {
-                executable: "third-party-host".into(),
+            execution: PluginExecution::Runtime {
+                runtime: RuntimeId::parse("vendor.runtime").unwrap(),
+                artifact: PluginArtifact {
+                    locator: "plugin.wasm".into(),
+                    revision: "sha256:fixture".into(),
+                    configuration: BTreeMap::from([(
+                        "entrypoint".into(),
+                        serde_json::json!("start"),
+                    )]),
+                },
             },
             dependencies: Vec::new(),
             services: Vec::new(),
@@ -99,7 +120,12 @@ mod tests {
 
         assert_eq!(encoded["id"], "third-party");
         assert_eq!(encoded["version"], 7);
-        assert_eq!(encoded["execution"]["kind"], "external");
-        assert_eq!(encoded["execution"]["executable"], "third-party-host");
+        assert_eq!(encoded["execution"]["kind"], "runtime");
+        assert_eq!(encoded["execution"]["runtime"], "vendor.runtime");
+        assert_eq!(encoded["execution"]["artifact"]["locator"], "plugin.wasm");
+        assert_eq!(
+            encoded["execution"]["artifact"]["revision"],
+            "sha256:fixture"
+        );
     }
 }

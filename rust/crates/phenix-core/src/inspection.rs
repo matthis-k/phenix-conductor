@@ -427,21 +427,41 @@ mod tests {
     }
 
     #[test]
-    fn inspection_exposes_external_component_execution_kind_before_activation() {
-        let provider = PluginManifest {
-            id: PluginId::parse("external-provider").unwrap(),
+    fn inspection_exposes_runtime_component_execution_kind_before_activation() {
+        let runtime = crate::RuntimeId::parse("vendor.runtime").unwrap();
+        let bridge = PluginManifest {
+            id: PluginId::parse("runtime-bridge").unwrap(),
             version: 1,
-            execution: PluginExecution::External {
-                executable: "fixture-external-host".into(),
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: vec![crate::ServiceContribution {
+                service: crate::runtime_provider_service(&runtime),
+                role: crate::ServiceRole::Terminal,
+                priority: 0,
+                required_authority: Authority::default(),
+            }],
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        };
+        let provider = PluginManifest {
+            id: PluginId::parse("runtime-guest").unwrap(),
+            version: 1,
+            execution: PluginExecution::Runtime {
+                runtime: runtime.clone(),
+                artifact: crate::PluginArtifact {
+                    locator: "plugin.wasm".into(),
+                    revision: "sha256:fixture".into(),
+                    configuration: BTreeMap::new(),
+                },
             },
             dependencies: Vec::new(),
             services: Vec::new(),
             resource_namespaces: Vec::new(),
             maximum_authority: Authority::default(),
         };
-        let component_id = component("external-provider");
+        let component_id = component("runtime-provider");
         let resolved = ResolvedHarness::resolve(
-            [provider.clone()],
+            [bridge, provider.clone()],
             [ComponentManifest {
                 id: component_id.clone(),
                 owner: provider.id,
@@ -457,8 +477,13 @@ mod tests {
         let inspection = ResolvedHarnessInspection::from_resolved(&resolved);
         assert_eq!(
             inspection.component_execution(&component_id),
-            Some(&PluginExecution::External {
-                executable: "fixture-external-host".into(),
+            Some(&PluginExecution::Runtime {
+                runtime: crate::RuntimeId::parse("vendor.runtime").unwrap(),
+                artifact: crate::PluginArtifact {
+                    locator: "plugin.wasm".into(),
+                    revision: "sha256:fixture".into(),
+                    configuration: BTreeMap::new(),
+                },
             })
         );
     }
