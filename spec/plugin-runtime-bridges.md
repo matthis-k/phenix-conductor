@@ -1,8 +1,6 @@
 # Plugin runtimes, hot loading, and build requests
 
 status: partial
-coverage:
-  - rust/crates/phenix-core/src/runtime_provider_regression.rs
 
 This builds on the plugin ownership rules from #445 and the stable kernel interfaces from #444.
 
