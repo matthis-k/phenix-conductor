@@ -619,6 +619,8 @@ fn event_and_hook_names_validate_runtime_identifiers() {
     assert_eq!(event.as_str(), "fixture.session.created");
     assert!(EventName::parse("").is_err());
 }
+
+#[allow(dead_code)]
 mod attribute_composition {
     #[phenix_sdk::plugin(id = "fixture.attr.leaf")]
     pub struct Leaf;
