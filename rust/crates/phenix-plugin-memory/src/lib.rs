@@ -34,6 +34,8 @@ mod provenance_integration;
 #[cfg(test)]
 mod reranking_integration;
 #[cfg(test)]
+mod restart_integration;
+#[cfg(test)]
 mod revalidation_failure_integration;
 #[cfg(test)]
 mod supersession_integration;
