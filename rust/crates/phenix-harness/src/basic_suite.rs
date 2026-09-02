@@ -1,12 +1,11 @@
 use crate::{default_suite_authority, HarnessBuildError, HarnessBuilder, PhenixHarness};
-use phenix_core::{InterfaceId, KernelError, PersistenceBackend};
+use phenix_core::{KernelError, PersistenceBackend};
 use phenix_plugin_catalog::{
     basic_context_component_manifest, basic_context_factory, basic_context_manifest,
     basic_model_component_manifest, basic_model_factory, basic_model_manifest,
     basic_skills_component_manifest, basic_skills_factory, basic_skills_manifest,
     basic_tools_component_manifest, basic_tools_factory, basic_tools_manifest,
-    context_component_id, memory_component_id, session_component_manifest, session_factory,
-    session_manifest,
+    session_component_manifest, session_factory, session_manifest,
 };
 
 impl HarnessBuilder {
@@ -49,11 +48,13 @@ mod tests {
     use phenix_core::{
         context_service, model_inference_service, skill_service, tool_service, CallableId,
         ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
-        LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse, PhenixValue,
-        Project, SessionId, SkillCommand, SkillDefinition, SkillId, SkillResponse, ToolCommand,
-        ToolDefinition, ToolResponse,
+        InterfaceId, LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse,
+        PhenixValue, Project, SessionId, SkillCommand, SkillDefinition, SkillId, SkillResponse,
+        ToolCommand, ToolDefinition, ToolResponse,
     };
-    use phenix_plugin_catalog::{session_service, SessionCommand, SessionResponse};
+    use phenix_plugin_catalog::{
+        context_component_id, memory_component_id, session_service, SessionCommand, SessionResponse,
+    };
     use std::{
         collections::{BTreeMap, BTreeSet},
         fs,
