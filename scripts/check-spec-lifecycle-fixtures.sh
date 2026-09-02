@@ -35,6 +35,13 @@ expect_failure \
   'status: complete'
 
 expect_failure \
+  temporary-with-status \
+  'temporary specs must not also declare lasting status' \
+  '# Temporary with status' \
+  'temporary: true' \
+  'status: implemented'
+
+expect_failure \
   enforced-without-coverage \
   'enforced specs require at least one coverage pointer' \
   '# Enforced without coverage' \
