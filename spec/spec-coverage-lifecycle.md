@@ -22,7 +22,7 @@ Every lasting normative file under `spec/` declares a compact status block near 
 Required field:
 
 ```yaml
-status: specification-only | partial | enforced
+status: specification-only | implemented | partial | enforced
 ```
 
 Temporary implementation slices instead declare:
@@ -31,7 +31,7 @@ Temporary implementation slices instead declare:
 temporary: true
 ```
 
-When `status` is `partial` or `enforced`, add one or more repository-owned coverage pointers where real regression coverage exists:
+When `status` is `implemented`, `partial`, or `enforced`, add repository-owned coverage pointers where real regression coverage exists:
 
 ```yaml
 coverage:
@@ -46,6 +46,8 @@ A specification may point to another normative specification when that file owns
 ## Meaning of status
 
 `specification-only` means future behavior is defined but no implementation claim is made.
+
+`implemented` means the specification describes the current implemented contract, but complete regression enforcement is not claimed.
 
 `partial` means an additive feature or active implementation is incomplete. It does not make known contract duplication, backwards compatibility, migration debt, or old/new coexistence acceptable in a clean baseline.
 
