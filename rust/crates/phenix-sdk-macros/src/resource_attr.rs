@@ -8,10 +8,10 @@ use syn::{
 pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<TokenStream> {
     let schema = parse_schema(args)?;
     let mut item = syn::parse2::<ItemImpl>(input)?;
-    if item.trait_.is_some() {
+    if item.trait_.is_some() || !item.generics.params.is_empty() {
         return Err(syn::Error::new_spanned(
             &item,
-            "#[phenix_sdk::resource] applies to an inherent resource impl",
+            "#[phenix_sdk::resource] applies to a non-generic inherent resource impl",
         ));
     }
 
@@ -215,5 +215,23 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("only one Phenix contribution"));
+    }
+
+    #[test]
+    fn resource_impl_rejects_generic_static_definition() {
+        let error = expand(
+            quote!(schema = 2),
+            quote! {
+                impl<T> Store<T> {
+                    #[phenix(migrate(from = 1))]
+                    fn migrate() {}
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("non-generic inherent resource impl"));
     }
 }
