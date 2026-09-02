@@ -187,8 +187,8 @@ impl PluginInstance for ModelProvider {
         }
         let value: PhenixValue =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let request = ModelInferenceRequest::try_from(Project(&value))
-            .map_err(|error| error.to_string())?;
+        let request =
+            ModelInferenceRequest::try_from(Project(&value)).map_err(|error| error.to_string())?;
         let response = ModelInferenceResponse {
             output: [b"answer:".as_slice(), request.input.as_slice()]
                 .concat()
