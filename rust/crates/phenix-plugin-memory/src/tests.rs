@@ -424,7 +424,7 @@ fn compaction_rejects_summary_only_provenance() {
         )
         .unwrap_err()
         .to_string();
-    assert!(error.contains("must retain raw durable source provenance"));
+    assert!(error.contains("must reference raw durable evidence, not derived memory"));
     let _ = fs::remove_file(path);
 }
 
