@@ -28,7 +28,7 @@ fn context<'host, 'runtime, 'state>(
     PluginContext::new(host, (), (), authenticated)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct ModelTarget {
     pub provider_plugin: PluginId,
     pub model: ModelId,
@@ -36,7 +36,7 @@ pub struct ModelTarget {
     pub options: BTreeMap<String, phenix_core::PhenixValue>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct RoutingProfile {
     pub id: RoutingProfileId,
     pub default_target: ModelTarget,
@@ -50,7 +50,7 @@ pub struct RoutingProfileDescriptor {
     pub providers: Vec<PluginId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ModelCommand {
     RegisterProfile {
@@ -75,7 +75,7 @@ pub enum ModelCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelResponse {
     Profile {
