@@ -662,7 +662,10 @@ mod tests {
             }
         };
 
-        let error = field_contributions(&mut item).unwrap_err();
+        let error = match field_contributions(&mut item) {
+            Ok(_) => panic!("unknown backend feature must be rejected"),
+            Err(error) => error,
+        };
         assert!(error
             .to_string()
             .contains("unsupported resource backend feature"));
