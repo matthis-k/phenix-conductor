@@ -17,10 +17,10 @@ use phenix_sdk::{
     memory_extract_callable, memory_resolve_callable, memory_service, memory_summarize_callable,
     memory_validate_callable, ContextCheckpoint, ContextCompactionCommand,
     ContextCompactionInterface, ContextCompactionRequest, ContextCompactionResponse,
-    MemoryCanonicalReference, MemoryCommand, MemoryConsolidationRequest, MemoryEmbeddingInterface,
-    MemoryEmbeddingRequest, MemoryEmbeddingResponse, MemoryExpansion, MemoryExtractionRequest,
-    MemoryFreshness, MemoryFreshnessRecord, MemoryInterface, MemoryKind, MemoryNode,
-    MemoryRankCandidate, MemoryRankInterface, MemoryRankRequest, MemoryRankResponse,
+    MemoryCanonicalReference, MemoryCommand, MemoryConsolidationRequest, MemoryDependencyRevision,
+    MemoryEmbeddingInterface, MemoryEmbeddingRequest, MemoryEmbeddingResponse, MemoryExpansion,
+    MemoryExtractionRequest, MemoryFreshness, MemoryFreshnessRecord, MemoryInterface, MemoryKind,
+    MemoryNode, MemoryRankCandidate, MemoryRankInterface, MemoryRankRequest, MemoryRankResponse,
     MemoryRecallQuery, MemoryRecord, MemoryResponse, MemoryRevalidationOutcome, MemoryScope,
     MemorySourceReference, ModelCommand, ModelResponse, ModelRoutingInterface,
 };
@@ -196,6 +196,13 @@ fn handle(context: &MemoryContext<'_, '_>, command: MemoryCommand) -> MemoryResu
             limit,
         } => Ok(MemoryResponse::Affected {
             memory_ids: observe_revision(context, service, resource, revision, observed_at, limit)?,
+        }),
+        MemoryCommand::ObserveConflict {
+            source,
+            affected_ids,
+            observed_at,
+        } => Ok(MemoryResponse::Affected {
+            memory_ids: observe_conflict(context, source, affected_ids, observed_at)?,
         }),
         MemoryCommand::BindCanonicalReference {
             id,
@@ -416,6 +423,67 @@ fn observe_revision(
             write_record(context, &state_key, &state)?;
             affected.push(id);
         }
+    }
+    Ok(affected)
+}
+
+fn observe_conflict(
+    context: &MemoryContext<'_, '_>,
+    source: MemorySourceReference,
+    mut affected_ids: Vec<String>,
+    observed_at: u64,
+) -> MemoryResult<Vec<String>> {
+    if affected_ids.is_empty() || affected_ids.len() > 100 {
+        return Err(MemoryError::Invalid(
+            "conflicting evidence must affect between 1 and 100 memories".into(),
+        ));
+    }
+    affected_ids.sort();
+    let original_len = affected_ids.len();
+    affected_ids.dedup();
+    if affected_ids.len() != original_len {
+        return Err(MemoryError::Invalid(
+            "conflicting evidence requires distinct affected memories".into(),
+        ));
+    }
+
+    let mut sources = vec![source];
+    normalize_sources(&mut sources)?;
+    let source = sources
+        .pop()
+        .expect("one validated conflicting evidence source remains");
+    let dependency = MemoryDependencyRevision {
+        service: source.service.clone(),
+        resource: source.resource.clone(),
+        revision: None,
+    };
+    let entry = dependency_key(&source.service, &source.resource);
+    let mut affected = Vec::new();
+
+    for id in affected_ids {
+        let key = MemoryKey::parse(id.clone())?;
+        let record: MemoryRecord = read_record(context, &record_key(&key))?
+            .ok_or_else(|| MemoryError::Missing(format!("memory {id}")))?;
+        let state_key = freshness_key(&key);
+        let mut state: MemoryFreshnessRecord =
+            read_record(context, &state_key)?.unwrap_or_else(|| initial_state(&record, None));
+        if !state.dependencies.contains(&dependency) {
+            state.dependencies.push(dependency.clone());
+            state.dependencies.sort();
+        }
+        if state.freshness == MemoryFreshness::Current {
+            state.freshness = MemoryFreshness::NeedsValidation;
+            state.changed_at = observed_at;
+            affected.push(id.clone());
+        }
+        write_record_with_secondary_entry(
+            context,
+            &state_key,
+            &state,
+            DEPENDENCY_INDEX,
+            &entry,
+            &id,
+        )?;
     }
     Ok(affected)
 }

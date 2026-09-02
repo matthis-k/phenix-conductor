@@ -177,6 +177,11 @@ pub enum MemoryCommand {
         observed_at: u64,
         limit: u32,
     },
+    ObserveConflict {
+        source: MemorySourceReference,
+        affected_ids: Vec<String>,
+        observed_at: u64,
+    },
     BindCanonicalReference {
         id: String,
         reference: MemoryCanonicalReference,

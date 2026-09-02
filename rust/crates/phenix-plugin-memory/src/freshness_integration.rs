@@ -315,6 +315,94 @@ fn revision_change_invalidates_only_dependent_current_memory() {
 }
 
 #[test]
+fn conflicting_new_evidence_invalidates_only_the_bounded_affected_set() {
+    let path = temp_db("conflict");
+    let mut kernel = kernel_with(&path);
+    let changed = record("changed", MemoryKind::Fact, "shared changed", 10);
+    let stable = record("stable", MemoryKind::Fact, "shared stable", 11);
+    for record in [changed.clone(), stable.clone()] {
+        invoke(&mut kernel, MemoryCommand::Record { record }).unwrap();
+    }
+
+    let conflict_source = MemorySourceReference {
+        service: ServiceId::parse("fixture.history@1").unwrap(),
+        resource: "turn/conflicting-evidence".into(),
+        start: None,
+        end: None,
+    };
+    let response = invoke(
+        &mut kernel,
+        MemoryCommand::ObserveConflict {
+            source: conflict_source.clone(),
+            affected_ids: vec![changed.id.clone()],
+            observed_at: 20,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        response,
+        MemoryResponse::Affected {
+            memory_ids: vec![changed.id.clone()]
+        }
+    );
+
+    let freshness = invoke(
+        &mut kernel,
+        MemoryCommand::GetFreshness {
+            id: changed.id.clone(),
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        freshness,
+        MemoryResponse::Freshness { state: Some(state) }
+            if state.freshness == MemoryFreshness::NeedsValidation
+                && state.changed_at == 20
+                && state.dependencies.iter().any(|dependency|
+                    dependency.service == conflict_source.service
+                        && dependency.resource == conflict_source.resource)
+    ));
+
+    let current = invoke(
+        &mut kernel,
+        MemoryCommand::Recall {
+            query: MemoryRecallQuery {
+                scopes: vec![scope()],
+                kinds: vec![MemoryKind::Fact],
+                query: "shared".into(),
+                at: 25,
+                limit: 10,
+            },
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        current,
+        MemoryResponse::Recall {
+            records: vec![stable]
+        }
+    );
+
+    assert_eq!(
+        invoke(
+            &mut kernel,
+            MemoryCommand::ObserveRevision {
+                service: conflict_source.service,
+                resource: conflict_source.resource,
+                revision: "rev-2".into(),
+                observed_at: 30,
+                limit: 10,
+            },
+        )
+        .unwrap(),
+        MemoryResponse::Affected {
+            memory_ids: vec![changed.id]
+        }
+    );
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn temporal_expiry_becomes_historical_without_losing_past_recall() {
     let path = temp_db("expiry");
     let mut kernel = kernel_with(&path);
