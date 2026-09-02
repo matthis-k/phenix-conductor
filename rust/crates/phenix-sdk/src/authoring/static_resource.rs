@@ -60,7 +60,7 @@ impl StaticResourceDescriptor {
         field: &'static str,
         features: impl IntoIterator<Item = BackendFeature>,
     ) -> Self {
-        let namespace = ResourceNamespace::parse(&format!("{}.{field}", owner.as_str()))
+        let namespace = ResourceNamespace::parse(format!("{}.{field}", owner.as_str()))
             .expect("plugin id and Rust field name derive a valid resource namespace");
         Self::new::<F>(namespace, field, features)
     }
