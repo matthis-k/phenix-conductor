@@ -5,7 +5,7 @@ use phenix_backend::{
 use phenix_backend_acp::{AcpBackend, AcpBackendConfig};
 use phenix_domain::{
     BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionId, InferenceOptions, Key, ModelId, ModelTarget, PhenixSchema, ProviderId,
+    ExecutionId, InferenceOptions, ModelId, ModelTarget, PhenixSchema, ProviderId,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -55,7 +55,7 @@ fn callable() -> CallableDescriptor {
         kind: CallableKind::Tool,
         description: "Echo the supplied value".to_owned(),
         input_schema: PhenixSchema::Table(BTreeMap::from([(
-            Key::parse("value").unwrap(),
+            "value".parse().unwrap(),
             PhenixSchema::String,
         )])),
         output_schema: PhenixSchema::String,
