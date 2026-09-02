@@ -3,23 +3,23 @@ pub use phenix_core::{
     ModelInferenceResponse, MODEL_INFERENCE_SERVICE,
 };
 use phenix_core::{
-    Bytes, CallableId, ComponentInterface, InterfaceId, ModelId, PluginId, RoutingProfileId,
-    ServiceId,
+    Bytes, CallableId, ComponentInterface, InterfaceId, ModelId, PhenixValue, PluginId,
+    RoutingProfileId, ServiceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const MODEL_ROUTING_SERVICE: &str = "phenix.models.routing@1";
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct ModelTarget {
     pub provider_plugin: PluginId,
     pub model: ModelId,
     #[serde(default)]
-    pub options: BTreeMap<String, serde_json::Value>,
+    pub options: BTreeMap<String, PhenixValue>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct RoutingProfile {
     pub id: RoutingProfileId,
     pub default_target: ModelTarget,
@@ -33,7 +33,7 @@ pub struct RoutingProfileDescriptor {
     pub providers: Vec<PluginId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ModelCommand {
     RegisterProfile {
@@ -58,7 +58,7 @@ pub enum ModelCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelResponse {
     Profile {

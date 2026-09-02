@@ -4,7 +4,7 @@ use crate::{
     ResolvedHarnessActivationError, ServiceId,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LiveReconciliationError {
     NoActiveGeneration,
     ActiveGenerationMismatch {

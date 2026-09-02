@@ -1,4 +1,4 @@
-use crate::{Authority, ConfigurationFrontendId};
+use crate::{Authority, ConfigurationFrontendId, PhenixValue};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -57,7 +57,7 @@ pub struct ConfigContribution {
     pub namespace: ConfigNamespace,
     pub contract_version: u64,
     pub precedence: i32,
-    pub value: serde_json::Value,
+    pub value: PhenixValue,
     pub requested_authority: Authority,
 }
 
@@ -86,7 +86,7 @@ pub struct FrontendConfigContribution {
     pub namespace: ConfigNamespace,
     pub contract_version: u64,
     pub precedence: i32,
-    pub value: serde_json::Value,
+    pub value: PhenixValue,
     pub requested_authority: Authority,
 }
 
@@ -176,7 +176,7 @@ pub struct ConfigContributionAttribution {
 pub struct ResolvedConfigContribution {
     pub namespace: ConfigNamespace,
     pub contract_version: u64,
-    pub value: serde_json::Value,
+    pub value: PhenixValue,
     pub attributions: Vec<ConfigContributionAttribution>,
     pub granted_authority: Authority,
 }
@@ -364,7 +364,7 @@ mod tests {
             namespace: ConfigNamespace::parse("acme.engineering@1").unwrap(),
             contract_version: 1,
             precedence,
-            value: serde_json::json!({"review":"strict","team":"compiler"}),
+            value: serde_json::json!({"review":"strict","team":"compiler"}).into(),
             requested_authority,
         }
     }
@@ -391,7 +391,7 @@ mod tests {
             namespace: ConfigNamespace::parse("acme.engineering@1").unwrap(),
             contract_version: 1,
             precedence: 10,
-            value: serde_json::json!({"review":"strict"}),
+            value: serde_json::json!({"review":"strict"}).into(),
             requested_authority: Authority::default(),
         }
     }
@@ -537,8 +537,8 @@ mod tests {
             10,
             Authority::default(),
         );
-        left.value = serde_json::json!({"mode":"strict"});
-        right.value = serde_json::json!({"mode":"relaxed"});
+        left.value = serde_json::json!({"mode":"strict"}).into();
+        right.value = serde_json::json!({"mode":"relaxed"}).into();
 
         assert_eq!(
             ResolvedConfigContributions::try_resolve([left, right], &Authority::default(),)

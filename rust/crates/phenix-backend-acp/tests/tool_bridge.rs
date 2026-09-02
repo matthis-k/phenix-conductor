@@ -5,9 +5,10 @@ use phenix_backend::{
 use phenix_backend_acp::{AcpBackend, AcpBackendConfig};
 use phenix_domain::{
     BackendId, CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
-    ExecutionId, InferenceOptions, ModelId, ModelTarget, ProviderId,
+    ExecutionId, InferenceOptions, ModelId, ModelTarget, PhenixSchema, ProviderId,
 };
 use serde_json::json;
+use std::collections::BTreeMap;
 
 #[derive(Default)]
 struct ToolHost {
@@ -53,12 +54,11 @@ fn callable() -> CallableDescriptor {
         id: CallableId::parse("phenix.echo").unwrap(),
         kind: CallableKind::Tool,
         description: "Echo the supplied value".to_owned(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {"value": {"type": "string"}},
-            "required": ["value"]
-        }),
-        output_schema: json!({"type": "string"}),
+        input_schema: PhenixSchema::Table(BTreeMap::from([(
+            "value".parse().unwrap(),
+            PhenixSchema::String,
+        )])),
+        output_schema: PhenixSchema::String,
         capabilities: CapabilitySet::default(),
         policy: CallablePolicy::default(),
     }

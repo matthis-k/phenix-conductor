@@ -4,8 +4,8 @@ use crate::{
     FrontendServiceResult, LiveFrontendProvider,
 };
 use phenix_core::{
-    Authority, ComponentInterface, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
+    Authority, ComponentInterface, PhenixValue, PluginContext, PluginExecution, PluginHost,
+    PluginId, PluginInstance, PluginManifest, SdkClient, ServiceContribution, ServiceId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -259,7 +259,7 @@ fn begin_call(
     connection_id: String,
     provider: String,
     method: String,
-    params: serde_json::Value,
+    params: PhenixValue,
 ) -> Result<FrontendResponse, String> {
     validate_id("frontend connection id", &connection_id)?;
     validate_id("frontend provider id", &provider)?;
@@ -461,7 +461,7 @@ mod tests {
                 execution_id: "child".into(),
                 provider: "web".into(),
                 method: "search".into(),
-                params: serde_json::json!({"q":"nix"}),
+                params: serde_json::json!({"q":"nix"}).into(),
             },
         )
         .unwrap();
@@ -477,7 +477,7 @@ mod tests {
             FrontendCommand::CompleteCall {
                 connection_id: "frontend-b".into(),
                 correlation_id,
-                result: serde_json::json!({}),
+                result: serde_json::json!({}).into(),
             }
         )
         .unwrap_err()
@@ -488,7 +488,7 @@ mod tests {
                 FrontendCommand::CompleteCall {
                     connection_id: "frontend-a".into(),
                     correlation_id,
-                    result: serde_json::json!({"ok":true}),
+                    result: serde_json::json!({"ok":true}).into(),
                 }
             )
             .unwrap(),
@@ -538,7 +538,7 @@ mod tests {
                 execution_id: "root".into(),
                 provider: "web".into(),
                 method: "search".into(),
-                params: serde_json::json!({}),
+                params: serde_json::json!({}).into(),
             }
         )
         .unwrap_err()

@@ -165,7 +165,7 @@ mod model_provider {
                 input,
                 |request: ModelRequest| -> Result<ModelResponse, String> {
                     Ok(ModelResponse {
-                        value: format!("{}!", request.prompt),
+                        value: request.prompt,
                         tokens: 7,
                     })
                 },
@@ -189,7 +189,7 @@ mod model_consumer {
 
     #[derive(Clone, Debug, Eq, PartialEq, DerivePhenixValue)]
     struct ModelResponse {
-        value: String,
+        value: PluginId,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq, DerivePhenixValue)]
@@ -247,7 +247,7 @@ mod model_consumer {
                     }
                     .map_err(|error| error.to_string())?;
                     Ok(RunResponse {
-                        value: response.value,
+                        value: response.value.to_string(),
                     })
                 },
             )
@@ -454,7 +454,7 @@ fn independent_provider_and_consumer_types_work_through_the_live_component_graph
     assert_eq!(
         model_consumer::RunResponse::try_from(Project(&value)).unwrap(),
         model_consumer::RunResponse {
-            value: "hello!".into(),
+            value: "hello".into(),
         }
     );
 
@@ -466,6 +466,24 @@ fn independent_provider_and_consumer_types_work_through_the_live_component_graph
     assert!(kernel
         .invoke(&model_consumer::run_service(), &exact, &authority, None,)
         .is_err());
+
+    let semantically_invalid =
+        serde_json::to_vec(&PhenixValue::from(&model_consumer::RunRequest {
+            prompt: "not a valid identifier".into(),
+            exact: false,
+        }))
+        .unwrap();
+    let error = kernel
+        .invoke(
+            &model_consumer::run_service(),
+            &semantically_invalid,
+            &authority,
+            None,
+        )
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("identifier contains unsupported characters"));
 }
 
 #[test]

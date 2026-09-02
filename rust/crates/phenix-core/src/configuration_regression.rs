@@ -19,7 +19,7 @@ fn contribution(frontend: &str, source: &str, value: serde_json::Value) -> Confi
         namespace: ConfigNamespace::parse("fixture.policy@1").unwrap(),
         contract_version: 1,
         precedence: 10,
-        value,
+        value: value.into(),
         requested_authority: Authority::default(),
     }
 }
@@ -89,7 +89,7 @@ fn third_party_frontend_can_lower_plugin_defined_configuration_without_core_chan
         namespace: namespace.clone(),
         contract_version: 7,
         precedence: 40,
-        value: serde_json::json!({"team":"compiler","review":"strict"}),
+        value: serde_json::json!({"team":"compiler","review":"strict"}).into(),
         requested_authority: Authority::default(),
     };
 
@@ -107,7 +107,7 @@ fn third_party_frontend_can_lower_plugin_defined_configuration_without_core_chan
     assert_eq!(entry.contract_version, 7);
     assert_eq!(
         entry.value,
-        serde_json::json!({"team":"compiler","review":"strict"})
+        serde_json::json!({"team":"compiler","review":"strict"}).into()
     );
     assert_eq!(entry.attributions.len(), 1);
     assert_eq!(entry.attributions[0].source.frontend, frontend);
@@ -143,7 +143,7 @@ fn frontend_requested_authority_cannot_bypass_resolver_policy() {
         namespace,
         contract_version: 7,
         precedence: 40,
-        value: serde_json::json!({"review":"strict"}),
+        value: serde_json::json!({"review":"strict"}).into(),
         requested_authority: Authority::new([read.clone(), write.clone()]),
     };
 
@@ -182,7 +182,7 @@ fn stable_frontend_rejects_unmaterialized_environment_binding() {
         namespace,
         contract_version: 7,
         precedence: 40,
-        value: serde_json::json!({"review":"strict"}),
+        value: serde_json::json!({"review":"strict"}).into(),
         requested_authority: Authority::default(),
     };
 
@@ -223,7 +223,7 @@ fn equivalent_nix_and_lua_frontends_resolve_to_the_same_semantic_generation() {
                 namespace: namespace.clone(),
                 contract_version: 7,
                 precedence: 40,
-                value: serde_json::json!({"team":"compiler","review":"strict"}),
+                value: serde_json::json!({"team":"compiler","review":"strict"}).into(),
                 requested_authority: Authority::default(),
             }
         };

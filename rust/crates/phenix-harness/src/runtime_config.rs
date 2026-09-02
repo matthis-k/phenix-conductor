@@ -69,8 +69,8 @@ struct RuntimeModelTarget {
 impl RuntimeModelTarget {
     fn into_model_target(self) -> ModelTarget {
         let mut options = BTreeMap::new();
-        options.insert("backend".into(), Value::String(self.backend));
-        options.insert("inference".into(), self.inference);
+        options.insert("backend".into(), PhenixValue::String(self.backend));
+        options.insert("inference".into(), self.inference.into());
         ModelTarget {
             provider_plugin: self.provider,
             model: self.model,
@@ -228,14 +228,13 @@ fn apply_configuration(
     let authority = default_suite_authority();
 
     for agent in configuration.agents {
-        let output = harness.invoke(
-            &execution_configuration_service(),
-            &serde_json::to_vec(&ExecutionConfigurationCommand::RegisterAgent { agent })?,
-            &authority,
-            None,
-        )?;
         if !matches!(
-            serde_json::from_slice::<ExecutionConfigurationResponse>(&output)?,
+            invoke_projected::<_, ExecutionConfigurationResponse>(
+                harness,
+                &execution_configuration_service(),
+                &ExecutionConfigurationCommand::RegisterAgent { agent },
+                &authority,
+            )?,
             ExecutionConfigurationResponse::Agent { agent: Some(_) }
         ) {
             return Err("execution configuration service rejected agent registration".into());
@@ -243,16 +242,13 @@ fn apply_configuration(
     }
 
     for orchestration in configuration.orchestrations {
-        let output = harness.invoke(
-            &execution_configuration_service(),
-            &serde_json::to_vec(&ExecutionConfigurationCommand::RegisterOrchestration {
-                orchestration,
-            })?,
-            &authority,
-            None,
-        )?;
         if !matches!(
-            serde_json::from_slice::<ExecutionConfigurationResponse>(&output)?,
+            invoke_projected::<_, ExecutionConfigurationResponse>(
+                harness,
+                &execution_configuration_service(),
+                &ExecutionConfigurationCommand::RegisterOrchestration { orchestration },
+                &authority,
+            )?,
             ExecutionConfigurationResponse::Orchestration {
                 orchestration: Some(_)
             }
@@ -356,19 +352,38 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn runtime_model_target_lowers_foreign_json_before_dispatch() {
+        let target = RuntimeModelTarget {
+            backend: "phenix".into(),
+            provider: PluginId::parse("provider.fixture").unwrap(),
+            model: ModelId::parse("model.test").unwrap(),
+            inference: json!({"effort": "low"}),
+        }
+        .into_model_target();
+
+        assert_eq!(
+            target.options["backend"],
+            PhenixValue::String("phenix".into())
+        );
+        assert!(matches!(
+            &target.options["inference"],
+            PhenixValue::Map(values)
+                if values.get("effort") == Some(&PhenixValue::String("low".into()))
+        ));
+    }
+
     fn invoke_configuration(
         harness: &mut PhenixHarness,
         command: ExecutionConfigurationCommand,
     ) -> ExecutionConfigurationResponse {
-        let output = harness
-            .invoke(
-                &execution_configuration_service(),
-                &serde_json::to_vec(&command).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
-            .unwrap();
-        serde_json::from_slice(&output).unwrap()
+        invoke_projected(
+            harness,
+            &execution_configuration_service(),
+            &command,
+            &default_suite_authority(),
+        )
+        .unwrap()
     }
 
     #[test]

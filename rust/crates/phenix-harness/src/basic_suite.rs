@@ -49,8 +49,8 @@ mod tests {
         context_service, model_inference_service, skill_service, tool_service, CallableId,
         ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
         InterfaceId, LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse,
-        PhenixValue, Project, SessionId, SkillCommand, SkillDefinition, SkillId, SkillResponse,
-        ToolCommand, ToolDefinition, ToolResponse,
+        PhenixSchema, PhenixValue, Project, SessionId, SkillCommand, SkillDefinition, SkillId,
+        SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
     };
     use phenix_plugin_catalog::{
         context_component_id, memory_component_id, session_service, SessionCommand, SessionResponse,
@@ -89,16 +89,34 @@ mod tests {
         serde_json::from_slice(&output).unwrap()
     }
 
-    fn invoke_session(harness: &mut PhenixHarness, request: &SessionCommand) -> SessionResponse {
+    fn invoke_structural(
+        harness: &mut PhenixHarness,
+        service: &phenix_core::ServiceId,
+        request: &PhenixValue,
+    ) -> PhenixValue {
         let output = harness
             .invoke(
-                &session_service(),
-                &serde_json::to_vec(&PhenixValue::from(request)).unwrap(),
+                service,
+                &serde_json::to_vec(request).unwrap(),
                 &default_suite_authority(),
                 None,
             )
             .unwrap();
-        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        serde_json::from_slice(&output).unwrap()
+    }
+
+    fn invoke_model(
+        harness: &mut PhenixHarness,
+        request: &ModelInferenceRequest,
+    ) -> ModelInferenceResponse {
+        let request = PhenixValue::from(request);
+        let output = invoke_structural(harness, &model_inference_service(), &request);
+        ModelInferenceResponse::try_from(Project(&output)).unwrap()
+    }
+
+    fn invoke_session(harness: &mut PhenixHarness, request: &SessionCommand) -> SessionResponse {
+        let request = PhenixValue::from(request);
+        let output = invoke_structural(harness, &session_service(), &request);
         SessionResponse::try_from(Project(&output)).unwrap()
     }
 
@@ -188,8 +206,8 @@ mod tests {
                 &ToolCommand::Register {
                     tool: ToolDefinition {
                         id: CallableId::parse("echo").unwrap(),
-                        input_schema: serde_json::json!({}),
-                        output_schema: serde_json::json!({}),
+                        input_schema: PhenixSchema::Any,
+                        output_schema: PhenixSchema::Any,
                         output_prefix: b"tool:".to_vec().into(),
                     },
                 },
@@ -205,9 +223,8 @@ mod tests {
                     content: b"project context".to_vec().into(),
                 },
             );
-            let model: ModelInferenceResponse = invoke(
+            let model = invoke_model(
                 &mut harness,
-                &model_inference_service(),
                 &ModelInferenceRequest {
                     model: ModelId::parse("direct").unwrap(),
                     input: b"hello".to_vec().into(),

@@ -28,15 +28,15 @@ fn context<'host, 'runtime, 'state>(
     PluginContext::new(host, (), (), authenticated)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct ModelTarget {
     pub provider_plugin: PluginId,
     pub model: ModelId,
     #[serde(default)]
-    pub options: BTreeMap<String, serde_json::Value>,
+    pub options: BTreeMap<String, phenix_core::PhenixValue>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct RoutingProfile {
     pub id: RoutingProfileId,
     pub default_target: ModelTarget,
@@ -50,7 +50,7 @@ pub struct RoutingProfileDescriptor {
     pub providers: Vec<PluginId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ModelCommand {
     RegisterProfile {
@@ -75,7 +75,7 @@ pub enum ModelCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelResponse {
     Profile {
@@ -237,17 +237,26 @@ fn handle(
                 input,
                 options: target.options.clone(),
             };
+            let input = context
+                .kernel
+                .encode_value(&request)
+                .map_err(|error| error.to_string())?;
             let output = context
                 .kernel
                 .invoke_service_abi(
                     &model_inference_service(),
-                    &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+                    &input,
                     context.call.authority,
                     Some(&target.provider_plugin),
                 )
                 .map_err(|error| error.to_string())?;
-            let response: ModelInferenceResponse =
-                serde_json::from_slice(&output).map_err(|error| error.to_string())?;
+            let response = context
+                .kernel
+                .decode_projected::<ModelInferenceResponse>(
+                    &phenix_core::ModelInferenceInterface::interface_id(),
+                    &output,
+                )
+                .map_err(|error| error.to_string())?;
             Ok(ModelResponse::Inference { target, response })
         }
     }
@@ -379,21 +388,30 @@ mod tests {
             &mut self,
             service: &ServiceId,
             input: &[u8],
-            _host: &PluginHost<'_>,
+            host: &PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
             if service != &model_inference_service() {
                 return Err(format!("unsupported fixture provider service: {service}"));
             }
-            let request: ModelInferenceRequest =
-                serde_json::from_slice(input).map_err(|error| error.to_string())?;
-            serde_json::to_vec(&ModelInferenceResponse {
+            let context = PluginContext::new(host, (), (), ());
+            let request = context
+                .kernel
+                .decode_projected::<ModelInferenceRequest>(
+                    &phenix_core::ModelInferenceInterface::interface_id(),
+                    input,
+                )
+                .map_err(|error| error.to_string())?;
+            let response = ModelInferenceResponse {
                 output: request.input,
                 provider_metadata: BTreeMap::from([(
                     "provider".into(),
-                    serde_json::json!("fixture.provider"),
+                    serde_json::json!("fixture.provider").into(),
                 )]),
-            })
-            .map_err(|error| error.to_string())
+            };
+            context
+                .kernel
+                .encode_value(&response)
+                .map_err(|error| error.to_string())
         }
     }
 
@@ -591,7 +609,8 @@ mod tests {
             ModelResponse::Inference { target, response }
                 if target.provider_plugin.as_str() == "fixture.provider"
                     && response.output.as_ref() == b"hello"
-                    && response.provider_metadata["provider"] == "fixture.provider"
+                    && response.provider_metadata["provider"]
+                        == serde_json::json!("fixture.provider").into()
         ));
         let _ = fs::remove_file(path);
     }

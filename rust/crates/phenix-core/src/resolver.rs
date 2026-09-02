@@ -620,7 +620,7 @@ mod tests {
             namespace: ConfigNamespace::parse("acme.engineering@1").unwrap(),
             contract_version: 1,
             precedence: 10,
-            value: serde_json::json!({"review":"strict"}),
+            value: serde_json::json!({"review":"strict"}).into(),
             requested_authority: Authority::default(),
         }
     }
@@ -649,7 +649,7 @@ mod tests {
                 namespace: ConfigNamespace::parse("acme.engineering@1").unwrap(),
                 contract_version: 1,
                 precedence: 10,
-                value: serde_json::json!({"review":"strict"}),
+                value: serde_json::json!({"review":"strict"}).into(),
                 requested_authority: Authority::default(),
             },
         )
@@ -690,8 +690,8 @@ mod tests {
     fn configuration_conflicts_are_rejected_by_the_canonical_resolver() {
         let mut left = contribution("phenix-config-nix", "flake:one", "a");
         let mut right = contribution("phenix-config-lua", "file:two.lua", "b");
-        left.value = serde_json::json!({"mode":"strict"});
-        right.value = serde_json::json!({"mode":"relaxed"});
+        left.value = serde_json::json!({"mode":"strict"}).into();
+        right.value = serde_json::json!({"mode":"relaxed"}).into();
 
         assert_eq!(
             ResolvedHarness::resolve([], [], [left, right], &Authority::default()).unwrap_err(),
@@ -883,7 +883,7 @@ mod tests {
         )
         .unwrap();
         let mut changed = contribution("phenix-config-nix", "flake:acme", "b");
-        changed.value = serde_json::json!({"review":"relaxed"});
+        changed.value = serde_json::json!({"review":"relaxed"}).into();
         let changed = ResolvedHarness::resolve(
             [owner("consumer-owner", Authority::default())],
             [ComponentManifest {

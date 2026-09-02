@@ -7,7 +7,7 @@ use agent_client_protocol::schema::v1::{
 use phenix_backend::{
     BackendError, PreparedToolSurface, ToolInvocation, ToolPresentation, ToolResult,
 };
-use phenix_domain::CallableDescriptor;
+use phenix_domain::{CallableDescriptor, PhenixSchema};
 use serde_json::{json, value::RawValue, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{mpsc, Arc, Mutex};
@@ -158,13 +158,16 @@ impl ToolBridge {
             .callables
             .values()
             .map(|callable| {
-                json!({
+                let input_schema = json_schema(&callable.input_schema).map_err(|error| {
+                    agent_client_protocol::Error::internal_error().data(error.to_string())
+                })?;
+                Ok(json!({
                     "name": callable.id.as_str(),
                     "description": callable.description,
-                    "inputSchema": callable.input_schema,
-                })
+                    "inputSchema": input_schema,
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, agent_client_protocol::Error>>()?;
         Ok(json!({ "tools": tools }))
     }
 
@@ -225,6 +228,57 @@ pub(super) struct BridgeToolRequest {
     pub(super) response: mpsc::SyncSender<Result<ToolResult, BackendError>>,
 }
 
+fn json_schema(schema: &PhenixSchema) -> Result<Value, BackendError> {
+    let schema = match schema {
+        PhenixSchema::Any => json!({}),
+        PhenixSchema::Never => json!({"not": {}}),
+        PhenixSchema::Unit => json!({"type": "null"}),
+        PhenixSchema::Bool => json!({"type": "boolean"}),
+        PhenixSchema::I64 => json!({"type": "integer"}),
+        PhenixSchema::U64 => json!({"type": "integer", "minimum": 0}),
+        PhenixSchema::F64 => json!({"type": "number"}),
+        PhenixSchema::String => json!({"type": "string"}),
+        PhenixSchema::Bytes => json!({"type": "string", "contentEncoding": "base64"}),
+        PhenixSchema::Option(item) => {
+            json!({"anyOf": [json_schema(item)?, {"type": "null"}]})
+        }
+        PhenixSchema::Array { item, len } => json!({
+            "type": "array",
+            "items": json_schema(item)?,
+            "minItems": len,
+            "maxItems": len,
+        }),
+        PhenixSchema::List(item) => {
+            json!({"type": "array", "items": json_schema(item)?})
+        }
+        PhenixSchema::Map(item) => {
+            json!({"type": "object", "additionalProperties": json_schema(item)?})
+        }
+        PhenixSchema::Table(fields) => {
+            let properties = fields
+                .iter()
+                .map(|(key, schema)| Ok((key.as_str().to_owned(), json_schema(schema)?)))
+                .collect::<Result<Map<String, Value>, BackendError>>()?;
+            let required = fields
+                .keys()
+                .map(|key| key.as_str().to_owned())
+                .collect::<Vec<_>>();
+            json!({
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": false,
+            })
+        }
+        PhenixSchema::Variant(_) | PhenixSchema::Callable { .. } | PhenixSchema::Object { .. } => {
+            return Err(BackendError::Unsupported(
+                "Phenix callable schema cannot be represented as JSON Schema".to_owned(),
+            ));
+        }
+    };
+    Ok(schema)
+}
+
 fn tool_result(result: Result<ToolResult, BackendError>) -> Value {
     match result {
         Ok(result) => json!({
@@ -248,19 +302,18 @@ fn raw_value(value: Value) -> Result<Arc<RawValue>, agent_client_protocol::Error
 mod tests {
     use super::*;
     use phenix_backend::{BackendCapabilities, ToolProvision};
-    use phenix_domain::{CallableId, CallableKind, CallablePolicy, CapabilitySet};
+    use phenix_domain::{CallableId, CallableKind, CallablePolicy, CapabilitySet, PhenixSchema};
 
     fn callable() -> CallableDescriptor {
         CallableDescriptor {
             id: CallableId::parse("phenix.echo").unwrap(),
             kind: CallableKind::Agent,
             description: "Echo a value".to_owned(),
-            input_schema: json!({
-                "type": "object",
-                "properties": { "value": { "type": "string" } },
-                "required": ["value"]
-            }),
-            output_schema: json!({ "type": "string" }),
+            input_schema: PhenixSchema::Table(BTreeMap::from([(
+                "value".parse().unwrap(),
+                PhenixSchema::String,
+            )])),
+            output_schema: PhenixSchema::String,
             capabilities: CapabilitySet::default(),
             policy: CallablePolicy::default(),
         }
@@ -284,11 +337,15 @@ mod tests {
     }
 
     #[test]
-    fn list_tools_preserves_callable_schema() {
+    fn list_tools_adapts_structural_schema_at_the_mcp_boundary() {
         let bridge = ToolBridge::default();
         bridge.provision(&surface()).unwrap();
         let listed = bridge.list_tools().unwrap();
         assert_eq!(listed["tools"][0]["name"], "phenix.echo");
         assert_eq!(listed["tools"][0]["inputSchema"]["type"], "object");
+        assert_eq!(
+            listed["tools"][0]["inputSchema"]["properties"]["value"]["type"],
+            "string"
+        );
     }
 }

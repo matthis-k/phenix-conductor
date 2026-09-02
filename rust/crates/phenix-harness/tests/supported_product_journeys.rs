@@ -185,18 +185,20 @@ impl PluginInstance for ModelProvider {
         if service != &model_inference_service() {
             return Err(format!("unsupported fixture model service: {service}"));
         }
-        let request: ModelInferenceRequest =
+        let value: PhenixValue =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let request =
+            ModelInferenceRequest::try_from(Project(&value)).map_err(|error| error.to_string())?;
         let response = ModelInferenceResponse {
             output: [b"answer:".as_slice(), request.input.as_slice()]
                 .concat()
                 .into(),
             provider_metadata: BTreeMap::from([(
                 "model".into(),
-                serde_json::Value::String(request.model.as_str().to_owned()),
+                PhenixValue::String(request.model.as_str().to_owned()),
             )]),
         };
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        serde_json::to_vec(&PhenixValue::from(&response)).map_err(|error| error.to_string())
     }
 }
 
@@ -413,7 +415,10 @@ fn supported_harness_routes_model_inference_and_tool_calls_through_plugins() {
             assert_eq!(target.provider_plugin.as_str(), provider);
             assert_eq!(target.model.as_str(), "fixture-model");
             assert_eq!(response.output.as_ref(), b"answer:hello");
-            assert_eq!(response.provider_metadata["model"], "fixture-model");
+            assert_eq!(
+                response.provider_metadata["model"],
+                PhenixValue::String("fixture-model".into())
+            );
         }
         other => panic!("unexpected model response: {other:?}"),
     }

@@ -235,4 +235,6 @@ if [[ -z "${PHENIX_PLUGIN_ARCHITECTURE_FIXTURE_MODE:-}" ]]; then
     printf '%s\n' "$fixture_errors" >&2
     exit 1
   fi
+
+  bash "$repo_root/scripts/check-structural-boundaries.sh"
 fi

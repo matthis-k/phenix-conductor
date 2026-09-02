@@ -4,7 +4,7 @@ use phenix_core::{
     PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
     SdkClient, ServiceContribution, ServiceId, TransactionOp,
 };
-use phenix_sdk::{ContextInterface, ExecutionInterface};
+use phenix_sdk::{ContextInterface, ContextResourceRevision, ExecutionInterface};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,6 +37,11 @@ enum ContextRequest {
         lifetime: ContextLifetime,
         reason: String,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+enum ContextResponse {
+    Loaded { resource: ContextResourceRevision },
 }
 
 struct HookSdk<'host, 'runtime> {
@@ -92,7 +97,7 @@ pub enum HookFailurePolicy {
     FailOperation,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum HookAction {
     Observe,
@@ -107,11 +112,11 @@ pub enum HookAction {
     },
     EmitMetadata {
         key: String,
-        value: serde_json::Value,
+        value: PhenixValue,
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct HookDefinition {
     pub id: String,
     pub event: LifecycleEvent,
@@ -121,7 +126,7 @@ pub struct HookDefinition {
     pub failure_policy: HookFailurePolicy,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct HookConfiguration {
     pub revision: String,
     pub hooks: Vec<HookDefinition>,
@@ -133,14 +138,14 @@ pub struct HookWarning {
     pub message: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct HookDispatch {
     pub executed: Vec<String>,
     pub warnings: Vec<HookWarning>,
-    pub metadata: BTreeMap<String, serde_json::Value>,
+    pub metadata: BTreeMap<String, PhenixValue>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum HookCommand {
     RegisterConfiguration {
@@ -157,7 +162,7 @@ pub enum HookCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum HookResponse {
     Configuration {
@@ -330,14 +335,14 @@ fn execute_action(
         } => context
             .sdk
             .context
-            .invoke_value(&PhenixValue::from(&ContextRequest::Load {
+            .invoke_projected::<ContextRequest, ContextResponse>(&ContextRequest::Load {
                 execution_id: execution_id.to_owned(),
                 resource_id: resource_id.clone(),
                 revision: revision.clone(),
                 requester: ContextRequester::Hook,
                 lifetime: ContextLifetime::Execution,
                 reason: reason.clone(),
-            }))
+            })
             .map(|_| ())
             .map_err(|error| error.to_string()),
         HookAction::InvokeCallable { callable_id, input } => {

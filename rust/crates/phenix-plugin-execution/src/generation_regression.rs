@@ -37,7 +37,7 @@ fn generation_contribution(mode: &str) -> ConfigContribution {
         namespace: ConfigNamespace::parse("fixture.generation@1").unwrap(),
         contract_version: 1,
         precedence: 10,
-        value: serde_json::json!({"mode": mode}),
+        value: serde_json::json!({"mode": mode}).into(),
         requested_authority: Authority::default(),
     }
 }

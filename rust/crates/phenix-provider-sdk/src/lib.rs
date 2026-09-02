@@ -306,23 +306,36 @@ mod tests {
         let output = kernel
             .invoke(
                 &model_inference_service(),
-                &serde_json::to_vec(&ModelInferenceRequest {
+                &serde_json::to_vec(&phenix_core::PhenixValue::from(&ModelInferenceRequest {
                     model: phenix_core::ModelId::parse("model-a").unwrap(),
                     input: b"hello".to_vec().into(),
                     options: BTreeMap::new(),
-                })
+                }))
                 .unwrap(),
                 &network_authority(),
                 Some(&plugin),
             )
             .unwrap();
-        let response: ModelInferenceResponse = serde_json::from_slice(&output).unwrap();
+        let output: phenix_core::PhenixValue = serde_json::from_slice(&output).unwrap();
+        let response = ModelInferenceResponse::try_from(phenix_core::Project(&output)).unwrap();
         assert_eq!(response.output.as_ref(), b"world");
-        assert_eq!(response.provider_metadata["id"], "response-1");
-        assert_eq!(response.provider_metadata["protocol"], "openai_responses");
         assert_eq!(
-            response.provider_metadata["rate_limits"]["requests"]["remaining"],
-            99
+            response.provider_metadata["id"],
+            phenix_core::PhenixValue::String("response-1".into())
+        );
+        assert_eq!(
+            response.provider_metadata["protocol"],
+            phenix_core::PhenixValue::String("openai_responses".into())
+        );
+        assert_eq!(
+            response.provider_metadata["rate_limits"],
+            serde_json::json!({
+                "requests": {
+                    "limit": 100,
+                    "remaining": 99
+                }
+            })
+            .into()
         );
         server.join().unwrap();
     }

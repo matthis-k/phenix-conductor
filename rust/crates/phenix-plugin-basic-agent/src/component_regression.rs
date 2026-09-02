@@ -62,7 +62,7 @@ impl PluginInstance for Replacement {
             output: b"replacement".to_vec().into(),
             provider_metadata: BTreeMap::from([(
                 "provider".into(),
-                serde_json::json!("fixture.replacement"),
+                serde_json::json!("fixture.replacement").into(),
             )]),
         }))
         .map_err(|error| error.to_string())

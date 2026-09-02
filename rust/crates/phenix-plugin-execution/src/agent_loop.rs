@@ -63,7 +63,7 @@ pub(crate) enum ModelInvokeCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub(crate) enum ModelInvokeResponse {
     Profile {},
     Profiles {},

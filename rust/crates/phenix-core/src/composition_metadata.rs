@@ -48,7 +48,7 @@ pub struct DurableMigrationMetadata {
     pub to_version: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PluginPackageMetadata {
     #[serde(flatten)]
     pub manifest: PluginManifest,

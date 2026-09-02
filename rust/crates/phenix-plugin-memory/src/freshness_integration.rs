@@ -111,17 +111,18 @@ impl PluginInstance for RevalidationProvider {
         if service != &model_inference_service() {
             return Err(format!("unsupported fixture service: {service}"));
         }
-        let request: ModelInferenceRequest =
+        let input: PhenixValue =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let request: ModelInferenceRequest = input.project().map_err(|error| error.to_string())?;
         let output = match request.model.as_str() {
             "validate-keep" | "resolve-keep" => b"\"keep_current\"".to_vec(),
             "validate-ambiguous" => b"\"needs_validation\"".to_vec(),
             model => return Err(format!("unexpected revalidation model: {model}")),
         };
-        serde_json::to_vec(&ModelInferenceResponse {
+        serde_json::to_vec(&PhenixValue::from(&ModelInferenceResponse {
             output: Bytes::new(output),
             provider_metadata: BTreeMap::new(),
-        })
+        }))
         .map_err(|error| error.to_string())
     }
 }

@@ -3,6 +3,7 @@
 mod credentials;
 mod oauth;
 mod providers;
+mod schema_adapter;
 
 use credentials::{CredentialStore, StoredCredential};
 use futures::StreamExt;
@@ -455,11 +456,12 @@ impl PhenixSession {
             .callables()
             .iter()
             .map(|descriptor| {
-                Tool::new(descriptor.id.as_str())
+                let schema = schema_adapter::json_schema(&descriptor.input_schema)?;
+                Ok(Tool::new(descriptor.id.as_str())
                     .with_description(descriptor.description.clone())
-                    .with_schema(descriptor.input_schema.clone())
+                    .with_schema(schema))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, BackendError>>()?;
         let reasoning_effort = model
             .inference
             .effort
@@ -658,7 +660,7 @@ mod tests {
     use super::*;
     use phenix_backend::{ToolProvision, ToolResult};
     use phenix_domain::{
-        CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+        CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, PhenixSchema,
     };
     use serde_json::json;
 
@@ -781,8 +783,8 @@ mod tests {
                 id: CallableId::parse("read").unwrap(),
                 kind: CallableKind::Tool,
                 description: "test read".to_owned(),
-                input_schema: json!({"type": "object"}),
-                output_schema: json!({"type": "object"}),
+                input_schema: PhenixSchema::Map(Box::new(PhenixSchema::Any)),
+                output_schema: PhenixSchema::Map(Box::new(PhenixSchema::Any)),
                 capabilities: CapabilitySet::default(),
                 policy: CallablePolicy::default(),
             }],

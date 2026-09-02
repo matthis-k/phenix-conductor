@@ -1,19 +1,19 @@
 use crate::{
-    Authority, ComponentId, InterfaceId, InterfaceSchema, PluginId, ResourceNamespace, RuntimeId,
-    ServiceId,
+    Authority, ComponentId, InterfaceId, InterfaceSchema, PhenixValue, PluginId, ResourceNamespace,
+    RuntimeId, ServiceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PluginArtifact {
     pub locator: String,
     pub revision: String,
     #[serde(default)]
-    pub configuration: BTreeMap<String, serde_json::Value>,
+    pub configuration: BTreeMap<String, PhenixValue>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PluginExecution {
     Embedded,
@@ -66,7 +66,7 @@ pub struct ComponentManifest {
     pub maximum_authority: Authority,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PluginManifest {
     pub id: PluginId,
     pub version: u32,
@@ -107,7 +107,7 @@ mod tests {
                     revision: "sha256:fixture".into(),
                     configuration: BTreeMap::from([(
                         "entrypoint".into(),
-                        serde_json::json!("start"),
+                        PhenixValue::String("start".into()),
                     )]),
                 },
             },

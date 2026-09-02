@@ -1,6 +1,6 @@
 use crate::{
     Bytes, CallableId, ComponentInterface, ContextResourceId, ContextRevisionId, InterfaceId,
-    ModelId, ServiceId, SkillId,
+    ModelId, PhenixSchema, PhenixValue, ServiceId, SkillId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -10,18 +10,18 @@ pub const TOOL_SERVICE: &str = "phenix.tools@1";
 pub const SKILL_SERVICE: &str = "phenix.skills@1";
 pub const CONTEXT_SERVICE: &str = "phenix.context@1";
 
-#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelInferenceRequest {
     pub model: ModelId,
     pub input: Bytes,
     #[serde(default)]
-    pub options: BTreeMap<String, serde_json::Value>,
+    pub options: BTreeMap<String, PhenixValue>,
 }
 
-#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelInferenceResponse {
     pub output: Bytes,
-    pub provider_metadata: BTreeMap<String, serde_json::Value>,
+    pub provider_metadata: BTreeMap<String, PhenixValue>,
 }
 
 pub struct ModelInferenceInterface;
@@ -36,13 +36,17 @@ impl ComponentInterface for ModelInferenceInterface {
     }
 }
 
+fn any_schema() -> PhenixSchema {
+    PhenixSchema::Any
+}
+
 #[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolDefinition {
     pub id: CallableId,
-    #[serde(default)]
-    pub input_schema: serde_json::Value,
-    #[serde(default)]
-    pub output_schema: serde_json::Value,
+    #[serde(default = "any_schema")]
+    pub input_schema: PhenixSchema,
+    #[serde(default = "any_schema")]
+    pub output_schema: PhenixSchema,
     #[serde(default)]
     pub output_prefix: Bytes,
 }

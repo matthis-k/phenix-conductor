@@ -76,6 +76,12 @@
           label = "phenix-sdk / plugin_authoring";
         }
         {
+          id = "sdk-incompatible-schema";
+          package = "phenix-sdk";
+          test = "incompatible_schema";
+          label = "phenix-sdk / incompatible_schema";
+        }
+        {
           id = "harness-component-graph";
           package = "phenix-harness";
           test = "component_graph";
@@ -248,6 +254,7 @@
                   "statix"
                   "actionlint"
                   "plugin-architecture"
+                  "structural-boundaries"
                   "test-targets"
                   "workflow-sync"
                 ];
@@ -336,6 +343,21 @@
                       bash scripts/check-plugin-architecture.sh
                       bash scripts/check-spec-lifecycle-fixtures.sh
                       bash scripts/check-spec-lifecycle.sh
+                    '';
+                  };
+
+                  structural-boundaries = {
+                    description = "Canonical structural boundary enforcement";
+                    ci = sourceCi // {
+                      stepName = "Structural boundaries";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.bash
+                      pkgs.git
+                    ];
+                    exec = ''
+                      ${repositoryRoot}
+                      bash scripts/check-structural-boundaries.sh
                     '';
                   };
 

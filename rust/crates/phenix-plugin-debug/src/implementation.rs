@@ -23,19 +23,19 @@ pub enum DebugCommand {
     Snapshot,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum DiagnosticEntry {
-    Available { value: serde_json::Value },
+    Available { value: PhenixValue },
     Unavailable { error: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct DiagnosticSnapshot {
     pub services: BTreeMap<String, DiagnosticEntry>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum DebugResponse {
     Snapshot { snapshot: DiagnosticSnapshot },
@@ -197,12 +197,7 @@ fn probe<I, Request>(
 }
 
 fn response_entry(response: PhenixValue) -> DiagnosticEntry {
-    match serde_json::to_value(response) {
-        Ok(value) => DiagnosticEntry::Available { value },
-        Err(error) => DiagnosticEntry::Unavailable {
-            error: format!("invalid diagnostic service response: {error}"),
-        },
-    }
+    DiagnosticEntry::Available { value: response }
 }
 
 fn error_entry(error: ComponentInvocationError) -> DiagnosticEntry {
@@ -215,8 +210,9 @@ fn error_entry(error: ComponentInvocationError) -> DiagnosticEntry {
 mod tests {
     use super::*;
     use crate::debug_component_manifest;
-    use phenix_core::{Kernel, KernelConfig, ResolvedHarness, ResolvedHarnessActivation};
+    use phenix_core::{Kernel, KernelConfig, Project, ResolvedHarness, ResolvedHarnessActivation};
     use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
+    use phenix_sdk::SessionResponse;
 
     #[test]
     fn diagnostic_service_uses_resolved_optional_imports_without_kernel_fallbacks() {
@@ -252,9 +248,12 @@ mod tests {
             .unwrap();
         let output: PhenixValue = serde_json::from_slice(&output).unwrap();
         let DebugResponse::Snapshot { snapshot } = output.project().unwrap();
+        let DiagnosticEntry::Available { value } = &snapshot.services["sessions"] else {
+            panic!("sessions probe should be available");
+        };
         assert!(matches!(
-            snapshot.services["sessions"],
-            DiagnosticEntry::Available { .. }
+            SessionResponse::try_from(Project(value)).unwrap(),
+            SessionResponse::Sessions { sessions } if sessions.is_empty()
         ));
         assert!(matches!(
             snapshot.services["context"],
