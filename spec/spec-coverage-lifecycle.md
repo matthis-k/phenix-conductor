@@ -20,6 +20,12 @@ Required field:
 status: specification-only | partial | enforced
 ```
 
+Temporary implementation slices instead declare:
+
+```yaml
+temporary: true
+```
+
 When `status` is `partial` or `enforced`, add one or more repository-owned coverage pointers where real regression coverage exists:
 
 ```yaml
@@ -69,6 +75,10 @@ The check must:
 The check must not infer semantic completeness from file names or grep implementation text. Runtime semantics remain proven by Rust or Product tests.
 
 Temporary migration specs may carry explicit temporary metadata while active. They must be deleted at migration completion rather than promoted into permanent historical records.
+
+`scripts/check-spec-lifecycle.sh` is the canonical validator. During initial classification it may be run against explicit paths. After every lasting normative spec is classified, wire its default whole-tree mode into the Source validation order so new unclassified specs fail CI.
+
+The validator only checks metadata shape and coverage-path existence. It does not claim semantic completeness from metadata.
 
 ## Migration
 
