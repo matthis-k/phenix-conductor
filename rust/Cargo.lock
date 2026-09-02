@@ -1657,6 +1657,7 @@ dependencies = [
  "phenix-plugin-hooks",
  "phenix-plugin-jobs",
  "phenix-plugin-language",
+ "phenix-plugin-memory",
  "phenix-plugin-models",
  "phenix-plugin-options",
  "phenix-plugin-planning",
@@ -1764,6 +1765,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "phenix-plugin-memory"
+version = "0.1.0"
+dependencies = [
+ "phenix-core",
+ "phenix-plugin-models",
+ "phenix-plugin-sessions",
+ "phenix-sdk",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

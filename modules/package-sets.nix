@@ -67,6 +67,7 @@ let
     hooks = "phenix.hooks";
     jobs = "phenix.jobs";
     language = "phenix.language";
+    memory = "phenix.memory";
     models = "phenix.models";
     options = "phenix.options";
     planning = "phenix.planning";

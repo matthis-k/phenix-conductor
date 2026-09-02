@@ -32,6 +32,8 @@ pub use phenix_plugin_command_toolbelt::{
 };
 pub use phenix_plugin_context::{
     context_component_id, context_component_manifest, context_factory, context_manifest,
+    ContextInjection, ContextInjectionLifetime, ContextInjectionRequester, ContextResourceKind,
+    ContextScope, ExactContextReference, ExecutionContextProjection, ProjectedContextEntry,
 };
 pub use phenix_plugin_debug::{
     debug_component_id, debug_component_manifest, debug_factory, debug_manifest, debug_service,
@@ -65,6 +67,11 @@ pub use phenix_plugin_language::{
     language_service, DocumentProvenance, LanguageCommand, LanguageDocumentIdentity,
     LanguageInterface, LanguageObservation, LanguageOperationKind, LanguageOperationResult,
     LanguageProviderEpoch, LanguageResponse, LANGUAGE_SERVICE,
+};
+pub use phenix_plugin_memory::{
+    memory_component_id, memory_component_manifest, memory_factory, memory_manifest,
+    memory_service, MemoryCommand, MemoryInterface, MemoryKind, MemoryNode, MemoryRecallQuery,
+    MemoryRecord, MemoryResponse, MemoryScope, MemorySourceReference, MEMORY_SERVICE,
 };
 pub use phenix_plugin_models::{
     model_inference_service, model_routing_component_id, model_routing_component_manifest,
@@ -115,15 +122,11 @@ pub use phenix_plugin_workspace::{
 };
 pub use phenix_sdk::{
     context_service, execution_service, CallableRecord, ContextCommand, ContextDescriptor,
-    ContextInjection, ContextInjectionLifetime, ContextInjectionRequester, ContextInterface,
-    ContextResourceKind, ContextResourceRevision, ContextResponse, ContextScope,
-    ExactContextReference, ExecutionAuthority, ExecutionCommand, ExecutionContextProjection,
-    ExecutionInterface, ExecutionRecord, ExecutionResponse, ExecutionState, JobCommand,
-    JobInterface, JobResponse, ModelInferenceInterface, ProjectedContextEntry,
+    ContextInterface, ContextResourceRevision, ContextResponse, DecisionRecord, ExecutionAuthority,
+    ExecutionCommand, ExecutionInterface, ExecutionRecord, ExecutionResponse, ExecutionState,
+    HistoryEntry, HistoryKind, JobCommand, JobInterface, JobResponse, ModelInferenceInterface,
+    ObjectiveRecord, PlanRecord, PlanStep, PlanningCommand, PlanningInterface, PlanningResponse,
     RepositoryContextSource, RuntimeResourceKind, RuntimeResourceRecord, RuntimeResourceState,
     WorkerTaskRecord, WorkerTaskState, CONTEXT_SERVICE, EXECUTION_SERVICE, JOB_SERVICE,
-};
-pub use phenix_sdk::{
-    DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord, PlanStep,
-    PlanningCommand, PlanningInterface, PlanningResponse, PLANNING_SERVICE,
+    PLANNING_SERVICE,
 };

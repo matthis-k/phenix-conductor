@@ -15,13 +15,13 @@ use phenix_plugin_catalog::{
     execution_component_manifest, execution_factory, execution_manifest,
     frontend_component_manifest, frontend_factory, frontend_manifest, hook_component_manifest,
     hook_factory, hook_manifest, job_component_manifest, job_factory, job_manifest,
-    language_component_manifest, language_factory, language_manifest,
-    model_routing_component_manifest, model_routing_factory, model_routing_manifest,
-    options_component_manifest, options_factory, options_manifest, planning_component_manifest,
-    planning_factory, planning_manifest, repository_worker_component_manifest,
-    repository_worker_factory, repository_worker_manifest, sdk_component_manifest, sdk_factory,
-    sdk_manifest, session_component_manifest, session_factory, session_manifest,
-    session_tree_component_manifest, session_tree_factory, session_tree_manifest,
+    language_component_manifest, language_factory, language_manifest, memory_component_manifest,
+    memory_factory, memory_manifest, model_routing_component_manifest, model_routing_factory,
+    model_routing_manifest, options_component_manifest, options_factory, options_manifest,
+    planning_component_manifest, planning_factory, planning_manifest,
+    repository_worker_component_manifest, repository_worker_factory, repository_worker_manifest,
+    sdk_component_manifest, sdk_factory, sdk_manifest, session_component_manifest, session_factory,
+    session_manifest, session_tree_component_manifest, session_tree_factory, session_tree_manifest,
     workspace_component_manifest, workspace_factory, workspace_manifest,
 };
 use std::{
@@ -34,6 +34,9 @@ use std::{
 mod basic_suite;
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
+type ExternalFactory =
+    Arc<dyn Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync>;
+
 #[derive(Debug)]
 pub enum HarnessBuildError {
     Kernel(KernelError),
@@ -95,6 +98,7 @@ pub fn default_suite_authority() -> Authority {
 pub struct HarnessBuilder {
     manifests: Vec<PluginManifest>,
     embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,
+    external_factories: BTreeMap<PluginId, ExternalFactory>,
     layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
     components: Vec<ComponentManifest>,
     contributions: Vec<ConfigContribution>,
@@ -118,6 +122,7 @@ impl HarnessBuilder {
         builder.add_embedded(context_manifest(), context_factory)?;
         builder.add_embedded(execution_manifest(authority.clone()), execution_factory)?;
         builder.add_embedded(language_manifest(), language_factory)?;
+        builder.add_embedded(memory_manifest(), memory_factory)?;
         builder.add_embedded(planning_manifest(), planning_factory)?;
         builder.add_embedded(workspace_manifest(), workspace_factory)?;
         builder.add_embedded(
@@ -139,6 +144,7 @@ impl HarnessBuilder {
             context_component_manifest(),
             execution_component_manifest(authority.clone()),
             language_component_manifest(),
+            memory_component_manifest(),
             planning_component_manifest(),
             workspace_component_manifest(),
             model_routing_component_manifest(authority.clone()),
@@ -165,6 +171,7 @@ impl HarnessBuilder {
             context_manifest(),
             execution_manifest(authority.clone()),
             language_manifest(),
+            memory_manifest(),
             planning_manifest(),
             workspace_manifest(),
             model_routing_manifest(authority.clone()),
@@ -231,6 +238,7 @@ impl HarnessBuilder {
             execution_factory,
         )?;
         builder.add_selected(&enabled, language_manifest(), language_factory)?;
+        builder.add_selected(&enabled, memory_manifest(), memory_factory)?;
         builder.add_selected(&enabled, planning_manifest(), planning_factory)?;
         builder.add_selected(&enabled, workspace_manifest(), workspace_factory)?;
         builder.add_selected(
@@ -261,6 +269,7 @@ impl HarnessBuilder {
             context_component_manifest(),
             execution_component_manifest(authority.clone()),
             language_component_manifest(),
+            memory_component_manifest(),
             planning_component_manifest(),
             workspace_component_manifest(),
             model_routing_component_manifest(authority.clone()),
@@ -335,6 +344,23 @@ impl HarnessBuilder {
         Ok(())
     }
 
+    pub fn add_external<F>(
+        &mut self,
+        manifest: PluginManifest,
+        factory: F,
+    ) -> Result<(), KernelError>
+    where
+        F: Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync + 'static,
+    {
+        if !matches!(manifest.execution, PluginExecution::External { .. }) {
+            return Err(KernelError::WrongExecutionKind(manifest.id));
+        }
+        let id = manifest.id.clone();
+        self.manifests.push(manifest);
+        self.external_factories.insert(id, Arc::new(factory));
+        Ok(())
+    }
+
     pub fn build(self) -> Result<PhenixHarness, HarnessBuildError> {
         let resolved = ResolvedHarness::resolve_with_layer_policies(
             self.manifests.clone(),
@@ -347,6 +373,9 @@ impl HarnessBuilder {
         kernel.activate_resolved_harness(&resolved)?;
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;
+        }
+        for (plugin, factory) in self.external_factories {
+            kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;
         }
         Ok(PhenixHarness { kernel, resolved })
     }
@@ -366,6 +395,9 @@ impl HarnessBuilder {
         kernel.activate_resolved_harness(&resolved)?;
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;
+        }
+        for (plugin, factory) in self.external_factories {
+            kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;
         }
         Ok(PhenixHarness { kernel, resolved })
     }

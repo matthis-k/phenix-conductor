@@ -20,6 +20,7 @@ phenix-plugin-frontend = { path = "../phenix-plugin-frontend" }
 phenix-plugin-hooks = { path = "../phenix-plugin-hooks" }
 phenix-plugin-jobs = { path = "../phenix-plugin-jobs" }
 phenix-plugin-language = { path = "../phenix-plugin-language" }
+phenix-plugin-memory = { path = "../phenix-plugin-memory" }
 phenix-plugin-models = { path = "../phenix-plugin-models" }
 phenix-plugin-options = { path = "../phenix-plugin-options" }
 phenix-plugin-planning = { path = "../phenix-plugin-planning" }
