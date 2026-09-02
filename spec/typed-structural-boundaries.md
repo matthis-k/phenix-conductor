@@ -1,6 +1,6 @@
 # Typed structural value boundaries
 
-status: partial
+status: enforced
 coverage:
   - scripts/check-structural-boundaries.sh
   - rust/crates/phenix-sdk/tests/incompatible_schema.rs
