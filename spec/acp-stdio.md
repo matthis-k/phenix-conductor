@@ -1,6 +1,8 @@
 # ACP stdio application
 
-Status: specification only. Canonical application-integration terminology is defined by #442. ACP adapter semantics are defined by #437.
+status: specification-only
+
+Canonical application-integration terminology is defined by #442. ACP adapter semantics are defined by #437.
 
 ## Goal
 
