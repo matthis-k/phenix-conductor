@@ -9,8 +9,8 @@ use phenix_core::{
     ServiceId, SessionId, TransactionOp,
 };
 use phenix_sdk::{
-    session_mutation_service, SessionMutationCommand, SessionMutationInterface,
-    SessionMutationResponse,
+    session_mutation_service, SessionHistoryDraft, SessionHistoryEntry, SessionMutationCommand,
+    SessionMutationInterface, SessionMutationResponse,
 };
 
 const SESSION_PLUGIN: &str = "phenix.sessions";
@@ -162,6 +162,21 @@ fn handle_session(
                 inputs: read_inputs(context, &id)?,
             })
         }
+        SessionCommand::ResolveInput { resource } => Ok(SessionResponse::Input {
+            input: resolve_input_resource(context, &resource)?,
+        }),
+        SessionCommand::AppendHistory { id, entry } => append_history(context, &id, entry),
+        SessionCommand::History { id } => {
+            if read_session(context, &id)?.is_none() {
+                return Err(format!("unknown session: {id}"));
+            }
+            Ok(SessionResponse::History {
+                entries: read_history(context, &id)?,
+            })
+        }
+        SessionCommand::ResolveHistory { resource } => Ok(SessionResponse::HistoryEntry {
+            entry: resolve_history_resource(context, &resource)?,
+        }),
     }
 }
 
@@ -266,6 +281,50 @@ fn continue_session(
     Ok(SessionResponse::Continued { session, input })
 }
 
+fn append_history(
+    context: &SessionContext<'_, '_>,
+    id: &SessionId,
+    draft: SessionHistoryDraft,
+) -> Result<SessionResponse, String> {
+    if read_session(context, id)?.is_none() {
+        return Err(format!("unknown session: {id}"));
+    }
+    let key = history_key(id);
+    let old_history = read_raw(context, &key)?;
+    let mut entries = decode_history(old_history.as_deref())?;
+    let entry = SessionHistoryEntry {
+        sequence: u64::try_from(entries.len())
+            .map_err(|_| "session history sequence overflow".to_owned())?
+            + 1,
+        role: draft.role,
+        content: draft.content,
+        tool_calls: draft.tool_calls,
+        tool_results: draft.tool_results,
+        finish_reason: draft.finish_reason,
+        usage: draft.usage,
+        context_revision: draft.context_revision,
+        instruction_revision: draft.instruction_revision,
+    };
+    entries.push(entry.clone());
+    context
+        .kernel
+        .transact_durable(
+            &session_namespace(),
+            &[
+                TransactionOp::AssertValue {
+                    key: key.clone(),
+                    expected: old_history,
+                },
+                TransactionOp::Put {
+                    key,
+                    value: serde_json::to_vec(&entries).map_err(|error| error.to_string())?,
+                },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(SessionResponse::HistoryAppended { entry })
+}
+
 fn read_session(
     context: &SessionContext<'_, '_>,
     id: &SessionId,
@@ -291,6 +350,57 @@ fn read_inputs(
     decode_inputs(read_raw(context, &inputs_key(id))?.as_deref())
 }
 
+fn read_history(
+    context: &SessionContext<'_, '_>,
+    id: &SessionId,
+) -> Result<Vec<SessionHistoryEntry>, String> {
+    decode_history(read_raw(context, &history_key(id))?.as_deref())
+}
+
+fn resolve_input_resource(
+    context: &SessionContext<'_, '_>,
+    resource: &str,
+) -> Result<Option<SessionInput>, String> {
+    let value = resource
+        .strip_prefix("input/")
+        .ok_or_else(|| format!("invalid session input resource: {resource}"))?;
+    let (session, sequence) = value
+        .rsplit_once('/')
+        .ok_or_else(|| format!("invalid session input resource: {resource}"))?;
+    let session = SessionId::parse(session).map_err(|error| error.to_string())?;
+    let sequence = sequence
+        .parse::<u64>()
+        .map_err(|_| format!("invalid session input resource: {resource}"))?;
+    if read_session(context, &session)?.is_none() {
+        return Ok(None);
+    }
+    Ok(read_inputs(context, &session)?
+        .into_iter()
+        .find(|input| input.sequence == sequence))
+}
+
+fn resolve_history_resource(
+    context: &SessionContext<'_, '_>,
+    resource: &str,
+) -> Result<Option<SessionHistoryEntry>, String> {
+    let value = resource
+        .strip_prefix("history/")
+        .ok_or_else(|| format!("invalid session history resource: {resource}"))?;
+    let (session, sequence) = value
+        .rsplit_once('/')
+        .ok_or_else(|| format!("invalid session history resource: {resource}"))?;
+    let session = SessionId::parse(session).map_err(|error| error.to_string())?;
+    let sequence = sequence
+        .parse::<u64>()
+        .map_err(|_| format!("invalid session history resource: {resource}"))?;
+    if read_session(context, &session)?.is_none() {
+        return Ok(None);
+    }
+    Ok(read_history(context, &session)?
+        .into_iter()
+        .find(|entry| entry.sequence == sequence))
+}
+
 fn read_raw(context: &SessionContext<'_, '_>, key: &str) -> Result<Option<Vec<u8>>, String> {
     context
         .kernel
@@ -310,12 +420,22 @@ fn decode_inputs(value: Option<&[u8]>) -> Result<Vec<SessionInput>, String> {
         .unwrap_or_else(|| Ok(Vec::new()))
 }
 
+fn decode_history(value: Option<&[u8]>) -> Result<Vec<SessionHistoryEntry>, String> {
+    value
+        .map(|value| serde_json::from_slice(value).map_err(|error| error.to_string()))
+        .unwrap_or_else(|| Ok(Vec::new()))
+}
+
 fn session_key(id: &SessionId) -> String {
     format!("session/{id}")
 }
 
 fn inputs_key(id: &SessionId) -> String {
     format!("inputs/{id}")
+}
+
+fn history_key(id: &SessionId) -> String {
+    format!("history/{id}")
 }
 
 #[cfg(test)]
@@ -413,6 +533,100 @@ mod tests {
                 ],
             }
         );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn durable_input_resource_resolves_after_restart() {
+        let path = temp_db("input-resource");
+        let root = SessionId::parse("root").unwrap();
+        {
+            let mut kernel = kernel_with(&path);
+            invoke(&mut kernel, &SessionCommand::Create { id: root.clone() }).unwrap();
+            invoke(
+                &mut kernel,
+                &SessionCommand::Continue {
+                    id: root.clone(),
+                    kind: SessionInputKind::User,
+                    content: b"hello".to_vec().into(),
+                },
+            )
+            .unwrap();
+        }
+
+        let mut restored = kernel_with(&path);
+        assert_eq!(
+            invoke(
+                &mut restored,
+                &SessionCommand::ResolveInput {
+                    resource: phenix_sdk::session_input_resource(&root, 1),
+                },
+            )
+            .unwrap(),
+            SessionResponse::Input {
+                input: Some(SessionInput {
+                    sequence: 1,
+                    kind: SessionInputKind::User,
+                    content: b"hello".to_vec().into(),
+                }),
+            }
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn portable_history_is_durable_and_resolvable_after_restart() {
+        let path = temp_db("history-resource");
+        let root = SessionId::parse("root").unwrap();
+        let draft = SessionHistoryDraft {
+            role: phenix_sdk::SessionHistoryRole::Assistant,
+            content: vec![phenix_sdk::SessionHistoryContentPart::Text {
+                text: "done".into(),
+            }],
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            finish_reason: Some(phenix_sdk::SessionHistoryFinishReason::Complete),
+            usage: None,
+            context_revision: "ctx-1".into(),
+            instruction_revision: "instructions-1".into(),
+        };
+        {
+            let mut kernel = kernel_with(&path);
+            invoke(&mut kernel, &SessionCommand::Create { id: root.clone() }).unwrap();
+            let response = invoke(
+                &mut kernel,
+                &SessionCommand::AppendHistory {
+                    id: root.clone(),
+                    entry: draft.clone(),
+                },
+            )
+            .unwrap();
+            assert!(matches!(
+                response,
+                SessionResponse::HistoryAppended { ref entry }
+                    if entry.sequence == 1 && entry.context_revision == "ctx-1"
+            ));
+        }
+
+        let mut restored = kernel_with(&path);
+        let history = invoke(&mut restored, &SessionCommand::History { id: root.clone() }).unwrap();
+        assert!(matches!(
+            history,
+            SessionResponse::History { ref entries }
+                if entries.len() == 1 && entries[0].content == draft.content
+        ));
+        let resolved = invoke(
+            &mut restored,
+            &SessionCommand::ResolveHistory {
+                resource: phenix_sdk::session_history_resource(&root, 1),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            resolved,
+            SessionResponse::HistoryEntry { entry: Some(ref entry) }
+                if entry.sequence == 1 && entry.instruction_revision == "instructions-1"
+        ));
         let _ = fs::remove_file(path);
     }
 }

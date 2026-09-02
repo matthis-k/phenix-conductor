@@ -2,7 +2,9 @@ use crate::context_manifest;
 use phenix_core::{
     ComponentExport, ComponentId, ComponentImport, ComponentInterface, ComponentManifest, PluginId,
 };
-use phenix_sdk::{ContextInterface, ExecutionInterface};
+use phenix_sdk::{
+    ContextCompactionInterface, ContextExpansionInterface, ContextInterface, ExecutionInterface,
+};
 
 const CONTEXT_COMPONENT: &str = "phenix.context";
 const CONTEXT_PLUGIN: &str = "phenix.context";
@@ -12,18 +14,31 @@ pub fn context_component_id() -> ComponentId {
     ComponentId::parse(CONTEXT_COMPONENT).expect("static component id is valid")
 }
 
+fn optional_import<I: ComponentInterface>(authority: &phenix_core::Authority) -> ComponentImport {
+    ComponentImport {
+        interface: I::interface_id(),
+        schema: I::schema(),
+        required: false,
+        authority: authority.clone(),
+    }
+}
+
 #[must_use]
 pub fn context_component_manifest() -> ComponentManifest {
     let authority = context_manifest().maximum_authority;
     ComponentManifest {
         id: context_component_id(),
         owner: PluginId::parse(CONTEXT_PLUGIN).expect("static plugin id is valid"),
-        imports: vec![ComponentImport {
-            interface: ExecutionInterface::interface_id(),
-            schema: ExecutionInterface::schema(),
-            required: true,
-            authority: authority.clone(),
-        }],
+        imports: vec![
+            ComponentImport {
+                interface: ExecutionInterface::interface_id(),
+                schema: ExecutionInterface::schema(),
+                required: true,
+                authority: authority.clone(),
+            },
+            optional_import::<ContextCompactionInterface>(&authority),
+            optional_import::<ContextExpansionInterface>(&authority),
+        ],
         exports: vec![ComponentExport {
             interface: ContextInterface::interface_id(),
             schema: ContextInterface::schema(),
@@ -80,5 +95,19 @@ mod tests {
             &execution_component_manifest(authority()).id
         );
         assert_eq!(handle.effective_authority(), &authority());
+        assert!(graph
+            .import_handle(
+                &context_component_id(),
+                &ContextCompactionInterface::interface_id()
+            )
+            .unwrap()
+            .is_none());
+        assert!(graph
+            .import_handle(
+                &context_component_id(),
+                &ContextExpansionInterface::interface_id()
+            )
+            .unwrap()
+            .is_none());
     }
 }

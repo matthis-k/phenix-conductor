@@ -1,9 +1,22 @@
 pub use phenix_core::SessionId;
-use phenix_core::{Bytes, ComponentInterface, InterfaceId, NamespaceTransaction, ServiceId};
+use phenix_core::{
+    Bytes, CallableId, ComponentInterface, InterfaceId, NamespaceTransaction, PhenixValue,
+    ServiceId, Type, ValueCodec, ValueError,
+};
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_SERVICE: &str = "phenix.sessions@1";
 pub const SESSION_MUTATION_SERVICE: &str = "phenix.sessions.mutation@1";
+
+#[must_use]
+pub fn session_input_resource(id: &SessionId, sequence: u64) -> String {
+    format!("input/{id}/{sequence}")
+}
+
+#[must_use]
+pub fn session_history_resource(id: &SessionId, sequence: u64) -> String {
+    format!("history/{id}/{sequence}")
+}
 
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
@@ -19,6 +32,128 @@ pub struct SessionInput {
     pub sequence: u64,
     pub kind: SessionInputKind,
     pub content: Bytes,
+}
+
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionHistoryRole {
+    User,
+    Assistant,
+    Tool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SessionHistoryContentPart {
+    Text {
+        text: String,
+    },
+    MediaReference {
+        media_type: String,
+        resource: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SessionHistoryValue(pub PhenixValue);
+
+impl From<PhenixValue> for SessionHistoryValue {
+    fn from(value: PhenixValue) -> Self {
+        Self(value)
+    }
+}
+
+impl From<SessionHistoryValue> for PhenixValue {
+    fn from(value: SessionHistoryValue) -> Self {
+        value.0
+    }
+}
+
+impl ValueCodec for SessionHistoryValue {
+    fn phenix_type() -> Type {
+        Type::Any
+    }
+
+    fn to_value(&self) -> PhenixValue {
+        self.0.clone()
+    }
+
+    fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
+        Ok(Self(value.clone()))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(deny_unknown_fields)]
+pub struct SessionHistoryToolCall {
+    pub call_id: String,
+    pub callable_id: CallableId,
+    pub arguments: SessionHistoryValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SessionHistoryToolOutcome {
+    Success { value: SessionHistoryValue },
+    Failure { code: String, message: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(deny_unknown_fields)]
+pub struct SessionHistoryToolResult {
+    pub call_id: String,
+    pub callable_id: CallableId,
+    pub result: SessionHistoryToolOutcome,
+}
+
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionHistoryFinishReason {
+    Complete,
+    ToolCalls,
+    Length,
+    ContentFilter,
+    Cancelled,
+    ProviderError,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(deny_unknown_fields)]
+pub struct SessionHistoryUsage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(deny_unknown_fields)]
+pub struct SessionHistoryEntry {
+    pub sequence: u64,
+    pub role: SessionHistoryRole,
+    pub content: Vec<SessionHistoryContentPart>,
+    pub tool_calls: Vec<SessionHistoryToolCall>,
+    pub tool_results: Vec<SessionHistoryToolResult>,
+    pub finish_reason: Option<SessionHistoryFinishReason>,
+    pub usage: Option<SessionHistoryUsage>,
+    pub context_revision: String,
+    pub instruction_revision: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(deny_unknown_fields)]
+pub struct SessionHistoryDraft {
+    pub role: SessionHistoryRole,
+    pub content: Vec<SessionHistoryContentPart>,
+    pub tool_calls: Vec<SessionHistoryToolCall>,
+    pub tool_results: Vec<SessionHistoryToolResult>,
+    pub finish_reason: Option<SessionHistoryFinishReason>,
+    pub usage: Option<SessionHistoryUsage>,
+    pub context_revision: String,
+    pub instruction_revision: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
@@ -42,7 +177,7 @@ pub enum SessionMutationResponse {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionCommand {
     Create {
@@ -60,9 +195,22 @@ pub enum SessionCommand {
     Inputs {
         id: SessionId,
     },
+    ResolveInput {
+        resource: String,
+    },
+    AppendHistory {
+        id: SessionId,
+        entry: SessionHistoryDraft,
+    },
+    History {
+        id: SessionId,
+    },
+    ResolveHistory {
+        resource: String,
+    },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionResponse {
     Created {
@@ -80,6 +228,18 @@ pub enum SessionResponse {
     },
     Inputs {
         inputs: Vec<SessionInput>,
+    },
+    Input {
+        input: Option<SessionInput>,
+    },
+    HistoryAppended {
+        entry: SessionHistoryEntry,
+    },
+    History {
+        entries: Vec<SessionHistoryEntry>,
+    },
+    HistoryEntry {
+        entry: Option<SessionHistoryEntry>,
     },
 }
 
