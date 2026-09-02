@@ -306,17 +306,18 @@ mod tests {
         let output = kernel
             .invoke(
                 &model_inference_service(),
-                &serde_json::to_vec(&ModelInferenceRequest {
+                &serde_json::to_vec(&phenix_core::PhenixValue::from(&ModelInferenceRequest {
                     model: phenix_core::ModelId::parse("model-a").unwrap(),
                     input: b"hello".to_vec().into(),
                     options: BTreeMap::new(),
-                })
+                }))
                 .unwrap(),
                 &network_authority(),
                 Some(&plugin),
             )
             .unwrap();
-        let response: ModelInferenceResponse = serde_json::from_slice(&output).unwrap();
+        let output: phenix_core::PhenixValue = serde_json::from_slice(&output).unwrap();
+        let response = ModelInferenceResponse::try_from(phenix_core::Project(&output)).unwrap();
         assert_eq!(response.output.as_ref(), b"world");
         assert_eq!(
             response.provider_metadata["id"],
