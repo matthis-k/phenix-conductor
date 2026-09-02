@@ -2,8 +2,8 @@ use crate::interface_attr::validate_interface_id;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    parse::Parser, punctuated::Punctuated, Attribute, ImplItem, ItemImpl, ItemStruct, LitStr, Meta,
-    Token, Type,
+    parse::Parser, punctuated::Punctuated, Attribute, Ident, ImplItem, ItemImpl, ItemStruct, LitStr,
+    Meta, Token, Type,
 };
 
 pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<TokenStream> {
@@ -78,17 +78,9 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
     }
 
     let self_ty = &item.self_ty;
-    let descriptors = exports.iter().map(|(method, export)| {
-        let interface = export.interface.expression();
-        let public = export.public;
-        quote! {
-            ::phenix_sdk::StaticComponentExport {
-                interface: #interface,
-                method: stringify!(#method),
-                public: #public,
-            }
-        }
-    });
+    let descriptors = exports
+        .iter()
+        .map(|(method, export)| export_descriptor(method, export));
 
     Ok(quote! {
         #item
@@ -101,7 +93,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
     })
 }
 
-struct ExportContribution {
+pub(crate) struct ExportContribution {
     interface: ExportInterface,
     public: bool,
 }
@@ -125,7 +117,19 @@ impl ExportInterface {
     }
 }
 
-fn parse_export(attribute: &Attribute) -> syn::Result<ExportContribution> {
+pub(crate) fn export_descriptor(method: &Ident, export: &ExportContribution) -> TokenStream {
+    let interface = export.interface.expression();
+    let public = export.public;
+    quote! {
+        ::phenix_sdk::StaticComponentExport {
+            interface: #interface,
+            method: stringify!(#method),
+            public: #public,
+        }
+    }
+}
+
+pub(crate) fn parse_export(attribute: &Attribute) -> syn::Result<ExportContribution> {
     let Meta::List(meta) = &attribute.meta else {
         return Err(syn::Error::new_spanned(
             attribute,
