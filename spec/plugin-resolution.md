@@ -4,79 +4,113 @@ Status: implementation contract.
 
 ## Purpose
 
-Select providers for replaceable service/capability contracts using pinned kernel policy, runtime availability, and authority.
+Resolve replaceable providers before activation and pin the result to one immutable graph generation.
 
-Permissions determine eligibility. Product policy determines preference among eligible providers.
+Authority determines eligibility. Composition policy determines preference among eligible providers. Runtime dispatch follows the resolved plan and does not search the live plugin set again.
 
-Requires `spec/plugins.md` and `spec/plugin-contributions.md`.
+This document extends `spec/plugin-authoring-macro.md` and `spec/plugin-contributions.md`.
+
+## Terms
+
+**Provider candidate.** A plugin contribution that implements a compatible interface.
+
+**Resolved provider.** The provider selected for an import in one graph generation.
+
+**Fallback plan.** An optional ordered set of alternate providers resolved with the graph. Fallback is available only when the interface contract and composition policy explicitly allow it.
+
+**Availability.** Process-local runtime health for a provider instance. Availability can prevent dispatch to a resolved provider. It does not silently change the graph.
 
 ## Domain
 
-The kernel may define generic provider-resolution types:
+The kernel may define generic provider-resolution types such as:
 
 ```text
-CapabilityId
-CapabilityVersion
-CapabilityRequirement
-CapabilityProviderId
+InterfaceId
+InterfaceRequirement
+ProviderId
 ProviderBinding
 ProviderPriority
-PluginPermissionGrant
-CapabilityPermissionRequirement
 ProviderAvailability
-ResolvedCapabilityProvider
+ResolvedProviderPlan
 ```
 
-Capability identity is opaque to the kernel beyond contract/version matching. `artifact.read`, `session.open`, `model.complete`, and similar names remain userspace contracts.
+Interface identity is opaque to the kernel beyond version and structural compatibility. Session, model, tool, context, and other product meanings belong to neutral contracts and plugins.
 
-## Configuration
+## Composition policy
 
-Plugins advertise capability implementations. They do not assign their own effective priority.
+Plugins advertise what they provide. They do not choose their own effective global priority or authority.
 
-Kernel/Harness policy supplies:
+Composition policy may supply:
 
-- enabled/disabled state;
-- permission grant;
-- integer priority;
-- optional explicit binding;
-- optional pre-dispatch fallback policy;
-- opaque scope selectors when a contract needs scoping.
+- enabled or disabled state;
+- authority grant;
+- effective provider priority;
+- explicit provider binding;
+- optional fallback policy where the interface permits fallback;
+- opaque scope selectors where the interface requires scoping.
 
-These values are pinned kernel configuration semantics.
+These inputs are part of graph resolution and therefore part of graph identity.
 
-## Effective permission
+A plugin may declare metadata that is intrinsic to its implementation. Composition policy decides the effective provider choice.
 
-A provider is eligible only when the operation fits all bounds:
+## Effective authority
+
+A provider is eligible only when the operation fits all authority bounds:
 
 ```text
 caller authority
   ∩ configured plugin grant
-  ∩ capability operation requirements
+  ∩ provider maximum authority
+  ∩ interface operation requirements
 ```
 
-Priority, first-party status, bundling, origin, or explicit binding cannot expand authority.
+Priority, first-party status, package origin, bundling, or explicit binding never expands authority.
 
-## Resolution order
+## Resolution
 
-For one request:
+During graph construction the kernel:
 
-1. resolve the pinned kernel policy/configuration snapshot;
-2. match capability ID and compatible contract version;
-3. discard disabled providers;
-4. discard unavailable providers that cannot satisfy the request;
-5. discard providers whose effective permissions do not satisfy the operation;
-6. apply any declared opaque scope requirement;
-7. if an explicit configured binding exists, select it when eligible;
-8. otherwise select the highest configured per-capability priority;
-9. break equal-priority ties by stable provider identity.
+1. matches the required interface ID and compatible version;
+2. checks structural request and response compatibility;
+3. removes disabled candidates;
+4. removes candidates that cannot receive the required authority;
+5. applies declared scope requirements;
+6. applies an eligible explicit binding when configured;
+7. otherwise selects by effective composition priority;
+8. breaks equal priority by stable provider identity;
+9. resolves any explicitly allowed fallback plan using the same eligibility rules;
+10. records the complete result in the candidate graph generation.
 
-The resolver never invokes provider code while deciding which provider wins.
+The resolver never invokes provider code while choosing providers.
+
+Registration order and activation order have no semantic effect.
+
+## Dispatch
+
+Dispatch uses the provider plan pinned to the invocation's graph generation.
+
+The kernel does not perform an unbounded provider search at request time.
+
+If the selected provider cannot accept the call, the result is normally an availability failure. A fallback may be used only when all of these are true:
+
+- the interface contract explicitly permits pre-dispatch fallback;
+- composition policy enabled fallback;
+- the fallback provider was resolved and pinned in the same graph generation;
+- the fallback remains within the invocation's authority bound.
+
+The executed provider and fallback reason are recorded in provenance.
+
+## Failure after dispatch
+
+Once provider execution starts, provider failure is an execution failure. It does not mean "try another provider."
+
+A userspace interface may define explicit replay or retry semantics for safe idempotent operations. Such behavior is part of that interface or a layer implementing it. It is not generic provider search.
+
+Mutating and ambiguity-sensitive operations default to no post-dispatch provider switch.
 
 ## Availability
 
-Availability is runtime state. Configuration expresses preference, not current health.
-
-At minimum:
+Availability is process-local runtime state, for example:
 
 ```text
 starting
@@ -86,56 +120,58 @@ unavailable
 stopped
 ```
 
-`degraded` is eligible only when the provider explicitly reports that it can satisfy the requested operation.
+Availability does not change semantic provider binding inside an existing generation.
 
-## Fallback
+A durable provider change, policy change, authority change, or provider replacement creates a candidate graph generation. Successful reconciliation commits the new generation atomically.
 
-Fallback may choose another eligible provider before dispatch.
+## Provenance
 
-After dispatch starts, the kernel does not transparently invoke another provider for the same logical operation unless the userspace capability contract explicitly declares safe idempotent replay semantics.
+The kernel records at least:
 
-Mutating or ambiguity-sensitive contracts default to no post-dispatch provider switch.
+- graph generation;
+- interface ID and version;
+- resolved primary provider;
+- resolved fallback plan when present;
+- provider actually entered;
+- authority bound;
+- selection or fallback reason;
+- provider artifact and runtime generation where relevant;
+- outcome.
 
-## Selection provenance
-
-The kernel records generic selection provenance:
-
-- capability and contract version;
-- selected provider identity;
-- pinned kernel policy/configuration identity;
-- effective permission bound;
-- selection reason;
-- provider runtime generation/epoch when relevant.
-
-The owning userspace service decides how that provenance is associated with its domain records.
+The owning userspace service decides how this provenance relates to its domain records.
 
 ## Scope
 
-The kernel supports generic scope keys/selectors where a contract requires them. It does not define workspace, session, execution, model, repository, or other product scope semantics.
+The kernel supports opaque scope values where an interface needs them. It does not define workspace, session, execution, model, repository, or other product scope semantics.
 
-A userspace contract defines the meaning and validation of its scope value. Scope never grants priority or authority by itself.
+The interface contract owns scope meaning and validation. Scope does not grant authority or priority by itself.
 
 ## Invariants
 
-- Permissions determine eligibility; configured policy determines preference.
-- First-party Phenix providers receive no implicit priority.
-- Explicit binding never bypasses permission or availability checks.
-- Same pinned policy, authority, availability, scope, and request produce the same selected provider.
-- Provider selection cannot execute provider code.
-- Runtime availability is not durable product semantics.
-- Pre-dispatch fallback never broadens authority.
-- Post-dispatch switching requires an explicit safe contract.
-- The resolver understands no agent-domain semantics.
+- Provider selection happens during graph resolution.
+- Provider plans are pinned to immutable graph generations.
+- Runtime dispatch does not search the live plugin set again.
+- Authority determines eligibility; composition policy determines preference.
+- First-party providers receive no implicit priority.
+- Explicit binding never bypasses compatibility or authority checks.
+- Registration order does not affect provider choice.
+- Provider resolution never executes provider code.
+- Availability does not silently mutate semantic binding.
+- Pre-dispatch fallback exists only when explicitly allowed and generation-pinned.
+- Post-dispatch failure never means generic provider fallback.
+- The resolver understands no product-domain semantics.
 
 ## Required regressions
 
-- higher-priority unauthorized provider loses to an eligible lower-priority provider;
-- explicit binding beats priority only when eligible;
-- unavailable preferred provider falls back deterministically;
-- equal-priority providers resolve by stable ID;
-- priority/grant changes change pinned kernel policy identity;
-- manifest metadata cannot self-promote a provider;
-- resolver records exact selected provider and reason;
-- mutating capability is not replayed after ambiguous post-dispatch failure;
-- alternate third-party provider resolves through the same path as a first-party Phenix provider;
-- kernel resolver requires no session/execution/workspace-specific type.
+- a higher-priority unauthorized provider is excluded before selection;
+- explicit binding wins only when compatible and authorized;
+- equal-priority providers resolve by stable identity;
+- structural incompatibility excludes a candidate before activation;
+- a provider, policy, or authority change creates a different graph identity;
+- an unavailable primary provider fails when no fallback plan exists;
+- an explicitly configured fallback uses only a provider pinned in the same generation;
+- runtime availability cannot cause an undeclared provider to receive a call;
+- provider failure after dispatch does not select another provider;
+- alternate third-party providers use the same resolver as first-party providers;
+- provenance records the resolved plan and actual executed provider;
+- the kernel resolver requires no session, execution, model, workspace, or repository-specific type.

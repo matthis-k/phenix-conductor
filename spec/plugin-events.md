@@ -4,46 +4,58 @@ Status: implementation contract.
 
 ## Purpose
 
-Provide a generic kernel event mechanism for plugin coordination without making Phenix lifecycle hooks, orchestration, context, or other userspace semantics part of the kernel.
+Provide a generic kernel event mechanism for facts that have already occurred. Events let plugins observe and react without adding product-specific event semantics to the kernel.
 
-Requires `spec/plugin-contributions.md` and `spec/plugin-host.md`.
+This document extends `spec/plugin-authoring-macro.md`, `spec/plugin-contributions.md`, and `spec/plugin-host.md`.
+
+## Event versus interception
+
+Events and interception have different semantics.
+
+**Event.** A fact that already exists. A listener may observe the fact and perform later work. It cannot reject, transform, or roll back the operation that produced the fact.
+
+**Layer.** Synchronous interposition around an operation that has not completed. A layer may transform input, handle the operation, delegate once, deny, or fail. See `spec/plugin-service-layering.md`.
+
+Use an event for observation and reaction. Use a layer when behavior must affect the originating operation.
+
+There is no pre-commit event veto mode. A boundary that can still deny or transform an operation is an interception boundary, not an event.
 
 ## Event model
 
-The kernel owns generic event transport and envelope metadata:
+The kernel owns generic transport and envelope metadata:
 
 ```text
 EventTypeId
 EventVersion
 EmitterPluginId
 CausalityId
-KernelPolicyRevision
-payload: typed transport value
+GraphGeneration
+payload: PhenixValue
 ```
 
-The emitting userspace service owns the event type's semantic payload contract.
+The event contract owns payload meaning.
 
-The kernel may define a small set of kernel-infrastructure events for plugin/runtime lifecycle. It must not define product events merely because the Phenix Harness uses them.
+The kernel may define infrastructure events for kernel and plugin-runtime lifecycle. Product events remain userspace contracts.
 
 A subscription contains:
 
 - stable subscription identity;
 - owning plugin identity;
-- event type/version;
+- event type and version;
 - optional dependency edges for the same event;
-- generic delivery/failure policy allowed by the event contract;
+- delivery failure policy;
 - handler binding;
-- immutable kernel policy provenance.
+- graph-generation provenance.
 
-Provider priority is not part of subscription dispatch.
+Provider priority is not part of event dispatch.
 
 ## Ordering
 
-Subscriptions for one event may form an explicit dependency DAG. Registration/source order is not semantic.
+Subscriptions for one event may form an explicit dependency DAG. Registration order and source order have no semantic meaning.
 
-Unrelated subscriptions use deterministic ordering only where the event contract requires serial delivery. Independent observers may run concurrently when permitted.
+Independent listeners may run concurrently when the event contract permits it. If delivery must be serial, declared dependencies determine the order.
 
-Cross-event dependency edges are invalid unless a higher-level userspace scheduler explicitly models that dependency outside the kernel event mechanism.
+Cross-event dependency edges belong in a controller or userspace scheduler, not in the kernel event graph.
 
 ## Recursion and causality
 
@@ -51,59 +63,67 @@ Each dispatch carries causal provenance. The kernel rejects causal re-entry of t
 
 A later independent event may invoke the same subscription normally.
 
-## Failure policy
+## Listener failure policy
 
-Generic policies may include:
+Generic listener policies may include:
 
 ```text
 ignore
 warn
-fail_operation
+fail_delivery
 ```
 
-`fail_operation` is valid only for kernel or userspace event contracts that explicitly identify a pre-commit veto boundary and route the veto back to the owning operation.
+These policies describe delivery of the event to the listener. They do not change the already-produced event or the completed operation that emitted it.
 
-The kernel does not invent product veto semantics.
+`fail_delivery` reports event-delivery failure to the caller or controller that requested delivery when that contract needs a synchronous result. It is not an operation veto and does not roll back unrelated listeners.
+
+Structural payload mismatch uses the canonical kernel diagnostic and never panics.
 
 ## Handler actions
 
-A handler may return a result or request permitted generic host operations through `PluginHostHandle`.
+A listener may return a delivery result and use authority-bearing host capabilities or ordinary service imports.
 
-It may invoke userspace services only through normal generic service/capability dispatch. There are no special kernel actions for context, tools, callables, orchestration, sessions, or other Phenix domains.
+There are no event-specific kernel actions for context, tools, callables, orchestration, sessions, models, or other product domains.
 
-A subscription is not a hidden scheduler. Multi-step product behavior belongs to userspace orchestration/services.
+A listener is not a scheduler. Multi-step or recurring behavior belongs in a kernel-scheduled controller or an ordinary userspace service.
 
-## Lifecycle hooks
+## Hooks
 
-Phenix lifecycle hooks should be implemented as userspace event producers/subscribers in the Phenix Plugin Suite where possible.
+Hooks are authoring concepts, not a second event runtime.
 
-Only kernel/plugin-runtime lifecycle events remain kernel-defined. Product lifecycle hooks do not justify a second privileged extension runtime.
+A hook that only observes a completed fact lowers to an event and listener. A hook that may transform, deny, wrap, or otherwise affect an operation lowers to service interposition.
+
+`phenix-plugin-hooks` may own configurable hook definitions and user-facing policy, but it receives no privileged kernel path.
 
 ## Durability
 
-Event delivery state is process-local unless an event contract explicitly requires durable evidence.
+Event delivery state is process-local unless the event contract explicitly requires durable evidence.
 
-Durable facts produced by a handler are written through the owning userspace service's durable schema or another declared service contract.
-
-The kernel does not turn arbitrary event payloads into canonical product history.
+A listener that produces durable state writes through the owning resource or another declared service contract. The kernel does not turn arbitrary events into product history.
 
 ## Invariants
 
-- Events have zero or more subscribers; provider priority never chooses a subscriber.
-- Event semantics belong to emitters/contracts, not automatically to the kernel.
+- Events represent facts that already exist.
+- Listeners cannot reject, transform, or roll back the originating operation.
+- Operation interception uses layers and continuations.
+- Events have zero or more listeners; provider priority never selects one listener.
+- Event semantics belong to the event contract, not the kernel.
 - Subscription ordering follows declared dependencies, not registration order.
 - Same-subscription causal re-entry is bounded.
-- Product hook/action semantics remain userspace.
-- Handler callbacks use only generic kernel host operations and ordinary service dispatch.
-- Process-local notification state does not become durable product history accidentally.
+- Listener failures affect delivery according to policy and do not create hidden veto semantics.
+- Listeners use ordinary host capabilities and service dispatch.
+- Event delivery does not become durable product history unless a userspace contract stores it.
 
 ## Required regressions
 
-- two subscribers both receive one event;
-- dependency cycles are rejected;
-- deterministic ordering follows the declared DAG;
+- two listeners both receive one event;
+- subscription dependency cycles are rejected;
+- deterministic serial ordering follows the declared DAG;
+- independent listeners may run concurrently when allowed;
 - recursive same-subscription causal re-entry is blocked;
-- first-party and alternate subscribers use the same event mechanism;
-- handler cannot bypass plugin authority;
-- a Phenix lifecycle hook can be implemented without a kernel-specific hook API;
-- kernel event module contains no orchestration/context/tool/session-specific action type.
+- first-party and alternate listeners use the same event mechanism;
+- a listener cannot bypass plugin authority;
+- listener failure cannot veto or roll back the originating operation;
+- a pre-operation policy is implemented through a layer rather than an event;
+- a Phenix observation hook can be implemented through the ordinary event mechanism;
+- the kernel event module contains no orchestration, context, tool, model, or session-specific action type.

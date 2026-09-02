@@ -4,48 +4,71 @@ Status: implementation contract.
 
 ## Purpose
 
-Provide one canonical runtime host for embedded, external, and resource-only plugins. Hosting mode changes transport and isolation, not authority, lifecycle, provider semantics, or provenance.
+Define the one runtime boundary through which executable plugin code receives kernel capabilities and returns plugin results.
 
-Requires `spec/plugins.md`, `spec/plugin-contributions.md`, and `spec/plugin-resolution.md`.
+Hosting mode changes transport and isolation. It does not change plugin identity, interface semantics, authority, lifecycle, graph resolution, persistence ownership, or provenance.
 
-## Ownership
+This document extends `spec/plugin-authoring-macro.md`, `spec/plugin-contributions.md`, `spec/plugin-resolution.md`, and `spec/plugin-runtime-bridges.md`.
 
-`PluginHost` is the only runtime boundary through which executable plugin code receives kernel mechanisms or returns plugin results.
+## Roles
+
+**Plugin authoring API.** Lets an author declare plugin state, behavior, dependencies, resources, and semantic metadata.
+
+**Core descriptor.** The generated or runtime-derived data used by the resolver. Static plugin authors do not maintain this by hand.
+
+**PluginHost.** The kernel-owned execution boundary for one executable plugin instance.
+
+**Runtime provider.** A plugin that maps another execution environment onto the canonical Plugin API.
+
+**Host capability.** An authority-bearing handle for a kernel- or environment-owned operation such as filesystem, process, network, clock, credentials, terminal, or frontend callback access.
+
+These roles are distinct. A runtime provider translates execution. It does not gain composition authority. A host capability grants one bounded operation. It does not expose mutable kernel internals.
+
+## Kernel ownership
 
 The kernel owns:
 
-- plugin instance identity and runtime generation;
-- start/stop/health lifecycle;
-- permission-bound host handles;
-- generic service/capability dispatch;
-- generic event subscription dispatch;
-- contribution registration;
+- plugin instance identity and graph generation;
+- lifecycle state and transitions;
+- authority grants and attenuation;
+- host capability construction;
+- interface dispatch through the resolved graph;
+- event delivery;
+- controller and task scheduling;
 - cancellation and live-call tracking;
-- normalized host/protocol failures;
-- kernel-operation provenance.
+- normalized host and bridge failures;
+- provenance.
 
-A plugin never receives mutable access to kernel runtime internals, persistence backend handles, raw registries, or SQLite connections.
+A plugin never receives mutable access to the kernel runtime, raw registries, persistence backend handles, or database connections.
 
 ## Hosting modes
 
+The canonical model is:
+
 ```text
-Plugin contract
+Plugin API
   |
-  +-- EmbeddedPluginAdapter -> statically linked Rust PluginFactory
-  +-- ExternalPluginAdapter -> versioned blocking process transport
-  `-- ResourcePluginAdapter -> manifest + static resources
+  +-- embedded runtime
+  |     `-- generated or generic Rust PluginInstance adapter
+  |
+  +-- runtime-provider plugin
+  |     `-- guest plugin in WASM, TypeScript, Python, process, remote, ...
+  |
+  `-- resource-only plugin
+        `-- no executable instance
 ```
 
-First-party, third-party, embedded, external, and resource-only are independent classifications.
+Core initially supplies only `embedded`. Other runtimes are ordinary runtime-provider plugins as defined in `spec/plugin-runtime-bridges.md`.
 
-Cross-process contracts use transport-safe typed values. No logical plugin contract may require Rust object identity, borrowed kernel references, or a dynamic Rust ABI.
+A runtime provider may use a process transport internally. "External plugin" is therefore an execution arrangement, not a second semantic plugin model.
+
+Rust dynamic libraries are not an implicit plugin hosting mode.
 
 ## Lifecycle
 
-Executable runtime states:
+Executable instances move through kernel-owned lifecycle states such as:
 
 ```text
-registered
 starting
 ready
 degraded
@@ -54,100 +77,127 @@ stopping
 stopped
 ```
 
-Each activation creates a runtime generation/epoch. Process-local handles belong to that generation and are never treated as durable state.
+Each active instance belongs to one graph generation and artifact revision. Process-local handles belong to that generation and are never durable state.
 
-Resource-only plugins register static contributions without an executable state machine.
+Resource-only plugins have no executable lifecycle callbacks. Their declarations still participate in graph construction and resource activation.
 
-## Host services
+## Host capabilities
 
-An executable plugin receives a permission-bound `PluginHostHandle` exposing a deliberately small set of generic kernel operations, for example:
+Executable plugins receive only host capabilities granted by the resolved authority policy.
 
-- invoke a permitted service/capability provider;
-- perform a permitted durable-data operation in an authorized namespace;
-- emit or subscribe to permitted generic events;
-- inspect allowed kernel/plugin runtime metadata;
-- request another bounded kernel task;
-- emit normalized diagnostics/results.
+Examples include:
 
-The host API must not expose Phenix session, artifact, context, skill, tool, callable, orchestration, model, repository, or other product-specific operations.
+- invoking an imported interface through kernel dispatch;
+- reading or mutating an authorized durable resource;
+- emitting an event;
+- inspecting permitted runtime metadata;
+- requesting a bounded controller or task operation;
+- filesystem access;
+- process execution;
+- network access;
+- clock access;
+- credential access;
+- terminal or frontend callbacks.
 
-A userspace plugin that needs those concepts calls the corresponding userspace service contract through generic provider dispatch.
+Product-domain operations such as sessions, models, tools, skills, context, memory, orchestration, or repository behavior are not special `PluginHost` methods. Plugins use the corresponding neutral interface contracts through ordinary imports.
 
-Every host operation rechecks effective authority. Possessing a host handle does not imply ambient access.
+Every host operation rechecks effective authority. Holding one host capability does not imply ambient access to another.
 
-## Capability invocation
+## Invocation
 
-Invocation order:
+The resolved graph chooses the provider and layer chain before execution.
+
+Invocation follows this shape:
 
 ```text
-resolve provider
+pin graph generation
   -> establish effective authority
   -> create live call scope
-  -> dispatch provider through selected adapter
-  -> normalize result/error
-  -> attach provider provenance
+  -> enter resolved layer/provider chain
+  -> adapt through runtime provider when required
+  -> normalize result or error to PhenixValue
+  -> record provenance
   -> close live call scope
 ```
 
-Provider code cannot run before resolution and authority enforcement.
+Provider code cannot execute before compatibility, graph binding, and authority checks complete.
 
-Callbacks through `PluginHostHandle` re-enter the same kernel mechanisms and authority checks as other plugin calls.
+Callbacks from a plugin re-enter ordinary kernel dispatch and authority enforcement.
+
+## Runtime providers
+
+A runtime provider receives authority for its own bridge implementation and a separate attenuated guest host for the guest plugin.
+
+Bridge authority never becomes guest authority.
+
+The bridge may translate:
+
+- artifacts;
+- lifecycle calls;
+- `PhenixValue` to native values and back;
+- guest capability handles;
+- private concurrency and error models.
+
+It may not redefine plugin identity, interfaces, authority, persistence ownership, graph semantics, lifecycle semantics, or provenance.
 
 ## Cancellation
 
-Each in-flight executable plugin call has a process-local live scope.
+Each in-flight executable call has a kernel-owned live scope.
 
-Cancellation:
+Cancellation may:
 
-- prevents undispatched work from starting;
-- signals running embedded workers through explicit cancellation handles;
-- sends correlated cancellation or terminates an external generation when policy requires hard cancellation;
-- closes the live scope on every terminal path;
-- rejects late results from cancelled scopes.
+- prevent undispatched work from starting;
+- signal an embedded worker through an explicit cancellation handle;
+- send correlated cancellation to a runtime provider;
+- terminate a guest process or runtime instance when policy permits hard cancellation;
+- reject late results from cancelled scopes.
 
-The kernel does not impose userspace cancellation semantics beyond this host-call boundary.
+Userspace interfaces may define additional domain cancellation semantics. The host boundary only guarantees the generic runtime behavior.
 
 ## Errors
 
 Kernel-facing host failures distinguish at least:
 
-- unavailable provider;
-- permission denied;
-- invalid request/response;
+- provider unavailable;
+- authority denied;
+- invalid structural request or response;
 - provider execution failure;
-- protocol/contract mismatch;
+- runtime-provider or protocol failure;
 - cancelled;
-- host operation denied;
-- provider crashed/disconnected.
+- host capability denied;
+- guest crashed or disconnected.
 
-Userspace services may define richer domain failures in their own contracts.
+Userspace interfaces may define richer typed domain failures.
 
-## Product composition
+## First-party and third-party equality
 
-A Phenix Plugin Suite component is an ordinary plugin enabled by Harness policy. It receives no host API, permission, priority, or durable privilege unavailable to a compatible alternate implementation.
+A first-party runtime plugin receives no private host method, implicit authority, provider priority, persistence privilege, or lifecycle path unavailable to a compatible third-party implementation.
 
-Removing a first-party plugin from configuration removes its new-call contributions without kernel changes. Embedded code may remain linked but inactive.
+If a first-party implementation requires a capability that an equivalent third-party plugin cannot request through the canonical Plugin API, the architecture is incomplete.
 
 ## Invariants
 
-- One `PluginHost` boundary owns executable plugin interaction.
-- Embedded and external plugins use the same logical service, authority, lifecycle, and provenance contracts.
-- Resource-only plugins need no fake executable.
-- Host APIs remain domain-neutral.
-- Plugin callbacks cannot bypass authority or persistence namespace checks.
-- Runtime generation changes on activation/restart.
-- Process-local handles are never reconstructed as durable state.
-- Every executable call records provider identity/generation and kernel policy provenance.
-- First-party plugins receive no private privileged host path.
-- Rust dynamic libraries are not a plugin hosting mode.
+- `PluginHost` is the one executable plugin boundary.
+- Hosting mode changes transport and isolation, not semantics.
+- Static authoring does not require hand-written factories or host registration.
+- Resource-only plugins need no fake executable instance.
+- Host capabilities remain generic and authority-bearing.
+- Product-domain behavior uses ordinary neutral interfaces rather than private host methods.
+- Plugin callbacks cannot bypass graph resolution, authority, or resource ownership.
+- Runtime-provider authority is separate from guest authority.
+- Process-local handles are generation-bound and never reconstructed as durable state.
+- First-party plugins receive no private privileged path.
 
 ## Required regressions
 
-- embedded and external providers invoke through the same logical host contract;
-- provider cannot execute before authority enforcement;
-- host handle rejects an ungranted operation;
-- plugin cannot obtain mutable runtime/store/backend handles;
-- alternate provider can use every host mechanism required by an equivalent first-party provider;
-- host interface contains no agent-domain service method;
-- cancellation and panic/disconnect always remove live-call scopes;
-- resource-only plugin registers without executable runtime.
+- embedded and bridged providers expose the same logical interface semantics;
+- provider code cannot execute before authority enforcement;
+- an ungranted host capability is rejected;
+- a plugin cannot obtain mutable runtime, registry, store-backend, or database handles;
+- an alternate third-party provider can request every supported host capability needed by an equivalent first-party provider;
+- product concepts are absent from the generic host API;
+- callbacks re-enter normal graph and authority checks;
+- cancellation and crash/disconnect always close live-call scopes;
+- runtime-provider authority cannot leak into guest authority;
+- a resource-only plugin activates without an executable runtime;
+- static Rust plugin authors do not maintain manual `PluginFactory` wiring.
