@@ -1,5 +1,7 @@
 # Structural plugin contracts
 
+status: specification-only
+
 Status: normative architecture and implementation contract.
 
 Plugins may use native language types internally. Public plugin boundaries lower those types into the structural representation owned by `phenix-core`.

@@ -1,5 +1,7 @@
 # Plugin event transport and subscriptions
 
+status: specification-only
+
 Status: implementation contract.
 
 ## Purpose

@@ -1,5 +1,7 @@
 # Persistence backend and durable schemas
 
+status: specification-only
+
 Status: implementation contract.
 
 ## Purpose

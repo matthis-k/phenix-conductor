@@ -1,5 +1,7 @@
 # Plugin contributions
 
+status: specification-only
+
 Status: implementation contract.
 
 ## Purpose

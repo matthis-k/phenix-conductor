@@ -1,5 +1,7 @@
 # Plugin host
 
+status: specification-only
+
 Status: implementation contract.
 
 ## Purpose

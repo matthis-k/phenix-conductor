@@ -1,5 +1,7 @@
 # Blocking threaded kernel runtime
 
+status: specification-only
+
 Status: normative runtime contract.
 
 ## Purpose

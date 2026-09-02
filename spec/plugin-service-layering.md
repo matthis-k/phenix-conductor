@@ -1,5 +1,7 @@
 # Layered service invocation
 
+status: specification-only
+
 Status: normative architecture and implementation contract.
 
 ## Purpose

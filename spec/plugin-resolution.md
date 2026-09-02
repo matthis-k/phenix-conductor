@@ -1,5 +1,7 @@
 # Plugin provider resolution
 
+status: specification-only
+
 Status: implementation contract.
 
 ## Purpose

@@ -1,5 +1,7 @@
 # Phenix plugin specification
 
+status: specification-only
+
 ## Status
 
 This document defines the canonical Phenix runtime plugin model and Rust authoring API.
