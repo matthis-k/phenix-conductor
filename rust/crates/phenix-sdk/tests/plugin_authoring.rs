@@ -656,6 +656,9 @@ mod attribute_composition {
         #[phenix(dep)]
         pub second: ConflictB,
     }
+
+    #[phenix_sdk::interface("fixture.attr.models@1")]
+    pub struct Models;
 }
 
 #[test]
@@ -685,4 +688,11 @@ fn attribute_plugin_dependencies_reject_incompatible_duplicate_ids() {
         error,
         phenix_sdk::StaticPluginGraphError::DuplicateId { .. }
     ));
+}
+
+#[test]
+fn interface_attribute_owns_canonical_runtime_identity() {
+    let id = <attribute_composition::Models as phenix_sdk::InterfaceMarker>::interface_id();
+
+    assert_eq!(id.as_str(), "fixture.attr.models@1");
 }
