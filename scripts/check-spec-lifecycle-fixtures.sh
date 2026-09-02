@@ -50,3 +50,6 @@ expect_failure \
 
 expect_failure \
   removed-only-coverage \
+  'enforced specs require at least one coverage pointer' \
+  '# Removed only coverage' \
+  'status: enforced'
