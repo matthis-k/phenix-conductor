@@ -1,6 +1,6 @@
 # Plugin SDK context
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 

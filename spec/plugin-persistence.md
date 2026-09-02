@@ -1,6 +1,6 @@
 # Persistence backend and durable schemas
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 

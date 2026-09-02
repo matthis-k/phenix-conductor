@@ -1,6 +1,6 @@
 # Plugin provider resolution
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 
