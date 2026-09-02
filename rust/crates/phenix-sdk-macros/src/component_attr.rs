@@ -100,7 +100,7 @@ pub(crate) struct ExportContribution {
 
 enum ExportInterface {
     Literal(LitStr),
-    Marker(Type),
+    Marker(Box<Type>),
 }
 
 impl ExportInterface {
@@ -155,7 +155,7 @@ pub(crate) fn parse_export(attribute: &Attribute) -> syn::Result<ExportContribut
         validate_interface_id(&id.value()).map_err(|error| syn::Error::new_spanned(&id, error))?;
         ExportInterface::Literal(id)
     } else {
-        ExportInterface::Marker(syn::parse2::<Type>(export.tokens)?)
+        ExportInterface::Marker(Box::new(syn::parse2::<Type>(export.tokens)?))
     };
 
     let mut public = false;
