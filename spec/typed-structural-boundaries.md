@@ -6,6 +6,7 @@ coverage:
   - rust/crates/phenix-sdk/tests/incompatible_schema.rs
   - rust/crates/phenix-sdk/tests/plugin_authoring.rs
   - rust/crates/phenix-harness/src/basic_suite.rs
+  - rust/crates/phenix-provider-sdk/src/lib.rs
 
 ## Status
 
