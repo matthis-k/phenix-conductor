@@ -200,10 +200,6 @@ fn runtime_restart_closure(
         for binding in candidate.runtime_bindings() {
             if active.runtime_binding(&binding.guest) != Some(binding) {
                 restart.insert(binding.guest.clone());
-                restart.insert(binding.provider.clone());
-            }
-            if restart.contains(&binding.guest) {
-                restart.insert(binding.provider.clone());
             }
             if restart.contains(&binding.provider) {
                 restart.insert(binding.guest.clone());
