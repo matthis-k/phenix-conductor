@@ -609,7 +609,8 @@ mod tests {
             ModelResponse::Inference { target, response }
                 if target.provider_plugin.as_str() == "fixture.provider"
                     && response.output.as_ref() == b"hello"
-                    && response.provider_metadata["provider"] == "fixture.provider"
+                    && response.provider_metadata["provider"]
+                        == serde_json::json!("fixture.provider").into()
         ));
         let _ = fs::remove_file(path);
     }
