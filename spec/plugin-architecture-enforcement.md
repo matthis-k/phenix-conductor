@@ -77,28 +77,11 @@ The validation check requires every declared implementation dependency to match 
 
 A contract import, request type, response type, interface ID, schema, manifest helper, default-provider handle, or shared domain value is never sufficient reason for an implementation dependency.
 
-## Migration debt
+## Forbidden migration metadata
 
-Current `main` still contains contract-only plugin dependency edges. The first enforcement change may record those exact edges as migration debt so the gate can land before the full ownership migration.
+`contract-debt` is migration-only metadata and is forbidden in the current architecture. Shared contracts belong to neutral owners; a runtime plugin must not retain a direct runtime-plugin dependency merely to import a contract.
 
-Debt is package-local and names the required destination, not only the current violation.
-
-Conceptually:
-
-```toml
-[package.metadata.phenix.contract-debt]
-phenix-plugin-execution = "Move the consumed execution contract to the neutral contract owner."
-```
-
-Rules:
-
-1. Every debt entry must match an actual direct normal or build dependency.
-2. Every undeclared `runtime-plugin -> runtime-plugin` edge fails validation.
-3. Removing an implementation edge must remove its debt entry in the same change.
-4. A debt entry cannot be used for intentional implementation reuse. Use `implementation-dependencies` for that case.
-5. The plugin-hygiene migration is complete only when contract debt is empty.
-
-This makes existing debt explicit and prevents silent growth. Review remains responsible for rejecting new debt entries that do not correspond to an approved migration step.
+Source validation rejects any package that reintroduces `contract-debt`, as well as undeclared `runtime-plugin -> runtime-plugin` implementation edges. Deliberate implementation sharing uses `implementation-dependencies` with a non-empty reason and must match a real direct normal or build dependency.
 
 ## Runtime package set
 
