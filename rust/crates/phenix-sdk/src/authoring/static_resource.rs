@@ -116,7 +116,10 @@ mod tests {
             [BackendFeature::Transactions],
         );
 
-        assert_eq!(resource.schema.namespace.as_str(), "fixture.resource-owner.plans");
+        assert_eq!(
+            resource.schema.namespace.as_str(),
+            "fixture.resource-owner.plans"
+        );
         assert_eq!(resource.schema.version, 3);
         assert!(resource
             .schema
