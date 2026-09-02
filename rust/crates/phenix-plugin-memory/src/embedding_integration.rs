@@ -82,7 +82,11 @@ impl PluginInstance for EmbedProvider {
         let value: PhenixValue =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let request: MemoryEmbeddingRequest = value.project().map_err(|error| error.to_string())?;
-        if request.inputs.first().is_some_and(|input| input == "provider-error") {
+        if request
+            .inputs
+            .first()
+            .is_some_and(|input| input == "provider-error")
+        {
             return Err("fixture embedding failed".into());
         }
         let embeddings = request
