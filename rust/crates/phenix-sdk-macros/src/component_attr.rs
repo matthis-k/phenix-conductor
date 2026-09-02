@@ -259,6 +259,43 @@ mod tests {
     }
 
     #[test]
+    fn component_struct_lowers_typed_import_fields() {
+        let output = expand(
+            TokenStream::new(),
+            quote! {
+                struct Api {
+                    #[phenix(import)]
+                    models: Required<Call<Models, Request, Response>>,
+                }
+            },
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(output.contains("StaticComponentImports for Api"));
+        assert!(output.contains("StaticComponentImport :: of"));
+        assert!(output.contains("Required < Call < Models , Request , Response > >"));
+        assert!(output.contains("stringify ! (models)"));
+        assert!(!output.contains("phenix (import"));
+    }
+
+    #[test]
+    fn component_struct_rejects_unknown_field_contributions() {
+        let error = expand(
+            TokenStream::new(),
+            quote!(
+                struct Api {
+                    #[phenix(unknown)]
+                    value: String,
+                }
+            ),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unsupported component field"));
+    }
+
+    #[test]
     fn component_impl_lowers_export_metadata_and_strips_helper_attribute() {
         let output = expand(
             TokenStream::new(),
