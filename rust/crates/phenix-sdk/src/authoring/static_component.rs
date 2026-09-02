@@ -1,6 +1,21 @@
-use phenix_core::{ComponentId, PluginId};
+use phenix_core::{ComponentId, InterfaceId, PluginId};
+
+pub trait InterfaceMarker {
+    fn interface_id() -> InterfaceId;
+}
 
 pub trait StaticComponentDefinition {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StaticComponentExport {
+    pub interface: InterfaceId,
+    pub method: &'static str,
+    pub public: bool,
+}
+
+pub trait StaticComponentBehavior {
+    fn exports() -> Vec<StaticComponentExport>;
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaticComponentDescriptor {
