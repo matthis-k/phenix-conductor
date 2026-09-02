@@ -68,11 +68,10 @@ mod workspace;
 pub use attempts::*;
 pub use debug::*;
 pub use failures::*;
-pub use phenix_core::{CallableId, ModelId, RoutingProfileId, SkillId};
+pub use phenix_core::{CallableId, ModelId, PhenixSchema, PhenixValue, RoutingProfileId, SkillId};
 pub use workspace::*;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
 
@@ -243,8 +242,8 @@ pub struct CallableDescriptor {
     pub id: CallableId,
     pub kind: CallableKind,
     pub description: String,
-    pub input_schema: Value,
-    pub output_schema: Value,
+    pub input_schema: PhenixSchema,
+    pub output_schema: PhenixSchema,
     pub capabilities: CapabilitySet,
     pub policy: CallablePolicy,
 }
@@ -303,7 +302,7 @@ pub enum OrchestrationValueBinding {
         pointer: String,
     },
     Literal {
-        value: Value,
+        value: PhenixValue,
     },
 }
 
@@ -343,7 +342,7 @@ pub enum ExecutionState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrchestrationInterfaceContext {
-    pub input: Value,
+    pub input: PhenixValue,
     pub nodes: BTreeMap<OrchestrationNodeId, OrchestrationNodeOutcome>,
     pub task: OrchestrationInterfaceTask,
 }
@@ -352,8 +351,8 @@ pub struct OrchestrationInterfaceContext {
 pub struct OrchestrationNodeOutcome {
     pub execution_id: Option<ExecutionId>,
     pub state: Option<ExecutionState>,
-    pub input: Option<Value>,
-    pub output: Option<Value>,
+    pub input: Option<PhenixValue>,
+    pub output: Option<PhenixValue>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -406,7 +405,7 @@ pub struct ExecutionSummary {
     pub state: ExecutionState,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionEvent {
     pub sequence: u64,
     pub session_id: SessionId,
@@ -414,7 +413,7 @@ pub struct ExecutionEvent {
     pub kind: ExecutionEventKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExecutionEventKind {
     UserInput {
@@ -458,7 +457,7 @@ pub enum ExecutionEventKind {
     LifecycleHookMetadata {
         hook_id: String,
         key: String,
-        value: Value,
+        value: PhenixValue,
     },
     Error {
         code: String,
@@ -475,8 +474,8 @@ mod tests {
             id: CallableId::parse("orchestration.example").unwrap(),
             kind: CallableKind::Orchestration,
             description: "Example orchestration".to_owned(),
-            input_schema: serde_json::json!({"type": "string"}),
-            output_schema: serde_json::json!({"type": "string"}),
+            input_schema: PhenixSchema::String,
+            output_schema: PhenixSchema::String,
             capabilities: CapabilitySet::default(),
             policy: CallablePolicy::default(),
         }

@@ -3,8 +3,8 @@
 use phenix_core::{
     model_inference_service, Authority, ComponentExport, ComponentId, ComponentInterface,
     ComponentManifest, ModelInferenceInterface, ModelInferenceRequest, ModelInferenceResponse,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ServiceContribution,
-    ServiceId, ServiceRole,
+    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    ServiceContribution, ServiceId, ServiceRole,
 };
 use std::collections::BTreeMap;
 
@@ -61,24 +61,36 @@ impl PluginInstance for BasicModel {
         &mut self,
         service: &ServiceId,
         input: &[u8],
-        _host: &PluginHost<'_>,
+        host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
         if service != &model_inference_service() {
             return Err(format!("unsupported basic model service: {service}"));
         }
-        let request: ModelInferenceRequest =
-            serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        serde_json::to_vec(&ModelInferenceResponse {
+        let context = PluginContext::new(host, (), (), ());
+        let request = context
+            .kernel
+            .decode_projected::<ModelInferenceRequest>(
+                &ModelInferenceInterface::interface_id(),
+                input,
+            )
+            .map_err(|error| error.to_string())?;
+        let response = ModelInferenceResponse {
             output: request.input,
             provider_metadata: BTreeMap::from([
-                ("provider".into(), serde_json::json!(BASIC_MODEL_PLUGIN)),
-                ("model".into(), serde_json::json!(request.model)),
+                (
+                    "provider".into(),
+                    serde_json::json!(BASIC_MODEL_PLUGIN).into(),
+                ),
+                ("model".into(), serde_json::json!(request.model).into()),
                 (
                     "implementation".into(),
-                    serde_json::json!("deterministic-echo"),
+                    serde_json::json!("deterministic-echo").into(),
                 ),
             ]),
-        })
-        .map_err(|error| error.to_string())
+        };
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }

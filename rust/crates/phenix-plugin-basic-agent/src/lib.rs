@@ -14,9 +14,9 @@ mod tests {
     use phenix_core::{
         context_service, skill_service, tool_service, Authority, CallableId, ComponentInterface,
         ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
-        Kernel, KernelConfig, LocalPersistence, ModelId, ResolvedHarness,
-        ResolvedHarnessActivation, SkillCommand, SkillDefinition, SkillId, SkillResponse,
-        ToolCommand, ToolDefinition, ToolResponse,
+        Kernel, KernelConfig, LocalPersistence, ModelId, PhenixSchema, PhenixValue,
+        ResolvedHarness, ResolvedHarnessActivation, SkillCommand, SkillDefinition, SkillId,
+        SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
     };
     use phenix_sdk::{
         model_inference_service, ModelInferenceInterface, ModelInferenceRequest,
@@ -107,6 +107,22 @@ mod tests {
         serde_json::from_slice(&output).unwrap()
     }
 
+    fn invoke_structural<T, R>(
+        kernel: &mut Kernel,
+        service: &phenix_core::ServiceId,
+        request: &T,
+    ) -> R
+    where
+        for<'value> PhenixValue: From<&'value T>,
+        for<'value> R:
+            TryFrom<phenix_core::Project<&'value PhenixValue>, Error = phenix_core::ValueError>,
+    {
+        let input = serde_json::to_vec(&PhenixValue::from(request)).unwrap();
+        let output = kernel.invoke(service, &input, &authority(), None).unwrap();
+        let value: PhenixValue = serde_json::from_slice(&output).unwrap();
+        R::try_from(phenix_core::Project(&value)).unwrap()
+    }
+
     #[test]
     fn basic_components_are_independently_named_and_export_canonical_interfaces() {
         let manifests = [
@@ -149,7 +165,7 @@ mod tests {
     fn basic_model_is_direct_and_policy_light() {
         let path = temp_db();
         let mut kernel = kernel(&path);
-        let response: ModelInferenceResponse = invoke(
+        let response: ModelInferenceResponse = invoke_structural(
             &mut kernel,
             &model_inference_service(),
             &ModelInferenceRequest {
@@ -161,11 +177,11 @@ mod tests {
         assert_eq!(response.output.as_ref(), b"hello");
         assert_eq!(
             response.provider_metadata.get("provider"),
-            Some(&serde_json::json!(BASIC_MODEL_PLUGIN))
+            Some(&PhenixValue::String(BASIC_MODEL_PLUGIN.to_owned()))
         );
         assert_eq!(
             response.provider_metadata.get("implementation"),
-            Some(&serde_json::json!("deterministic-echo"))
+            Some(&PhenixValue::String("deterministic-echo".to_owned()))
         );
         let _ = fs::remove_file(path);
     }
@@ -181,8 +197,8 @@ mod tests {
                 &ToolCommand::Register {
                     tool: ToolDefinition {
                         id: CallableId::parse("echo").unwrap(),
-                        input_schema: serde_json::json!({}),
-                        output_schema: serde_json::json!({}),
+                        input_schema: PhenixSchema::Any,
+                        output_schema: PhenixSchema::Any,
                         output_prefix: b"tool:".to_vec().into(),
                     },
                 },

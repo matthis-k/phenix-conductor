@@ -1,4 +1,4 @@
-use phenix_core::{ComponentInterface, InterfaceId, InterfaceSchema};
+use phenix_core::{ComponentInterface, InterfaceId, InterfaceSchema, PhenixValue};
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -18,22 +18,22 @@ pub struct LiveFrontendProvider {
     pub descriptor: FrontendProviderDescriptor,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct FrontendServiceRequest {
     pub correlation_id: u64,
     pub connection_id: String,
     pub provider: String,
     pub method: String,
-    pub params: serde_json::Value,
+    pub params: PhenixValue,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 pub struct FrontendServiceResult {
     pub correlation_id: u64,
-    pub result: serde_json::Value,
+    pub result: PhenixValue,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum FrontendCommand {
     SetProviders {
@@ -55,22 +55,22 @@ pub enum FrontendCommand {
         execution_id: String,
         provider: String,
         method: String,
-        params: serde_json::Value,
+        params: PhenixValue,
     },
     BeginDirectCall {
         connection_id: String,
         provider: String,
         method: String,
-        params: serde_json::Value,
+        params: PhenixValue,
     },
     CompleteCall {
         connection_id: String,
         correlation_id: u64,
-        result: serde_json::Value,
+        result: PhenixValue,
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum FrontendResponse {
     Providers {

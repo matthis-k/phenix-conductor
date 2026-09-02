@@ -1,6 +1,6 @@
 use crate::{
-    execution_manifest, AgentLoopCommand, AgentLoopResponse, ModelInvokeCommand,
-    ModelInvokeResponse, AGENT_LOOP_SERVICE, MODEL_ROUTING_SERVICE,
+    execution_manifest, AgentLoopCommand, AgentLoopResponse, ExecutionConfigurationInterface,
+    ModelInvokeCommand, ModelInvokeResponse, AGENT_LOOP_SERVICE, MODEL_ROUTING_SERVICE,
 };
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
@@ -65,6 +65,12 @@ pub fn execution_component_manifest(maximum_authority: Authority) -> ComponentMa
                 required_authority: persistence_authority(),
             },
             ComponentExport {
+                interface: ExecutionConfigurationInterface::interface_id(),
+                schema: ExecutionConfigurationInterface::schema(),
+                priority: 100,
+                required_authority: Authority::default(),
+            },
+            ComponentExport {
                 interface: AgentLoopInterface::interface_id(),
                 schema: AgentLoopInterface::schema(),
                 priority: 100,
@@ -114,10 +120,18 @@ mod tests {
         );
         assert_eq!(
             component.exports[1].interface,
-            AgentLoopInterface::interface_id()
+            ExecutionConfigurationInterface::interface_id()
         );
         assert_eq!(
             component.exports[1].required_authority,
+            Authority::default()
+        );
+        assert_eq!(
+            component.exports[2].interface,
+            AgentLoopInterface::interface_id()
+        );
+        assert_eq!(
+            component.exports[2].required_authority,
             Authority::default()
         );
         assert_eq!(component.imports.len(), 1);

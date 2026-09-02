@@ -1,5 +1,5 @@
 use crate::{Endpoint, ProviderError, ProviderRequest, ProviderResponse, RateLimits};
-use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
+use phenix_core::{ModelInferenceRequest, ModelInferenceResponse, ValueCodec};
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -96,7 +96,12 @@ fn request_object(
                 ),
             });
         }
-        body.insert(key.clone(), value.clone());
+        body.insert(
+            key.clone(),
+            Value::from_value(value).map_err(|error| ProviderError::InvalidRequest {
+                message: format!("provider option {key:?} is not JSON-compatible: {error:?}"),
+            })?,
+        );
     }
     Ok((body, text))
 }
@@ -164,10 +169,10 @@ fn parse_json(response: &ProviderResponse) -> Result<Value, ProviderError> {
 fn response_with_text(value: &Value, text: String) -> ModelInferenceResponse {
     let mut provider_metadata = BTreeMap::new();
     if let Some(id) = value.get("id").cloned() {
-        provider_metadata.insert("id".to_owned(), id);
+        provider_metadata.insert("id".to_owned(), id.into());
     }
     if let Some(usage) = value.get("usage").cloned() {
-        provider_metadata.insert("usage".to_owned(), usage);
+        provider_metadata.insert("usage".to_owned(), usage.into());
     }
     ModelInferenceResponse {
         output: text.into_bytes().into(),
@@ -354,6 +359,26 @@ mod tests {
             .unwrap();
         assert_eq!(decoded.output.as_ref(), b"world");
         assert_eq!(decoded.provider_metadata["id"], "response-1");
+    }
+
+    #[test]
+    fn non_json_options_stop_at_protocol_adapter() {
+        let endpoint = Endpoint::parse("https://example.com/v1").unwrap();
+        let mut request = request();
+        request.options.insert(
+            "binary".into(),
+            phenix_core::PhenixValue::Bytes(vec![1, 2, 3]),
+        );
+
+        let error = Protocol::OpenAiResponses
+            .encode(&endpoint, &request)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ProviderError::InvalidRequest { message }
+                if message.contains("not JSON-compatible")
+        ));
     }
 
     #[test]

@@ -105,6 +105,12 @@ impl<'value> TryFrom<crate::Project<&'value PhenixValue>> for usize {
     }
 }
 
+impl From<serde_json::Value> for PhenixValue {
+    fn from(value: serde_json::Value) -> Self {
+        value.to_value()
+    }
+}
+
 impl ValueCodec for serde_json::Value {
     fn phenix_type() -> Type {
         Type::Any
@@ -304,6 +310,19 @@ mod tests {
         assert_eq!(
             serde_json::Value::from_value(&json.to_value()).unwrap(),
             json
+        );
+    }
+
+    #[test]
+    fn structural_values_serialize_at_explicit_json_output_boundaries() {
+        let value = PhenixValue::Map(BTreeMap::from([
+            ("enabled".into(), PhenixValue::Bool(true)),
+            ("count".into(), PhenixValue::U64(2)),
+        ]));
+
+        assert_eq!(
+            serde_json::to_value(value).unwrap(),
+            serde_json::json!({"enabled": true, "count": 2})
         );
     }
 

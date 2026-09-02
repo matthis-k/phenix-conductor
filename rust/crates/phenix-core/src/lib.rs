@@ -32,6 +32,7 @@ mod resolver;
 mod runtime;
 mod sdk;
 mod std_value;
+mod structural_value;
 mod tasks;
 mod typed_component;
 

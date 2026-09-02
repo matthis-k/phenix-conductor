@@ -115,7 +115,7 @@ impl Display for ComponentGraphError {
 
 impl Error for ComponentGraphError {}
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedImportHandle {
     importer: ComponentId,
     interface: InterfaceId,
@@ -151,14 +151,14 @@ impl ResolvedImportHandle {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedImport {
     pub interface: InterfaceId,
     pub required: bool,
     pub binding: Option<ResolvedImportHandle>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedComponent {
     pub id: ComponentId,
     pub owning_plugin: PluginId,
@@ -167,7 +167,7 @@ pub struct ResolvedComponent {
     pub maximum_authority: Authority,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedComponentGraph {
     components: BTreeMap<ComponentId, ResolvedComponent>,
 }

@@ -16,7 +16,7 @@ pub trait ResolvedHarnessActivation {
     ) -> Result<(), ResolvedHarnessActivationError>;
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ResolvedHarnessActivationError {
     KernelConfigurationMismatch {
         kernel_plugins: Vec<PluginId>,
@@ -130,7 +130,7 @@ impl ResolvedHarnessActivation for Kernel {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ActiveResolvedGraph {
     pub generation: GraphGenerationId,
     pub component_graph: ResolvedComponentGraph,

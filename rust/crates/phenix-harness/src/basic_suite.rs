@@ -48,9 +48,9 @@ mod tests {
     use phenix_core::{
         context_service, model_inference_service, skill_service, tool_service, CallableId,
         ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
-        LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse, PhenixValue,
-        Project, SessionId, SkillCommand, SkillDefinition, SkillId, SkillResponse, ToolCommand,
-        ToolDefinition, ToolResponse,
+        LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse, PhenixSchema,
+        PhenixValue, Project, SessionId, SkillCommand, SkillDefinition, SkillId, SkillResponse,
+        ToolCommand, ToolDefinition, ToolResponse,
     };
     use phenix_plugin_catalog::{session_service, SessionCommand, SessionResponse};
     use std::{
@@ -155,8 +155,8 @@ mod tests {
                 &ToolCommand::Register {
                     tool: ToolDefinition {
                         id: CallableId::parse("echo").unwrap(),
-                        input_schema: serde_json::json!({}),
-                        output_schema: serde_json::json!({}),
+                        input_schema: PhenixSchema::Any,
+                        output_schema: PhenixSchema::Any,
                         output_prefix: b"tool:".to_vec().into(),
                     },
                 },

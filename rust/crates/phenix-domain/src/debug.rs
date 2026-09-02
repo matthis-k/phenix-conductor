@@ -4,8 +4,8 @@ use crate::{
     FileVersion, ModelTarget, OrchestrationDefinition, OrchestrationFailureDecisionRecord,
     OrchestrationNodeId, SessionSummary, WorkspaceDescriptor, WorkspaceId,
 };
+use phenix_core::PhenixValue;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -42,7 +42,7 @@ pub struct SessionDebugBundle {
     #[serde(default)]
     pub checkpoints: Vec<DebugWorkspaceCheckpoint>,
     #[serde(default)]
-    pub execution_outputs: BTreeMap<ExecutionId, Value>,
+    pub execution_outputs: BTreeMap<ExecutionId, PhenixValue>,
     #[serde(default)]
     pub diagnostic_write_patches: Vec<DiagnosticWritePatch>,
 }
@@ -66,7 +66,7 @@ pub struct DebugOrchestration {
     pub execution_id: ExecutionId,
     pub definition: OrchestrationDefinition,
     pub node_bindings: BTreeMap<OrchestrationNodeId, ExecutionId>,
-    pub node_inputs: BTreeMap<OrchestrationNodeId, Value>,
+    pub node_inputs: BTreeMap<OrchestrationNodeId, PhenixValue>,
     pub synthesis_execution: Option<ExecutionId>,
 }
 

@@ -23,19 +23,19 @@ pub enum DebugCommand {
     Snapshot,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum DiagnosticEntry {
-    Available { value: serde_json::Value },
+    Available { value: PhenixValue },
     Unavailable { error: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct DiagnosticSnapshot {
     pub services: BTreeMap<String, DiagnosticEntry>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum DebugResponse {
     Snapshot { snapshot: DiagnosticSnapshot },
@@ -197,12 +197,7 @@ fn probe<I, Request>(
 }
 
 fn response_entry(response: PhenixValue) -> DiagnosticEntry {
-    match serde_json::to_value(response) {
-        Ok(value) => DiagnosticEntry::Available { value },
-        Err(error) => DiagnosticEntry::Unavailable {
-            error: format!("invalid diagnostic service response: {error}"),
-        },
-    }
+    DiagnosticEntry::Available { value: response }
 }
 
 fn error_entry(error: ComponentInvocationError) -> DiagnosticEntry {

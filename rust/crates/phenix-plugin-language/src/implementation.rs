@@ -137,18 +137,18 @@ pub struct LanguageProviderEpoch {
     pub epoch: ProviderEpoch,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct LanguageOperationResult {
     pub operation: LanguageOperationKind,
-    pub payload: serde_json::Value,
+    pub payload: PhenixValue,
     pub documents: Vec<LanguageDocumentIdentity>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum DiagnosticsResult {
     Diagnostics {
-        payload: serde_json::Value,
+        payload: PhenixValue,
         documents: Vec<LanguageDocumentIdentity>,
     },
 }
@@ -161,7 +161,7 @@ impl DiagnosticsResult {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct LanguageObservation {
     pub id: String,
     pub execution_id: String,
@@ -171,7 +171,7 @@ pub struct LanguageObservation {
     pub result: LanguageOperationResult,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum LanguageCommand {
     ActivateProvider {
@@ -206,7 +206,7 @@ pub enum LanguageCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum LanguageResponse {
     Provider {
@@ -557,7 +557,7 @@ mod tests {
     fn workspace_result(operation: LanguageOperationKind) -> LanguageOperationResult {
         LanguageOperationResult {
             operation,
-            payload: serde_json::json!({"items": ["result"]}),
+            payload: serde_json::json!({"items": ["result"]}).into(),
             documents: vec![LanguageDocumentIdentity {
                 path: "src/lib.rs".into(),
                 file_version: Some("sha256:abc".into()),
@@ -568,7 +568,7 @@ mod tests {
 
     fn diagnostics_result() -> DiagnosticsResult {
         DiagnosticsResult::Diagnostics {
-            payload: serde_json::json!({"items": ["result"]}),
+            payload: serde_json::json!({"items": ["result"]}).into(),
             documents: vec![LanguageDocumentIdentity {
                 path: "src/lib.rs".into(),
                 file_version: Some("sha256:abc".into()),
@@ -670,7 +670,7 @@ mod tests {
         activate(&mut kernel, 1);
         let unsaved = LanguageOperationResult {
             operation: LanguageOperationKind::Hover,
-            payload: serde_json::json!({"text": "hover"}),
+            payload: serde_json::json!({"text": "hover"}).into(),
             documents: vec![LanguageDocumentIdentity {
                 path: "src/lib.rs".into(),
                 file_version: None,
@@ -701,7 +701,7 @@ mod tests {
 
         let invalid = LanguageOperationResult {
             operation: LanguageOperationKind::Definition,
-            payload: serde_json::json!({}),
+            payload: serde_json::json!({}).into(),
             documents: vec![LanguageDocumentIdentity {
                 path: "src/lib.rs".into(),
                 file_version: None,

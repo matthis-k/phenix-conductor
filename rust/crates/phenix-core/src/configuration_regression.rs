@@ -107,7 +107,7 @@ fn third_party_frontend_can_lower_plugin_defined_configuration_without_core_chan
     assert_eq!(entry.contract_version, 7);
     assert_eq!(
         entry.value,
-        serde_json::json!({"team":"compiler","review":"strict"})
+        serde_json::json!({"team":"compiler","review":"strict"}).into()
     );
     assert_eq!(entry.attributions.len(), 1);
     assert_eq!(entry.attributions[0].source.frontend, frontend);

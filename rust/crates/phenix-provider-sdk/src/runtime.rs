@@ -4,11 +4,10 @@ use crate::{
     ProviderRequest, ProviderResponse, ProviderSpec, RateLimits, Token,
 };
 use phenix_core::{
-    model_inference_service, ModelInferenceRequest, ModelInferenceResponse, PluginHost,
-    PluginInstance, ServiceId,
+    model_inference_service, ComponentInterface, ModelInferenceInterface, ModelInferenceRequest,
+    ModelInferenceResponse, PhenixValue, PluginContext, PluginHost, PluginInstance, ServiceId,
 };
 use reqwest::header::{HeaderName, HeaderValue, AUTHORIZATION};
-use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
 
 pub(crate) struct ProviderPlugin {
@@ -92,16 +91,18 @@ impl ProviderPlugin {
             let mut decoded = protocol.decode(&response)?;
             decoded.provider_metadata.insert(
                 "protocol".to_owned(),
-                Value::String(protocol.name().to_owned()),
+                PhenixValue::String(protocol.name().to_owned()),
             );
             decoded.provider_metadata.insert(
                 "endpoint".to_owned(),
-                Value::String(endpoint.as_str().to_owned()),
+                PhenixValue::String(endpoint.as_str().to_owned()),
             );
             if !limits.is_empty() {
                 decoded.provider_metadata.insert(
                     "rate_limits".to_owned(),
-                    serde_json::to_value(limits).expect("rate limits serialize"),
+                    serde_json::to_value(limits)
+                        .expect("rate limits serialize")
+                        .into(),
                 );
             }
             Ok(decoded)
@@ -170,15 +171,24 @@ impl PluginInstance for ProviderPlugin {
         &mut self,
         service: &ServiceId,
         input: &[u8],
-        _host: &PluginHost<'_>,
+        host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
         if service == &model_inference_service() {
-            let request = serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            let context = PluginContext::new(host, (), (), ());
+            let request = context
+                .kernel
+                .decode_projected::<ModelInferenceRequest>(
+                    &ModelInferenceInterface::interface_id(),
+                    input,
+                )
+                .map_err(|error| error.to_string())?;
             return self
                 .invoke_model(request)
                 .and_then(|response| {
-                    serde_json::to_vec(&response).map_err(|error| ProviderError::Protocol {
-                        message: error.to_string(),
+                    context.kernel.encode_value(&response).map_err(|error| {
+                        ProviderError::Protocol {
+                            message: error.to_string(),
+                        }
                     })
                 })
                 .map_err(|error| error.to_wire());

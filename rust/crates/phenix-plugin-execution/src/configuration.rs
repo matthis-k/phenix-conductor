@@ -1,9 +1,9 @@
 use phenix_core::{
-    CallableId, CapabilityId, DurableSchema, PluginContext, PluginHost, PluginInstance,
-    ResourceNamespace, ServiceId, TransactionOp,
+    CallableId, CapabilityId, ComponentInterface, DurableSchema, InterfaceId, PhenixSchema,
+    PhenixValue, PluginContext, PluginHost, PluginInstance, ResourceNamespace, ServiceId,
+    TransactionOp, TypeKind, ValueCodec, ValueError,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Display,
@@ -42,18 +42,68 @@ impl TryFrom<String> for NonEmptyText {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+impl ValueCodec for NonEmptyText {
+    fn phenix_type() -> PhenixSchema {
+        PhenixSchema::String
+    }
+
+    fn to_value(&self) -> PhenixValue {
+        PhenixValue::String(self.0.clone())
+    }
+
+    fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
+        match value {
+            PhenixValue::String(value) => value
+                .clone()
+                .try_into()
+                .map_err(|error: &'static str| ValueError::InvalidValue(error.into())),
+            _ => Err(ValueError::TypeMismatch {
+                expected: TypeKind::String,
+                actual: value.kind(),
+            }),
+        }
+    }
+}
+
+macro_rules! string_value_codec {
+    ($type:ty, $variant:path, $value:literal, $error:literal) => {
+        impl ValueCodec for $type {
+            fn phenix_type() -> PhenixSchema {
+                PhenixSchema::String
+            }
+
+            fn to_value(&self) -> PhenixValue {
+                PhenixValue::String($value.into())
+            }
+
+            fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
+                match value {
+                    PhenixValue::String(value) if value == $value => Ok($variant),
+                    PhenixValue::String(_) => Err(ValueError::InvalidValue($error.into())),
+                    _ => Err(ValueError::TypeMismatch {
+                        expected: TypeKind::String,
+                        actual: value.kind(),
+                    }),
+                }
+            }
+        }
+    };
+}
+
+#[derive(
+    Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue,
+)]
 pub struct CallablePolicy {
     #[serde(default)]
     pub requires_permission: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 struct CallableDefinition {
     id: CallableId,
     description: NonEmptyText,
-    input_schema: Value,
-    output_schema: Value,
+    input_schema: PhenixSchema,
+    output_schema: PhenixSchema,
     #[serde(default)]
     capabilities: BTreeSet<CapabilityId>,
     #[serde(default)]
@@ -66,7 +116,9 @@ enum AgentKind {
     Agent,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+string_value_codec!(AgentKind, AgentKind::Agent, "agent", "expected agent kind");
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct AgentDefinition {
     #[serde(flatten)]
     callable: CallableDefinition,
@@ -82,11 +134,11 @@ impl AgentDefinition {
         self.callable.description.as_str()
     }
 
-    pub fn input_schema(&self) -> &Value {
+    pub fn input_schema(&self) -> &PhenixSchema {
         &self.callable.input_schema
     }
 
-    pub fn output_schema(&self) -> &Value {
+    pub fn output_schema(&self) -> &PhenixSchema {
         &self.callable.output_schema
     }
 
@@ -105,14 +157,21 @@ enum OrchestrationKind {
     Orchestration,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+string_value_codec!(
+    OrchestrationKind,
+    OrchestrationKind::Orchestration,
+    "orchestration",
+    "expected orchestration kind"
+);
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 struct OrchestrationDescriptor {
     #[serde(flatten)]
     callable: CallableDefinition,
     kind: OrchestrationKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct OrchestrationNode {
     callable: CallableId,
     objective: NonEmptyText,
@@ -149,13 +208,36 @@ impl TryFrom<Vec<OrchestrationNode>> for NonEmptyNodes {
     }
 }
 
+impl ValueCodec for NonEmptyNodes {
+    fn phenix_type() -> PhenixSchema {
+        <Vec<OrchestrationNode> as ValueCodec>::phenix_type()
+    }
+
+    fn to_value(&self) -> PhenixValue {
+        self.0.to_value()
+    }
+
+    fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
+        Vec::<OrchestrationNode>::from_value(value)?
+            .try_into()
+            .map_err(|error: &'static str| ValueError::InvalidValue(error.into()))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum OrchestrationPolicy {
     Sequential,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+string_value_codec!(
+    OrchestrationPolicy,
+    OrchestrationPolicy::Sequential,
+    "sequential",
+    "expected sequential orchestration policy"
+);
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct OrchestrationDefinition {
     descriptor: OrchestrationDescriptor,
     policy: OrchestrationPolicy,
@@ -172,7 +254,7 @@ impl OrchestrationDefinition {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum ExecutionConfigurationCommand {
     RegisterAgent {
@@ -191,7 +273,7 @@ pub enum ExecutionConfigurationCommand {
     ListOrchestrations,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum ExecutionConfigurationResponse {
     Agent {
@@ -206,6 +288,22 @@ pub enum ExecutionConfigurationResponse {
     Orchestrations {
         orchestrations: Vec<OrchestrationDefinition>,
     },
+}
+
+pub struct ExecutionConfigurationInterface;
+
+impl ComponentInterface for ExecutionConfigurationInterface {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(EXECUTION_CONFIGURATION_SERVICE)
+            .expect("static execution configuration interface id is valid")
+    }
+
+    fn schema() -> phenix_core::InterfaceSchema {
+        phenix_core::InterfaceSchema::of::<
+            ExecutionConfigurationCommand,
+            ExecutionConfigurationResponse,
+        >()
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -250,9 +348,17 @@ impl PluginInstance for ExecutionConfigurationPlugin {
                 "unsupported execution configuration service: {service}"
             ));
         }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = execute(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
+        let context = context(host);
+        let interface = ExecutionConfigurationInterface::interface_id();
+        let command = context
+            .kernel
+            .decode_projected::<ExecutionConfigurationCommand>(&interface, input)
+            .map_err(|error| error.to_string())?;
+        let response = execute(&context, command)?;
+        context
+            .kernel
+            .encode_value(&response)
+            .map_err(|error| error.to_string())
     }
 }
 
