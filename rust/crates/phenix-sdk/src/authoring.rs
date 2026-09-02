@@ -12,7 +12,8 @@ pub use plugin::{
 };
 pub use static_component::{
     InterfaceMarker, StaticComponentBehavior, StaticComponentDefinition, StaticComponentDescriptor,
-    StaticComponentExport, StaticPluginComponents,
+    StaticComponentExport, StaticComponentLayer, StaticComponentListener, StaticComponentValue,
+    StaticPluginComponents,
 };
 pub use static_config::{StaticPluginConfigDescriptor, StaticPluginConfiguration};
 pub use static_import::{
