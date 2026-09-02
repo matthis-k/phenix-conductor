@@ -6,7 +6,7 @@ coverage:
 
 ## Status
 
-Normative companion to `plugin-hygiene.md`, `runtime-host-interfaces.md`, `application-integration-terminology.md`, and `plugin-runtime-bridges.md`.
+Normative companion to `runtime-host-interfaces.md`, `application-integration-terminology.md`, and `plugin-runtime-bridges.md`.
 
 This specification defines how repository validation detects architecture drift in the current plugin model.
 
