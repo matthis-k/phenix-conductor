@@ -459,3 +459,57 @@ fn stop_and_reactivate_preserves_memory_state() {
     );
     let _ = fs::remove_file(path);
 }
+
+#[test]
+fn recall_and_revalidation_emit_observable_operation_events() {
+    RECALL_EVENTS.store(0, Ordering::SeqCst);
+    REVALIDATION_EVENTS.store(0, Ordering::SeqCst);
+
+    let path = temp_db("operation-events");
+    let mut kernel = kernel_with(&path);
+    kernel
+        .events()
+        .replace_subscriptions([
+            event_subscription("memory-recall-observer", RECALL_EVENT, on_recall),
+            event_subscription(
+                "memory-revalidation-observer",
+                REVALIDATION_EVENT,
+                on_revalidation,
+            ),
+        ])
+        .unwrap();
+
+    invoke(
+        &mut kernel,
+        MemoryCommand::Record {
+            record: fact("observed-fact", "root", "observable memory", 10),
+        },
+    )
+    .unwrap();
+    invoke(
+        &mut kernel,
+        MemoryCommand::Recall {
+            query: MemoryRecallQuery {
+                scopes: vec![scope("root")],
+                kinds: vec![MemoryKind::Fact],
+                query: "observable".into(),
+                at: 11,
+                limit: 10,
+            },
+        },
+    )
+    .unwrap();
+    invoke(
+        &mut kernel,
+        MemoryCommand::Revalidate {
+            id: "observed-fact".into(),
+            profile_id: RoutingProfileId::parse("memory").unwrap(),
+            at: 11,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(RECALL_EVENTS.load(Ordering::SeqCst), 1);
+    assert_eq!(REVALIDATION_EVENTS.load(Ordering::SeqCst), 1);
+    let _ = fs::remove_file(path);
+}
