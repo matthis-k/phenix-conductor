@@ -233,9 +233,15 @@ fn handle(context: &MemoryContext<'_, '_>, command: MemoryCommand) -> MemoryResu
                 observed_at,
             )?),
         }),
-        MemoryCommand::Revalidate { id, profile_id, at } => Ok(MemoryResponse::Freshness {
-            state: Some(revalidate_memory(context, id, profile_id, at)?),
-        }),
+        MemoryCommand::Revalidate { id, profile_id, at } => {
+            let state = revalidate_memory(context, id.clone(), profile_id, at)?;
+            observe(
+                context,
+                REVALIDATION_EVENT,
+                serde_json::json!({ "memory_id": id, "at": at }),
+            );
+            Ok(MemoryResponse::Freshness { state: Some(state) })
+        }
         MemoryCommand::ExpandNode { id } => Ok(MemoryResponse::Expansion {
             expansion: expand_node(context, &MemoryKey::parse(id)?)?,
         }),
@@ -797,9 +803,15 @@ fn handle_compaction(
     command: ContextCompactionCommand,
 ) -> MemoryResult<ContextCompactionResponse> {
     match command {
-        ContextCompactionCommand::Compact { request } => Ok(ContextCompactionResponse::Compacted {
-            checkpoint: compact_context(context, request)?,
-        }),
+        ContextCompactionCommand::Compact { request } => {
+            let checkpoint = compact_context(context, request)?;
+            observe(
+                context,
+                COMPACTION_EVENT,
+                serde_json::json!({ "checkpoint_id": checkpoint.id }),
+            );
+            Ok(ContextCompactionResponse::Compacted { checkpoint })
+        }
     }
 }
 
