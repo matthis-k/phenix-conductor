@@ -50,11 +50,12 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
     });
     let id = resolve_plugin_id(args, &item.ident)?;
     let name = &item.ident;
+    let identity_impl = plugin_identity_impl(name, &id);
 
     Ok(quote! {
         #item
 
-        #plugin_identity_impl(name, &id)
+        #identity_impl
 
         impl ::phenix_sdk::StaticPluginDefinition for #name {
             fn descriptor() -> ::phenix_sdk::StaticPluginDescriptor {
