@@ -1,9 +1,9 @@
 use crate::{memory_component_manifest, memory_factory, memory_manifest};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, Kernel,
-    KernelConfig, LocalPersistence, PhenixValue, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResolvedHarness, ServiceContribution, ServiceId, ServiceRole,
-    SessionId,
+    LocalPersistence, PhenixValue, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, ResolvedHarness, ResolvedHarnessActivation, ServiceContribution, ServiceId,
+    ServiceRole, SessionId,
 };
 use phenix_plugin_models::{
     model_routing_component_manifest, model_routing_factory, model_routing_manifest,
