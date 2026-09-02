@@ -190,9 +190,15 @@ fn handle(context: &MemoryContext<'_, '_>, command: MemoryCommand) -> MemoryResu
         MemoryCommand::GetNode { id } => Ok(MemoryResponse::Node {
             node: read_record(context, &node_key(&MemoryKey::parse(id)?))?,
         }),
-        MemoryCommand::Recall { query } => Ok(MemoryResponse::Recall {
-            records: recall_memory(context, query)?,
-        }),
+        MemoryCommand::Recall { query } => {
+            let records = recall_memory(context, query)?;
+            observe(
+                context,
+                RECALL_EVENT,
+                serde_json::json!({ "records": records.len() }),
+            );
+            Ok(MemoryResponse::Recall { records })
+        }
         MemoryCommand::Extract { request } => Ok(MemoryResponse::Record {
             record: extract_memory(context, request)?,
         }),
