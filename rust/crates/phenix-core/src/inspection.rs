@@ -459,7 +459,7 @@ mod tests {
             resource_namespaces: Vec::new(),
             maximum_authority: Authority::default(),
         };
-        let component_id = component("external-provider");
+        let component_id = component("runtime-provider");
         let resolved = ResolvedHarness::resolve(
             [bridge, provider.clone()],
             [ComponentManifest {
