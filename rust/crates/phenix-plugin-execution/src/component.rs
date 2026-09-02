@@ -1,6 +1,7 @@
+use crate::configuration::ExecutionConfigurationInterface;
 use crate::{
-    execution_manifest, AgentLoopCommand, AgentLoopResponse, ExecutionConfigurationInterface,
-    ModelInvokeCommand, ModelInvokeResponse, AGENT_LOOP_SERVICE, MODEL_ROUTING_SERVICE,
+    execution_manifest, AgentLoopCommand, AgentLoopResponse, ModelInvokeCommand,
+    ModelInvokeResponse, AGENT_LOOP_SERVICE, MODEL_ROUTING_SERVICE,
 };
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
