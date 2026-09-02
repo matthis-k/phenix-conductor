@@ -659,6 +659,9 @@ mod attribute_composition {
 
     #[phenix_sdk::interface("fixture.attr.models@1")]
     pub struct Models;
+
+    #[phenix_sdk::plugin("fixture.attr.stateless")]
+    pub mod stateless {}
 }
 
 #[test]
@@ -695,4 +698,14 @@ fn interface_attribute_owns_canonical_runtime_identity() {
     let id = <attribute_composition::Models as phenix_sdk::InterfaceMarker>::interface_id();
 
     assert_eq!(id.as_str(), "fixture.attr.models@1");
+}
+
+#[test]
+fn stateless_plugin_module_generates_composable_definition() {
+    let plugin_id = attribute_composition::stateless::Plugin::plugin_id();
+    let graph = phenix_sdk::StaticPluginGraph::compose::<attribute_composition::stateless::Plugin>()
+        .unwrap();
+
+    assert_eq!(plugin_id.as_str(), "fixture.attr.stateless");
+    assert_eq!(graph.ids().next().unwrap().as_str(), "fixture.attr.stateless");
 }
