@@ -1,5 +1,10 @@
 # Spec coverage lifecycle
 
+status: partial
+coverage:
+  - scripts/check-spec-lifecycle.sh
+  - scripts/check-spec-lifecycle-fixtures.sh
+
 ## Status
 
 Normative repository process for connecting specifications to implementation and regression coverage.
