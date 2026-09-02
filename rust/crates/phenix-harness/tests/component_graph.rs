@@ -140,7 +140,7 @@ fn configuration_frontend_cannot_bypass_source_authority_or_stable_semantics() {
         namespace: namespace.clone(),
         contract_version: 1,
         precedence: 10,
-        value: serde_json::json!({"team":"compiler"}),
+        value: serde_json::json!({"team":"compiler"}).into(),
         requested_authority: Authority::default(),
     };
 
@@ -193,7 +193,7 @@ fn canonical_contribution(frontend: &str, value: serde_json::Value) -> ConfigCon
         namespace: ConfigNamespace::parse("fixture.policy@1").unwrap(),
         contract_version: 1,
         precedence: 10,
-        value,
+        value: value.into(),
         requested_authority: Authority::default(),
     }
 }

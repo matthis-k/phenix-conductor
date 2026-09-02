@@ -620,7 +620,7 @@ mod tests {
             namespace: ConfigNamespace::parse("acme.engineering@1").unwrap(),
             contract_version: 1,
             precedence: 10,
-            value: serde_json::json!({"review":"strict"}),
+            value: serde_json::json!({"review":"strict"}).into(),
             requested_authority: Authority::default(),
         }
     }
@@ -649,7 +649,7 @@ mod tests {
                 namespace: ConfigNamespace::parse("acme.engineering@1").unwrap(),
                 contract_version: 1,
                 precedence: 10,
-                value: serde_json::json!({"review":"strict"}),
+                value: serde_json::json!({"review":"strict"}).into(),
                 requested_authority: Authority::default(),
             },
         )
@@ -883,7 +883,7 @@ mod tests {
         )
         .unwrap();
         let mut changed = contribution("phenix-config-nix", "flake:acme", "b");
-        changed.value = serde_json::json!({"review":"relaxed"});
+        changed.value = serde_json::json!({"review":"relaxed"}).into();
         let changed = ResolvedHarness::resolve(
             [owner("consumer-owner", Authority::default())],
             [ComponentManifest {

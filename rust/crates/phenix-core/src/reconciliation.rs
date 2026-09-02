@@ -634,7 +634,7 @@ mod tests {
                 namespace: ConfigNamespace::parse("fixture.policy@1").unwrap(),
                 contract_version: 1,
                 precedence: 10,
-                value: serde_json::json!({"mode": value}),
+                value: serde_json::json!({"mode": value}).into(),
                 requested_authority: Authority::default(),
             },
         )
