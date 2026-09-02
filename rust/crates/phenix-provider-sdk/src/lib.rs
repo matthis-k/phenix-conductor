@@ -318,11 +318,23 @@ mod tests {
             .unwrap();
         let response: ModelInferenceResponse = serde_json::from_slice(&output).unwrap();
         assert_eq!(response.output.as_ref(), b"world");
-        assert_eq!(response.provider_metadata["id"], "response-1");
-        assert_eq!(response.provider_metadata["protocol"], "openai_responses");
         assert_eq!(
-            response.provider_metadata["rate_limits"]["requests"]["remaining"],
-            99
+            response.provider_metadata["id"],
+            phenix_core::PhenixValue::String("response-1".into())
+        );
+        assert_eq!(
+            response.provider_metadata["protocol"],
+            phenix_core::PhenixValue::String("openai_responses".into())
+        );
+        assert_eq!(
+            response.provider_metadata["rate_limits"],
+            serde_json::json!({
+                "requests": {
+                    "limit": 100,
+                    "remaining": 99
+                }
+            })
+            .into()
         );
         server.join().unwrap();
     }
