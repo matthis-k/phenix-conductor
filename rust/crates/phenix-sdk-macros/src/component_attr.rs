@@ -1,3 +1,4 @@
+use crate::interface_attr::validate_interface_id;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
@@ -147,12 +148,7 @@ fn parse_export(attribute: &Attribute) -> syn::Result<ExportContribution> {
     }
 
     let interface = if let Ok(id) = syn::parse2::<LitStr>(export.tokens.clone()) {
-        if id.value().is_empty() {
-            return Err(syn::Error::new_spanned(
-                &id,
-                "export interface id must not be empty",
-            ));
-        }
+        validate_interface_id(&id.value()).map_err(|error| syn::Error::new_spanned(&id, error))?;
         ExportInterface::Literal(id)
     } else {
         ExportInterface::Marker(syn::parse2::<Type>(export.tokens)?)
@@ -235,5 +231,21 @@ mod tests {
         .to_string();
 
         assert!(output.contains("Planning as :: phenix_sdk :: InterfaceMarker"));
+    }
+
+    #[test]
+    fn component_impl_rejects_unversioned_literal_interface() {
+        let error = expand(
+            TokenStream::new(),
+            quote! {
+                impl Api {
+                    #[phenix(export("fixture.api.run"))]
+                    fn run(&mut self) {}
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("@version"));
     }
 }
