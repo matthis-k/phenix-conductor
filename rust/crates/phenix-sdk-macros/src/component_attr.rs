@@ -71,10 +71,17 @@ fn component_imports(item: &mut ItemStruct) -> syn::Result<Vec<ImportContributio
 
     for field in &mut fields.named {
         let mut retained = Vec::new();
+        let mut contribution = None;
         for attribute in std::mem::take(&mut field.attrs) {
             if !attribute.path().is_ident("phenix") {
                 retained.push(attribute);
                 continue;
+            }
+            if contribution.is_some() {
+                return Err(syn::Error::new_spanned(
+                    attribute,
+                    "a component field may have only one Phenix role",
+                ));
             }
             let Meta::List(meta) = &attribute.meta else {
                 return Err(syn::Error::new_spanned(
@@ -92,12 +99,15 @@ fn component_imports(item: &mut ItemStruct) -> syn::Result<Vec<ImportContributio
                     "unsupported component field contribution",
                 ));
             }
-            imports.push(ImportContribution {
+            contribution = Some(ImportContribution {
                 field: field.ident.clone().expect("named field has an identifier"),
                 ty: field.ty.clone(),
             });
         }
         field.attrs = retained;
+        if let Some(contribution) = contribution {
+            imports.push(contribution);
+        }
     }
 
     Ok(imports)
@@ -277,6 +287,23 @@ mod tests {
         assert!(output.contains("Required < Call < Models , Request , Response > >"));
         assert!(output.contains("stringify ! (models)"));
         assert!(!output.contains("phenix (import"));
+    }
+
+    #[test]
+    fn component_struct_rejects_duplicate_field_roles() {
+        let error = expand(
+            TokenStream::new(),
+            quote! {
+                struct Api {
+                    #[phenix(import)]
+                    #[phenix(import)]
+                    models: Required<Call<Models, Request, Response>>,
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("only one Phenix role"));
     }
 
     #[test]
