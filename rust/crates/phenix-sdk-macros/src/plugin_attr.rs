@@ -52,12 +52,13 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
     let resource_descriptors = contributions.resources.iter().map(|resource| {
         let field = &resource.field;
         let ty = &resource.ty;
+        let features = &resource.features;
         if let Some(id) = &resource.id {
             quote! {
                 ::phenix_sdk::StaticResourceDescriptor::explicit::<#ty>(
                     #id,
                     stringify!(#field),
-                    [],
+                    [#(::phenix_sdk::BackendFeature::#features),*],
                 )
             }
         } else {
@@ -65,7 +66,7 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
                 ::phenix_sdk::StaticResourceDescriptor::derived::<#ty>(
                     &Self::plugin_id(),
                     stringify!(#field),
-                    [],
+                    [#(::phenix_sdk::BackendFeature::#features),*],
                 )
             }
         }
@@ -321,12 +322,18 @@ struct ResourceContribution {
     field: Ident,
     ty: Type,
     id: Option<LitStr>,
+    features: Vec<Ident>,
 }
 
 enum FieldRole {
     Dependency,
-    Component { id: Option<LitStr> },
-    Resource { id: Option<LitStr> },
+    Component {
+        id: Option<LitStr>,
+    },
+    Resource {
+        id: Option<LitStr>,
+        features: Vec<Ident>,
+    },
 }
 
 fn field_contributions(item: &mut ItemStruct) -> syn::Result<FieldContributions> {
@@ -363,12 +370,13 @@ fn field_contributions(item: &mut ItemStruct) -> syn::Result<FieldContributions>
                     id,
                 });
             }
-            Some(FieldRole::Resource { id }) => {
+            Some(FieldRole::Resource { id, features }) => {
                 let name = field.ident.clone().expect("named field has an identifier");
                 contributions.resources.push(ResourceContribution {
                     field: name,
                     ty: field.ty.clone(),
                     id,
+                    features,
                 });
             }
             None => {}
@@ -415,7 +423,41 @@ fn field_role(attribute: &Attribute) -> syn::Result<FieldRole> {
     };
 
     let mut id = None;
+    let mut features = Vec::new();
     for argument in arguments {
+        if kind == "resource" {
+            if let Meta::List(feature_list) = &argument {
+                if feature_list.path.is_ident("features") {
+                    if !features.is_empty() {
+                        return Err(syn::Error::new_spanned(
+                            argument,
+                            "duplicate resource features",
+                        ));
+                    }
+                    let values = Punctuated::<Ident, Token![,]>::parse_terminated
+                        .parse2(feature_list.tokens.clone())?;
+                    for feature in values {
+                        if !matches!(
+                            feature.to_string().as_str(),
+                            "Transactions"
+                                | "UniqueKeys"
+                                | "ForeignKeys"
+                                | "OrderedAppend"
+                                | "IndexedRange"
+                                | "Migrations"
+                        ) {
+                            return Err(syn::Error::new_spanned(
+                                feature,
+                                "unsupported resource backend feature",
+                            ));
+                        }
+                        features.push(feature);
+                    }
+                    continue;
+                }
+            }
+        }
+
         let Meta::NameValue(argument) = argument else {
             return Err(syn::Error::new_spanned(
                 argument,
@@ -442,7 +484,7 @@ fn field_role(attribute: &Attribute) -> syn::Result<FieldRole> {
     Ok(if kind == "component" {
         FieldRole::Component { id }
     } else {
-        FieldRole::Resource { id }
+        FieldRole::Resource { id, features }
     })
 }
 
@@ -589,7 +631,41 @@ mod tests {
         assert_eq!(contributions.resources.len(), 1);
         assert_eq!(contributions.resources[0].field, "state");
         assert!(contributions.resources[0].id.is_none());
+        assert!(contributions.resources[0].features.is_empty());
         assert!(item.fields.iter().all(|field| field.attrs.is_empty()));
+    }
+
+    #[test]
+    fn resource_field_preserves_required_backend_features() {
+        let mut item: ItemStruct = parse_quote! {
+            struct Plugin {
+                #[phenix(resource, features(Transactions, Migrations))]
+                state: phenix_sdk::Durable<State>,
+            }
+        };
+
+        let contributions = field_contributions(&mut item).unwrap();
+        let features = contributions.resources[0]
+            .features
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(features, ["Transactions", "Migrations"]);
+    }
+
+    #[test]
+    fn resource_field_rejects_unknown_backend_feature() {
+        let mut item: ItemStruct = parse_quote! {
+            struct Plugin {
+                #[phenix(resource, features(Transactions, Telepathy))]
+                state: phenix_sdk::Durable<State>,
+            }
+        };
+
+        let error = field_contributions(&mut item).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unsupported resource backend feature"));
     }
 
     #[test]
