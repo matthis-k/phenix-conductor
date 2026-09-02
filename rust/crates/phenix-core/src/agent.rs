@@ -1,4 +1,7 @@
-use crate::{Bytes, CallableId, ContextResourceId, ContextRevisionId, ModelId, ServiceId, SkillId};
+use crate::{
+    Bytes, CallableId, ComponentInterface, ContextResourceId, ContextRevisionId, InterfaceId,
+    ModelId, ServiceId, SkillId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -19,6 +22,18 @@ pub struct ModelInferenceRequest {
 pub struct ModelInferenceResponse {
     pub output: Bytes,
     pub provider_metadata: BTreeMap<String, serde_json::Value>,
+}
+
+pub struct ModelInferenceInterface;
+
+impl ComponentInterface for ModelInferenceInterface {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse(MODEL_INFERENCE_SERVICE).expect("static model interface is valid")
+    }
+
+    fn schema() -> crate::InterfaceSchema {
+        crate::InterfaceSchema::of::<ModelInferenceRequest, ModelInferenceResponse>()
+    }
 }
 
 #[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[package.metadata.phenix]
+role = "application"
+
 [dependencies]
 phenix-conductor = { path = "../phenix-conductor" }
 phenix-core = { path = "../phenix-core" }

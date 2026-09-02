@@ -1,16 +1,16 @@
+pub use phenix_core::{
+    model_inference_service, ModelInferenceRequest, ModelInferenceResponse, MODEL_INFERENCE_SERVICE,
+};
 use phenix_core::{
     Authority, Bytes, CallableId, CapabilityId, ComponentInterface, DurableSchema, ModelId,
-    PhenixValue, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, Project, ResourceNamespace, RoutingProfileId, ServiceContribution, ServiceId,
-    TransactionOp,
+    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    ResourceNamespace, RoutingProfileId, ServiceContribution, ServiceId, TransactionOp,
 };
-pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const MODEL_ROUTING_SERVICE: &str = "phenix.models.routing@1";
-pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";
 const MODEL_ROUTING_PLUGIN: &str = "phenix.models";
 const MODEL_NAMESPACE: &str = "phenix.models.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
@@ -136,11 +136,6 @@ pub fn model_routing_service() -> ServiceId {
     ServiceId::parse(MODEL_ROUTING_SERVICE).expect("static service id is valid")
 }
 
-#[must_use]
-pub fn model_inference_service() -> ServiceId {
-    ServiceId::parse(MODEL_INFERENCE_SERVICE).expect("static service id is valid")
-}
-
 fn model_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(MODEL_NAMESPACE).expect("static namespace is valid")
 }
@@ -246,16 +241,13 @@ fn handle(
                 .kernel
                 .invoke_service_abi(
                     &model_inference_service(),
-                    &serde_json::to_vec(&PhenixValue::from(&request))
-                        .map_err(|error| error.to_string())?,
+                    &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
                     context.call.authority,
                     Some(&target.provider_plugin),
                 )
                 .map_err(|error| error.to_string())?;
-            let output: PhenixValue =
+            let response: ModelInferenceResponse =
                 serde_json::from_slice(&output).map_err(|error| error.to_string())?;
-            let response = ModelInferenceResponse::try_from(Project(&output))
-                .map_err(|error| error.to_string())?;
             Ok(ModelResponse::Inference { target, response })
         }
     }
@@ -376,6 +368,35 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    struct PlainProvider;
+
+    impl PluginInstance for PlainProvider {
+        fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn invoke(
+            &mut self,
+            service: &ServiceId,
+            input: &[u8],
+            _host: &PluginHost<'_>,
+        ) -> Result<Vec<u8>, String> {
+            if service != &model_inference_service() {
+                return Err(format!("unsupported fixture provider service: {service}"));
+            }
+            let request: ModelInferenceRequest =
+                serde_json::from_slice(input).map_err(|error| error.to_string())?;
+            serde_json::to_vec(&ModelInferenceResponse {
+                output: request.input,
+                provider_metadata: BTreeMap::from([(
+                    "provider".into(),
+                    serde_json::json!("fixture.provider"),
+                )]),
+            })
+            .map_err(|error| error.to_string())
+        }
+    }
+
     fn temp_db(name: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -399,6 +420,23 @@ mod tests {
         model_routing_manifest(Authority::default()).maximum_authority
     }
 
+    fn provider_manifest() -> PluginManifest {
+        PluginManifest {
+            id: PluginId::parse("fixture.provider").unwrap(),
+            version: 1,
+            execution: PluginExecution::Embedded,
+            dependencies: Vec::new(),
+            services: vec![ServiceContribution {
+                role: phenix_core::ServiceRole::Terminal,
+                service: model_inference_service(),
+                priority: 100,
+                required_authority: Authority::default(),
+            }],
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        }
+    }
+
     fn kernel_with(path: &PathBuf) -> Kernel {
         let manifest = model_routing_manifest(Authority::default());
         let plugin = manifest.id.clone();
@@ -407,6 +445,24 @@ mod tests {
             Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
         kernel
             .register_embedded_factory(plugin, model_routing_factory)
+            .unwrap();
+        kernel.activate_all().unwrap();
+        kernel
+    }
+
+    fn kernel_with_provider(path: &PathBuf) -> Kernel {
+        let routing = model_routing_manifest(Authority::default());
+        let provider = provider_manifest();
+        let routing_id = routing.id.clone();
+        let provider_id = provider.id.clone();
+        let persistence = LocalPersistence::open(path).unwrap();
+        let mut kernel =
+            Kernel::with_persistence(KernelConfig::new([routing, provider]).unwrap(), persistence);
+        kernel
+            .register_embedded_factory(routing_id, model_routing_factory)
+            .unwrap();
+        kernel
+            .register_embedded_factory(provider_id, || Box::new(PlainProvider))
             .unwrap();
         kernel.activate_all().unwrap();
         kernel
@@ -493,6 +549,50 @@ mod tests {
                 target: target("provider.scout", "scout")
             }
         );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn routed_inference_uses_the_provider_service_contract() {
+        let path = temp_db("model-provider-abi");
+        let profile = RoutingProfile {
+            id: RoutingProfileId::parse("default").unwrap(),
+            default_target: target("fixture.provider", "fixture"),
+            callable_targets: BTreeMap::new(),
+        };
+        let mut kernel = kernel_with_provider(&path);
+        invoke(
+            &mut kernel,
+            ModelCommand::RegisterProfile {
+                profile: profile.clone(),
+            },
+        )
+        .unwrap();
+        invoke(
+            &mut kernel,
+            ModelCommand::SetProviderAuthenticated {
+                provider_plugin: PluginId::parse("fixture.provider").unwrap(),
+                authenticated: true,
+            },
+        )
+        .unwrap();
+
+        let response = invoke(
+            &mut kernel,
+            ModelCommand::Invoke {
+                profile_id: profile.id,
+                callable_id: None,
+                input: b"hello".to_vec().into(),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            response,
+            ModelResponse::Inference { target, response }
+                if target.provider_plugin.as_str() == "fixture.provider"
+                    && response.output.as_ref() == b"hello"
+                    && response.provider_metadata["provider"] == "fixture.provider"
+        ));
         let _ = fs::remove_file(path);
     }
 

@@ -27,6 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           nix run .#phenix-maintenance-command-1c6e6c4c02e5 -- fix
+          nix develop --command bash -lc 'cd rust && cargo metadata --format-version 1 >/dev/null'
           git diff --check
 
       - name: Commit autofixes

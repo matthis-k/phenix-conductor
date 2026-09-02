@@ -4,7 +4,7 @@ use phenix_core::{
     PluginInstance, Project, ResolvedHarness, ResolvedHarnessActivation, ServiceId, SubscriptionId,
     SubscriptionSpec,
 };
-use phenix_plugin_sdk::{
+use phenix_sdk::{
     phenix_plugin, EventName, HookName, ListenerProjection, PhenixValue as DerivePhenixValue,
 };
 use std::sync::{
@@ -115,7 +115,7 @@ phenix_plugin! {
 }
 
 mod minimal {
-    use phenix_plugin_sdk::phenix_plugin;
+    use phenix_sdk::phenix_plugin;
 
     phenix_plugin! {
         "fixture.minimal";

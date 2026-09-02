@@ -121,6 +121,7 @@ identifier!(CallableId);
 identifier!(ModelId);
 identifier!(RoutingProfileId);
 identifier!(SkillId);
+identifier!(RuntimeId);
 identifier!(SessionId);
 identifier!(ContextResourceId);
 identifier!(ContextRevisionId);

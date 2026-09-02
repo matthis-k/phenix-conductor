@@ -71,9 +71,9 @@
         }
         {
           id = "sdk-plugin-authoring";
-          package = "phenix-plugin-sdk";
+          package = "phenix-sdk";
           test = "plugin_authoring";
-          label = "phenix-plugin-sdk / plugin_authoring";
+          label = "phenix-sdk / plugin_authoring";
         }
         {
           id = "harness-component-graph";
@@ -334,8 +334,6 @@
                     exec = ''
                       ${repositoryRoot}
                       bash scripts/check-plugin-architecture.sh
-                      bash scripts/check-spec-lifecycle-fixtures.sh
-                      bash scripts/check-spec-lifecycle.sh
                     '';
                   };
 

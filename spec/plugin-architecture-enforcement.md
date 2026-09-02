@@ -1,14 +1,10 @@
 # Plugin architecture enforcement
 
-status: partial
-coverage:
-  - scripts/check-plugin-architecture.sh
-
 ## Status
 
-Normative companion to `runtime-host-interfaces.md`, `application-integration-terminology.md`, and `plugin-runtime-bridges.md`.
+Normative companion to `plugin-hygiene.md`, `runtime-host-interfaces.md`, `application-integration-terminology.md`, and `plugin-runtime-bridges.md`.
 
-This specification defines how repository validation detects architecture drift in the current plugin model.
+This specification defines how repository validation detects architecture drift.
 
 ## Goal
 
@@ -22,7 +18,7 @@ Behavior that cannot be proven from repository structure remains covered by Rust
 
 First-party workspace packages that participate in runtime composition declare one role in Cargo package metadata.
 
-The initial role vocabulary is deliberately small:
+The role vocabulary is deliberately small:
 
 - `runtime-plugin`: independently activatable runtime behavior;
 - `passive-library`: shared contracts, SDKs, macros, transports, or other imported code that activates nothing;
@@ -32,7 +28,7 @@ The initial role vocabulary is deliberately small:
 
 A role describes runtime ownership. It does not replace more specific architecture terms such as adapter, client SDK, binding, or transport.
 
-Package names are not authoritative. A `phenix-plugin-*` prefix does not make a package a runtime plugin, and a package without that prefix may still need migration if it exports activatable runtime behavior.
+Package names are not authoritative. A `phenix-plugin-*` prefix does not make a package a runtime plugin. A package without that prefix may still export activatable runtime behavior.
 
 ## Cargo metadata
 
@@ -56,7 +52,7 @@ Repository validation reads this through `cargo metadata`. Do not maintain a sec
 
 ## Runtime plugin dependencies
 
-A runtime plugin must communicate with another runtime plugin through stable Core/domain contracts and resolved component imports.
+A runtime plugin communicates with another runtime plugin through stable Core or domain contracts and resolved component imports.
 
 For normal and build dependencies, a direct `runtime-plugin -> runtime-plugin` Cargo edge is rejected unless the consumer declares that edge as intentional implementation reuse.
 
@@ -65,8 +61,6 @@ Development-only dependencies are outside this rule because tests may compose co
 ### Intentional implementation reuse
 
 Rare implementation reuse is declared next to the consuming package and must include a reason.
-
-Conceptually:
 
 ```toml
 [package.metadata.phenix.implementation-dependencies]
@@ -77,19 +71,24 @@ The validation check requires every declared implementation dependency to match 
 
 A contract import, request type, response type, interface ID, schema, manifest helper, default-provider handle, or shared domain value is never sufficient reason for an implementation dependency.
 
-## Forbidden migration metadata
+## Converged dependency metadata
 
-`contract-debt` is migration-only metadata and is forbidden in the current architecture. Shared contracts belong to neutral owners; a runtime plugin must not retain a direct runtime-plugin dependency merely to import a contract.
+`contract-debt` was migration-only metadata. The converged tree rejects it.
 
-Source validation rejects any package that reintroduces `contract-debt`, as well as undeclared `runtime-plugin -> runtime-plugin` implementation edges. Deliberate implementation sharing uses `implementation-dependencies` with a non-empty reason and must match a real direct normal or build dependency.
+Intentional current implementation reuse uses `implementation-dependencies`. Repository validation rejects:
+
+- any `contract-debt` metadata;
+- an undeclared normal or build `runtime-plugin -> runtime-plugin` dependency;
+- an `implementation-dependencies` declaration without a matching direct dependency;
+- an empty or non-string implementation-sharing reason.
 
 ## Runtime package set
 
 `phenixPlugins.${system}` contains runtime plugins only.
 
-Repository validation must reject entries that resolve to packages whose declared role is `passive-library`, `application`, `assembly`, or `test-support`.
+Repository validation rejects entries that resolve to packages whose declared role is `passive-library`, `application`, `assembly`, or `test-support`.
 
-The check must also reject multiple independently named plugin entries that are packaged from one implementation crate when those plugins are specified as independently packaged. The current basic model, tools, skills, and context split is the first required case.
+The check also rejects multiple independently named plugin entries packaged from one implementation crate when those plugins are specified as independently packaged. The basic model, tools, skills, and context split is the first required case.
 
 Catalogs and presets may reference runtime plugins but do not appear as runtime plugins unless they independently export activatable behavior.
 
@@ -105,15 +104,15 @@ The application-integration terminology is enforced at package boundaries:
 - transport choice cannot create a parallel runtime package category;
 - the prerelease `phenixClients` compatibility category is removed when its remaining consumers move to the canonical application/client-SDK model.
 
-The terminal CLI migration follows `application-cli.md`, which is the canonical source for application and command-toolbelt identities.
+The terminal CLI identity follows `application-cli.md`.
 
-Repository enforcement must reject the legacy runtime package `phenix-plugin-cli`, runtime plugin/component ID `phenix.cli`, `phenix.cli.*` service IDs, and a `phenixPlugins.${system}.cli` entry. Rename the runtime package, plugin ID, component ID, and service IDs together. Keep no prerelease compatibility alias.
+Repository enforcement rejects the legacy runtime package `phenix-plugin-cli`, runtime plugin or component ID `phenix.cli`, `phenix.cli.*` service IDs, and a `phenixPlugins.${system}.cli` entry. The runtime package, plugin ID, component ID, and service IDs use the canonical command-toolbelt identity without a compatibility alias.
 
 ## Runtime bridge enforcement
 
 The runtime-bridge specification adds behavioral invariants that source classification alone cannot prove.
 
-Rust tests must prove at least:
+Rust tests prove at least:
 
 - Core owns only the `embedded` bootstrap runtime initially;
 - runtime providers enter through one open runtime-provider interface rather than a closed runtime enum;
@@ -123,30 +122,21 @@ Rust tests must prove at least:
 - guest authority is derived independently from runtime-bridge authority;
 - replacing an implementation through the same component contract requires no consumer source change.
 
-These tests belong near the kernel/runtime code that owns the behavior. Do not mirror their expected values in a source-classification script.
+These tests belong near the kernel or runtime code that owns the behavior. Do not mirror their expected values in a source-classification script.
 
 ## Validation command
 
-Maintenance gains one Source check named `plugin-architecture`.
+Maintenance has one Source check named `plugin-architecture`.
 
 The check reads Cargo metadata and the evaluated package-set metadata needed to verify the rules above. It fails with concrete package and dependency names.
 
-The check must remain read-only and deterministic. It must not build plugin artifacts, start the conductor, or inspect network state.
+The check is read-only and deterministic. It does not build plugin artifacts, start the conductor, or inspect network state.
 
-Rust and Product tests continue to own runtime behavior.
+Rust and Product tests own runtime behavior.
 
-## Migration order
+## Validation ownership
 
-Apply enforcement in small changes:
-
-1. add package-role metadata and the dependency gate with exact current contract debt;
-2. add package-set role validation and expose current packaging violations;
-3. move shared contracts to neutral owners and delete debt entries as edges disappear;
-4. reclassify SDK, command toolbelt, catalog, provider bundles, and basic default packages;
-5. add the runtime-bridge behavioral tests as the management API lands;
-6. finish with zero contract debt and no packaging exceptions.
-
-Each migration PR updates the enforcement data in the same commit that changes the architecture. Do not land a migration that leaves the gate knowingly stale.
+Source validation owns package roles, dependency directions, implementation-sharing declarations, legacy identities, and package-set membership. Rust and Product tests own runtime behavior. Keep each fact in its existing machine-readable owner instead of copying it into a second registry.
 
 ## Completion criteria
 
@@ -155,7 +145,7 @@ Architecture enforcement is complete when:
 - every composition-relevant first-party package has one declared role;
 - Source validation rejects undeclared runtime-plugin implementation edges;
 - intentional implementation dependencies are exact and documented;
-- contract debt is empty;
+- migration-only `contract-debt` metadata is absent and rejected;
 - `phenixPlugins` contains runtime plugins only;
 - independently specified default plugins have independent package ownership;
 - the terminal CLI, SDKs, bindings, client SDKs, transports, catalogs, and presets are absent from the runtime plugin set unless they independently export runtime behavior;
@@ -165,4 +155,4 @@ Architecture enforcement is complete when:
 
 ## Simplification audit
 
-Before adding a new rule, check whether Cargo metadata, the component graph, or the evaluated package set already contains the fact. Derive from existing state instead of maintaining a second registry. Keep source checks structural and keep runtime semantics in behavioral tests.
+Before adding a new rule, check whether Cargo metadata, the component graph, or the evaluated package set already contains the fact. Derive from existing state instead of maintaining a second registry. Keep source checks structural and runtime semantics in behavioral tests.

@@ -7,19 +7,20 @@ pub use phenix_plugin_basic_tools::*;
 
 #[cfg(test)]
 mod component_regression;
-#[cfg(test)]
-mod external_replacement_regression;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use phenix_core::{
-        context_service, model_inference_service, skill_service, tool_service, Authority,
-        CallableId, ComponentInterface, ContextCommand, ContextResourceId, ContextResourceKind,
-        ContextResponse, ContextScope, Kernel, KernelConfig, LocalPersistence, ModelId,
-        ModelInferenceRequest, ModelInferenceResponse, ResolvedHarness, ResolvedHarnessActivation,
-        SkillCommand, SkillDefinition, SkillId, SkillResponse, ToolCommand, ToolDefinition,
-        ToolResponse,
+        context_service, skill_service, tool_service, Authority, CallableId, ComponentInterface,
+        ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
+        Kernel, KernelConfig, LocalPersistence, ModelId, ResolvedHarness,
+        ResolvedHarnessActivation, SkillCommand, SkillDefinition, SkillId, SkillResponse,
+        ToolCommand, ToolDefinition, ToolResponse,
+    };
+    use phenix_sdk::{
+        model_inference_service, ModelInferenceInterface, ModelInferenceRequest,
+        ModelInferenceResponse,
     };
     use std::{
         collections::BTreeMap,
@@ -107,7 +108,7 @@ mod tests {
     }
 
     #[test]
-    fn basic_components_are_independently_named_and_export_core_interfaces() {
+    fn basic_components_are_independently_named_and_export_canonical_interfaces() {
         let manifests = [
             basic_model_manifest(),
             basic_tools_manifest(),
@@ -127,7 +128,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            BasicModelInterface::interface_id().as_str(),
+            ModelInferenceInterface::interface_id().as_str(),
             model_inference_service().as_str()
         );
         assert_eq!(
@@ -161,6 +162,10 @@ mod tests {
         assert_eq!(
             response.provider_metadata.get("provider"),
             Some(&serde_json::json!(BASIC_MODEL_PLUGIN))
+        );
+        assert_eq!(
+            response.provider_metadata.get("implementation"),
+            Some(&serde_json::json!("deterministic-echo"))
         );
         let _ = fs::remove_file(path);
     }

@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-use phenix_plugin_execution::{ExecutionCommand, ExecutionResponse};
+use phenix_sdk::{ExecutionCommand, ExecutionResponse};
 mod component;
 mod implementation;
 pub use component::*;

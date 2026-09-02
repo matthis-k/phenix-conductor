@@ -53,6 +53,7 @@ let
     };
 
   pluginIds = {
+    api = "phenix.api";
     artifacts = "phenix.artifacts";
     basic-context = "phenix.basic-context";
     basic-model = "phenix.basic-model";
@@ -70,13 +71,13 @@ let
     options = "phenix.options";
     planning = "phenix.planning";
     repository-workers = "phenix.repository-workers";
-    sdk = "phenix.sdk";
     session-tree = "phenix.session-tree";
     sessions = "phenix.sessions";
     workspace = "phenix.workspace";
   };
 
   basicPluginCrates = {
+    api = "phenix-plugin-api";
     basic-context = "phenix-plugin-basic-context";
     basic-model = "phenix-plugin-basic-model";
     basic-skills = "phenix-plugin-basic-skills";
@@ -98,6 +99,8 @@ let
   );
   hasLegacyCliIdentity =
     pluginIds ? cli || builtins.elem "phenix.cli" (builtins.attrValues pluginIds);
+  hasLegacySdkIdentity =
+    pluginIds ? sdk || builtins.elem "phenix.sdk" (builtins.attrValues pluginIds);
 
   pluginRole =
     package:
@@ -109,6 +112,8 @@ let
   checkedPluginCrates =
     if hasLegacyCliIdentity then
       throw "phenixPlugins must use command-toolbelt rather than the legacy cli runtime identity"
+    else if hasLegacySdkIdentity then
+      throw "phenixPlugins must use api rather than the legacy sdk runtime identity"
     else if builtins.length pluginCrateValues != builtins.length uniquePluginCrates then
       throw "phenixPlugins entries must use unique implementation packages"
     else
@@ -139,7 +144,7 @@ let
             manifest = {
               id = pluginId;
               version = 1;
-              execution = "embedded";
+              execution.kind = "embedded";
             };
           }
         ) pluginIds;

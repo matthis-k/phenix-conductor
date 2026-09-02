@@ -1,22 +1,9 @@
-use crate::{planning_manifest, PLANNING_SERVICE};
-use phenix_core::{
-    ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId, PluginId,
-};
+use crate::planning_manifest;
+use phenix_core::{ComponentExport, ComponentId, ComponentInterface, ComponentManifest, PluginId};
+use phenix_sdk::PlanningInterface;
 
 const PLANNING_COMPONENT: &str = "phenix.planning";
 const PLANNING_PLUGIN: &str = "phenix.planning";
-
-pub struct PlanningInterface;
-
-impl ComponentInterface for PlanningInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(PLANNING_SERVICE).expect("static planning interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<crate::PlanningCommand, crate::PlanningResponse>()
-    }
-}
 
 #[must_use]
 pub fn planning_component_id() -> ComponentId {

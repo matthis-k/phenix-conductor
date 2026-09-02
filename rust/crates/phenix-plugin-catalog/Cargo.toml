@@ -9,6 +9,7 @@ role = "assembly"
 
 [dependencies]
 phenix-core = { path = "../phenix-core" }
+phenix-sdk = { path = "../phenix-sdk" }
 phenix-plugin-artifacts = { path = "../phenix-plugin-artifacts" }
 phenix-plugin-basic-agent = { path = "../phenix-plugin-basic-agent" }
 phenix-plugin-command-toolbelt = { path = "../phenix-plugin-command-toolbelt" }
@@ -24,7 +25,7 @@ phenix-plugin-options = { path = "../phenix-plugin-options" }
 phenix-plugin-planning = { path = "../phenix-plugin-planning" }
 phenix-plugin-providers = { path = "../phenix-plugin-providers" }
 phenix-plugin-repository-workers = { path = "../phenix-plugin-repository-workers" }
-phenix-plugin-sdk = { path = "../phenix-plugin-sdk" }
+phenix-plugin-api = { path = "../phenix-plugin-api" }
 phenix-plugin-session-tree = { path = "../phenix-plugin-session-tree" }
 phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }
 phenix-plugin-workspace = { path = "../phenix-plugin-workspace" }

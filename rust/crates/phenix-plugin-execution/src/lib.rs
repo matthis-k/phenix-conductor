@@ -23,10 +23,6 @@ pub use configuration::{
     ExecutionConfigurationCommand, ExecutionConfigurationResponse, OrchestrationDefinition,
     OrchestrationNode, EXECUTION_CONFIGURATION_SERVICE,
 };
-pub use implementation::{
-    execution_service, CallableRecord, ExecutionAuthority, ExecutionCommand, ExecutionRecord,
-    ExecutionResponse, ExecutionState, WorkerTaskRecord, WorkerTaskState, EXECUTION_SERVICE,
-};
 pub use tool_schedule::{ScheduledToolBatch, ToolCallPlan, ToolConcurrency, ToolScheduler};
 
 use phenix_core::{

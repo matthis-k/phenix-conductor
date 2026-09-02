@@ -2,14 +2,17 @@ use crate::{
     basic_context_component_manifest, basic_context_manifest, basic_model_component_manifest,
     basic_model_factory, basic_model_manifest, basic_skills_component_manifest,
     basic_skills_manifest, basic_tools_component_manifest, basic_tools_manifest,
-    BasicContextInterface, BasicModelInterface, BasicSkillsInterface, BasicToolsInterface,
+    BasicContextInterface, BasicSkillsInterface, BasicToolsInterface,
 };
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentGraphError, ComponentId, ComponentImport,
-    ComponentInterface, ComponentManifest, InterfaceId, Kernel, KernelConfig, ModelId,
-    ModelInferenceRequest, ModelInferenceResponse, PhenixValue, PluginExecution, PluginHost,
-    PluginId, PluginInstance, PluginManifest, Project, ResolvedComponentGraph, ResolvedHarness,
-    ResolvedHarnessActivation, ResolvedHarnessError, ServiceContribution, ServiceId, ServiceRole,
+    ComponentInterface, ComponentManifest, InterfaceId, Kernel, KernelConfig, ModelId, PhenixValue,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, Project,
+    ResolvedComponentGraph, ResolvedHarness, ResolvedHarnessActivation, ResolvedHarnessError,
+    ServiceContribution, ServiceId, ServiceRole,
+};
+use phenix_sdk::{
+    model_inference_service, ModelInferenceInterface, ModelInferenceRequest, ModelInferenceResponse,
 };
 use std::collections::BTreeMap;
 
@@ -31,7 +34,7 @@ impl PluginInstance for Consumer {
         let request: ModelInferenceRequest =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = host
-            .invoke_import::<BasicModelInterface>(
+            .invoke_import::<ModelInferenceInterface>(
                 &component("fixture.consumer"),
                 &PhenixValue::from(&request),
             )
@@ -96,8 +99,8 @@ fn consumer_component() -> ComponentManifest {
         id: component("fixture.consumer"),
         owner: consumer_manifest().id,
         imports: vec![ComponentImport {
-            interface: BasicModelInterface::interface_id(),
-            schema: BasicModelInterface::schema(),
+            interface: ModelInferenceInterface::interface_id(),
+            schema: ModelInferenceInterface::schema(),
             required: true,
             authority: Authority::default(),
         }],
@@ -114,7 +117,7 @@ fn replacement_manifest() -> PluginManifest {
         dependencies: Vec::new(),
         services: vec![ServiceContribution {
             role: ServiceRole::Terminal,
-            service: phenix_core::model_inference_service(),
+            service: model_inference_service(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -129,8 +132,8 @@ fn replacement_component() -> ComponentManifest {
         owner: replacement_manifest().id,
         imports: Vec::new(),
         exports: vec![ComponentExport {
-            interface: BasicModelInterface::interface_id(),
-            schema: BasicModelInterface::schema(),
+            interface: ModelInferenceInterface::interface_id(),
+            schema: ModelInferenceInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -264,7 +267,7 @@ fn omitting_basic_and_replacement_model_leaves_required_import_unresolved() {
             component: missing_component,
             interface: missing_interface,
         }) if missing_component == component("fixture.consumer")
-            && missing_interface == BasicModelInterface::interface_id()
+            && missing_interface == ModelInferenceInterface::interface_id()
     ));
 }
 
@@ -289,7 +292,7 @@ fn replacement_component_satisfies_the_same_basic_model_import_without_consumer_
         .component_graph()
         .import_handle(
             &component("fixture.consumer"),
-            &BasicModelInterface::interface_id(),
+            &ModelInferenceInterface::interface_id(),
         )
         .unwrap()
         .unwrap();

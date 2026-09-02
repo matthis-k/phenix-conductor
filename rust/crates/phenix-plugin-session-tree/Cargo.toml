@@ -7,12 +7,12 @@ publish = false
 [package.metadata.phenix]
 role = "runtime-plugin"
 
-[package.metadata.phenix.contract-debt]
-phenix-plugin-sessions = "Move the consumed session contract to its neutral owner."
-
 [dependencies]
 phenix-core = { path = "../phenix-core" }
+phenix-sdk = { path = "../phenix-sdk" }
 phenix-sdk-macros = { path = "../phenix-sdk-macros" }
-phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+phenix-plugin-sessions = { path = "../phenix-plugin-sessions" }

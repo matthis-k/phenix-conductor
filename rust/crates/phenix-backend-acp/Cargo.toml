@@ -3,6 +3,9 @@ name = "phenix-backend-acp"
 version = "0.1.0"
 edition = "2021"
 
+[package.metadata.phenix]
+role = "passive-library"
+
 [[bin]]
 name = "acp-continuity-fixture"
 path = "tests/fixtures/acp_continuity_agent.rs"

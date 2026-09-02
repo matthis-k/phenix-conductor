@@ -34,9 +34,6 @@ use std::{
 mod basic_suite;
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
-type ExternalFactory =
-    Arc<dyn Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync>;
-
 #[derive(Debug)]
 pub enum HarnessBuildError {
     Kernel(KernelError),
@@ -98,7 +95,6 @@ pub fn default_suite_authority() -> Authority {
 pub struct HarnessBuilder {
     manifests: Vec<PluginManifest>,
     embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,
-    external_factories: BTreeMap<PluginId, ExternalFactory>,
     layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
     components: Vec<ComponentManifest>,
     contributions: Vec<ConfigContribution>,
@@ -339,23 +335,6 @@ impl HarnessBuilder {
         Ok(())
     }
 
-    pub fn add_external<F>(
-        &mut self,
-        manifest: PluginManifest,
-        factory: F,
-    ) -> Result<(), KernelError>
-    where
-        F: Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync + 'static,
-    {
-        if !matches!(manifest.execution, PluginExecution::External { .. }) {
-            return Err(KernelError::WrongExecutionKind(manifest.id));
-        }
-        let id = manifest.id.clone();
-        self.manifests.push(manifest);
-        self.external_factories.insert(id, Arc::new(factory));
-        Ok(())
-    }
-
     pub fn build(self) -> Result<PhenixHarness, HarnessBuildError> {
         let resolved = ResolvedHarness::resolve_with_layer_policies(
             self.manifests.clone(),
@@ -368,9 +347,6 @@ impl HarnessBuilder {
         kernel.activate_resolved_harness(&resolved)?;
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;
-        }
-        for (plugin, factory) in self.external_factories {
-            kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;
         }
         Ok(PhenixHarness { kernel, resolved })
     }
@@ -390,9 +366,6 @@ impl HarnessBuilder {
         kernel.activate_resolved_harness(&resolved)?;
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;
-        }
-        for (plugin, factory) in self.external_factories {
-            kernel.register_external_factory(plugin, move |manifest| factory(manifest))?;
         }
         Ok(PhenixHarness { kernel, resolved })
     }

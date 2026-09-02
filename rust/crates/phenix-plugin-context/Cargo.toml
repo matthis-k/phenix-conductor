@@ -7,13 +7,13 @@ publish = false
 [package.metadata.phenix]
 role = "runtime-plugin"
 
-[package.metadata.phenix.contract-debt]
-phenix-plugin-execution = "Move the consumed execution contract to its neutral owner."
-
 [dependencies]
 phenix-core = { path = "../phenix-core" }
+phenix-sdk = { path = "../phenix-sdk" }
 phenix-sdk-macros = { path = "../phenix-sdk-macros" }
-phenix-plugin-execution = { path = "../phenix-plugin-execution" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+
+[dev-dependencies]
+phenix-plugin-execution = { path = "../phenix-plugin-execution" }

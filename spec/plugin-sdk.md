@@ -1,116 +1,103 @@
 # Plugin SDK contributions
 
-status: implemented
+Status: implementation contract.
 
 ## Purpose
 
-Let a selected plugin extend an SDK without adding plugin-specific methods to core.
+Define two separate roles:
 
-Core only resolves SDK contribution metadata. SDK behavior stays in plugins and uses the same typed component interfaces as plugin-to-plugin calls.
+- `phenix-sdk` is the passive Rust authoring library. Importing it activates no runtime behavior.
+- `phenix-plugin-api` is an optional runtime plugin. It provides convenience services and contributes the default `phenix` SDK namespace.
 
-## Contribution
+Core resolves SDK contribution metadata. Runtime behavior still uses ordinary typed component interfaces and the normal component graph.
+
+## SDK library
+
+`phenix-sdk` owns Rust authoring support:
+
+- `PhenixSdk` and `phenix_context`;
+- typed SDK clients and capability objects;
+- plugin authoring helpers such as event/listener support;
+- common Core and domain re-exports used by plugin authors;
+- `phenix-sdk-macros` derives and attributes;
+- provider authoring helpers where appropriate.
+
+The crate has package role `passive-library`. It has no `PluginManifest`, component manifest, factory, activation hook, runtime plugin ID, or Nix `phenixPlugins` entry.
+
+## API plugin
+
+`phenix-plugin-api` is an ordinary runtime plugin with these canonical identities:
+
+```text
+package       phenix-plugin-api
+plugin        phenix.api
+component     phenix.api
+sessions      phenix.api.sessions@1
+tools         phenix.api.tools@1
+skills        phenix.api.skills@1
+config        phenix.api.config@1
+SDK namespace phenix
+```
+
+The API plugin may be disabled or replaced. No compatibility package, plugin ID, component ID, service ID, or package-set alias exists for the former `phenix-plugin-sdk` or `phenix.sdk` identity.
+
+The API plugin provides policy-bearing convenience operations. It does not own the underlying session, tool, skill, model, context, or option state.
+
+Sessions resolve scoped options before calling the ordinary session contract. Tools map registration and invocation to execution callables. Skills map registration and lookup to context resources whose kind is `skill`. Models, context, and options use their normal typed interfaces.
+
+## Contributions
 
 An SDK contribution declares:
 
 - the selected plugin that provides it;
 - one stable SDK namespace;
 - typed component interfaces exposed through that namespace;
-- optional opaque SDK resource identifiers for client helper code or generated bindings.
+- optional opaque SDK resource identifiers for client helpers or generated bindings.
 
-`SdkNamespace` and `SdkResourceId` are parsed identifiers. Invalid identifiers do not enter resolved state.
+`SdkNamespace` and `SdkResourceId` are parsed identifiers. Invalid identifiers do not enter resolved state. Resources are opaque to Core.
 
-Resources are opaque to core. Packaging and SDK consumers decide how to materialize them.
+SDK contributions resolve against an already resolved Harness composition. Resolution requires the provider plugin to be selected, every referenced interface to be available, and one provider to own each namespace.
 
-## Resolution
+Source order does not affect the result. SDK metadata grants no authority and does not alter provider selection. The resolved SDK set is derived from selected plugins, components, and contribution metadata rather than stored in a second runtime registry.
 
-SDK contributions resolve against an already resolved Harness composition.
+A testing plugin may independently contribute a `testing` namespace. Removing the API plugin removes only the `phenix` contribution and its convenience services.
 
-Resolution requires:
+## Configuration files
 
-1. the provider plugin is selected;
-2. every referenced interface is exported by a selected component;
-3. one provider owns each SDK namespace.
+The API plugin exposes `phenix.api.config@1`. `Read` accepts a parsed relative path under `PHENIX_CONFIG_DIR`. It rejects absolute paths, `.` and `..` segments, and symlinks that resolve outside that directory.
 
-Source order does not affect the result. SDK metadata grants no authority and does not alter component or service provider selection.
-
-The resolved SDK set is derived from the selected plugins, components, and contribution metadata. It is not stored as a second runtime registry.
-
-## Default Phenix SDK
-
-`phenix-plugin-sdk` is an ordinary userspace plugin that contributes the `phenix` namespace. It provides typed modules for:
-
-```text
-phenix.sessions
-phenix.models
-phenix.tools
-phenix.skills
-phenix.context
-phenix.options
-```
-
-Models, context, and options expose their ordinary typed plugin interfaces directly. Tools wrap execution callables. Skills wrap context resources whose kind is `skill`. These wrappers add SDK ergonomics without creating parallel durable state or provider registries.
-
-Sessions add the typed helper `phenix.sdk.sessions@1`. `Open` looks up the requested session and resolves scoped options before calling the ordinary session interface:
-
-```text
-session.reuse_existing
-session.auto_create
-```
-
-The options context includes the requested session and optional agent. Normal option precedence therefore changes SDK behavior without adding session policy to the sessions plugin.
-
-`phenix.sdk.tools@1` maps tool registration and invocation to the execution plugin's callable contract. `phenix.sdk.skills@1` maps skill registration, lookup, and listing to the context plugin's resource contract.
-
-The SDK contribution also names opaque resources for each default module so language-specific bindings or helper packages can be attached without changing core.
-
-A testing plugin can independently contribute a `testing` namespace with test interfaces and helper resources.
-
-```text
-phenix SDK plugin
-  -> namespace phenix
-  -> sessions -> options + sessions
-  -> tools -> execution callables
-  -> skills -> context resources
-  -> models/context/options -> existing interfaces
-
-testing plugin
-  -> namespace testing
-  -> testing interfaces/resources
-```
-
-Removing either plugin removes its SDK contribution. A compatible replacement can provide the same namespace when the previous provider is not selected.
-
-### Configuration files
-
-The default `phenix` SDK exposes `phenix.sdk.config@1`. `Read` accepts a parsed relative path under `PHENIX_CONFIG_DIR`. It rejects absolute paths, `.` and `..` segments, and symlinks that resolve outside that directory.
-
-The Nix wrapper owns `PHENIX_CONFIG_DIR`. It points at the selected user configuration directory, or the packaged default directory when none is supplied. SDK code receives relative names such as `settings.json`; it does not discover host configuration directories. Nix-generated settings are a separate startup source and are not written into that directory.
+The Nix wrapper owns `PHENIX_CONFIG_DIR`. It points at the selected user configuration directory or the packaged default directory. SDK code receives relative names such as `settings.json`; it does not discover host configuration directories.
 
 ## Invariants
 
-- SDK helpers use ordinary typed plugin interfaces.
+- `phenix-sdk` is passive authoring code.
+- `phenix-plugin-api` is the only default runtime owner of `phenix.api*` identities.
+- SDK helpers invoke ordinary typed component interfaces.
 - SDK contribution metadata carries no authority.
-- First-party and third-party plugins use the same contract.
+- First-party and third-party contributions use the same contract.
 - Duplicate namespace ownership fails resolution.
 - Unknown providers fail resolution.
 - References to unavailable interfaces fail resolution.
 - Resource-only plugins may provide client-only SDK helpers.
 - Zero-plugin composition has no SDK namespaces.
-- The Phenix SDK can be replaced or omitted.
-- SDK convenience behavior reads userspace options rather than adding hidden core policy.
-- SDK wrappers reuse product-owned state instead of storing duplicate tool or skill state.
+- API convenience behavior reads userspace options instead of adding hidden Core policy.
+- Convenience wrappers reuse product-owned state instead of storing duplicate state.
 
 ## Required regressions
 
-- two selected plugins contribute different namespaces;
-- a resource-only plugin contributes client helper resources;
-- a contribution cannot reference an unavailable interface;
+- importing `phenix-sdk` does not register or activate a plugin;
+- `phenix-sdk` is classified as `passive-library`;
+- `phenix-plugin-api` is classified as `runtime-plugin`;
+- the legacy `phenix-plugin-sdk` package and `phenix.sdk` runtime identity are absent;
+- two selected plugins can contribute different namespaces;
+- a resource-only plugin can contribute client helper resources;
+- unavailable interfaces reject a contribution;
 - duplicate namespace ownership fails;
 - an unselected provider fails;
 - empty composition resolves to no SDK namespaces;
-- the default Phenix SDK advertises sessions, models, tools, skills, context, and options;
-- the default SDK session helper honors scoped option resolution;
-- SDK tools register through execution callables;
-- SDK skills register and list through context resources;
+- the API plugin advertises sessions, models, tools, skills, context, and options through the `phenix` namespace;
+- the API session helper honors scoped option resolution;
+- API tools register through execution callables;
+- API skills register and list through context resources;
 - config paths are parsed before dispatch;
 - config reads cannot follow symlinks outside `PHENIX_CONFIG_DIR`.
