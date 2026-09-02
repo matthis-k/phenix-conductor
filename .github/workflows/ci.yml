@@ -47,6 +47,9 @@ jobs:
       - name: "Plugin architecture"
         run: nix run .#phenix-maintenance-command-da4d8b6b0d46 -- check source plugin-architecture
 
+      - name: "Structural boundaries"
+        run: nix run .#phenix-maintenance-command-d0a2e91a2adf -- check source structural-boundaries
+
       - name: "Test target classification"
         run: nix run .#phenix-maintenance-command-fe564e52f93c -- check source test-targets
 
