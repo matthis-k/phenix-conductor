@@ -1,8 +1,6 @@
 # Plugin runtimes, hot loading, and build requests
 
-## Status
-
-Specification only.
+status: partial
 
 This builds on the plugin ownership rules from #445 and the stable kernel interfaces from #444.
 

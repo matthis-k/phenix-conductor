@@ -1,5 +1,7 @@
 # Structural plugin contracts
 
+status: implemented
+
 Plugins may use native language types internally. Public plugin boundaries lower those types into a small structural representation owned by `phenix-core`.
 
 The ABI value is `PhenixValue`. Native Rust types are local views over that value; they are not part of the cross-plugin ABI.

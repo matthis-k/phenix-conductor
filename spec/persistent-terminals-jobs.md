@@ -1,5 +1,7 @@
 # Persistent terminals and jobs
 
+status: implemented
+
 ## Contract
 
 Terminals and jobs are conductor-owned runtime resources with durable identity and metadata. Execution-owned terminals/jobs are the default. When the owner execution reaches a terminal state, its running execution-owned terminals and jobs are revoked. Longer-lived workspace jobs require explicit promotion before that transition.

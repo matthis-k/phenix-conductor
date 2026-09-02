@@ -1,6 +1,6 @@
 # Scheduled work
 
-Status: proposed
+status: specification-only
 
 ## Goal
 

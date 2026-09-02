@@ -1,6 +1,6 @@
 # Observability
 
-Status: proposed
+status: specification-only
 
 ## Goal
 

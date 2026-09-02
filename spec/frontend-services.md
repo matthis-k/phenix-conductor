@@ -1,5 +1,7 @@
 # Frontend service providers
 
+status: implemented
+
 ## Purpose
 
 Some capabilities live in a frontend process rather than the conductor. Examples include browser-backed services and editor-owned integrations. A frontend service provider lets conductor-owned logic use those capabilities over an existing frontend connection.

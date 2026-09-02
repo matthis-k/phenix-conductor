@@ -1,6 +1,6 @@
 # Plugin contributions
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 

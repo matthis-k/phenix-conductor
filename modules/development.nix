@@ -334,6 +334,8 @@
                     exec = ''
                       ${repositoryRoot}
                       bash scripts/check-plugin-architecture.sh
+                      bash scripts/check-spec-lifecycle-fixtures.sh
+                      bash scripts/check-spec-lifecycle.sh
                     '';
                   };
 

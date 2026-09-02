@@ -1,5 +1,7 @@
 # Conductor lifecycle hooks
 
+status: implemented
+
 ## Contract
 
 Hooks are immutable configuration-revision semantics attached to explicit conductor lifecycle events. Each hook declares an event, dependency ordering, action, and failure policy. Hooks for one event form a dependency DAG; configuration registration order does not determine execution order.

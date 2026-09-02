@@ -1,6 +1,6 @@
 # Plugin event transport and subscriptions
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 

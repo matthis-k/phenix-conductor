@@ -1,6 +1,6 @@
 # Plugin host
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 

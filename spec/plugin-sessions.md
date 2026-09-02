@@ -1,6 +1,6 @@
 # Session service plugins
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 

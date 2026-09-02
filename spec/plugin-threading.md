@@ -1,6 +1,6 @@
 # Blocking threaded kernel runtime
 
-Status: normative runtime contract.
+status: implemented
 
 ## Purpose
 

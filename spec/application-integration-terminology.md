@@ -1,6 +1,6 @@
 # Application integration terminology
 
-Status: normative terminology for Phenix application integration.
+status: implemented
 
 ## Terms
 

@@ -1,6 +1,6 @@
 # Stable runtime and host interfaces
 
-Status: specification only.
+status: specification-only
 
 ## Goal
 

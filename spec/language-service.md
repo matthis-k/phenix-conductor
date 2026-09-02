@@ -1,5 +1,7 @@
 # Workspace language services
 
+status: implemented
+
 ## Purpose
 
 The conductor owns language-service selection for each workspace. Frontends may supply a live provider. Phenix may also run a managed provider. Agents and backends never select a frontend connection or language-server process directly.

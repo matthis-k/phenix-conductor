@@ -1,5 +1,7 @@
 # Execution context budgeting and compaction
 
+status: specification-only
+
 ## Purpose
 
 Keep each execution within the resolved model's actual context capacity without sacrificing durable semantics or exact provenance.

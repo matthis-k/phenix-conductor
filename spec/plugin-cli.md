@@ -1,6 +1,6 @@
 # Phenix CLI service plugin
 
-Status: implementation contract and plugin pressure test.
+status: implemented
 
 ## Purpose
 

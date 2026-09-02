@@ -1,6 +1,6 @@
 # Process confinement
 
-Status: proposed
+status: specification-only
 
 ## Goal
 
