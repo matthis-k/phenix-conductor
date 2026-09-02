@@ -28,6 +28,8 @@ mod embedding_integration;
 #[cfg(test)]
 mod freshness_integration;
 #[cfg(test)]
+mod maintenance_integration;
+#[cfg(test)]
 mod provenance_integration;
 #[cfg(test)]
 mod reranking_integration;
