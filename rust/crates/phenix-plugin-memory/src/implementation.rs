@@ -569,16 +569,6 @@ fn compact_context(
                 item.id
             )));
         }
-        if item.source_refs.iter().any(|source| {
-            source.service == memory_service()
-                || source.service == context_compaction_service()
-                || source.service == context_expansion_service()
-        }) {
-            return Err(MemoryError::Invalid(format!(
-                "context compaction item {} must retain raw durable source provenance",
-                item.id
-            )));
-        }
         covered_refs.extend(item.source_refs.iter().cloned());
         if item.exact {
             retained_exact_refs.extend(item.source_refs.iter().cloned());
@@ -829,6 +819,15 @@ fn validate_scope(scope: &MemoryScope) -> MemoryResult<()> {
 fn normalize_sources(sources: &mut Vec<MemorySourceReference>) -> MemoryResult<()> {
     for source in sources.iter() {
         validate_text("memory source resource", &source.resource)?;
+        if source.service == memory_service()
+            || source.service == context_compaction_service()
+            || source.service == context_expansion_service()
+        {
+            return Err(MemoryError::Invalid(format!(
+                "memory source {} must reference raw durable evidence, not derived memory",
+                source.resource
+            )));
+        }
         if matches!((source.start, source.end), (Some(start), Some(end)) if start > end) {
             return Err(MemoryError::Invalid(format!(
                 "memory source {} starts after it ends",
