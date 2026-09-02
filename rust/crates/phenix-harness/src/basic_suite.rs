@@ -87,32 +87,34 @@ mod tests {
         serde_json::from_slice(&output).unwrap()
     }
 
+    fn invoke_structural(
+        harness: &mut PhenixHarness,
+        service: &phenix_core::ServiceId,
+        request: &PhenixValue,
+    ) -> PhenixValue {
+        let output = harness
+            .invoke(
+                service,
+                &serde_json::to_vec(request).unwrap(),
+                &default_suite_authority(),
+                None,
+            )
+            .unwrap();
+        serde_json::from_slice(&output).unwrap()
+    }
+
     fn invoke_model(
         harness: &mut PhenixHarness,
         request: &ModelInferenceRequest,
     ) -> ModelInferenceResponse {
-        let output = harness
-            .invoke(
-                &model_inference_service(),
-                &serde_json::to_vec(&PhenixValue::from(request)).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
-            .unwrap();
-        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        let request = PhenixValue::from(request);
+        let output = invoke_structural(harness, &model_inference_service(), &request);
         ModelInferenceResponse::try_from(Project(&output)).unwrap()
     }
 
     fn invoke_session(harness: &mut PhenixHarness, request: &SessionCommand) -> SessionResponse {
-        let output = harness
-            .invoke(
-                &session_service(),
-                &serde_json::to_vec(&PhenixValue::from(request)).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
-            .unwrap();
-        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        let request = PhenixValue::from(request);
+        let output = invoke_structural(harness, &session_service(), &request);
         SessionResponse::try_from(Project(&output)).unwrap()
     }
 
