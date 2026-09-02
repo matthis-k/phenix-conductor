@@ -665,6 +665,14 @@ mod attribute_composition {
         #[phenix(export("fixture.attr.stateless.run@1"), public)]
         pub fn run() {}
     }
+
+    pub struct PlanStore;
+
+    #[phenix_sdk::resource(schema = 3)]
+    impl PlanStore {
+        #[phenix(migrate(from = 2))]
+        fn v2_to_v3() {}
+    }
 }
 
 #[test]
@@ -725,4 +733,20 @@ fn stateless_plugin_module_generates_default_component_and_export() {
         "fixture.attr.stateless.run@1"
     );
     assert!(exports[0].public);
+}
+
+#[test]
+fn resource_attribute_owns_schema_and_migration_metadata() {
+    let migrations =
+        <attribute_composition::PlanStore as phenix_sdk::StaticResourceDefinition>::migrations();
+
+    assert_eq!(
+        <attribute_composition::PlanStore as phenix_sdk::StaticResourceDefinition>::schema_version(
+        ),
+        3
+    );
+    assert_eq!(migrations.len(), 1);
+    assert_eq!(migrations[0].from_version, 2);
+    assert_eq!(migrations[0].to_version, 3);
+    assert_eq!(migrations[0].method, "v2_to_v3");
 }
