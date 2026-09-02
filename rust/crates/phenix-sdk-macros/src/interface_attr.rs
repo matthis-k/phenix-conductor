@@ -11,8 +11,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
             "Phenix interface markers must be non-generic unit structs",
         ));
     }
-    validate_interface_id(&id.value())
-        .map_err(|error| syn::Error::new_spanned(&id, error))?;
+    validate_interface_id(&id.value()).map_err(|error| syn::Error::new_spanned(&id, error))?;
     let name = &item.ident;
 
     Ok(quote! {
@@ -57,7 +56,9 @@ mod tests {
     fn interface_marker_lowers_stable_identity() {
         let output = expand(
             quote!("phenix.models.inference@1"),
-            quote!(pub struct ModelsInference;),
+            quote!(
+                pub struct ModelsInference;
+            ),
         )
         .unwrap()
         .to_string();
