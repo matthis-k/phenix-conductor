@@ -8,9 +8,9 @@ use crate::{
     retrieval,
 };
 use phenix_core::{
-    Authority, Bytes, CallableId, CapabilityId, ComponentInterface, DurableSchema, PluginContext,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
-    RoutingProfileId, SdkClient, ServiceContribution, ServiceId,
+    Authority, Bytes, CallableId, CapabilityId, ComponentInterface, DurableSchema, EventTypeId,
+    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    ResourceNamespace, RoutingProfileId, SdkClient, ServiceContribution, ServiceId,
 };
 use phenix_sdk::{
     context_compaction_service, context_expansion_service, memory_consolidate_callable,
@@ -34,6 +34,9 @@ const RECORD_INDEX: &str = "index/records";
 const DEPENDENCY_INDEX: &str = "index/dependencies";
 const NODE_INDEX: &str = "index/nodes";
 const CHECKPOINT_INDEX: &str = "index/checkpoints";
+pub(crate) const RECALL_EVENT: &str = "phenix.memory.recall";
+pub(crate) const COMPACTION_EVENT: &str = "phenix.memory.compaction";
+pub(crate) const REVALIDATION_EVENT: &str = "phenix.memory.revalidation";
 
 pub(crate) struct MemorySdk<'host, 'runtime> {
     models: SdkClient<'host, 'runtime, ModelRoutingInterface>,
@@ -88,6 +91,14 @@ pub(crate) fn persistence_authority() -> Authority {
 
 fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).expect("static capability is valid")
+}
+
+fn observe(context: &MemoryContext<'_, '_>, event: &str, payload: serde_json::Value) {
+    let event_type = EventTypeId::parse(event).expect("static memory event type is valid");
+    let Ok(payload) = serde_json::to_vec(&payload) else {
+        return;
+    };
+    let _ = context.kernel.dispatch_event(event_type, 1, 0, 0, payload);
 }
 
 fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> MemoryContext<'host, 'runtime> {
