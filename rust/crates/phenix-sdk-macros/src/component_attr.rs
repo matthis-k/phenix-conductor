@@ -2,8 +2,8 @@ use crate::interface_attr::validate_interface_id;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    parse::Parser, punctuated::Punctuated, Attribute, Ident, ImplItem, ItemImpl, ItemStruct, LitStr,
-    Meta, Token, Type,
+    parse::Parser, punctuated::Punctuated, Attribute, Ident, ImplItem, ItemImpl, ItemStruct,
+    LitStr, Meta, Token, Type,
 };
 
 pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<TokenStream> {
