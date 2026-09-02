@@ -1,13 +1,13 @@
-use crate::{
-    basic_model_component_manifest, basic_model_factory, basic_model_manifest, BasicModelInterface,
-};
+use crate::{basic_model_component_manifest, basic_model_factory, basic_model_manifest};
 use phenix_core::{
-    model_inference_service, Authority, ComponentExport, ComponentId, ComponentImport,
-    ComponentInterface, ComponentManifest, ExternalPluginProcess, ExternalSandbox,
-    ExternalTransportConfig, Kernel, KernelConfig, ModelId, ModelInferenceRequest,
-    ModelInferenceResponse, PhenixValue, PluginExecution, PluginHost, PluginId, PluginInstance,
+    Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
+    ComponentManifest, ExternalPluginProcess, ExternalSandbox, ExternalTransportConfig, Kernel,
+    KernelConfig, ModelId, PhenixValue, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, Project, ResolvedHarness, ResolvedHarnessActivation, ServiceContribution,
     ServiceId, ServiceRole,
+};
+use phenix_sdk::{
+    model_inference_service, ModelInferenceInterface, ModelInferenceRequest, ModelInferenceResponse,
 };
 use std::{
     collections::BTreeMap,
@@ -35,7 +35,7 @@ impl PluginInstance for Consumer {
         let request: ModelInferenceRequest =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
         let response = host
-            .invoke_import::<BasicModelInterface>(
+            .invoke_import::<ModelInferenceInterface>(
                 &component("fixture.basic-model-consumer"),
                 &PhenixValue::from(&request),
             )
@@ -101,8 +101,8 @@ fn external_component() -> ComponentManifest {
         owner: external_manifest().id,
         imports: Vec::new(),
         exports: vec![ComponentExport {
-            interface: BasicModelInterface::interface_id(),
-            schema: BasicModelInterface::schema(),
+            interface: ModelInferenceInterface::interface_id(),
+            schema: ModelInferenceInterface::schema(),
             priority: 100,
             required_authority: Authority::default(),
         }],
@@ -132,8 +132,8 @@ fn consumer_component() -> ComponentManifest {
         id: component("fixture.basic-model-consumer"),
         owner: consumer_manifest().id,
         imports: vec![ComponentImport {
-            interface: BasicModelInterface::interface_id(),
-            schema: BasicModelInterface::schema(),
+            interface: ModelInferenceInterface::interface_id(),
+            schema: ModelInferenceInterface::schema(),
             required: true,
             authority: Authority::default(),
         }],
@@ -163,7 +163,7 @@ fn external_component_replaces_basic_model_without_changing_the_consumer_contrac
         .component_graph()
         .import_handle(
             &component("fixture.basic-model-consumer"),
-            &BasicModelInterface::interface_id(),
+            &ModelInferenceInterface::interface_id(),
         )
         .unwrap()
         .unwrap();

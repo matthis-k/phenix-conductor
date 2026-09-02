@@ -12,8 +12,8 @@ pub use types::*;
 
 use phenix_core::{
     model_inference_service, Authority, CapabilityId, ComponentExport, ComponentId,
-    ComponentInterface, ComponentManifest, InterfaceId, PluginExecution, PluginId, PluginInstance,
-    PluginManifest, ServiceContribution, ServiceId, ServiceRole, MODEL_INFERENCE_SERVICE,
+    ComponentInterface, ComponentManifest, InterfaceId, ModelInferenceInterface, PluginExecution,
+    PluginId, PluginInstance, PluginManifest, ServiceContribution, ServiceId, ServiceRole,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -49,14 +49,6 @@ pub struct ProviderAuthInterface;
 impl ComponentInterface for ProviderAuthInterface {
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(PROVIDER_AUTH_SERVICE).expect("static provider auth interface is valid")
-    }
-}
-
-pub struct ProviderModelInterface;
-
-impl ComponentInterface for ProviderModelInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(MODEL_INFERENCE_SERVICE).expect("static model interface is valid")
     }
 }
 
@@ -164,8 +156,8 @@ impl ProviderDefinition {
     #[must_use]
     pub fn component_manifest(&self) -> ComponentManifest {
         let mut exports = vec![ComponentExport {
-            interface: ProviderModelInterface::interface_id(),
-            schema: ProviderModelInterface::schema(),
+            interface: ModelInferenceInterface::interface_id(),
+            schema: ModelInferenceInterface::schema(),
             priority: 100,
             required_authority: network_authority(),
         }];
@@ -251,7 +243,7 @@ mod tests {
         assert!(component
             .exports
             .iter()
-            .any(|export| export.interface == ProviderModelInterface::interface_id()));
+            .any(|export| export.interface == ModelInferenceInterface::interface_id()));
         assert!(component
             .exports
             .iter()
