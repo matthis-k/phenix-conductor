@@ -49,6 +49,27 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
             }
         }
     });
+    let resource_descriptors = contributions.resources.iter().map(|resource| {
+        let field = &resource.field;
+        let ty = &resource.ty;
+        if let Some(id) = &resource.id {
+            quote! {
+                ::phenix_sdk::StaticResourceDescriptor::explicit::<#ty>(
+                    #id,
+                    stringify!(#field),
+                    [],
+                )
+            }
+        } else {
+            quote! {
+                ::phenix_sdk::StaticResourceDescriptor::derived::<#ty>(
+                    &Self::plugin_id(),
+                    stringify!(#field),
+                    [],
+                )
+            }
+        }
+    });
     let id = resolve_plugin_id(args, &item.ident)?;
     let name = &item.ident;
     let identity_impl = plugin_identity_impl(name, &id);
@@ -73,6 +94,12 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
         impl ::phenix_sdk::StaticPluginComponents for #name {
             fn components() -> Vec<::phenix_sdk::StaticComponentDescriptor> {
                 vec![#(#component_descriptors),*]
+            }
+        }
+
+        impl ::phenix_sdk::StaticPluginResources for #name {
+            fn resources() -> Vec<::phenix_sdk::StaticResourceDescriptor> {
+                vec![#(#resource_descriptors),*]
             }
         }
     })
@@ -281,6 +308,7 @@ fn explicit_plugin_id(args: TokenStream) -> syn::Result<Option<LitStr>> {
 struct FieldContributions {
     dependencies: Vec<Type>,
     components: Vec<ComponentContribution>,
+    resources: Vec<ResourceContribution>,
 }
 
 struct ComponentContribution {
@@ -289,9 +317,16 @@ struct ComponentContribution {
     id: Option<LitStr>,
 }
 
+struct ResourceContribution {
+    field: Ident,
+    ty: Type,
+    id: Option<LitStr>,
+}
+
 enum FieldRole {
     Dependency,
     Component { id: Option<LitStr> },
+    Resource { id: Option<LitStr> },
 }
 
 fn field_contributions(item: &mut ItemStruct) -> syn::Result<FieldContributions> {
@@ -323,6 +358,14 @@ fn field_contributions(item: &mut ItemStruct) -> syn::Result<FieldContributions>
             Some(FieldRole::Component { id }) => {
                 let name = field.ident.clone().expect("named field has an identifier");
                 contributions.components.push(ComponentContribution {
+                    field: name,
+                    ty: field.ty.clone(),
+                    id,
+                });
+            }
+            Some(FieldRole::Resource { id }) => {
+                let name = field.ident.clone().expect("named field has an identifier");
+                contributions.resources.push(ResourceContribution {
                     field: name,
                     ty: field.ty.clone(),
                     id,
@@ -360,36 +403,47 @@ fn field_role(attribute: &Attribute) -> syn::Result<FieldRole> {
         }
         return Ok(FieldRole::Dependency);
     }
-    if !role.is_ident("component") {
+    let kind = if role.is_ident("component") {
+        "component"
+    } else if role.is_ident("resource") {
+        "resource"
+    } else {
         return Err(syn::Error::new_spanned(
             role,
             "unsupported plugin field attribute",
         ));
-    }
+    };
 
     let mut id = None;
     for argument in arguments {
         let Meta::NameValue(argument) = argument else {
             return Err(syn::Error::new_spanned(
                 argument,
-                "component metadata must use key = value syntax",
+                format!("{kind} metadata must use key = value syntax"),
             ));
         };
         if !argument.path.is_ident("id") {
             return Err(syn::Error::new_spanned(
                 argument.path,
-                "unsupported component metadata",
+                format!("unsupported {kind} metadata"),
             ));
         }
         if id.is_some() {
-            return Err(syn::Error::new_spanned(argument, "duplicate component id"));
+            return Err(syn::Error::new_spanned(
+                argument,
+                format!("duplicate {kind} id"),
+            ));
         }
-        let value = string_literal(argument.value, "component id must be a string literal")?;
-        validate_static_id(&value.value(), "component")
+        let value = string_literal(argument.value, "field id must be a string literal")?;
+        validate_static_id(&value.value(), kind)
             .map_err(|error| syn::Error::new_spanned(&value, error))?;
         id = Some(value);
     }
-    Ok(FieldRole::Component { id })
+    Ok(if kind == "component" {
+        FieldRole::Component { id }
+    } else {
+        FieldRole::Resource { id }
+    })
 }
 
 fn string_literal(value: Expr, message: &'static str) -> syn::Result<LitStr> {
@@ -520,5 +574,41 @@ mod tests {
             contributions.components[0].id.as_ref().unwrap().value(),
             "legacy.component"
         );
+    }
+
+    #[test]
+    fn resource_field_is_lowered_without_leaking_helper_attribute() {
+        let mut item: ItemStruct = parse_quote! {
+            struct Plugin {
+                #[phenix(resource)]
+                state: phenix_sdk::Durable<State>,
+            }
+        };
+
+        let contributions = field_contributions(&mut item).unwrap();
+        assert_eq!(contributions.resources.len(), 1);
+        assert_eq!(contributions.resources[0].field, "state");
+        assert!(contributions.resources[0].id.is_none());
+        assert!(item.fields.iter().all(|field| field.attrs.is_empty()));
+    }
+
+    #[test]
+    fn plugin_expansion_emits_resource_descriptor_from_resource_field() {
+        let output = expand(
+            quote!("phenix.resource-owner"),
+            quote! {
+                struct Plugin {
+                    #[phenix(resource, id = "legacy.state")]
+                    state: phenix_sdk::Durable<State>,
+                }
+            },
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(output.contains("StaticPluginResources for Plugin"));
+        assert!(output.contains("StaticResourceDescriptor :: explicit"));
+        assert!(output.contains("legacy.state"));
+        assert!(!output.contains("phenix (resource"));
     }
 }
