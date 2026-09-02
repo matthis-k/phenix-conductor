@@ -1,5 +1,12 @@
-use crate::{memory_factory, memory_manifest};
-use phenix_core::{Kernel, KernelConfig, LocalPersistence, PhenixValue, ServiceId, SessionId};
+use crate::{
+    implementation::{RECALL_EVENT, REVALIDATION_EVENT},
+    memory_factory, memory_manifest,
+};
+use phenix_core::{
+    Authority, EventEnvelope, EventFailurePolicy, EventSubscription, EventTypeId, Kernel,
+    KernelConfig, LocalPersistence, PhenixValue, RoutingProfileId, ServiceId, SessionId,
+    SubscriptionId, SubscriptionSpec,
+};
 use phenix_sdk::{
     memory_service, MemoryCommand, MemoryExpansion, MemoryKind, MemoryNode, MemoryRecallQuery,
     MemoryRecord, MemoryResponse, MemoryScope, MemorySourceReference,
@@ -7,8 +14,46 @@ use phenix_sdk::{
 use std::{
     fs,
     path::PathBuf,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
+
+static RECALL_EVENTS: AtomicUsize = AtomicUsize::new(0);
+static REVALIDATION_EVENTS: AtomicUsize = AtomicUsize::new(0);
+
+fn on_recall(_event: &EventEnvelope, _authority: &Authority) -> Result<(), String> {
+    RECALL_EVENTS.fetch_add(1, Ordering::SeqCst);
+    Ok(())
+}
+
+fn on_revalidation(_event: &EventEnvelope, _authority: &Authority) -> Result<(), String> {
+    REVALIDATION_EVENTS.fetch_add(1, Ordering::SeqCst);
+    Ok(())
+}
+
+fn event_subscription(
+    id: &str,
+    event: &str,
+    handler: fn(&EventEnvelope, &Authority) -> Result<(), String>,
+) -> EventSubscription {
+    EventSubscription {
+        spec: SubscriptionSpec {
+            id: SubscriptionId::parse(id).unwrap(),
+            owner: memory_manifest().id,
+            event_type: EventTypeId::parse(event).unwrap(),
+            event_version: 1,
+            dependencies: Vec::new(),
+            failure_policy: EventFailurePolicy::Ignore,
+            required_authority: Authority::default(),
+            maximum_authority: Authority::default(),
+            kernel_policy_revision: 0,
+        },
+        handler: Arc::new(handler),
+    }
+}
 
 fn temp_db(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
