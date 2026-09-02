@@ -1,6 +1,10 @@
 # Memory freshness and revalidation
 
-status: partial
+status: implemented
+coverage:
+  - rust/crates/phenix-plugin-memory/src/freshness_integration.rs
+  - rust/crates/phenix-plugin-memory/src/revalidation_failure_integration.rs
+  - rust/crates/phenix-plugin-memory/src/supersession_integration.rs
 
 This requirement extends `spec/plugin-memory.md`. It was added after the original PR scope. The PR is not complete until the memory implementation satisfies both specifications.
 

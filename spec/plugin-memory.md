@@ -1,6 +1,18 @@
 # Memory service plugin
 
-status: partial
+status: implemented
+coverage:
+  - rust/crates/phenix-harness/src/basic_suite.rs
+  - rust/crates/phenix-harness/src/lib.rs
+  - rust/crates/phenix-plugin-memory/src/component.rs
+  - rust/crates/phenix-plugin-memory/src/embedding_integration.rs
+  - rust/crates/phenix-plugin-memory/src/maintenance_integration.rs
+  - rust/crates/phenix-plugin-memory/src/provenance_integration.rs
+  - rust/crates/phenix-plugin-memory/src/reranking_integration.rs
+  - rust/crates/phenix-plugin-memory/src/restart_integration.rs
+  - rust/crates/phenix-plugin-memory/src/supersession_integration.rs
+  - rust/crates/phenix-plugin-memory/src/tests.rs
+  - rust/crates/phenix-plugin-sessions/src/history_integration.rs
 
 ## Purpose
 
