@@ -13,15 +13,16 @@ use phenix_core::{
     RoutingProfileId, SdkClient, ServiceContribution, ServiceId,
 };
 use phenix_sdk::{
-    context_compaction_service, context_expansion_service, memory_resolve_callable, memory_service,
-    memory_summarize_callable, memory_validate_callable, ContextCheckpoint,
-    ContextCompactionCommand, ContextCompactionInterface, ContextCompactionRequest,
-    ContextCompactionResponse, MemoryCanonicalReference, MemoryCommand, MemoryEmbeddingInterface,
-    MemoryEmbeddingRequest, MemoryEmbeddingResponse, MemoryExpansion, MemoryFreshness,
-    MemoryFreshnessRecord, MemoryInterface, MemoryKind, MemoryNode, MemoryRankCandidate,
-    MemoryRankInterface, MemoryRankRequest, MemoryRankResponse, MemoryRecallQuery, MemoryRecord,
-    MemoryResponse, MemoryRevalidationOutcome, MemoryScope, MemorySourceReference, ModelCommand,
-    ModelResponse, ModelRoutingInterface,
+    context_compaction_service, context_expansion_service, memory_consolidate_callable,
+    memory_extract_callable, memory_resolve_callable, memory_service, memory_summarize_callable,
+    memory_validate_callable, ContextCheckpoint, ContextCompactionCommand,
+    ContextCompactionInterface, ContextCompactionRequest, ContextCompactionResponse,
+    MemoryCanonicalReference, MemoryCommand, MemoryConsolidationRequest, MemoryEmbeddingInterface,
+    MemoryEmbeddingRequest, MemoryEmbeddingResponse, MemoryExpansion, MemoryExtractionRequest,
+    MemoryFreshness, MemoryFreshnessRecord, MemoryInterface, MemoryKind, MemoryNode,
+    MemoryRankCandidate, MemoryRankInterface, MemoryRankRequest, MemoryRankResponse,
+    MemoryRecallQuery, MemoryRecord, MemoryResponse, MemoryRevalidationOutcome, MemoryScope,
+    MemorySourceReference, ModelCommand, ModelResponse, ModelRoutingInterface,
 };
 
 const MEMORY_PLUGIN: &str = "phenix.memory";
@@ -181,6 +182,12 @@ fn handle(context: &MemoryContext<'_, '_>, command: MemoryCommand) -> MemoryResu
         MemoryCommand::Recall { query } => Ok(MemoryResponse::Recall {
             records: recall_memory(context, query)?,
         }),
+        MemoryCommand::Extract { request } => Ok(MemoryResponse::Record {
+            record: extract_memory(context, request)?,
+        }),
+        MemoryCommand::Consolidate { request } => Ok(MemoryResponse::Record {
+            record: consolidate_memory(context, request)?,
+        }),
         MemoryCommand::ObserveRevision {
             service,
             resource,
@@ -217,6 +224,116 @@ fn handle(context: &MemoryContext<'_, '_>, command: MemoryCommand) -> MemoryResu
             record: promote_memory(context, id, promoted_id, scope, created_at)?,
         }),
     }
+}
+
+fn extract_memory(
+    context: &MemoryContext<'_, '_>,
+    request: MemoryExtractionRequest,
+) -> MemoryResult<MemoryRecord> {
+    if request.observations.is_empty() {
+        return Err(MemoryError::Invalid(
+            "memory extraction requires at least one observation".into(),
+        ));
+    }
+    let mut source_refs = Vec::new();
+    for observation in &request.observations {
+        validate_text("memory extraction observation", &observation.content)?;
+        source_refs.extend(observation.source_refs.iter().cloned());
+    }
+    normalize_sources(&mut source_refs)?;
+    if source_refs.is_empty() {
+        return Err(MemoryError::Invalid(
+            "memory extraction requires exact durable provenance".into(),
+        ));
+    }
+    let input = serde_json::to_vec(&request.observations)
+        .map_err(|error| MemoryError::Provider(error.to_string()))?;
+    let content = routed_memory_text(
+        context,
+        &request.profile_id,
+        memory_extract_callable(),
+        input,
+        "memory extraction",
+    )?;
+    record_memory(
+        context,
+        MemoryRecord {
+            id: request.id,
+            kind: request.kind,
+            scope: request.scope,
+            content,
+            source_refs,
+            supersedes: Vec::new(),
+            valid_from: None,
+            valid_until: None,
+            created_at: request.created_at,
+        },
+    )
+}
+
+fn consolidate_memory(
+    context: &MemoryContext<'_, '_>,
+    request: MemoryConsolidationRequest,
+) -> MemoryResult<MemoryRecord> {
+    if !(2..=100).contains(&request.ids.len()) {
+        return Err(MemoryError::Invalid(
+            "memory consolidation requires between 2 and 100 records".into(),
+        ));
+    }
+    let mut ids = request.ids;
+    ids.sort();
+    let original_len = ids.len();
+    ids.dedup();
+    if ids.len() != original_len {
+        return Err(MemoryError::Invalid(
+            "memory consolidation requires distinct records".into(),
+        ));
+    }
+
+    let mut records = Vec::with_capacity(ids.len());
+    for id in &ids {
+        let key = MemoryKey::parse(id.clone())?;
+        let record: MemoryRecord = read_record(context, &record_key(&key))?
+            .ok_or_else(|| MemoryError::Missing(format!("memory {id}")))?;
+        records.push(record);
+    }
+    let first = &records[0];
+    if records
+        .iter()
+        .any(|record| record.kind != first.kind || record.scope != first.scope)
+    {
+        return Err(MemoryError::Invalid(
+            "consolidated memory must have the same kind and scope".into(),
+        ));
+    }
+    let mut source_refs = records
+        .iter()
+        .flat_map(|record| record.source_refs.iter().cloned())
+        .collect::<Vec<_>>();
+    normalize_sources(&mut source_refs)?;
+    let input = serde_json::to_vec(&records)
+        .map_err(|error| MemoryError::Provider(error.to_string()))?;
+    let content = routed_memory_text(
+        context,
+        &request.profile_id,
+        memory_consolidate_callable(),
+        input,
+        "memory consolidation",
+    )?;
+    record_memory(
+        context,
+        MemoryRecord {
+            id: request.consolidated_id,
+            kind: first.kind,
+            scope: first.scope.clone(),
+            content,
+            source_refs,
+            supersedes: ids,
+            valid_from: None,
+            valid_until: None,
+            created_at: request.created_at,
+        },
+    )
 }
 
 fn get_freshness(
@@ -368,6 +485,35 @@ fn routed_revalidation(
 ) -> MemoryResult<MemoryRevalidationOutcome> {
     let input = serde_json::to_vec(&(record, state))
         .map_err(|error| MemoryError::Provider(error.to_string()))?;
+    let output = routed_model_bytes(context, profile_id, callable_id, input, "memory revalidation")?;
+    serde_json::from_slice(&output).map_err(|error| {
+        MemoryError::Provider(format!("invalid memory revalidation outcome: {error}"))
+    })
+}
+
+fn routed_memory_text(
+    context: &MemoryContext<'_, '_>,
+    profile_id: &RoutingProfileId,
+    callable_id: CallableId,
+    input: Vec<u8>,
+    label: &str,
+) -> MemoryResult<String> {
+    let output = routed_model_bytes(context, profile_id, callable_id, input, label)?;
+    let text = String::from_utf8(output)
+        .map_err(|error| MemoryError::Provider(error.to_string()))?
+        .trim()
+        .to_owned();
+    validate_text(label, &text)?;
+    Ok(text)
+}
+
+fn routed_model_bytes(
+    context: &MemoryContext<'_, '_>,
+    profile_id: &RoutingProfileId,
+    callable_id: CallableId,
+    input: Vec<u8>,
+    label: &str,
+) -> MemoryResult<Vec<u8>> {
     let response: ModelResponse = context
         .sdk
         .models
@@ -378,13 +524,11 @@ fn routed_revalidation(
         })
         .map_err(|error| MemoryError::Provider(error.to_string()))?;
     let ModelResponse::Inference { response, .. } = response else {
-        return Err(MemoryError::Provider(
-            "memory revalidation returned a non-inference response".into(),
-        ));
+        return Err(MemoryError::Provider(format!(
+            "{label} returned a non-inference response"
+        )));
     };
-    serde_json::from_slice(response.output.as_ref()).map_err(|error| {
-        MemoryError::Provider(format!("invalid memory revalidation outcome: {error}"))
-    })
+    Ok(response.output.as_ref().to_vec())
 }
 
 fn recall_memory(
@@ -679,25 +823,13 @@ fn compact_context(
 
     let input = serde_json::to_vec(&request.items)
         .map_err(|error| MemoryError::Provider(error.to_string()))?;
-    let response: ModelResponse = context
-        .sdk
-        .models
-        .invoke_projected(&ModelCommand::Invoke {
-            profile_id: request.profile_id.clone(),
-            callable_id: Some(memory_summarize_callable()),
-            input: Bytes::new(input),
-        })
-        .map_err(|error| MemoryError::Provider(error.to_string()))?;
-    let ModelResponse::Inference { response, .. } = response else {
-        return Err(MemoryError::Provider(
-            "memory summarization returned a non-inference response".into(),
-        ));
-    };
-    let summary = String::from_utf8(response.output.as_ref().to_vec())
-        .map_err(|error| MemoryError::Provider(error.to_string()))?
-        .trim()
-        .to_owned();
-    validate_text("memory summary", &summary)?;
+    let summary = routed_memory_text(
+        context,
+        &request.profile_id,
+        memory_summarize_callable(),
+        input,
+        "memory summary",
+    )?;
 
     let summary_node_id = format!("summary-{digest:016x}");
     record_node(
