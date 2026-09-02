@@ -9,9 +9,9 @@ pub use api::*;
 pub use authoring::*;
 pub use contracts::*;
 pub use phenix_core::{
-    Bytes, CallableRef, ComponentId, Contract, ContractId, ContractValue, Exact, Key, ObjectRef,
-    PhenixContract, PhenixSchema, PhenixValue, PluginId, Project, ReferenceId, Type, TypeKind,
-    ValueError,
+    BackendFeature, Bytes, CallableRef, ComponentId, Contract, ContractId, ContractValue,
+    DurableSchema, Exact, Key, ObjectRef, PhenixContract, PhenixSchema, PhenixValue, PluginId,
+    Project, ReferenceId, Type, TypeKind, ValueError,
 };
 pub use phenix_provider_sdk::{
     ApiTokenSource, Auth, AuthDescriptor, AuthKind, EnvironmentVariable, ProviderAuthCommand,
