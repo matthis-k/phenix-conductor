@@ -54,13 +54,12 @@ pub(crate) fn json_schema(schema: &PhenixSchema) -> Result<Value, BackendError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_domain::Key;
     use std::collections::BTreeMap;
 
     #[test]
     fn table_schema_becomes_external_json_schema() {
         let schema = PhenixSchema::Table(BTreeMap::from([(
-            Key::parse("value").unwrap(),
+            "value".parse().unwrap(),
             PhenixSchema::String,
         )]));
 
