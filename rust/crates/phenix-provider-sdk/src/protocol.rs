@@ -358,7 +358,10 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(decoded.output.as_ref(), b"world");
-        assert_eq!(decoded.provider_metadata["id"], "response-1");
+        assert_eq!(
+            decoded.provider_metadata["id"],
+            phenix_core::PhenixValue::String("response-1".into())
+        );
     }
 
     #[test]
