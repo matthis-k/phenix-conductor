@@ -2,8 +2,8 @@ use crate::interface_attr::validate_interface_id;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    parse::Parser, punctuated::Punctuated, Attribute, Ident, ImplItem, ItemImpl, ItemStruct,
-    LitStr, Meta, Token, Type,
+    parse::Parser, punctuated::Punctuated, Attribute, Fields, Ident, ImplItem, ItemImpl,
+    ItemStruct, LitStr, Meta, Token, Type,
 };
 
 pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<TokenStream> {
@@ -34,13 +34,73 @@ fn expand_struct(item: ItemStruct) -> syn::Result<TokenStream> {
             "Phenix components must have one concrete static definition",
         ));
     }
+    let mut item = item;
+    let imports = component_imports(&mut item)?;
     let name = &item.ident;
+    let descriptors = imports.iter().map(|import| {
+        let field = &import.field;
+        let ty = &import.ty;
+        quote! {
+            ::phenix_sdk::StaticComponentImport::of::<#ty>(stringify!(#field))
+        }
+    });
 
     Ok(quote! {
         #item
 
         impl ::phenix_sdk::StaticComponentDefinition for #name {}
+
+        impl ::phenix_sdk::StaticComponentImports for #name {
+            fn imports() -> Vec<::phenix_sdk::StaticComponentImport> {
+                vec![#(#descriptors),*]
+            }
+        }
     })
+}
+
+struct ImportContribution {
+    field: Ident,
+    ty: Type,
+}
+
+fn component_imports(item: &mut ItemStruct) -> syn::Result<Vec<ImportContribution>> {
+    let Fields::Named(fields) = &mut item.fields else {
+        return Ok(Vec::new());
+    };
+    let mut imports = Vec::new();
+
+    for field in &mut fields.named {
+        let mut retained = Vec::new();
+        for attribute in std::mem::take(&mut field.attrs) {
+            if !attribute.path().is_ident("phenix") {
+                retained.push(attribute);
+                continue;
+            }
+            let Meta::List(meta) = &attribute.meta else {
+                return Err(syn::Error::new_spanned(
+                    attribute,
+                    "component field attributes must use #[phenix(...)] syntax",
+                ));
+            };
+            let arguments =
+                Punctuated::<Meta, Token![,]>::parse_terminated.parse2(meta.tokens.clone())?;
+            if arguments.len() != 1
+                || !matches!(arguments.first(), Some(Meta::Path(path)) if path.is_ident("import"))
+            {
+                return Err(syn::Error::new_spanned(
+                    attribute,
+                    "unsupported component field contribution",
+                ));
+            }
+            imports.push(ImportContribution {
+                field: field.ident.clone().expect("named field has an identifier"),
+                ty: field.ty.clone(),
+            });
+        }
+        field.attrs = retained;
+    }
+
+    Ok(imports)
 }
 
 fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
