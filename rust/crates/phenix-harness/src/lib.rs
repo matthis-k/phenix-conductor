@@ -472,11 +472,11 @@ mod tests {
         ServiceContribution, ServiceId, ServiceRole, SessionId,
     };
     use phenix_plugin_catalog::{
-        artifact_manifest, artifact_service, context_manifest, context_service, planning_manifest,
-        planning_service, repository_work_queue_service, session_manifest, session_service,
-        ArtifactCommand, ArtifactProvenance, ArtifactResponse, ContextCommand, ContextDescriptor,
-        ContextResourceKind, ContextResponse, ContextScope, PlanningCommand, PlanningResponse,
-        RepositoryWorkSnapshot, SessionCommand, SessionResponse,
+        artifact_manifest, artifact_service, context_manifest, context_service, memory_service,
+        planning_manifest, planning_service, repository_work_queue_service, session_manifest,
+        session_service, ArtifactCommand, ArtifactProvenance, ArtifactResponse, ContextCommand,
+        ContextDescriptor, ContextResourceKind, ContextResponse, ContextScope, PlanningCommand,
+        PlanningResponse, RepositoryWorkSnapshot, SessionCommand, SessionResponse,
     };
 
     fn plugin(value: &str) -> PluginId {
@@ -604,6 +604,31 @@ mod tests {
         ) -> Result<Vec<u8>, String> {
             Ok(self.0.clone())
         }
+    }
+
+    #[test]
+    fn alternate_memory_provider_replaces_default_without_core_changes() {
+        let mut builder = HarnessBuilder::with_default_suite().unwrap();
+        builder
+            .add_embedded(
+                service_manifest(
+                    "fixture.alternate-memory",
+                    memory_service(),
+                    200,
+                    Authority::default(),
+                ),
+                || Box::new(Echo(b"alternate-memory")),
+            )
+            .unwrap();
+        let mut harness = builder.build().unwrap();
+        harness.activate().unwrap();
+
+        assert_eq!(
+            harness
+                .invoke(&memory_service(), b"ignored", &Authority::default(), None)
+                .unwrap(),
+            b"alternate-memory"
+        );
     }
 
     #[test]
