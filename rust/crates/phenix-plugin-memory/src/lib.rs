@@ -26,6 +26,8 @@ pub use phenix_sdk::{
 #[cfg(test)]
 mod freshness_integration;
 #[cfg(test)]
+mod provenance_integration;
+#[cfg(test)]
 mod reranking_integration;
 #[cfg(test)]
 mod revalidation_failure_integration;
