@@ -321,7 +321,7 @@ mod tests {
         ]));
 
         assert_eq!(
-            serde_json::to_value(value).unwrap(),
+            serde_json::Value::from_value(&value).unwrap(),
             serde_json::json!({"enabled": true, "count": 2})
         );
     }
