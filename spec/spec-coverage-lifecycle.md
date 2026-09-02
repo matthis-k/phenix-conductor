@@ -76,10 +76,12 @@ The check must:
 1. require valid status metadata on normative specs;
 2. require every declared coverage path to exist;
 3. reject `enforced` when no coverage pointer exists;
-4. reject duplicate complete ownership of one rule when a spec explicitly delegates that rule to another normative file;
+4. reject a file that declares both temporary migration state and lasting status;
 5. report specification paths and broken coverage pointers directly.
 
 The check must not infer semantic completeness from file names or grep implementation text. Runtime semantics remain proven by Rust or Product tests.
+
+Semantic ownership and migration completion remain explicit repository decisions. Source validates their lifecycle representation; it does not infer those decisions from prose.
 
 Temporary migration specs may carry explicit temporary metadata while active. They must be deleted at migration completion rather than promoted into permanent historical records.
 
