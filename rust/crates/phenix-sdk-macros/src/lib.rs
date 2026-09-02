@@ -7,11 +7,19 @@ use syn::{
 };
 
 mod component_attr;
+mod interface_attr;
 mod plugin_attr;
 
 #[proc_macro_attribute]
 pub fn component(args: TokenStream, input: TokenStream) -> TokenStream {
     component_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_attribute]
+pub fn interface(args: TokenStream, input: TokenStream) -> TokenStream {
+    interface_attr::expand(args.into(), input.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
