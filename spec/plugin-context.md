@@ -19,7 +19,7 @@ The first-party context service should own:
 - injection/projection into model or agent execution;
 - historical resolution;
 - execution-pinned context provenance;
-- context-budget projection and compaction contracts where applicable;
+- context-budget projection and selection of compaction/expansion providers;
 - durable context records.
 
 Repository discovery and richer processing may be separate plugins behind contracts such as:
@@ -33,6 +33,10 @@ context.compact@1
 ```
 
 These contracts are userspace contracts even when mediated by the kernel provider resolver.
+
+In the normal Phenix Plugin Suite, `context.compact@1` and `context.expand@1` resolve to `phenix.memory`. The context service remains responsible for the execution budget and final projection. The memory service owns hierarchical compact nodes, checkpoints, retrieval, and reversible expansion as defined by `spec/plugin-memory.md`.
+
+An alternate context implementation may bind compatible providers differently. Neither Core nor the generic context contract gives `phenix.memory` a privileged path.
 
 ## Repository context
 
@@ -48,6 +52,8 @@ The context service, not the kernel, defines resource identity, immutable revisi
 
 The kernel enforces the authority used by the service and persists its declared durable state without understanding context meaning.
 
+A compact memory summary is derived context. It does not replace the canonical context resource or exact historical source it references.
+
 ## Mandatory context
 
 If the Phenix Harness requires a context class for a configured execution policy, that requirement belongs to Harness/suite policy, not to the kernel.
@@ -60,17 +66,23 @@ Context roles declare whether providers are additive, singular, or ordered proce
 
 An alternate context implementation may replace the first-party service through the same declared service contract. The kernel must not contain a privileged path for the Phenix implementation.
 
+The normal suite may require memory-backed compaction as product policy while the basic fixture suite remains memory-free.
+
 ## Durable state
 
 Context resources, revisions, injection history, discovery indexes, rankings, and domain caches use plugin-owned schemas.
 
 Derived caches may be rebuildable. Canonical context history is defined by the owning context service.
 
+Memory-owned hierarchy nodes and compaction checkpoints remain in the memory namespace even when referenced by a context projection.
+
 ## Permissions
 
 Context services receive only the authority required for their sources and operations. Local discovery may require filesystem read. Remote discovery may require network or secrets.
 
 Context or skill activation must not implicitly increase unrelated tool/write/network/repository/IPC/secret authority.
+
+Calling a compaction or expansion provider cannot grant that provider more source authority than the requesting execution/context projection has.
 
 ## Invariants
 
@@ -82,6 +94,8 @@ Context or skill activation must not implicitly increase unrelated tool/write/ne
 - Context durable data uses plugin namespaces.
 - Provider selection cannot expand authority.
 - Harness policy, not the kernel, decides required context behavior.
+- Normal Phenix compaction is memory-backed without moving memory semantics into context or Core.
+- Compact summaries never replace canonical context sources.
 
 ## Required regressions
 
@@ -92,4 +106,6 @@ Context or skill activation must not implicitly increase unrelated tool/write/ne
 - alternate context provider can replace the first-party implementation without kernel changes;
 - QML/mock provider contributes context through ordinary service contracts;
 - context/skill activation does not increase execution authority;
+- normal suite binds context compaction/expansion to memory while basic fixtures remain memory-free;
+- memory-backed compact summaries still resolve to exact context/source provenance;
 - kernel persistence and runtime modules contain no context-specific schema or semantic registry.

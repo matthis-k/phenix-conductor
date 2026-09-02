@@ -48,11 +48,13 @@ mod tests {
     use phenix_core::{
         context_service, model_inference_service, skill_service, tool_service, CallableId,
         ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
-        LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse, PhenixValue,
-        Project, SessionId, SkillCommand, SkillDefinition, SkillId, SkillResponse, ToolCommand,
-        ToolDefinition, ToolResponse,
+        InterfaceId, LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse,
+        PhenixValue, Project, SessionId, SkillCommand, SkillDefinition, SkillId, SkillResponse,
+        ToolCommand, ToolDefinition, ToolResponse,
     };
-    use phenix_plugin_catalog::{session_service, SessionCommand, SessionResponse};
+    use phenix_plugin_catalog::{
+        context_component_id, memory_component_id, session_service, SessionCommand, SessionResponse,
+    };
     use std::{
         collections::{BTreeMap, BTreeSet},
         fs,
@@ -123,6 +125,37 @@ mod tests {
                 vec![plugin]
             );
         }
+    }
+
+    #[test]
+    fn default_suite_includes_memory_while_basic_suite_remains_memory_free() {
+        let default = HarnessBuilder::with_default_suite()
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(default
+            .kernel()
+            .config()
+            .manifests()
+            .any(|manifest| manifest.id.as_str() == "phenix.memory"));
+        for interface in ["context.compact@1", "context.expand@1"] {
+            let handle = default
+                .component_graph()
+                .import_handle(
+                    &context_component_id(),
+                    &InterfaceId::parse(interface).unwrap(),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(handle.exporter(), &memory_component_id());
+        }
+
+        let basic = HarnessBuilder::with_basic_suite().unwrap().build().unwrap();
+        assert!(!basic
+            .kernel()
+            .config()
+            .manifests()
+            .any(|manifest| manifest.id.as_str() == "phenix.memory"));
     }
 
     #[test]
