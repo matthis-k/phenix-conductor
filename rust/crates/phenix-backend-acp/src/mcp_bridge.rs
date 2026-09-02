@@ -302,9 +302,7 @@ fn raw_value(value: Value) -> Result<Arc<RawValue>, agent_client_protocol::Error
 mod tests {
     use super::*;
     use phenix_backend::{BackendCapabilities, ToolProvision};
-    use phenix_domain::{
-        CallableId, CallableKind, CallablePolicy, CapabilitySet, Key, PhenixSchema,
-    };
+    use phenix_domain::{CallableId, CallableKind, CallablePolicy, CapabilitySet, PhenixSchema};
 
     fn callable() -> CallableDescriptor {
         CallableDescriptor {
@@ -312,7 +310,7 @@ mod tests {
             kind: CallableKind::Agent,
             description: "Echo a value".to_owned(),
             input_schema: PhenixSchema::Table(BTreeMap::from([(
-                Key::parse("value").unwrap(),
+                "value".parse().unwrap(),
                 PhenixSchema::String,
             )])),
             output_schema: PhenixSchema::String,
