@@ -228,6 +228,7 @@ fn cleanup_staged(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{runtime_provider_service, RuntimeId, ServiceContribution};
 
     fn plugin(value: &str) -> PluginId {
         PluginId::parse(value).unwrap()
