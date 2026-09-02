@@ -1,6 +1,11 @@
 # Typed structural value boundaries
 
 status: partial
+coverage:
+  - scripts/check-structural-boundaries.sh
+  - rust/crates/phenix-sdk/tests/incompatible_schema.rs
+  - rust/crates/phenix-sdk/tests/plugin_authoring.rs
+  - rust/crates/phenix-harness/src/basic_suite.rs
 
 ## Status
 
