@@ -660,7 +660,7 @@ mod tests {
     use super::*;
     use phenix_backend::{ToolProvision, ToolResult};
     use phenix_domain::{
-        CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet,
+        CallableDescriptor, CallableId, CallableKind, CallablePolicy, CapabilitySet, PhenixSchema,
     };
     use serde_json::json;
 
@@ -783,8 +783,8 @@ mod tests {
                 id: CallableId::parse("read").unwrap(),
                 kind: CallableKind::Tool,
                 description: "test read".to_owned(),
-                input_schema: json!({"type": "object"}),
-                output_schema: json!({"type": "object"}),
+                input_schema: PhenixSchema::Map(Box::new(PhenixSchema::Any)),
+                output_schema: PhenixSchema::Map(Box::new(PhenixSchema::Any)),
                 capabilities: CapabilitySet::default(),
                 policy: CallablePolicy::default(),
             }],
