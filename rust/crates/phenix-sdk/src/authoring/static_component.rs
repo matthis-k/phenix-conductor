@@ -27,7 +27,7 @@ pub struct StaticComponentDescriptor {
 impl StaticComponentDescriptor {
     #[must_use]
     pub fn derived<T: StaticComponentDefinition>(owner: &PluginId, field: &'static str) -> Self {
-        let id = ComponentId::parse(&format!("{}.{field}", owner.as_str()))
+        let id = ComponentId::parse(format!("{}.{field}", owner.as_str()))
             .expect("plugin id and Rust field name derive a valid component id");
         Self::new::<T>(id, field)
     }
