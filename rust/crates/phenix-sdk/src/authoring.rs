@@ -8,7 +8,8 @@ pub use plugin::{
     StaticPluginDescriptor, StaticPluginGraph, StaticPluginGraphError, TypedSdkClient,
 };
 pub use static_component::{
-    StaticComponentDefinition, StaticComponentDescriptor, StaticPluginComponents,
+    InterfaceMarker, StaticComponentBehavior, StaticComponentDefinition, StaticComponentDescriptor,
+    StaticComponentExport, StaticPluginComponents,
 };
 
 impl std::fmt::Debug for StaticPluginGraph {
