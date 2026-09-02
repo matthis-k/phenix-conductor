@@ -29,7 +29,10 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
     }
 
     let contributions = field_contributions(&mut item)?;
-    let dependency_types = contributions.dependencies.iter().map(|dependency| &dependency.ty);
+    let dependency_types = contributions
+        .dependencies
+        .iter()
+        .map(|dependency| &dependency.ty);
     let dependency_modules = contributions.dependencies.iter().map(|dependency| {
         let field = &dependency.field;
         let ty = &dependency.ty;
