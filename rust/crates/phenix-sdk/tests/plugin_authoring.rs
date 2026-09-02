@@ -661,7 +661,10 @@ mod attribute_composition {
     pub struct Models;
 
     #[phenix_sdk::plugin("fixture.attr.stateless")]
-    pub mod stateless {}
+    pub mod stateless {
+        #[phenix(export("fixture.attr.stateless.run@1"), public)]
+        pub fn run() {}
+    }
 }
 
 #[test]
@@ -701,11 +704,18 @@ fn interface_attribute_owns_canonical_runtime_identity() {
 }
 
 #[test]
-fn stateless_plugin_module_generates_composable_definition() {
+fn stateless_plugin_module_generates_default_component_and_export() {
     let plugin_id = attribute_composition::stateless::Plugin::plugin_id();
     let graph = phenix_sdk::StaticPluginGraph::compose::<attribute_composition::stateless::Plugin>()
         .unwrap();
+    let components = <attribute_composition::stateless::Plugin as phenix_sdk::StaticPluginComponents>::components();
+    let exports = <attribute_composition::stateless::Component as phenix_sdk::StaticComponentBehavior>::exports();
 
     assert_eq!(plugin_id.as_str(), "fixture.attr.stateless");
     assert_eq!(graph.ids().next().unwrap().as_str(), "fixture.attr.stateless");
+    assert_eq!(components.len(), 1);
+    assert_eq!(components[0].id.as_str(), "fixture.attr.stateless");
+    assert_eq!(exports.len(), 1);
+    assert_eq!(exports[0].interface.as_str(), "fixture.attr.stateless.run@1");
+    assert!(exports[0].public);
 }
