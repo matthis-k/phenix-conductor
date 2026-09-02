@@ -1,3 +1,4 @@
+use crate::component_attr::{export_descriptor, parse_export, ExportContribution};
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
@@ -15,7 +16,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
 
     Err(syn::Error::new_spanned(
         input,
-        "#[phenix_sdk::plugin] applies to a plugin struct, stateless inline module, or lifecycle impl",
+        "#[phenix_sdk::plugin] applies to a plugin struct or stateless inline module",
     ))
 }
 
@@ -88,13 +89,23 @@ fn expand_module(args: TokenStream, mut item: ItemMod) -> syn::Result<TokenStrea
     if items.iter().any(defines_generated_plugin_type) {
         return Err(syn::Error::new_spanned(
             &item.ident,
-            "stateless plugin modules reserve the name Plugin for the generated zero-sized plugin type",
+            "stateless plugin modules reserve the names Plugin and Component for generated zero-sized types",
         ));
     }
+
+    let exports = module_exports(items)?;
+    let descriptors = exports
+        .iter()
+        .map(|(function, export)| export_descriptor(function, export))
+        .collect::<Vec<_>>();
 
     let identity: Item = parse_quote! {
         #[doc(hidden)]
         pub struct Plugin;
+    };
+    let component: Item = parse_quote! {
+        #[doc(hidden)]
+        pub struct Component;
     };
     let identity_impl: Item = parse_quote! {
         impl Plugin {
@@ -122,16 +133,66 @@ fn expand_module(args: TokenStream, mut item: ItemMod) -> syn::Result<TokenStrea
             }
         }
     };
+    let component_definition: Item = parse_quote! {
+        impl ::phenix_sdk::StaticComponentDefinition for Component {}
+    };
+    let component_behavior: Item = syn::parse2(quote! {
+        impl ::phenix_sdk::StaticComponentBehavior for Component {
+            fn exports() -> Vec<::phenix_sdk::StaticComponentExport> {
+                vec![#(#descriptors),*]
+            }
+        }
+    })?;
     let components_impl: Item = parse_quote! {
         impl ::phenix_sdk::StaticPluginComponents for Plugin {
             fn components() -> Vec<::phenix_sdk::StaticComponentDescriptor> {
-                Vec::new()
+                vec![::phenix_sdk::StaticComponentDescriptor::explicit::<Component>(
+                    #id,
+                    "default",
+                )]
             }
         }
     };
-    items.extend([identity, identity_impl, definition_impl, components_impl]);
+    items.extend([
+        identity,
+        component,
+        identity_impl,
+        definition_impl,
+        component_definition,
+        component_behavior,
+        components_impl,
+    ]);
 
     Ok(quote!(#item))
+}
+
+fn module_exports(items: &mut [Item]) -> syn::Result<Vec<(Ident, ExportContribution)>> {
+    let mut exports = Vec::new();
+    for item in items {
+        let Item::Fn(function) = item else {
+            continue;
+        };
+        let mut retained = Vec::new();
+        let mut export = None;
+        for attribute in std::mem::take(&mut function.attrs) {
+            if !attribute.path().is_ident("phenix") {
+                retained.push(attribute);
+                continue;
+            }
+            if export.is_some() {
+                return Err(syn::Error::new_spanned(
+                    attribute,
+                    "a stateless plugin function may declare only one Phenix contribution",
+                ));
+            }
+            export = Some(parse_export(&attribute)?);
+        }
+        function.attrs = retained;
+        if let Some(export) = export {
+            exports.push((function.sig.ident.clone(), export));
+        }
+    }
+    Ok(exports)
 }
 
 fn plugin_identity_impl(name: &Ident, id: &LitStr) -> TokenStream {
@@ -153,13 +214,14 @@ fn plugin_identity_impl(name: &Ident, id: &LitStr) -> TokenStream {
 }
 
 fn defines_generated_plugin_type(item: &Item) -> bool {
-    match item {
-        Item::Struct(item) => item.ident == "Plugin",
-        Item::Enum(item) => item.ident == "Plugin",
-        Item::Union(item) => item.ident == "Plugin",
-        Item::Type(item) => item.ident == "Plugin",
-        _ => false,
-    }
+    let ident = match item {
+        Item::Struct(item) => Some(&item.ident),
+        Item::Enum(item) => Some(&item.ident),
+        Item::Union(item) => Some(&item.ident),
+        Item::Type(item) => Some(&item.ident),
+        _ => None,
+    };
+    ident.is_some_and(|ident| ident == "Plugin" || ident == "Component")
 }
 
 fn resolve_plugin_id(args: TokenStream, item: &Ident) -> syn::Result<LitStr> {
@@ -393,28 +455,33 @@ mod tests {
     }
 
     #[test]
-    fn stateless_module_lowers_to_zero_sized_plugin_definition() {
+    fn stateless_module_lowers_default_component_and_exports() {
         let output = expand(
             quote!("phenix.stateless"),
             quote! {
-                pub mod plugin {}
+                pub mod plugin {
+                    #[phenix(export("phenix.stateless.run@1"), public)]
+                    pub fn run() {}
+                }
             },
         )
         .unwrap()
         .to_string();
 
         assert!(output.contains("pub struct Plugin"));
-        assert!(output.contains("StaticPluginDefinition for Plugin"));
-        assert!(output.contains("phenix.stateless"));
+        assert!(output.contains("pub struct Component"));
+        assert!(output.contains("StaticComponentBehavior for Component"));
+        assert!(output.contains("phenix.stateless.run@1"));
+        assert!(!output.contains("phenix (export"));
     }
 
     #[test]
-    fn stateless_module_reserves_generated_plugin_type_name() {
+    fn stateless_module_reserves_generated_type_names() {
         let error = expand(
             quote!("phenix.stateless"),
             quote! {
                 mod plugin {
-                    struct Plugin;
+                    struct Component;
                 }
             },
         )
