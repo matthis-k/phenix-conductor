@@ -1,127 +1,188 @@
 # Layered service invocation
 
-status: implemented
+status: specification-only
+
+Status: normative architecture and implementation contract.
 
 ## Purpose
 
-Allow plugins to extend or override a service without replacing its complete implementation.
+Allow plugins to extend or override an operation without replacing its complete implementation.
 
-A configured service call resolves an ordered set of layers plus one terminal provider. A layer may delegate to the next participant, return a result itself, or deny the call. Plugins that do not declare the requested contract and version do not participate.
+A resolved call contains zero or more ordered layers and one terminal provider. A layer may handle, delegate once, transform, deny, or fail. The kernel resolves the complete chain before activation and pins it to one graph generation.
 
-This extends `spec/plugin-resolution.md` and `spec/plugin-contributions.md`. Provider fallback keeps its existing safety rules.
+This document extends `spec/plugin-authoring-macro.md`, `spec/plugin-resolution.md`, and `spec/plugin-contributions.md`.
 
-## Core and plugin boundary
+## Ownership boundary
 
-`phenix-core` owns fundamental primitives and simple mechanisms. Plugins own non-trivial behavior, policy, discovery, management, composition, and product semantics.
-
-A concept may be agent-specific and still belong in core when it is a primitive that most plausible plugins would otherwise need to reimplement or depend on another plugin to use. Core should expose the smallest useful representation and mechanism for that primitive, not the richer behavior built on top of it.
-
-Examples of core primitives and mechanisms include:
+`phenix-core` owns generic runtime mechanisms:
 
 ```text
-plugin identity, lifecycle, registration, and dependency mechanics
-service contracts, terminal resolution, layering, and continuations
-authority attenuation and trust-boundary enforcement
-events, tasks, cancellation, persistence namespaces, transactions, and provenance
-minimal model request/stream/tool-call primitives
-minimal tool identity/schema/registration/invocation primitives
-minimal skill identity/content/registration/injection primitives
-minimal session identity/lifecycle/input/output primitives
-minimal context attachment/injection primitives
+plugin and component identity
+interface identity and structural compatibility
+graph resolution and generations
+terminal provider selection
+service layering and one-shot continuations
+authority attenuation
+event transport
+controller and task scheduling
+cancellation
+persistence namespaces and transactions
+lifecycle and provenance
+PhenixValue and PhenixSchema
 ```
 
-Examples of plugin-owned behavior include:
+Neutral passive contract owners such as `phenix-sdk` own shared semantic vocabulary that plugins and clients need to name independently of one implementation:
 
 ```text
-model providers, authentication, routing, budgets, fallback policy, and model catalogs
-tool suites, shell/filesystem/MCP tools, discovery, and tool-set policy
-skill discovery, catalogs, search, ranking, activation, precedence, and version management
-session trees, branching policy, summaries, history search, and rich metadata
-context discovery, ranking, compaction, dependency expansion, and repository context
-orchestration, workers, planning, objectives, decisions, artifacts, hooks, jobs, and diagnostics
+session contracts
+model contracts
+tool contracts
+skill contracts
+context contracts
+workspace contracts
+execution contracts
+other shared product contracts
 ```
 
-The decision rule is:
+Runtime plugins own implementations and non-trivial product behavior:
 
-> Put a mechanism in core when most plausible plugins would otherwise need the same small primitive or mechanism. Keep non-trivial behavior and policy in plugins.
+```text
+model providers and routing
+tool suites and discovery
+skill catalogs and activation policy
+session trees and branching
+context discovery and compaction
+memory and indexing
+orchestration and workers
+planning and objectives
+artifacts
+hooks and policy
+diagnostics
+```
 
-Do not move behavior into core only because several first-party plugins use it. A shared first-party library or service may still be the correct owner when the behavior is non-trivial or domain-specific.
+A shared product contract does not become a Core mechanism merely because many plugins use it. Core remains domain-neutral. The neutral contract owner gives independent providers and consumers one semantic identity without coupling them to a default implementation.
 
-For hooks specifically, core owns only the generic mechanisms needed to implement interception: events, ordered service layers, continuations, cancellation, authority, and provenance. Configurable hook definitions, conditions, actions, pre/post domain semantics, persistence, and user-facing hook management belong to `phenix-plugin-hooks`. The hooks plugin receives no privileged registration or execution path.
+The rule is:
+
+> Core owns composition and execution mechanisms. Neutral contracts own shared semantic vocabulary. Plugins own implementations and product behavior.
+
+## Hooks and events
+
+Hooks are authoring concepts, not a privileged runtime.
+
+A hook that can affect an operation uses layering. A hook that only observes a completed fact uses events. See `spec/plugin-events.md`.
+
+Configurable hook definitions, conditions, persistence, and user-facing management may live in `phenix-plugin-hooks`. That plugin receives no private registration or dispatch path.
 
 ## Terms
 
-**Terminal provider.** The selected implementation at the bottom of a service chain. Provider resolution selects one terminal provider before dispatch.
+**Terminal provider.** The implementation at the bottom of the resolved chain.
 
-**Layer.** A plugin contribution that runs before the terminal provider. Higher configured layer priority runs earlier. Equal priority uses stable plugin identity.
+**Layer.** An interposition contribution that runs before the terminal provider.
 
-**Continuation.** A kernel-issued, one-shot handle for invoking the next participant in the already resolved chain.
+**Continuation.** A kernel-issued, invocation-scoped, one-shot capability that advances to the next participant in the already resolved chain.
 
-**Skip.** A contribution is absent from the chain because it is disabled, unavailable, unauthorized, out of scope, or incompatible with the requested contract/version. Skipped code is never invoked.
+**Declared ordering constraint.** Intrinsic ordering metadata supplied by a layer, such as a stable before/after relationship where semantics require it.
+
+**Effective layer order.** The final order produced by the resolver from compatible layers, declared constraints, and composition policy.
 
 ## Contribution roles
 
-A service contribution declares one role:
+A service contribution has one executable role:
 
 ```text
 terminal
 layer
 ```
 
-The kernel keeps provider selection and layer ordering separate.
+Provider selection and layer ordering are separate decisions.
 
-A plugin may contribute only the service contracts and versions it understands. A plugin that supports `phenix.sessions@2` but not `phenix.sessions@3` is skipped for an `@3` invocation. The `@3` chain continues through compatible layers to its selected terminal provider.
+A plugin contributes only interfaces and versions it understands. Incompatible contributions are excluded before activation.
 
-A plugin must not contribute the same service and version as both a layer and a terminal provider.
+A plugin cannot contribute the same interface and version as both a terminal and a layer in one component contribution.
 
-Resource-only plugins cannot contribute either executable role.
+Resource-only plugins have no executable terminal or layer role.
+
+## Layer ordering
+
+Plugins do not assign themselves effective global priority.
+
+A layer may declare only ordering information intrinsic to its semantics. Composition policy controls effective enablement, required status, binding, and priority. The resolver combines these inputs deterministically.
+
+Conceptually:
+
+```text
+layer declaration
+  identity
+  compatible interface/version
+  optional intrinsic before/after constraints
+
+composition policy
+  enabled/disabled
+  required/optional
+  effective priority/order
+  authority grant
+  scope
+
+resolver
+  -> effective layer order pinned to graph generation
+```
+
+Source order, registration order, and activation order never define layer order.
+
+If declared constraints and composition policy cannot produce one valid deterministic order, graph construction fails.
 
 ## Chain resolution
 
-For one request the kernel:
+During graph construction the kernel:
 
-1. pins the kernel and Harness policy snapshot;
-2. resolves eligible layers for the exact compatible service contract/version;
-3. orders layers by configured policy, then stable plugin identity;
-4. resolves one eligible terminal provider through the existing provider resolver;
-5. records the complete planned chain;
-6. dispatches to the first layer, or directly to the terminal provider when no layers exist.
+1. finds compatible layer contributions for the interface;
+2. checks authority and scope eligibility;
+3. applies composition enablement and required status;
+4. orders layers from declared constraints and effective composition policy;
+5. resolves one terminal provider through `spec/plugin-resolution.md`;
+6. records the complete chain in the candidate graph generation.
 
-A valid chain requires a terminal provider even when a layer may handle a request without delegating. This keeps service availability decidable before plugin code runs.
+A valid executable chain has one terminal provider even when an earlier layer may handle the request without delegation. This keeps availability decidable before plugin code runs.
 
-Explicit terminal-provider binding selects the terminal provider. It does not remove configured layers. Harness policy may disable or bind layers separately.
-
-Plugin registration or activation order never defines layer order.
+An explicit terminal binding chooses the terminal provider. It does not remove configured layers.
 
 ## Layer behavior
 
-A layer receives the normal service request plus a continuation bound to the remaining chain.
+A layer receives the typed request plus a continuation bound to the remaining chain.
 
-A layer has three semantic choices:
+A layer may:
 
 ```text
-handle    return a service result without invoking the continuation
-delegate  invoke the continuation once and return or transform its result
-deny      return an explicit denial without invoking the continuation
+handle    return a result without delegation
+delegate  invoke the continuation once, then return or transform its result
+deny      return an explicit denial without delegation
+fail      return an execution failure
 ```
 
-A layer that only wants pass-through behavior delegates and returns the result unchanged.
+The continuation is single-use. A second call fails before another participant runs.
 
-The continuation is single-use. A second call fails before another participant is invoked.
+The continuation is bound to:
 
-A continuation is valid only for its originating invocation, service contract/version, pinned policy, authority bound, and remaining chain position. It cannot be stored and reused by a later request.
+- originating invocation;
+- interface and version;
+- graph generation;
+- remaining chain position;
+- effective authority.
 
-A plugin cannot emulate continuation by recursively invoking the same service. Same-service causal re-entry remains denied. Only the kernel-issued continuation advances the current chain.
+It cannot be stored for later use.
+
+Recursive invocation of the same interface does not emulate continuation. Only the kernel-issued continuation advances the current chain.
 
 ## Failure semantics
 
-Failure and denial stop the chain.
+Denial and failure stop the chain.
 
-A plugin error never means "try the next provider." This preserves the existing rule against unsafe post-dispatch provider switching for mutating or ambiguity-sensitive operations.
+A layer or terminal error never means "try the next provider." Provider fallback follows the generation-pinned rules in `spec/plugin-resolution.md` and occurs only before provider execution when the resolved provider plan allows it.
 
-Unsupported contract/version behavior is represented by absence from the resolved chain, not by invoking a plugin and interpreting an error as pass-through.
+Unsupported interface/version behavior is represented by absence from the resolved chain, not by invoking a plugin and interpreting an error as pass-through.
 
-A contract may define typed domain failures. Those remain results or errors of that contract and do not alter chain resolution unless the contract explicitly defines safe replay semantics.
+An interface may define typed domain failures or explicit safe replay semantics. Those remain part of that interface rather than generic layer behavior.
 
 ## Authority
 
@@ -131,140 +192,120 @@ Each participant runs under the intersection of:
 caller authority
 configured plugin grant
 participant maximum authority
-service operation requirements
+interface operation requirements
 ```
 
-A layer may attenuate authority before delegating. It cannot increase authority for the continuation or any later participant.
+A layer may attenuate authority before delegation. It cannot increase authority for the continuation or later participants.
 
-The kernel binds the continuation to the resulting authority. Retrying, wrapping, handling, denial, or delegation cannot regain removed authority.
+Retry, wrapping, handling, denial, and delegation cannot restore removed authority.
 
 ## State and transactions
 
-Layering does not make plugin state shared.
+Layering does not share plugin state.
 
-Each plugin keeps its own durable namespaces and schemas. A layer may attach state to an opaque domain identity through its own schema or an explicit shared contract.
+Each plugin owns its own durable resources. Cross-plugin state access requires an explicit interface and authority.
 
-When one user-visible mutation requires state changes across layers and the terminal provider to commit atomically, the owning service contract must use the existing kernel transaction mechanism. Layer ordering alone does not provide rollback for arbitrary side effects.
+When one logical mutation needs atomic changes across multiple namespaces, the owning interface must use the kernel transaction mechanism. Layer order alone does not provide rollback for arbitrary side effects.
 
-A layer must perform irreversible external side effects only under semantics declared by the service contract. The kernel does not retry a partially executed chain by default.
+Irreversible external effects require interface-defined semantics. The kernel does not retry a partially executed chain by default.
 
 ## Provenance
 
-The kernel records both the planned chain and the executed path.
-
-At minimum:
+The kernel records both the resolved chain and the executed path:
 
 ```text
-service contract/version
-pinned policy identity
-caller/effective authority bound
-ordered eligible layers
+graph generation
+interface/version
+caller and effective authority
+ordered layers
 selected terminal provider
-participants actually entered
-for each entered layer: handled, delegated, denied, or failed
-terminal invocation status when reached
+participants entered
+per-layer outcome: handled, delegated, denied, failed
+terminal outcome when reached
 ```
 
-A layer that delegates remains part of provenance even when it leaves the result unchanged.
+A delegating layer remains part of provenance even when it leaves the result unchanged.
 
-## External plugins
+## External and bridged plugins
 
-External plugins receive the same semantics as embedded plugins.
+Embedded and bridged plugins use the same layering semantics.
 
-The local plugin protocol represents a continuation as an opaque invocation-scoped token. A host operation advances that token once. The host validates service identity, policy identity, authority, invocation identity, and chain position before dispatching the next participant.
+A runtime bridge represents continuation as an opaque invocation-scoped capability. The kernel validates invocation identity, interface, graph generation, chain position, and authority before advancing it.
 
-An external plugin crash or protocol failure stops the chain. It does not select another terminal provider.
+A guest crash or bridge failure stops the chain. It does not select another terminal provider after dispatch begins.
 
-## Session composition
+## Example: session tree
 
-Sessions have a minimal core primitive and richer userspace semantics.
+The shared session contract belongs to a neutral passive contract owner. A session implementation and a session-tree extension are ordinary plugins.
 
-Core may define stable session identity and the smallest lifecycle/input/output operations needed by most plugins. It must not absorb tree semantics, branching policy, summaries, search, rich metadata, or other non-trivial session behavior.
-
-Session-related plugins add behavior in two ways:
+A session-tree plugin may:
 
 ```text
-layer an existing session operation
-add a separate session-related contract
+layer session creation when lineage must be recorded
+provide a separate session-tree interface
+store lineage in its own durable resource keyed by SessionId
 ```
 
-Example:
+It does not redefine `SessionId`, change the base session contract, or mutate the terminal session provider's private storage.
 
-```text
-phenix-session-policy      layer phenix.sessions@1
-phenix-session-tree        layer phenix.sessions@1 where child creation needs lineage
-phenix-session-tree        provide phenix.session-tree@1
-phenix-sessions            terminal phenix.sessions@1 when a replaceable richer provider is configured
-```
-
-A client that only understands `phenix.sessions@1` keeps working. A client that understands tree behavior may also call `phenix.session-tree@1`.
-
-The tree plugin stores lineage in its own durable namespace keyed by the session identity defined by the session contract. It does not change the base session wire or Rust type.
-
-If the tree plugin does not support a newer session contract version, it is skipped for that version. The compatible terminal session provider still handles the request unless Harness policy requires the tree layer.
-
-Harness policy may mark a layer as required for a service/version. Startup or resolution fails when a required layer is unavailable or incompatible instead of silently degrading semantics.
+If the session-tree layer is optional and unavailable, the base session contract remains usable. If composition policy marks the layer required, graph construction fails when the layer cannot participate.
 
 ## Configuration
 
-Harness policy owns effective composition. It may configure:
+Composition policy owns effective composition:
 
 ```text
-terminal provider binding and priority
+terminal binding and priority
 layer enabled/disabled state
-layer priority/order
-required versus optional layer status
-layer-specific authority grants and scope selectors
+layer effective order or priority
+required/optional layer status
+layer authority grants
+scope selectors
 ```
 
-Plugins advertise roles and compatibility. They do not grant themselves effective priority, required status, or authority.
+Plugins advertise capability, compatibility, and intrinsic ordering constraints. They do not grant themselves effective priority, required status, or authority.
 
-The resolved chain is part of the pinned configuration identity.
+The resolved chain is part of graph identity.
 
 ## Invariants
 
-- Core owns fundamental primitives and simple mechanisms; plugins own non-trivial behavior and policy.
-- Core may contain agent-specific primitives when most plausible plugins need them.
-- Shared first-party use alone does not justify moving non-trivial behavior into core.
-- Provider replacement and service layering are distinct mechanisms.
-- Every valid chain has exactly one terminal provider.
-- Layers fall through only by explicit continuation.
-- Contract/version incompatibility skips before dispatch.
-- Failure never means fallback.
+- Core owns generic composition and execution mechanisms, not product-domain contracts.
+- Shared product contracts live in neutral passive owners.
+- Plugins own implementations and product behavior.
+- Provider replacement and layering are distinct mechanisms.
+- Every executable chain has exactly one terminal provider.
+- Layers advance only through a one-shot continuation.
+- Failure never means generic fallback.
 - Denial is explicit and stops the chain.
-- Continuations are one-shot and invocation-scoped.
-- Same-service recursive invocation cannot bypass the continuation.
+- Continuations are invocation-scoped and generation-pinned.
+- Same-interface recursion cannot bypass continuation semantics.
 - Layering cannot expand authority.
-- Layer order comes from pinned policy, not registration order.
-- Plugin-owned state stays namespaced.
-- Rich session extensions do not change the minimal session primitive.
-- Required layers fail closed when absent.
-- Configurable hook behavior is plugin-owned and uses only ordinary core mechanisms.
-- Planned and executed chain provenance is inspectable.
+- Effective layer order comes from the resolver and composition policy, not self-promotion or registration order.
+- Plugin-owned state stays isolated unless an explicit contract permits sharing.
+- Hooks use ordinary layers or events.
+- Planned and executed paths are inspectable.
 
 ## Required regressions
 
-- no-layer invocation behaves exactly like current single-provider invocation;
-- two layers delegate in deterministic configured order to one terminal provider;
-- a layer may handle without invoking lower participants;
+- no-layer invocation behaves like direct terminal invocation;
+- two layers delegate in deterministic resolved order;
+- a layer may handle without entering lower participants;
 - a layer may deny and prevent lower participants from running;
 - a layer failure prevents lower participants from running;
-- a layer may delegate and transform the returned result;
-- an incompatible layer version is skipped before invocation;
-- an optional missing layer falls through to the terminal provider;
-- a required missing or incompatible layer fails resolution;
+- a layer may delegate and transform the result;
+- an incompatible layer is excluded before activation;
+- an optional missing layer leaves the terminal usable;
+- a required missing layer fails graph construction;
 - explicit terminal binding preserves configured layers;
-- a continuation cannot be invoked twice;
-- a continuation cannot be reused after its originating invocation;
-- same-service recursive invocation is rejected while continuation succeeds;
+- conflicting layer ordering constraints fail graph construction;
+- a continuation cannot be invoked twice or reused later;
+- same-interface recursive invocation is rejected while continuation succeeds;
 - delegated authority can only stay equal or shrink;
-- higher-priority unauthorized layer is excluded before execution;
-- provider failure after dispatch does not trigger another terminal provider;
-- provenance records the planned chain and actual handle/delegate/deny/fail path;
-- embedded and external layers obey the same chain semantics;
-- core model/tool/skill/session/context primitives remain usable without first-party management plugins;
-- removing `phenix-plugin-hooks` removes configurable hook behavior without removing generic events or service layering;
-- a replacement hook plugin can use the same ordinary core mechanisms without privileged APIs;
-- session-tree behavior can layer session creation while ordinary session calls still reach the configured base session implementation;
-- disabling an optional session-tree layer leaves basic session behavior available;
-- making the session-tree layer required rejects a composition that cannot supply it.
+- a self-declared layer priority cannot override composition policy;
+- provider failure after dispatch does not select another terminal provider;
+- provenance records the resolved chain and actual path;
+- embedded and bridged layers obey the same semantics;
+- session, model, tool, skill, context, workspace, and execution contracts can be consumed without importing default provider crates;
+- removing `phenix-plugin-hooks` removes configurable hook behavior without removing generic events or layering;
+- a replacement hooks plugin can use the same ordinary Core mechanisms;
+- session-tree behavior can layer session creation without changing the base session contract.

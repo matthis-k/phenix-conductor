@@ -1,59 +1,70 @@
 # Persistence backend and durable schemas
 
-status: implemented
+status: specification-only
+
+Status: implementation contract.
 
 ## Purpose
 
-Give the kernel a provider-neutral persistence mechanism for kernel infrastructure state and arbitrary plugin-owned durable schemas.
+Give the kernel a provider-neutral persistence mechanism for kernel infrastructure state and plugin-owned durable resources.
 
-Persistence is infrastructure. Agent-product schemas are userspace.
+Persistence is infrastructure. Product schemas remain outside Core.
 
-Requires `spec/plugin-kernel-primitives.md` and `spec/plugin-durable-data.md`.
+This document extends `spec/plugin-authoring-macro.md` and `spec/plugin-durable-data.md`.
 
-## Kernel persistence mechanism
+## Ownership
 
 The kernel owns:
 
 - store identity;
 - durable namespace identity;
-- schema registration/versioning;
+- schema registration and versioning;
 - transaction boundaries and atomicity;
-- migration ordering/startup gating;
+- migration ordering and startup gating;
 - recovery validation;
-- corruption/failure semantics;
-- namespace permissions;
-- backend feature negotiation and selection.
+- corruption and failure semantics;
+- namespace authority;
+- backend feature negotiation;
+- persistence-provider selection and bootstrap.
 
-The kernel does not predefine Phenix session, artifact, context, worker, planning, model, or other product records.
+Plugins own:
 
-## Baseline local backend
+- product field meaning;
+- resource schemas;
+- resource migrations;
+- domain reconstruction and invariants;
+- higher-level search, indexing, replication, archival, or other product behavior unless a separate generic service owns it.
 
-The kernel may ship one simple local backend so infrastructure can boot and plugin schemas can be exercised without installing a separate persistence provider.
+The kernel does not define session, artifact, context, worker, planning, memory, model, or other product records.
 
-The backend may reuse SQLite. SQLite remains an implementation detail and is never exposed to plugins.
+## Baseline backend
 
-The baseline backend should stay narrow:
+Core may ship one narrow local backend so the kernel can boot and persistence conformance tests do not require another plugin.
 
-- local store;
+The baseline backend may use SQLite internally. SQLite is not part of the Plugin API and is never exposed to plugins.
+
+The baseline backend should provide only generic persistence needs such as:
+
+- local durable storage;
 - atomic transactions;
-- schema materialization/migrations;
+- schema materialization and migrations;
 - exact key lookup and bounded declared queries;
-- durable metadata/version checks;
+- durable metadata and version checks;
 - recovery of registered schemas.
 
-It should not absorb product FTS, semantic search, replication, archival, or feature-specific query logic.
+FTS, vector search, graph traversal, replication, archival, and product-specific query policy should remain separate services rather than expanding the persistence mechanism indefinitely.
 
 ## Registered schemas
 
-The active backend receives the complete validated schema set:
+The selected backend receives the complete validated schema set for one graph generation:
 
 ```text
 kernel infrastructure schemas
-+ plugin durable schemas
-= physical backend schema
++ plugin durable resource schemas
+= backend materialization plan
 ```
 
-A relational backend may materialize tables/indexes. Another backend may choose another representation.
+A relational backend may create tables and indexes. Another backend may use another representation.
 
 Callers never issue SQL or receive backend handles.
 
@@ -61,30 +72,69 @@ Callers never issue SQL or receive backend handles.
 
 Kernel-private schemas contain only state required for kernel mechanisms, for example:
 
-- plugin/runtime generation metadata;
-- kernel policy/configuration snapshots;
-- durable namespace/schema metadata;
-- transaction/migration/recovery metadata where required.
+- graph and runtime generation metadata;
+- kernel policy and configuration identity;
+- durable namespace and schema metadata;
+- transaction, migration, and recovery metadata where required.
 
-They do not contain miniature agent-harness models.
+They do not contain product-domain models.
 
-## Plugin schemas
+## Plugin resources
 
-Plugins register their product schemas through `spec/plugin-durable-data.md`.
+Static plugin authors declare durable resources through the authoring API. They do not manually register namespaces during startup when the declaration already contains the required schema and ownership metadata.
 
-A backend persists them without understanding what a session, artifact, context resource, QML cache, worker result, or GitHub integration means.
+The kernel performs mechanical schema registration and migration coordination from the resolved resource declarations.
 
-## Alternative persistence providers
+A backend persists plugin resources without understanding their product meaning.
 
-A persistence provider may replace the baseline backend when explicitly configured and compatible.
+## Persistence providers
 
-Selection occurs before opening/claiming the store. Priority must not silently migrate an existing store to a different backend.
+A persistence provider is an infrastructure provider with a special bootstrap position, not a privileged product plugin.
 
-Switching backend requires explicit migration/export-import unless the implementations share a declared storage format.
+Core always has the baseline backend available for bootstrap. An alternate persistence provider may replace it only when configuration explicitly selects that provider and the provider can be instantiated before the target store is opened.
+
+Persistence-provider selection therefore happens in a bootstrap phase before ordinary store-backed plugin activation.
+
+Conceptually:
+
+```text
+inspect configuration and plugin metadata
+  -> resolve bootstrap-capable persistence provider
+  -> validate backend features and store binding
+  -> open or claim store
+  -> register complete schema set
+  -> run required migrations
+  -> continue ordinary candidate preparation and activation
+```
+
+A runtime plugin that provides persistence may itself be hosted only by a runtime available before store opening. Initially this means `embedded`, or a runtime-provider chain that can bootstrap without the target persistence store.
+
+The resolver rejects a bootstrap cycle such as:
+
+```text
+persistence provider A needs plugin state from store S
+store S cannot open until persistence provider A starts
+```
+
+Persistence bootstrap authority is separate from ordinary plugin authority. A backend does not gain access to product semantics or unrelated host capabilities merely because it stores data.
+
+## Store ownership and provider changes
+
+Backend selection occurs before opening or claiming the store.
+
+Priority alone must not silently move an existing store to another backend.
+
+Changing persistence providers requires one of:
+
+- an explicit migration or export/import operation;
+- a declared compatible shared storage format;
+- a new store binding.
+
+A provider change that cannot satisfy these conditions fails candidate preparation and leaves the active generation unchanged.
 
 ## Backend feature negotiation
 
-Schemas declare required generic features such as:
+Resource schemas declare required generic features such as:
 
 ```text
 transactions
@@ -96,37 +146,56 @@ indexed_range
 
 A backend is eligible only when it implements the complete requirement set.
 
-FTS/vector/graph operations should remain separate services rather than continuously expanding the persistence mechanism.
+Backend feature negotiation occurs before the store is opened for the candidate generation.
 
 ## Transactions
 
-A transaction may contain mutations from several plugin namespaces and kernel infrastructure when necessary.
+A transaction may contain mutations from several plugin namespaces and kernel infrastructure where one declared operation requires atomicity.
 
-The kernel validates schema ownership and authority, then submits one complete mutation set to the backend. The backend commits everything or nothing.
+The kernel validates resource ownership and authority, then submits one complete mutation set. The backend commits everything or nothing.
+
+The persistence provider receives structural operations and schema metadata. It does not receive product-specific mutable objects.
 
 ## Recovery
 
-The backend reconstructs stored records according to registered schemas. The kernel validates kernel infrastructure state. Each plugin validates its own domain relationships after load.
+The backend reconstructs stored structural records according to registered schemas.
 
-The backend does not declare plugin semantics valid.
+The kernel validates kernel infrastructure state. Each plugin validates its own domain relationships after load.
+
+A persistence backend does not declare product semantics valid.
+
+## First-party and third-party equality
+
+An alternate persistence provider must be able to implement the same documented persistence-provider contract as the baseline backend.
+
+The baseline implementation may have a bootstrap implementation inside Core, but it must not expose private product capabilities that an equivalent external provider cannot represent through the persistence contract.
 
 ## Invariants
 
-- Kernel persistence is a mechanism, not the Phenix data model.
-- Product data belongs to plugin schemas.
-- Baseline backend makes kernel infrastructure and plugin conformance tests durable, not a miniature Harness.
-- Backend choice does not redefine plugin schemas.
-- Multi-plugin state can commit atomically.
-- No caller depends on SQLite APIs.
+- Persistence is a kernel mechanism, not the product data model.
+- Product data belongs to plugin-owned resources.
+- Static authors declare resources once; kernel startup performs mechanical registration and migration.
+- Callers never depend on SQLite or backend-specific APIs.
+- Alternate persistence providers use one explicit bootstrap contract.
+- Persistence-provider selection happens before the target store opens.
+- Bootstrap dependency cycles are rejected.
+- Backend selection does not redefine plugin schemas.
+- Backend changes never happen implicitly because of provider priority.
+- Multi-plugin state may commit atomically through the generic transaction mechanism.
+- Persistence-provider authority does not grant product-domain authority.
 
 ## Required regressions
 
-- kernel-only infrastructure state persists/restores through the baseline backend;
-- arbitrary mock plugin schema materializes and round-trips;
-- Phenix session/artifact/context schemas persist without backend-specific code;
-- multi-plugin transaction commits atomically;
-- plugin cannot access another namespace or kernel-private records;
-- alternate mock backend passes the same generic conformance fixture;
-- unsupported schema feature makes a backend ineligible before store open;
-- no product semantic module outside a plugin issues SQL;
-- higher-priority backend cannot silently take over an existing store.
+- kernel-only infrastructure state persists and restores through the baseline backend;
+- a static plugin durable resource materializes without manual startup registration;
+- arbitrary mock plugin data round-trips through the baseline backend;
+- session, artifact, context, and memory schemas persist without backend-specific product code;
+- a multi-plugin transaction commits atomically;
+- a plugin cannot access another private namespace or kernel-private records;
+- an alternate mock backend passes the same generic conformance fixture;
+- an alternate provider can be selected before store opening;
+- a persistence-provider bootstrap cycle is rejected before activation;
+- unsupported schema features make a backend ineligible before store open;
+- changing backend for an existing store requires explicit compatibility or migration;
+- a failed backend candidate leaves the active generation unchanged;
+- no product semantic module outside a plugin issues SQL or receives a backend handle.
