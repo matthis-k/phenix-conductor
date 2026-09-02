@@ -1,6 +1,6 @@
 # Spec coverage lifecycle
 
-status: partial
+status: implemented
 coverage:
   - scripts/check-spec-lifecycle.sh
   - scripts/check-spec-lifecycle-fixtures.sh
