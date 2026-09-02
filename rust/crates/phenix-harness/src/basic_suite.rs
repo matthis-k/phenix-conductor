@@ -87,6 +87,22 @@ mod tests {
         serde_json::from_slice(&output).unwrap()
     }
 
+    fn invoke_model(
+        harness: &mut PhenixHarness,
+        request: &ModelInferenceRequest,
+    ) -> ModelInferenceResponse {
+        let output = harness
+            .invoke(
+                &model_inference_service(),
+                &serde_json::to_vec(&PhenixValue::from(request)).unwrap(),
+                &default_suite_authority(),
+                None,
+            )
+            .unwrap();
+        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        ModelInferenceResponse::try_from(Project(&output)).unwrap()
+    }
+
     fn invoke_session(harness: &mut PhenixHarness, request: &SessionCommand) -> SessionResponse {
         let output = harness
             .invoke(
@@ -172,9 +188,8 @@ mod tests {
                     content: b"project context".to_vec().into(),
                 },
             );
-            let model: ModelInferenceResponse = invoke(
+            let model = invoke_model(
                 &mut harness,
-                &model_inference_service(),
                 &ModelInferenceRequest {
                     model: ModelId::parse("direct").unwrap(),
                     input: b"hello".to_vec().into(),
