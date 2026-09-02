@@ -1,5 +1,12 @@
 # Adaptive worker task DAG
 
+status: enforced
+
+coverage:
+  - rust/crates/phenix-sdk/src/contracts/execution.rs
+  - rust/crates/phenix-plugin-execution/src/implementation.rs
+  - rust/crates/phenix-plugin-execution/src/generation_regression.rs
+
 ## Purpose
 
 Phenix derives specialist worker executions from the active objective and enacted plan rather than maintaining a fixed team. This specification defines how the workflow agent and conductor turn bounded work into an explicit worker DAG.
