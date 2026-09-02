@@ -16,11 +16,12 @@ use phenix_sdk::{
     context_compaction_service, context_expansion_service, memory_resolve_callable, memory_service,
     memory_summarize_callable, memory_validate_callable, ContextCheckpoint,
     ContextCompactionCommand, ContextCompactionInterface, ContextCompactionRequest,
-    ContextCompactionResponse, MemoryCanonicalReference, MemoryCommand, MemoryExpansion,
-    MemoryFreshness, MemoryFreshnessRecord, MemoryInterface, MemoryKind, MemoryNode,
-    MemoryRankCandidate, MemoryRankInterface, MemoryRankRequest, MemoryRankResponse,
-    MemoryRecallQuery, MemoryRecord, MemoryResponse, MemoryRevalidationOutcome, MemoryScope,
-    MemorySourceReference, ModelCommand, ModelResponse, ModelRoutingInterface,
+    ContextCompactionResponse, MemoryCanonicalReference, MemoryCommand, MemoryEmbeddingInterface,
+    MemoryEmbeddingRequest, MemoryEmbeddingResponse, MemoryExpansion, MemoryFreshness,
+    MemoryFreshnessRecord, MemoryInterface, MemoryKind, MemoryNode, MemoryRankCandidate,
+    MemoryRankInterface, MemoryRankRequest, MemoryRankResponse, MemoryRecallQuery, MemoryRecord,
+    MemoryResponse, MemoryRevalidationOutcome, MemoryScope, MemorySourceReference, ModelCommand,
+    ModelResponse, ModelRoutingInterface,
 };
 
 const MEMORY_PLUGIN: &str = "phenix.memory";
@@ -35,6 +36,7 @@ const CHECKPOINT_INDEX: &str = "index/checkpoints";
 
 pub(crate) struct MemorySdk<'host, 'runtime> {
     models: SdkClient<'host, 'runtime, ModelRoutingInterface>,
+    embed: SdkClient<'host, 'runtime, MemoryEmbeddingInterface>,
     rank: SdkClient<'host, 'runtime, MemoryRankInterface>,
 }
 
@@ -92,6 +94,7 @@ fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> MemoryContext<
         host,
         MemorySdk {
             models: SdkClient::new(host, crate::memory_component_id()),
+            embed: SdkClient::new(host, crate::memory_component_id()),
             rank: SdkClient::new(host, crate::memory_component_id()),
         },
         (),
@@ -417,9 +420,11 @@ fn recall_memory(
         }
     }
     let requested_limit = query.limit;
+    let candidate_limit = requested_limit.saturating_mul(4).min(100);
     let mut candidate_query = query.clone();
-    candidate_query.limit = requested_limit.saturating_mul(4).min(100);
-    let mut candidates = retrieval::recall(current, &candidate_query)?;
+    candidate_query.limit = candidate_limit;
+    let mut candidates = retrieval::recall(current.clone(), &candidate_query)?;
+    append_semantic_candidates(context, &current, &query, candidate_limit, &mut candidates)?;
     if candidates.len() <= 1 {
         candidates.truncate(requested_limit as usize);
         return Ok(candidates);
@@ -467,6 +472,88 @@ fn recall_memory(
         }
     }
     Ok(ranked)
+}
+
+fn append_semantic_candidates(
+    context: &MemoryContext<'_, '_>,
+    current: &[MemoryRecord],
+    query: &MemoryRecallQuery,
+    limit: u32,
+    candidates: &mut Vec<MemoryRecord>,
+) -> MemoryResult<()> {
+    if query.query.trim().is_empty() || limit == 0 {
+        return Ok(());
+    }
+
+    let mut pool_query = query.clone();
+    pool_query.query.clear();
+    pool_query.limit = 100;
+    let pool = retrieval::recall(current.to_vec(), &pool_query)?;
+    if pool.is_empty() {
+        return Ok(());
+    }
+
+    let inputs = std::iter::once(query.query.clone())
+        .chain(pool.iter().map(|record| record.content.clone()))
+        .collect();
+    let Ok(response): Result<MemoryEmbeddingResponse, _> = context
+        .sdk
+        .embed
+        .invoke_projected(&MemoryEmbeddingRequest { inputs })
+    else {
+        return Ok(());
+    };
+    if response.embeddings.len() != pool.len() + 1 {
+        return Ok(());
+    }
+    let Some(query_embedding) = response.embeddings.first() else {
+        return Ok(());
+    };
+    if query_embedding.is_empty() {
+        return Ok(());
+    }
+
+    let mut scored = pool
+        .into_iter()
+        .zip(response.embeddings.into_iter().skip(1))
+        .filter_map(|(record, embedding)| {
+            cosine_similarity(query_embedding, &embedding).map(|score| (score, record))
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .total_cmp(left_score)
+            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut seen = candidates
+        .iter()
+        .map(|record| record.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for (_, record) in scored.into_iter().take(limit as usize) {
+        if seen.insert(record.id.clone()) {
+            candidates.push(record);
+        }
+    }
+    Ok(())
+}
+
+fn cosine_similarity(left: &[f64], right: &[f64]) -> Option<f64> {
+    if left.len() != right.len() || left.is_empty() {
+        return None;
+    }
+    let dot = left
+        .iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum::<f64>();
+    let left_norm = left.iter().map(|value| value * value).sum::<f64>().sqrt();
+    let right_norm = right.iter().map(|value| value * value).sum::<f64>().sqrt();
+    if left_norm == 0.0 || right_norm == 0.0 {
+        return None;
+    }
+    Some(dot / (left_norm * right_norm))
 }
 
 fn handle_compaction(
