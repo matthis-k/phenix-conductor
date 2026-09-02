@@ -9,6 +9,7 @@ use syn::{
 mod component_attr;
 mod interface_attr;
 mod plugin_attr;
+mod resource_attr;
 
 #[proc_macro_attribute]
 pub fn component(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -27,6 +28,13 @@ pub fn interface(args: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn plugin(args: TokenStream, input: TokenStream) -> TokenStream {
     plugin_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_attribute]
+pub fn resource(args: TokenStream, input: TokenStream) -> TokenStream {
+    resource_attr::expand(args.into(), input.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

@@ -1,6 +1,7 @@
 mod context;
 mod plugin;
 mod static_component;
+mod static_resource;
 
 pub use context::*;
 pub use plugin::{
@@ -11,6 +12,7 @@ pub use static_component::{
     InterfaceMarker, StaticComponentBehavior, StaticComponentDefinition, StaticComponentDescriptor,
     StaticComponentExport, StaticPluginComponents,
 };
+pub use static_resource::{StaticResourceDefinition, StaticResourceMigration};
 
 impl std::fmt::Debug for StaticPluginGraph {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
