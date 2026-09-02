@@ -8,39 +8,38 @@ pattern='std::any::Any|std::any::\{[^}]*Any|any::Any|dyn[[:space:]]+Any'
 json_field_pattern='pub[[:space:]]+[[:alnum:]_]+[[:space:]]*:[^,]*serde_json::Value'
 raw_invoke_pattern='\.invoke_value[[:space:]]*\('
 
-check_input() {
-  if rg -n --pcre2 "$pattern"; then
-    printf '%s\n' "public Phenix structural boundaries must not depend on std::any::Any" >&2
+check_fixture() {
+  local pattern="$1"
+  local input="$2"
+  local message="$3"
+  if [[ "$input" =~ $pattern ]]; then
+    printf '%s\n' "$input"
+    printf '%s\n' "$message" >&2
     return 1
   fi
 }
 
 if [[ -n "${PHENIX_STRUCTURAL_BOUNDARY_FIXTURE:-}" ]]; then
-  printf '%s\n' "$PHENIX_STRUCTURAL_BOUNDARY_FIXTURE" | check_input
+  check_fixture \
+    "$pattern" \
+    "$PHENIX_STRUCTURAL_BOUNDARY_FIXTURE" \
+    "public Phenix structural boundaries must not depend on std::any::Any"
   exit
 fi
-
-check_json_fields() {
-  if rg -n --pcre2 "$json_field_pattern"; then
-    printf '%s\n' "neutral Phenix contracts must use PhenixValue instead of serde_json::Value" >&2
-    return 1
-  fi
-}
 
 if [[ -n "${PHENIX_JSON_BOUNDARY_FIXTURE:-}" ]]; then
-  printf '%s\n' "$PHENIX_JSON_BOUNDARY_FIXTURE" | check_json_fields
+  check_fixture \
+    "$json_field_pattern" \
+    "$PHENIX_JSON_BOUNDARY_FIXTURE" \
+    "neutral Phenix contracts must use PhenixValue instead of serde_json::Value"
   exit
 fi
 
-check_raw_invoke() {
-  if rg -n --pcre2 "$raw_invoke_pattern"; then
-    printf '%s\n' "statically known plugin consumers must use typed invocation helpers" >&2
-    return 1
-  fi
-}
-
 if [[ -n "${PHENIX_RAW_INVOKE_FIXTURE:-}" ]]; then
-  printf '%s\n' "$PHENIX_RAW_INVOKE_FIXTURE" | check_raw_invoke
+  check_fixture \
+    "$raw_invoke_pattern" \
+    "$PHENIX_RAW_INVOKE_FIXTURE" \
+    "statically known plugin consumers must use typed invocation helpers"
   exit
 fi
 
@@ -56,10 +55,10 @@ for crate in rust/crates/phenix-plugin-*; do
   targets+=("$crate/src")
 done
 
-rg -n --pcre2 "$pattern" "${targets[@]}" && {
+if git grep -n -E "$pattern" -- "${targets[@]}"; then
   printf '%s\n' "public Phenix structural boundaries must not depend on std::any::Any" >&2
   exit 1
-}
+fi
 
 json_targets=(
   rust/crates/phenix-core/src/agent.rs
@@ -71,15 +70,15 @@ json_targets=(
   rust/crates/phenix-sdk/src/contracts/models.rs
 )
 
-rg -n --pcre2 "$json_field_pattern" "${json_targets[@]}" && {
+if git grep -n -E "$json_field_pattern" -- "${json_targets[@]}"; then
   printf '%s\n' "neutral Phenix contracts must use PhenixValue instead of serde_json::Value" >&2
   exit 1
-}
+fi
 
 for crate in rust/crates/phenix-plugin-*; do
   [[ -d "$crate/src" ]] || continue
   [[ "$crate" == "rust/crates/phenix-plugin-debug" ]] && continue
-  if rg -n --pcre2 "$raw_invoke_pattern" "$crate/src"; then
+  if git grep -n -E "$raw_invoke_pattern" -- "$crate/src"; then
     printf '%s\n' "statically known plugin consumers must use typed invocation helpers" >&2
     exit 1
   fi
