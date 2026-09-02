@@ -2,22 +2,14 @@
 
 use phenix_core::{
     model_inference_service, Authority, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, InterfaceId, ModelInferenceRequest, ModelInferenceResponse, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ServiceContribution, ServiceId,
-    ServiceRole, MODEL_INFERENCE_SERVICE,
+    ComponentManifest, ModelInferenceInterface, ModelInferenceRequest, ModelInferenceResponse,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ServiceContribution,
+    ServiceId, ServiceRole,
 };
 use std::collections::BTreeMap;
 
 pub const BASIC_MODEL_PLUGIN: &str = "phenix.basic-model";
 pub const BASIC_MODEL_COMPONENT: &str = "phenix.basic-model";
-
-pub struct BasicModelInterface;
-
-impl ComponentInterface for BasicModelInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(MODEL_INFERENCE_SERVICE).expect("static model interface id is valid")
-    }
-}
 
 #[must_use]
 pub fn basic_model_manifest() -> PluginManifest {
@@ -44,8 +36,8 @@ pub fn basic_model_component_manifest() -> ComponentManifest {
         owner: basic_model_manifest().id,
         imports: Vec::new(),
         exports: vec![ComponentExport {
-            interface: BasicModelInterface::interface_id(),
-            schema: BasicModelInterface::schema(),
+            interface: ModelInferenceInterface::interface_id(),
+            schema: ModelInferenceInterface::schema(),
             priority: 10,
             required_authority: Authority::default(),
         }],
@@ -81,6 +73,10 @@ impl PluginInstance for BasicModel {
             provider_metadata: BTreeMap::from([
                 ("provider".into(), serde_json::json!(BASIC_MODEL_PLUGIN)),
                 ("model".into(), serde_json::json!(request.model)),
+                (
+                    "implementation".into(),
+                    serde_json::json!("deterministic-echo"),
+                ),
             ]),
         })
         .map_err(|error| error.to_string())

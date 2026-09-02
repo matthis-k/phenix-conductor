@@ -69,9 +69,9 @@ pub use activation::{
 pub use agent::{
     context_service, model_inference_service, skill_service, tool_service, ContextCommand,
     ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextResponse, ContextScope,
-    ModelInferenceRequest, ModelInferenceResponse, SkillCommand, SkillDefinition, SkillResponse,
-    ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE, MODEL_INFERENCE_SERVICE,
-    SKILL_SERVICE, TOOL_SERVICE,
+    ModelInferenceInterface, ModelInferenceRequest, ModelInferenceResponse, SkillCommand,
+    SkillDefinition, SkillResponse, ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE,
+    MODEL_INFERENCE_SERVICE, SKILL_SERVICE, TOOL_SERVICE,
 };
 pub use authority::Authority;
 pub use component::{
@@ -173,7 +173,7 @@ impl ConfigurationFrontendMetadata {
         SourceIdentityRule::RequiredNonEmpty
     }
 
-    /// Stable configuration must carry an exact source revision.
+    /// Stable configuration must carry an exact source revision identity.
     pub const fn source_revision_rule(&self) -> SourceRevisionRule {
         SourceRevisionRule::RequiredExact
     }

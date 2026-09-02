@@ -1,13 +1,15 @@
+pub use phenix_core::{
+    model_inference_service, ModelInferenceInterface, ModelInferenceRequest,
+    ModelInferenceResponse, MODEL_INFERENCE_SERVICE,
+};
 use phenix_core::{
     Bytes, CallableId, ComponentInterface, InterfaceId, ModelId, PluginId, RoutingProfileId,
     ServiceId,
 };
-pub use phenix_core::{ModelInferenceRequest, ModelInferenceResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const MODEL_ROUTING_SERVICE: &str = "phenix.models.routing@1";
-pub const MODEL_INFERENCE_SERVICE: &str = "phenix.models.inference@1";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 pub struct ModelTarget {
@@ -94,9 +96,4 @@ impl ComponentInterface for ModelRoutingInterface {
 #[must_use]
 pub fn model_routing_service() -> ServiceId {
     ServiceId::parse(MODEL_ROUTING_SERVICE).expect("static model routing service id is valid")
-}
-
-#[must_use]
-pub fn model_inference_service() -> ServiceId {
-    ServiceId::parse(MODEL_INFERENCE_SERVICE).expect("static model inference service id is valid")
 }

@@ -185,10 +185,8 @@ impl PluginInstance for ModelProvider {
         if service != &model_inference_service() {
             return Err(format!("unsupported fixture model service: {service}"));
         }
-        let input: PhenixValue =
+        let request: ModelInferenceRequest =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let request =
-            ModelInferenceRequest::try_from(Project(&input)).map_err(|error| error.to_string())?;
         let response = ModelInferenceResponse {
             output: [b"answer:".as_slice(), request.input.as_slice()]
                 .concat()
@@ -198,7 +196,7 @@ impl PluginInstance for ModelProvider {
                 serde_json::Value::String(request.model.as_str().to_owned()),
             )]),
         };
-        serde_json::to_vec(&PhenixValue::from(&response)).map_err(|error| error.to_string())
+        serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
