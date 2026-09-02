@@ -1,10 +1,14 @@
 # Plugin architecture enforcement
 
+status: partial
+coverage:
+  - scripts/check-plugin-architecture.sh
+
 ## Status
 
 Normative companion to `plugin-hygiene.md`, `runtime-host-interfaces.md`, `application-integration-terminology.md`, and `plugin-runtime-bridges.md`.
 
-This specification defines how repository validation detects architecture drift while the plugin migration is in progress.
+This specification defines how repository validation detects architecture drift in the current plugin model.
 
 ## Goal
 
