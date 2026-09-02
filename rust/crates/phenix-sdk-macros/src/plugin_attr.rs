@@ -1,12 +1,25 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    parse::Parser, punctuated::Punctuated, Attribute, Expr, ExprLit, Fields, Ident, ItemStruct,
-    Lit, LitStr, Meta, Token, Type,
+    parse::Parser, parse_quote, punctuated::Punctuated, Attribute, Expr, ExprLit, Fields, Ident,
+    Item, ItemMod, ItemStruct, Lit, LitStr, Meta, Token, Type,
 };
 
 pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<TokenStream> {
-    let mut item = syn::parse2::<ItemStruct>(input)?;
+    if let Ok(item) = syn::parse2::<ItemStruct>(input.clone()) {
+        return expand_struct(args, item);
+    }
+    if let Ok(item) = syn::parse2::<ItemMod>(input.clone()) {
+        return expand_module(args, item);
+    }
+
+    Err(syn::Error::new_spanned(
+        input,
+        "#[phenix_sdk::plugin] applies to a plugin struct, stateless inline module, or lifecycle impl",
+    ))
+}
+
+fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenStream> {
     if !item.generics.params.is_empty() {
         return Err(syn::Error::new_spanned(
             &item.generics,
@@ -35,41 +48,13 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
             }
         }
     });
-    let id = explicit_plugin_id(args)?;
-
-    let id = match id {
-        Some(id) => id,
-        None => {
-            let package = std::env::var("CARGO_PKG_NAME").map_err(|_| {
-                syn::Error::new_spanned(&item.ident, "plugin package identity is unavailable")
-            })?;
-            let id = default_plugin_id(&package).ok_or_else(|| {
-                syn::Error::new_spanned(
-                    &item.ident,
-                    "plugin without an explicit id requires a phenix-plugin-* package name",
-                )
-            })?;
-            syn::LitStr::new(&id, item.ident.span())
-        }
-    };
+    let id = resolve_plugin_id(args, &item.ident)?;
     let name = &item.ident;
 
     Ok(quote! {
         #item
 
-        impl #name {
-            #[must_use]
-            pub fn plugin_id() -> ::phenix_sdk::PluginId {
-                ::phenix_sdk::PluginId::parse(#id)
-                    .expect("plugin attribute validated the static plugin id")
-            }
-
-            #[must_use]
-            pub fn component_id() -> ::phenix_sdk::ComponentId {
-                ::phenix_sdk::ComponentId::parse(#id)
-                    .expect("plugin attribute validated the default component id")
-            }
-        }
+        #plugin_identity_impl(name, &id)
 
         impl ::phenix_sdk::StaticPluginDefinition for #name {
             fn descriptor() -> ::phenix_sdk::StaticPluginDescriptor {
@@ -89,6 +74,107 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
             }
         }
     })
+}
+
+fn expand_module(args: TokenStream, mut item: ItemMod) -> syn::Result<TokenStream> {
+    let id = resolve_plugin_id(args, &item.ident)?;
+    let Some((_, items)) = item.content.as_mut() else {
+        return Err(syn::Error::new_spanned(
+            &item,
+            "stateless Phenix plugins must use an inline module so authoring contributions stay visible to the macro",
+        ));
+    };
+    if items.iter().any(defines_generated_plugin_type) {
+        return Err(syn::Error::new_spanned(
+            &item.ident,
+            "stateless plugin modules reserve the name Plugin for the generated zero-sized plugin type",
+        ));
+    }
+
+    let identity: Item = parse_quote! {
+        #[doc(hidden)]
+        pub struct Plugin;
+    };
+    let identity_impl: Item = parse_quote! {
+        impl Plugin {
+            #[must_use]
+            pub fn plugin_id() -> ::phenix_sdk::PluginId {
+                ::phenix_sdk::PluginId::parse(#id)
+                    .expect("plugin attribute validated the static plugin id")
+            }
+
+            #[must_use]
+            pub fn component_id() -> ::phenix_sdk::ComponentId {
+                ::phenix_sdk::ComponentId::parse(#id)
+                    .expect("plugin attribute validated the default component id")
+            }
+        }
+    };
+    let definition_impl: Item = parse_quote! {
+        impl ::phenix_sdk::StaticPluginDefinition for Plugin {
+            fn descriptor() -> ::phenix_sdk::StaticPluginDescriptor {
+                ::phenix_sdk::StaticPluginDescriptor {
+                    id: Self::plugin_id(),
+                    definition: concat!(module_path!(), "::Plugin"),
+                    dependencies: Vec::new(),
+                }
+            }
+        }
+    };
+    let components_impl: Item = parse_quote! {
+        impl ::phenix_sdk::StaticPluginComponents for Plugin {
+            fn components() -> Vec<::phenix_sdk::StaticComponentDescriptor> {
+                Vec::new()
+            }
+        }
+    };
+    items.extend([identity, identity_impl, definition_impl, components_impl]);
+
+    Ok(quote!(#item))
+}
+
+fn plugin_identity_impl(name: &Ident, id: &LitStr) -> TokenStream {
+    quote! {
+        impl #name {
+            #[must_use]
+            pub fn plugin_id() -> ::phenix_sdk::PluginId {
+                ::phenix_sdk::PluginId::parse(#id)
+                    .expect("plugin attribute validated the static plugin id")
+            }
+
+            #[must_use]
+            pub fn component_id() -> ::phenix_sdk::ComponentId {
+                ::phenix_sdk::ComponentId::parse(#id)
+                    .expect("plugin attribute validated the default component id")
+            }
+        }
+    }
+}
+
+fn defines_generated_plugin_type(item: &Item) -> bool {
+    match item {
+        Item::Struct(item) => item.ident == "Plugin",
+        Item::Enum(item) => item.ident == "Plugin",
+        Item::Union(item) => item.ident == "Plugin",
+        Item::Type(item) => item.ident == "Plugin",
+        _ => false,
+    }
+}
+
+fn resolve_plugin_id(args: TokenStream, item: &Ident) -> syn::Result<LitStr> {
+    if let Some(id) = explicit_plugin_id(args)? {
+        return Ok(id);
+    }
+
+    let package = std::env::var("CARGO_PKG_NAME")
+        .map_err(|_| syn::Error::new_spanned(item, "plugin package identity is unavailable"))?;
+    let id = default_plugin_id(&package).ok_or_else(|| {
+        syn::Error::new_spanned(
+            item,
+            "plugin without an explicit id requires a phenix-plugin-* package name",
+        )
+    })?;
+    Ok(LitStr::new(&id, item.span()))
 }
 
 fn explicit_plugin_id(args: TokenStream) -> syn::Result<Option<LitStr>> {
@@ -277,6 +363,7 @@ fn default_plugin_id(package: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quote::quote;
     use syn::parse_quote;
 
     #[test]
@@ -302,6 +389,37 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(id.value(), "phenix.example");
+    }
+
+    #[test]
+    fn stateless_module_lowers_to_zero_sized_plugin_definition() {
+        let output = expand(
+            quote!("phenix.stateless"),
+            quote! {
+                pub mod plugin {}
+            },
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(output.contains("pub struct Plugin"));
+        assert!(output.contains("StaticPluginDefinition for Plugin"));
+        assert!(output.contains("phenix.stateless"));
+    }
+
+    #[test]
+    fn stateless_module_reserves_generated_plugin_type_name() {
+        let error = expand(
+            quote!("phenix.stateless"),
+            quote! {
+                mod plugin {
+                    struct Plugin;
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("reserve"));
     }
 
     #[test]
