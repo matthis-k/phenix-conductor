@@ -1,15 +1,12 @@
 use crate::{debug_manifest, DEBUG_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-    ComponentManifest, HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixSchema, PluginId,
+    ComponentManifest, HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixSchema,
 };
 use phenix_sdk::{
     ContextInterface, FrontendInterface, JobInterface, ModelRoutingInterface, PlanningInterface,
     SessionInterface,
 };
-
-const DEBUG_COMPONENT: &str = "phenix.debug";
-const DEBUG_PLUGIN: &str = "phenix.debug";
 
 pub struct DebugInterface;
 
@@ -58,7 +55,7 @@ pub(crate) enum FrontendProbeCommand {
 
 #[must_use]
 pub fn debug_component_id() -> ComponentId {
-    ComponentId::parse(DEBUG_COMPONENT).expect("static debug component id is valid")
+    crate::Plugin::component_id()
 }
 
 fn optional_import<Request: HasPhenixSchema>(
@@ -78,7 +75,7 @@ pub fn debug_component_manifest(maximum_authority: Authority) -> ComponentManife
     let authority = debug_manifest(maximum_authority).maximum_authority;
     ComponentManifest {
         id: debug_component_id(),
-        owner: PluginId::parse(DEBUG_PLUGIN).expect("static debug plugin id is valid"),
+        owner: crate::Plugin::plugin_id(),
         imports: vec![
             optional_import::<SessionProbeCommand>(SessionInterface::interface_id(), &authority),
             optional_import::<ContextProbeCommand>(ContextInterface::interface_id(), &authority),

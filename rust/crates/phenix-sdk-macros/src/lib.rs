@@ -6,6 +6,23 @@ use syn::{
     parse_macro_input, parse_quote, Data, DeriveInput, Fields, Generics, Ident, LitStr, Type,
 };
 
+mod component_attr;
+mod plugin_attr;
+
+#[proc_macro_attribute]
+pub fn component(args: TokenStream, input: TokenStream) -> TokenStream {
+    component_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_attribute]
+pub fn plugin(args: TokenStream, input: TokenStream) -> TokenStream {
+    plugin_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 #[proc_macro_derive(PhenixValue, attributes(phenix))]
 pub fn derive_phenix_value(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

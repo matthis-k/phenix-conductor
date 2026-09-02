@@ -5,6 +5,7 @@ use phenix_core::{
     PluginId, Project, SdkClient, SubscriptionId, SubscriptionSpec, ValueError,
 };
 use std::{
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
     marker::PhantomData,
@@ -19,6 +20,126 @@ pub mod __phenix_plugin {
         InterfaceSchema, PhenixValue, PluginContext, PluginExecution, PluginHost, PluginId,
         PluginManifest, ServiceContribution, ServiceId, ServiceRole,
     };
+}
+
+#[derive(Clone)]
+pub struct StaticPluginDependency {
+    descriptor: fn() -> StaticPluginDescriptor,
+}
+
+impl StaticPluginDependency {
+    #[must_use]
+    pub fn of<T: StaticPluginDefinition>() -> Self {
+        Self {
+            descriptor: T::descriptor,
+        }
+    }
+
+    fn descriptor(&self) -> StaticPluginDescriptor {
+        (self.descriptor)()
+    }
+}
+
+#[derive(Clone)]
+pub struct StaticPluginDescriptor {
+    pub id: PluginId,
+    pub definition: &'static str,
+    pub dependencies: Vec<StaticPluginDependency>,
+}
+
+pub trait StaticPluginDefinition {
+    fn descriptor() -> StaticPluginDescriptor;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StaticPluginGraphError {
+    DuplicateId {
+        id: PluginId,
+        first: &'static str,
+        second: &'static str,
+    },
+    Cycle(PluginId),
+}
+
+impl Display for StaticPluginGraphError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateId { id, first, second } => {
+                write!(
+                    f,
+                    "plugin id {id} has incompatible definitions {first} and {second}"
+                )
+            }
+            Self::Cycle(id) => write!(f, "static plugin dependency cycle includes {id}"),
+        }
+    }
+}
+
+impl Error for StaticPluginGraphError {}
+
+#[derive(Clone)]
+pub struct StaticPluginGraph {
+    nodes: BTreeMap<PluginId, StaticPluginDescriptor>,
+}
+
+impl StaticPluginGraph {
+    pub fn compose<T: StaticPluginDefinition>() -> Result<Self, StaticPluginGraphError> {
+        let mut graph = Self {
+            nodes: BTreeMap::new(),
+        };
+        let mut visiting = BTreeSet::new();
+        graph.collect(T::descriptor(), &mut visiting)?;
+        Ok(graph)
+    }
+
+    fn collect(
+        &mut self,
+        descriptor: StaticPluginDescriptor,
+        visiting: &mut BTreeSet<PluginId>,
+    ) -> Result<(), StaticPluginGraphError> {
+        if visiting.contains(&descriptor.id) {
+            return Err(StaticPluginGraphError::Cycle(descriptor.id));
+        }
+        if let Some(existing) = self.nodes.get(&descriptor.id) {
+            return if existing.definition == descriptor.definition {
+                Ok(())
+            } else {
+                Err(StaticPluginGraphError::DuplicateId {
+                    id: descriptor.id,
+                    first: existing.definition,
+                    second: descriptor.definition,
+                })
+            };
+        }
+
+        let id = descriptor.id.clone();
+        visiting.insert(id.clone());
+        for dependency in &descriptor.dependencies {
+            self.collect(dependency.descriptor(), visiting)?;
+        }
+        visiting.remove(&id);
+        self.nodes.insert(id, descriptor);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn descriptor(&self, id: &PluginId) -> Option<&StaticPluginDescriptor> {
+        self.nodes.get(id)
+    }
+
+    pub fn ids(&self) -> impl Iterator<Item = &PluginId> {
+        self.nodes.keys()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
 }
 
 const STRUCTURAL_MISMATCH_EVENT: &str = "kernel.structural_value_mismatch";

@@ -1,8 +1,21 @@
 mod context;
 mod plugin;
+mod static_component;
 
 pub use context::*;
-pub use plugin::{EventEmitError, EventEmitter, EventName, TypedSdkClient};
+pub use plugin::{
+    EventEmitError, EventEmitter, EventName, StaticPluginDefinition, StaticPluginDependency,
+    StaticPluginDescriptor, StaticPluginGraph, StaticPluginGraphError, TypedSdkClient,
+};
+pub use static_component::{
+    StaticComponentDefinition, StaticComponentDescriptor, StaticPluginComponents,
+};
+
+impl std::fmt::Debug for StaticPluginGraph {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_list().entries(self.ids()).finish()
+    }
+}
 
 #[doc(hidden)]
 pub use plugin::{

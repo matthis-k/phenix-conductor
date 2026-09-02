@@ -619,3 +619,70 @@ fn event_and_hook_names_validate_runtime_identifiers() {
     assert_eq!(event.as_str(), "fixture.session.created");
     assert!(EventName::parse("").is_err());
 }
+mod attribute_composition {
+    #[phenix_sdk::plugin(id = "fixture.attr.leaf")]
+    pub struct Leaf;
+
+    #[phenix_sdk::plugin(id = "fixture.attr.left")]
+    pub struct Left {
+        #[phenix(dep)]
+        pub leaf: Leaf,
+    }
+
+    #[phenix_sdk::plugin(id = "fixture.attr.right")]
+    pub struct Right {
+        #[phenix(dep)]
+        pub leaf: Leaf,
+    }
+
+    #[phenix_sdk::plugin(id = "fixture.attr.root")]
+    pub struct Root {
+        #[phenix(dep)]
+        pub left: Left,
+        #[phenix(dep)]
+        pub right: Right,
+    }
+
+    #[phenix_sdk::plugin(id = "fixture.attr.conflict")]
+    pub struct ConflictA;
+
+    #[phenix_sdk::plugin(id = "fixture.attr.conflict")]
+    pub struct ConflictB;
+
+    #[phenix_sdk::plugin(id = "fixture.attr.conflict-root")]
+    pub struct ConflictRoot {
+        #[phenix(dep)]
+        pub first: ConflictA,
+        #[phenix(dep)]
+        pub second: ConflictB,
+    }
+}
+
+#[test]
+fn attribute_plugin_dependencies_expand_recursively_and_deduplicate_diamonds() {
+    let graph = phenix_sdk::StaticPluginGraph::compose::<attribute_composition::Root>().unwrap();
+    let ids = graph
+        .ids()
+        .map(phenix_core::PluginId::as_str)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        ids,
+        vec![
+            "fixture.attr.leaf",
+            "fixture.attr.left",
+            "fixture.attr.right",
+            "fixture.attr.root",
+        ]
+    );
+}
+
+#[test]
+fn attribute_plugin_dependencies_reject_incompatible_duplicate_ids() {
+    let error = phenix_sdk::StaticPluginGraph::compose::<attribute_composition::ConflictRoot>()
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        phenix_sdk::StaticPluginGraphError::DuplicateId { .. }
+    ));
+}

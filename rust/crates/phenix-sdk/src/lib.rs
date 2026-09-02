@@ -9,14 +9,15 @@ pub use api::*;
 pub use authoring::*;
 pub use contracts::*;
 pub use phenix_core::{
-    Bytes, CallableRef, Contract, ContractId, ContractValue, Exact, Key, ObjectRef, PhenixContract,
-    PhenixSchema, PhenixValue, PluginId, Project, ReferenceId, Type, TypeKind, ValueError,
+    Bytes, CallableRef, ComponentId, Contract, ContractId, ContractValue, Exact, Key, ObjectRef,
+    PhenixContract, PhenixSchema, PhenixValue, PluginId, Project, ReferenceId, Type, TypeKind,
+    ValueError,
 };
 pub use phenix_provider_sdk::{
     ApiTokenSource, Auth, AuthDescriptor, AuthKind, EnvironmentVariable, ProviderAuthCommand,
     ProviderAuthInterface, ProviderAuthResponse, ProviderError, RateLimits,
 };
-pub use phenix_sdk_macros::{PhenixContract, PhenixValue};
+pub use phenix_sdk_macros::{component, plugin, PhenixContract, PhenixValue};
 pub use providers::{Provider, ProviderSdkError, ProviderSdkExt, Providers};
 
 #[cfg(test)]
