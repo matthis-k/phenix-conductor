@@ -109,9 +109,10 @@ Add negative fixtures that prove Source rejects:
 - missing or invalid status;
 - an `enforced` spec without coverage;
 - a stale coverage path;
-- removal of the only declared coverage for an enforced spec.
+- removal of the only declared coverage for an enforced spec;
+- a temporary migration spec that also claims lasting status.
 
-Add repository cleanup coverage that prevents completed temporary migration specifications from being retained as canonical architecture when their completion condition says to delete them.
+Whole-tree Source validation ensures lasting files remain classified. Completion review removes temporary migration specifications once their migration converges; Source deliberately does not infer semantic completion from prose.
 
 The final exact head must pass Source, Rust, Product, and Maintenance validation.
 
