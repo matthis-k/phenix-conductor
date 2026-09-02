@@ -26,7 +26,7 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
     })
 }
 
-fn validate_interface_id(value: &str) -> Result<(), &'static str> {
+pub(crate) fn validate_interface_id(value: &str) -> Result<(), &'static str> {
     let (identity, version) = value
         .rsplit_once('@')
         .ok_or("interface id must include an @version suffix")?;
