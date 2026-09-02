@@ -12,7 +12,10 @@ pub use static_component::{
     InterfaceMarker, StaticComponentBehavior, StaticComponentDefinition, StaticComponentDescriptor,
     StaticComponentExport, StaticPluginComponents,
 };
-pub use static_resource::{StaticResourceDefinition, StaticResourceMigration};
+pub use static_resource::{
+    Durable, StaticPluginResources, StaticResourceDefinition, StaticResourceDescriptor,
+    StaticResourceField, StaticResourceMigration,
+};
 
 impl std::fmt::Debug for StaticPluginGraph {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
