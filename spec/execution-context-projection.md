@@ -1,5 +1,7 @@
 # Execution context projection
 
+status: implemented
+
 ## Purpose
 
 Make model context a first-class conductor-owned projection over durable workspace semantics. Backend conversation state is disposable and never canonical.
