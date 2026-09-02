@@ -735,7 +735,8 @@ fn append_semantic_candidates(
     if response.embeddings.len() != pool.len() + 1 {
         return Ok(());
     }
-    let Some(query_embedding) = response.embeddings.first() else {
+    let mut embeddings = response.embeddings.into_iter();
+    let Some(query_embedding) = embeddings.next() else {
         return Ok(());
     };
     if query_embedding.is_empty() {
@@ -744,9 +745,9 @@ fn append_semantic_candidates(
 
     let mut scored = pool
         .into_iter()
-        .zip(response.embeddings.into_iter().skip(1))
+        .zip(embeddings)
         .filter_map(|(record, embedding)| {
-            cosine_similarity(query_embedding, &embedding).map(|score| (score, record))
+            cosine_similarity(&query_embedding, &embedding).map(|score| (score, record))
         })
         .collect::<Vec<_>>();
     scored.sort_by(|(left_score, left), (right_score, right)| {
