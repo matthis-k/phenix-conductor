@@ -111,6 +111,33 @@ pub struct MemoryRecallQuery {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(deny_unknown_fields)]
+pub struct MemoryExtractionObservation {
+    pub content: String,
+    pub source_refs: Vec<MemorySourceReference>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryExtractionRequest {
+    pub profile_id: RoutingProfileId,
+    pub id: String,
+    pub kind: MemoryKind,
+    pub scope: MemoryScope,
+    pub observations: Vec<MemoryExtractionObservation>,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryConsolidationRequest {
+    pub profile_id: RoutingProfileId,
+    pub ids: Vec<String>,
+    pub consolidated_id: String,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
+#[serde(deny_unknown_fields)]
 pub struct MemoryExpansion {
     pub node: MemoryNode,
     pub children: Vec<MemoryNode>,
@@ -136,6 +163,12 @@ pub enum MemoryCommand {
     },
     Recall {
         query: MemoryRecallQuery,
+    },
+    Extract {
+        request: MemoryExtractionRequest,
+    },
+    Consolidate {
+        request: MemoryConsolidationRequest,
     },
     ObserveRevision {
         service: ServiceId,
@@ -339,7 +372,7 @@ pub struct ContextExpansionInterface;
 impl ComponentInterface for ContextExpansionInterface {
     fn interface_id() -> InterfaceId {
         InterfaceId::parse(CONTEXT_EXPANSION_SERVICE)
-            .expect("static context expansion interface id is valid")
+            .expect("static expansion interface id is valid")
     }
 
     fn schema() -> phenix_core::InterfaceSchema {
