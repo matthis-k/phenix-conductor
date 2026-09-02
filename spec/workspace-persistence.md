@@ -1,5 +1,7 @@
 # Workspace persistence
 
+status: implemented
+
 ## Ownership
 
 Each Phenix workspace owns one canonical SQLite database. Git worktrees are distinct workspaces and use distinct databases.

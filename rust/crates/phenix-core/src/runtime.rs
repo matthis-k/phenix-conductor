@@ -3,9 +3,9 @@ use crate::{
     ComponentInvocationError, DurableSchema, EventBus, EventDispatchReport, EventEnvelope,
     EventError, EventTypeId, GraphGenerationId, KernelConfig, KernelError, KernelEvent,
     KernelPolicyIdentity, LocalPersistence, NamespaceTransaction, PersistenceBackend,
-    PluginExecution, PluginId, PluginManifest, ResolvedComponentGraph, ResolvedServiceChain,
-    ResourceNamespace, SchemaMigration, ServiceId, ServiceRole, SkillResourceMetadata, TaskRuntime,
-    TaskScope, TransactionOp,
+    PluginArtifact, PluginExecution, PluginId, PluginManifest, ResolvedComponentGraph,
+    ResolvedServiceChain, ResourceNamespace, SchemaMigration, ServiceId, ServiceRole,
+    SkillResourceMetadata, TaskRuntime, TaskScope, TransactionOp,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -151,15 +151,6 @@ struct ContinuationState {
     trace: Arc<Mutex<InvocationTrace>>,
 }
 
-#[derive(Clone)]
-pub(crate) struct ContinuationBinding {
-    pub graph_generation: Option<GraphGenerationId>,
-    pub policy_identity: KernelPolicyIdentity,
-    pub service: ServiceId,
-    pub authority: Authority,
-    pub next_position: usize,
-}
-
 pub struct PluginHost<'a> {
     graph_generation: Option<&'a GraphGenerationId>,
     component_graph: &'a ResolvedComponentGraph,
@@ -183,8 +174,26 @@ pub enum LayerResult {
     Denied(String),
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimePluginCandidate<'a> {
+    pub manifest: &'a PluginManifest,
+    pub artifact: &'a PluginArtifact,
+    pub guest_authority: &'a Authority,
+}
+
+pub trait PluginRuntimeProvider: Send {
+    fn prepare(
+        &mut self,
+        candidate: RuntimePluginCandidate<'_>,
+    ) -> Result<Box<dyn PluginInstance>, String>;
+}
+
 pub trait PluginInstance: Send {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String>;
+
+    fn runtime_provider(&mut self) -> Option<&mut dyn PluginRuntimeProvider> {
+        None
+    }
 
     fn invoke(
         &mut self,
@@ -220,8 +229,6 @@ pub trait PluginInstance: Send {
 }
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
-type ExternalFactory =
-    Arc<dyn Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync>;
 
 #[derive(Clone, Copy)]
 struct InvocationContext<'a> {
@@ -243,7 +250,6 @@ pub struct Kernel {
     config: KernelConfig,
     states: BTreeMap<PluginId, PluginState>,
     embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,
-    external_factories: BTreeMap<PluginId, ExternalFactory>,
     instances: BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
     events: Arc<EventBus>,
     tasks: TaskRuntime,

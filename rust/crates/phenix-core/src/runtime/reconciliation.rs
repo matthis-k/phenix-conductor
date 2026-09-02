@@ -33,6 +33,13 @@ impl Kernel {
             .manifests()
             .map(|manifest| (manifest.id.clone(), manifest.clone()))
             .collect();
+        let restart_plugins = runtime_restart_closure(
+            &self.config,
+            &candidate_config,
+            &old_manifests,
+            &candidate_manifests,
+            restart_plugins,
+        );
         let mut next_states = BTreeMap::new();
         let mut next_instances = BTreeMap::new();
         let mut staged = Vec::new();
@@ -65,15 +72,46 @@ impl Kernel {
                                 KernelError::EmbeddedFactoryMissing(plugin.clone())
                             })?())
                         }
-                        PluginExecution::External { .. } => Some(
-                            self.external_factories.get(plugin).ok_or_else(|| {
-                                KernelError::ExternalHostUnavailable(plugin.clone())
-                            })?(manifest)
-                            .map_err(|message| KernelError::PluginStart {
-                                plugin: plugin.clone(),
-                                message,
-                            })?,
-                        ),
+                        PluginExecution::Runtime { runtime, artifact } => {
+                            let binding = candidate_config
+                                .runtime_binding(plugin)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    KernelError::RuntimeProviderUnavailable(runtime.clone())
+                                })?;
+                            let provider =
+                                next_instances.get(&binding.provider).cloned().ok_or_else(
+                                    || KernelError::PluginNotActive(binding.provider.clone()),
+                                )?;
+                            let prepared = {
+                                let mut provider =
+                                    provider.lock().expect("plugin instance mutex poisoned");
+                                let contract = provider.runtime_provider().ok_or_else(|| {
+                                    KernelError::RuntimeProviderContractUnavailable {
+                                        runtime: runtime.clone(),
+                                        provider: binding.provider.clone(),
+                                    }
+                                })?;
+                                contract
+                                    .prepare(RuntimePluginCandidate {
+                                        manifest,
+                                        artifact,
+                                        guest_authority: &manifest.maximum_authority,
+                                    })
+                                    .map_err(|message| KernelError::RuntimePrepare {
+                                        plugin: plugin.clone(),
+                                        runtime: runtime.clone(),
+                                        message,
+                                    })
+                            };
+                            match prepared {
+                                Ok(instance) => Some(instance),
+                                Err(error) => {
+                                    cleanup_staged(&staged, &next_instances);
+                                    return Err(error);
+                                }
+                            }
+                        }
                     };
                 if let Some(mut instance) = instance {
                     let host = PluginHost {
@@ -143,6 +181,36 @@ impl Kernel {
     }
 }
 
+fn runtime_restart_closure(
+    active: &KernelConfig,
+    candidate: &KernelConfig,
+    active_manifests: &BTreeMap<PluginId, PluginManifest>,
+    candidate_manifests: &BTreeMap<PluginId, PluginManifest>,
+    requested: &BTreeSet<PluginId>,
+) -> BTreeSet<PluginId> {
+    let mut restart = requested.clone();
+    for (plugin, manifest) in candidate_manifests {
+        if active_manifests.get(plugin) != Some(manifest) {
+            restart.insert(plugin.clone());
+        }
+    }
+
+    loop {
+        let before = restart.len();
+        for binding in candidate.runtime_bindings() {
+            if active.runtime_binding(&binding.guest) != Some(binding) {
+                restart.insert(binding.guest.clone());
+            }
+            if restart.contains(&binding.provider) {
+                restart.insert(binding.guest.clone());
+            }
+        }
+        if restart.len() == before {
+            return restart;
+        }
+    }
+}
+
 fn cleanup_staged(
     staged: &[PluginId],
     instances: &BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
@@ -154,5 +222,85 @@ fn cleanup_staged(
                 .expect("staged plugin instance mutex poisoned")
                 .stop();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{runtime_provider_service, RuntimeId, ServiceContribution};
+
+    fn plugin(value: &str) -> PluginId {
+        PluginId::parse(value).unwrap()
+    }
+
+    fn runtime(value: &str) -> RuntimeId {
+        RuntimeId::parse(value).unwrap()
+    }
+
+    fn manifest(
+        id: &str,
+        execution: PluginExecution,
+        services: Vec<ServiceContribution>,
+    ) -> PluginManifest {
+        PluginManifest {
+            id: plugin(id),
+            version: 1,
+            execution,
+            dependencies: Vec::new(),
+            services,
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    #[test]
+    fn changing_guest_does_not_restart_unchanged_runtime_provider() {
+        let runtime = runtime("vendor.runtime");
+        let provider = manifest(
+            "fixture.bridge",
+            PluginExecution::Embedded,
+            vec![ServiceContribution {
+                service: runtime_provider_service(&runtime),
+                role: ServiceRole::Terminal,
+                priority: 0,
+                required_authority: Authority::default(),
+            }],
+        );
+        let guest = |revision: &str| {
+            manifest(
+                "fixture.guest",
+                PluginExecution::Runtime {
+                    runtime: runtime.clone(),
+                    artifact: PluginArtifact {
+                        locator: "fixture.plugin".into(),
+                        revision: revision.into(),
+                        configuration: BTreeMap::new(),
+                    },
+                },
+                Vec::new(),
+            )
+        };
+        let active = KernelConfig::new([provider.clone(), guest("sha256:v1")]).unwrap();
+        let candidate = KernelConfig::new([provider.clone(), guest("sha256:v2")]).unwrap();
+        let active_manifests = active
+            .manifests()
+            .map(|manifest| (manifest.id.clone(), manifest.clone()))
+            .collect();
+        let candidate_manifests = candidate
+            .manifests()
+            .map(|manifest| (manifest.id.clone(), manifest.clone()))
+            .collect();
+
+        let restart = runtime_restart_closure(
+            &active,
+            &candidate,
+            &active_manifests,
+            &candidate_manifests,
+            &BTreeSet::new(),
+        );
+
+        assert!(restart.contains(&plugin("fixture.guest")));
+        assert!(!restart.contains(&provider.id));
     }
 }

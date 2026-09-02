@@ -1,5 +1,7 @@
 # Context catalog
 
+status: implemented
+
 ## Ownership
 
 The conductor owns durable context identity, discovery, loading, versioning, and injection history. Backends receive projected model context; backend conversation state is not canonical context.

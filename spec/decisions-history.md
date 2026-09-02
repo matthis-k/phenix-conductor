@@ -1,5 +1,7 @@
 # Durable decisions and searchable history
 
+status: implemented
+
 ## Contract
 
 Decisions are workspace-owned durable semantic state. Drafts may change until recorded; recorded decisions are immutable. Changes use explicit successor/reversion relations. A decision records the question, chosen option, rationale, alternatives or why none were considered, evidence references, creator, objective references, dependencies, and any successor/reversion relation.

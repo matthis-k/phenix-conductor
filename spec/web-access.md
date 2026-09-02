@@ -1,6 +1,6 @@
 # Web access
 
-Status: proposed
+status: specification-only
 
 ## Goal
 

@@ -1,5 +1,7 @@
 # Worker results and verification
 
+status: implemented
+
 ## Contract
 
 Every completed worker task returns a typed result envelope bound to the worker task and execution. The envelope records structured output, exact evidence references, artifact references where used, and completion/failure provenance. Result schema validation happens before the task may enter completed state.

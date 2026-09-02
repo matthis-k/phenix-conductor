@@ -1,6 +1,8 @@
 # ACP adapter
 
-Status: specification only. Implement after repository cleanup. Canonical application-integration terminology is defined by #442.
+status: specification-only
+
+Canonical application-integration terminology is defined by #442. Implementation follows repository cleanup.
 
 ## Goal
 

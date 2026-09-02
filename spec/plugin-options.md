@@ -1,6 +1,6 @@
 # Options plugin
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 

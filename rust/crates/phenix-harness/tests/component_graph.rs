@@ -1,20 +1,12 @@
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentGraphError, ComponentId, ComponentImport,
-    ComponentInterface, ComponentManifest, ConfigContribution, ConfigContributionSource,
-    ConfigMergeError, ConfigNamespace, ConfigSourceClass, ConfigurationFrontendId,
-    ConfigurationFrontendMetadata, ExternalPluginProcess, ExternalSandbox, ExternalTransportConfig,
-    FrontendConfigContribution, FrontendConfigError, InterfaceId, PhenixValue, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResolvedHarness, ResolvedHarnessError,
-    ServiceId,
+    ComponentManifest, ConfigContribution, ConfigContributionSource, ConfigMergeError,
+    ConfigNamespace, ConfigSourceClass, ConfigurationFrontendId, ConfigurationFrontendMetadata,
+    FrontendConfigContribution, FrontendConfigError, InterfaceId, PluginExecution, PluginId,
+    PluginManifest, ResolvedHarness, ResolvedHarnessError,
 };
 use phenix_harness::{HarnessBuildError, HarnessBuilder};
-use std::{
-    collections::BTreeSet,
-    io,
-    process::{Child, Command, Stdio},
-    sync::Arc,
-    time::Duration,
-};
+use std::collections::BTreeSet;
 
 fn plugin(value: &str) -> PluginId {
     PluginId::parse(value).unwrap()
@@ -258,139 +250,4 @@ fn harness_builder_rejects_configuration_conflicts_before_activation() {
             ConfigMergeError::ConflictingContributions { .. }
         ))
     ));
-}
-
-struct ExternalEchoInterface;
-
-impl ComponentInterface for ExternalEchoInterface {
-    fn interface_id() -> InterfaceId {
-        interface("fixture.external-echo@1")
-    }
-}
-
-struct NoopPlugin;
-
-impl PluginInstance for NoopPlugin {
-    fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn invoke(
-        &mut self,
-        service: &ServiceId,
-        _input: &[u8],
-        _host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        Err(format!("noop consumer does not provide {service}"))
-    }
-}
-
-struct ScriptSandbox {
-    script: String,
-}
-
-impl ExternalSandbox for ScriptSandbox {
-    fn spawn(&self, _executable: &str) -> io::Result<Child> {
-        Command::new("sh")
-            .arg("-c")
-            .arg(&self.script)
-            .env_clear()
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-    }
-}
-
-#[test]
-fn typed_component_handle_invokes_an_external_provider_through_the_same_binding() {
-    let consumer = owner("external-consumer-owner", Authority::default());
-    let provider = PluginManifest {
-        id: plugin("external-provider-owner"),
-        version: 1,
-        execution: PluginExecution::External {
-            executable: "fixture".into(),
-        },
-        dependencies: Vec::new(),
-        services: Vec::new(),
-        resource_namespaces: Vec::new(),
-        maximum_authority: Authority::default(),
-    };
-    let script = r#"
-        read handshake
-        generation=${handshake#*\"generation\":}
-        generation=${generation%%,*}
-        echo "{\"type\":\"handshake_ok\",\"protocol\":3,\"plugin\":\"external-provider-owner\",\"generation\":$generation,\"services\":[]}"
-        read request
-        echo "{\"type\":\"result\",\"request_id\":1,\"generation\":$generation,\"output\":[123,34,116,121,112,101,34,58,34,115,116,114,105,110,103,34,44,34,118,97,108,117,101,34,58,34,101,120,116,101,114,110,97,108,34,125]}"
-        read stop || true
-    "#
-    .to_owned();
-
-    let mut builder = HarnessBuilder::new();
-    builder
-        .add_embedded(consumer.clone(), || Box::new(NoopPlugin))
-        .unwrap();
-    builder
-        .add_external(provider.clone(), move |manifest| {
-            Ok(Box::new(ExternalPluginProcess::new(
-                manifest.clone(),
-                "fixture",
-                ExternalTransportConfig::new(
-                    Arc::new(ScriptSandbox {
-                        script: script.clone(),
-                    }),
-                    Duration::from_secs(2),
-                ),
-            )))
-        })
-        .unwrap();
-    builder.add_component(ComponentManifest {
-        id: component("external-consumer"),
-        owner: consumer.id,
-        imports: vec![ComponentImport {
-            interface: ExternalEchoInterface::interface_id(),
-            schema: ExternalEchoInterface::schema(),
-            required: true,
-            authority: Authority::default(),
-        }],
-        exports: Vec::new(),
-        maximum_authority: Authority::default(),
-    });
-    builder.add_component(ComponentManifest {
-        id: component("external-provider"),
-        owner: provider.id,
-        imports: Vec::new(),
-        exports: vec![ComponentExport {
-            interface: ExternalEchoInterface::interface_id(),
-            schema: ExternalEchoInterface::schema(),
-            priority: 100,
-            required_authority: Authority::default(),
-        }],
-        maximum_authority: Authority::default(),
-    });
-
-    let mut harness = builder.build().unwrap();
-    harness.activate().unwrap();
-    let handle = harness
-        .component_graph()
-        .import_handle(
-            &component("external-consumer"),
-            &ExternalEchoInterface::interface_id(),
-        )
-        .unwrap()
-        .unwrap()
-        .clone();
-    assert!(matches!(
-        handle.execution(),
-        PluginExecution::External { .. }
-    ));
-
-    let response = handle
-        .invoke_value::<ExternalEchoInterface>(
-            harness.kernel_mut(),
-            &PhenixValue::String("hello".to_owned()),
-        )
-        .unwrap();
-    assert_eq!(response, PhenixValue::String("external".to_owned()));
 }

@@ -14,7 +14,6 @@ mod configuration_regression;
 mod contract;
 mod contract_wire;
 mod events;
-mod external;
 mod frontend_metadata;
 mod identity;
 mod inspection;
@@ -40,12 +39,6 @@ extern crate self as phenix_core;
 #[cfg(test)]
 mod component_endpoint_regression;
 #[cfg(test)]
-mod component_host_parity_regression;
-#[cfg(test)]
-mod external_layer_conformance_regression;
-#[cfg(test)]
-mod external_typed_import_runtime_regression;
-#[cfg(test)]
 mod host_authority_regression;
 #[cfg(test)]
 mod invalid_candidate_activation_regression;
@@ -59,6 +52,10 @@ mod persistence_backend_conformance;
 #[cfg(test)]
 mod provider_rebind_generation_regression;
 #[cfg(test)]
+mod runtime_component_parity_regression;
+#[cfg(test)]
+mod runtime_provider_regression;
+#[cfg(test)]
 mod service_layer_dispatch_regression;
 #[cfg(test)]
 mod third_party_component_regression;
@@ -69,9 +66,9 @@ pub use activation::{
 pub use agent::{
     context_service, model_inference_service, skill_service, tool_service, ContextCommand,
     ContextDescriptor, ContextResourceKind, ContextResourceRevision, ContextResponse, ContextScope,
-    ModelInferenceRequest, ModelInferenceResponse, SkillCommand, SkillDefinition, SkillResponse,
-    ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE, MODEL_INFERENCE_SERVICE,
-    SKILL_SERVICE, TOOL_SERVICE,
+    ModelInferenceInterface, ModelInferenceRequest, ModelInferenceResponse, SkillCommand,
+    SkillDefinition, SkillResponse, ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE,
+    MODEL_INFERENCE_SERVICE, SKILL_SERVICE, TOOL_SERVICE,
 };
 pub use authority::Authority;
 pub use component::{
@@ -97,21 +94,18 @@ pub use events::{
     EventBus, EventDispatchReport, EventEnvelope, EventError, EventFailurePolicy, EventHandler,
     EventSubscription, KernelEvent, SubscriptionSpec,
 };
-pub use external::{
-    ExternalPluginProcess, ExternalSandbox, ExternalTransportConfig, ExternalTransportError,
-    EXTERNAL_PROTOCOL_VERSION,
-};
 pub use frontend_metadata::FrontendMetadataResolutionError;
 pub use identity::{
     CallableId, CapabilityId, ComponentId, ConfigurationFrontendId, ContextResourceId,
     ContextRevisionId, EventTypeId, InterfaceId, ModelId, PluginId, ResourceNamespace,
-    RoutingProfileId, SdkNamespace, SdkResourceId, ServiceId, SessionId, SkillId, SubscriptionId,
+    RoutingProfileId, RuntimeId, SdkNamespace, SdkResourceId, ServiceId, SessionId, SkillId,
+    SubscriptionId,
 };
 pub use inspection::ResolvedHarnessInspection;
 pub use live_reconciliation::LiveReconciliationError;
 pub use manifest::{
-    ComponentExport, ComponentImport, ComponentManifest, PluginExecution, PluginManifest,
-    ServiceContribution, ServiceRole,
+    ComponentExport, ComponentImport, ComponentManifest, PluginArtifact, PluginExecution,
+    PluginManifest, ServiceContribution, ServiceRole,
 };
 pub use metadata_input::{CompositionMetadataInput, MetadataResolutionError};
 pub use metadata_inspection::ResolvedCompositionMetadata;
@@ -134,13 +128,15 @@ pub use reconciliation::{
 };
 pub use reconciliation_inspection::CandidateResolutionInspection;
 pub use registry::{
-    KernelConfig, KernelError, KernelPolicyIdentity, LayerPolicy, ProviderBinding,
-    ResolvedServiceChain,
+    runtime_provider_runtime, runtime_provider_service, KernelConfig, KernelError,
+    KernelPolicyIdentity, LayerPolicy, ProviderBinding, ResolvedServiceChain, RuntimeBinding,
+    EMBEDDED_RUNTIME, RUNTIME_PROVIDER_SERVICE_PREFIX,
 };
 pub use resolver::{GraphGenerationId, ResolvedHarness, ResolvedHarnessError};
 pub use runtime::{
-    Kernel, LayerResult, PluginHost, PluginInstance, PluginState, ServiceInvocationProvenance,
-    ServiceParticipantOutcome, ServiceParticipantProvenance,
+    Kernel, LayerResult, PluginHost, PluginInstance, PluginRuntimeProvider, PluginState,
+    RuntimePluginCandidate, ServiceInvocationProvenance, ServiceParticipantOutcome,
+    ServiceParticipantProvenance,
 };
 pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
 pub use tasks::{CancellationToken, TaskHandle, TaskRuntime, TaskScope};
@@ -173,7 +169,7 @@ impl ConfigurationFrontendMetadata {
         SourceIdentityRule::RequiredNonEmpty
     }
 
-    /// Stable configuration must carry an exact source revision.
+    /// Stable configuration must carry an exact source revision identity.
     pub const fn source_revision_rule(&self) -> SourceRevisionRule {
         SourceRevisionRule::RequiredExact
     }
@@ -181,41 +177,5 @@ impl ConfigurationFrontendMetadata {
     /// Environment bindings cannot alter the stable semantic configuration.
     pub const fn stable_materialization_rule(&self) -> StableMaterializationRule {
         StableMaterializationRule::MaterializedOnly
-    }
-}
-
-#[cfg(test)]
-mod host_component_import_regression;
-
-#[cfg(test)]
-mod configuration_frontend_metadata_contract {
-    use super::*;
-    use std::collections::BTreeSet;
-
-    #[test]
-    fn frontend_metadata_exposes_source_and_stable_materialization_rules() {
-        let metadata = ConfigurationFrontendMetadata {
-            id: ConfigurationFrontendId::parse("fixture-config").unwrap(),
-            version: 1,
-            accepted_source_kinds: BTreeSet::from(["fixture".into()]),
-            exposed_namespaces: BTreeSet::from([
-                ConfigNamespace::parse("fixture.policy@1").unwrap()
-            ]),
-            watch: true,
-            required_authority: Authority::default(),
-        };
-
-        assert_eq!(
-            metadata.source_identity_rule(),
-            SourceIdentityRule::RequiredNonEmpty
-        );
-        assert_eq!(
-            metadata.source_revision_rule(),
-            SourceRevisionRule::RequiredExact
-        );
-        assert_eq!(
-            metadata.stable_materialization_rule(),
-            StableMaterializationRule::MaterializedOnly
-        );
     }
 }

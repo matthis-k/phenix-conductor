@@ -1,6 +1,8 @@
 # Socket transport library
 
-Status: specification only. Implement after repository cleanup.
+status: specification-only
+
+Implementation follows repository cleanup.
 
 ## Terminology
 

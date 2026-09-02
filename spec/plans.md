@@ -1,5 +1,7 @@
 # Plans
 
+status: implemented
+
 ## Ownership
 
 Plans are durable workspace-owned strategy records. The conductor owns plan identity, revisions, lifecycle, step state, objective links, and execution links.

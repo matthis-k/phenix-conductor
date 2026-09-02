@@ -1,5 +1,7 @@
 # Durable artifacts and reversible pruning
 
+status: specification-only
+
 ## Purpose
 
 Prevent execution context growth by preserving large/reusable outputs durably and replacing old context bytes with compact recoverable references.

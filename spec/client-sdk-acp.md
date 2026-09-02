@@ -1,6 +1,8 @@
 # ACP client SDK
 
-Status: specification only. Implement after the ACP adapter contract from #437 is stable enough to define the application-facing protocol.
+status: specification-only
+
+Implementation follows stabilization of the ACP adapter contract from #437.
 
 ## Goal
 

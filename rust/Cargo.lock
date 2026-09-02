@@ -1603,6 +1603,7 @@ dependencies = [
  "phenix-plugin-basic-model",
  "phenix-plugin-basic-skills",
  "phenix-plugin-basic-tools",
+ "phenix-sdk",
  "serde",
  "serde_json",
 ]

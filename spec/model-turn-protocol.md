@@ -1,6 +1,6 @@
 # Model turn protocol
 
-Status: proposed
+status: specification-only
 
 ## Goal
 

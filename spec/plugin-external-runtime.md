@@ -1,6 +1,6 @@
 # External plugin runtime
 
-Status: implementation contract.
+status: implemented
 
 ## Purpose
 

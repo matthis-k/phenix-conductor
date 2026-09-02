@@ -1,6 +1,6 @@
 # Configuration frontends and graph generations
 
-Status: normative architecture and implementation contract.
+status: implemented
 
 ## Purpose
 

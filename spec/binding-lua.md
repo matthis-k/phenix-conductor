@@ -1,6 +1,8 @@
 # Lua client binding
 
-Status: specification only. Implement on the application-side ACP client SDK from #440.
+status: specification-only
+
+Implementation builds on the application-side ACP client SDK from #440.
 
 ## Goal
 
