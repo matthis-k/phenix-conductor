@@ -47,6 +47,7 @@ targets=(
   rust/crates/phenix-core/src/contract.rs
   rust/crates/phenix-core/src/plugin.rs
   rust/crates/phenix-core/src/plugin_context.rs
+  rust/crates/phenix-provider-sdk/src
   rust/crates/phenix-sdk/src
 )
 
