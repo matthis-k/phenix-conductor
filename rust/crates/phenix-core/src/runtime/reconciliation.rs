@@ -224,3 +224,82 @@ fn cleanup_staged(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plugin(value: &str) -> PluginId {
+        PluginId::parse(value).unwrap()
+    }
+
+    fn runtime(value: &str) -> RuntimeId {
+        RuntimeId::parse(value).unwrap()
+    }
+
+    fn manifest(
+        id: &str,
+        execution: PluginExecution,
+        services: Vec<ServiceContribution>,
+    ) -> PluginManifest {
+        PluginManifest {
+            id: plugin(id),
+            version: 1,
+            execution,
+            dependencies: Vec::new(),
+            services,
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    #[test]
+    fn changing_guest_does_not_restart_unchanged_runtime_provider() {
+        let runtime = runtime("vendor.runtime");
+        let provider = manifest(
+            "fixture.bridge",
+            PluginExecution::Embedded,
+            vec![ServiceContribution {
+                service: runtime_provider_service(&runtime),
+                role: ServiceRole::Terminal,
+                priority: 0,
+                required_authority: Authority::default(),
+            }],
+        );
+        let guest = |revision: &str| {
+            manifest(
+                "fixture.guest",
+                PluginExecution::Runtime {
+                    runtime: runtime.clone(),
+                    artifact: PluginArtifact {
+                        locator: "fixture.plugin".into(),
+                        revision: revision.into(),
+                        configuration: BTreeMap::new(),
+                    },
+                },
+                Vec::new(),
+            )
+        };
+        let active = KernelConfig::new([provider.clone(), guest("sha256:v1")]).unwrap();
+        let candidate = KernelConfig::new([provider.clone(), guest("sha256:v2")]).unwrap();
+        let active_manifests = active
+            .manifests()
+            .map(|manifest| (manifest.id.clone(), manifest.clone()))
+            .collect();
+        let candidate_manifests = candidate
+            .manifests()
+            .map(|manifest| (manifest.id.clone(), manifest.clone()))
+            .collect();
+
+        let restart = runtime_restart_closure(
+            &active,
+            &candidate,
+            &active_manifests,
+            &candidate_manifests,
+            &BTreeSet::new(),
+        );
+
+        assert!(restart.contains(&plugin("fixture.guest")));
+        assert!(!restart.contains(&provider.id));
+    }
+}
