@@ -1,5 +1,7 @@
 # Language intelligence
 
+status: implemented
+
 ## Purpose
 
 Expose language intelligence as conductor-owned semantic operations. The conductor may use a frontend-linked provider or launch the managed provider selected by the workspace language-service contract.

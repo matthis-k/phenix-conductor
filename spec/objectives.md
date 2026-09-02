@@ -1,5 +1,7 @@
 # Objectives
 
+status: implemented
+
 ## Ownership
 
 Objectives are durable workspace-owned desired states. The conductor owns their identity, lifecycle, criteria, and links to executions.
