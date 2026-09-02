@@ -129,7 +129,12 @@ fn invoke(kernel: &mut Kernel, command: MemoryCommand) -> Result<MemoryResponse,
     output.project().map_err(|error| error.to_string())
 }
 
-fn routing(kernel: &mut Kernel, name: &str, extract: &str, consolidate: &str) -> phenix_core::RoutingProfileId {
+fn routing(
+    kernel: &mut Kernel,
+    name: &str,
+    extract: &str,
+    consolidate: &str,
+) -> phenix_core::RoutingProfileId {
     let profile_id = phenix_core::RoutingProfileId::parse(name).unwrap();
     let provider = PluginId::parse(PROVIDER).unwrap();
     let target = |model: &str| ModelTarget {
@@ -145,7 +150,10 @@ fn routing(kernel: &mut Kernel, name: &str, extract: &str, consolidate: &str) ->
             (memory_consolidate_callable(), target(consolidate)),
         ]),
     };
-    let input = serde_json::to_vec(&PhenixValue::from(&RoutingCommand::RegisterProfile { profile })).unwrap();
+    let input = serde_json::to_vec(&PhenixValue::from(&RoutingCommand::RegisterProfile {
+        profile,
+    }))
+    .unwrap();
     let output = kernel
         .invoke(
             &model_routing_service(),
@@ -260,7 +268,10 @@ fn consolidation_unions_provenance_and_supersedes_inputs() {
     };
     assert_eq!(record.content, "consolidated durable fact");
     assert_eq!(record.supersedes, vec!["a", "b"]);
-    assert_eq!(record.source_refs, vec![source("history/a"), source("history/b")]);
+    assert_eq!(
+        record.source_refs,
+        vec![source("history/a"), source("history/b")]
+    );
 
     let current = invoke(
         &mut kernel,
@@ -275,7 +286,12 @@ fn consolidation_unions_provenance_and_supersedes_inputs() {
         },
     )
     .unwrap();
-    assert_eq!(current, MemoryResponse::Recall { records: vec![record] });
+    assert_eq!(
+        current,
+        MemoryResponse::Recall {
+            records: vec![record]
+        }
+    );
     let _ = fs::remove_file(path);
 }
 

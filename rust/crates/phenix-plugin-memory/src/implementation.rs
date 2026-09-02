@@ -311,8 +311,8 @@ fn consolidate_memory(
         .flat_map(|record| record.source_refs.iter().cloned())
         .collect::<Vec<_>>();
     normalize_sources(&mut source_refs)?;
-    let input = serde_json::to_vec(&records)
-        .map_err(|error| MemoryError::Provider(error.to_string()))?;
+    let input =
+        serde_json::to_vec(&records).map_err(|error| MemoryError::Provider(error.to_string()))?;
     let content = routed_memory_text(
         context,
         &request.profile_id,
@@ -485,7 +485,13 @@ fn routed_revalidation(
 ) -> MemoryResult<MemoryRevalidationOutcome> {
     let input = serde_json::to_vec(&(record, state))
         .map_err(|error| MemoryError::Provider(error.to_string()))?;
-    let output = routed_model_bytes(context, profile_id, callable_id, input, "memory revalidation")?;
+    let output = routed_model_bytes(
+        context,
+        profile_id,
+        callable_id,
+        input,
+        "memory revalidation",
+    )?;
     serde_json::from_slice(&output).map_err(|error| {
         MemoryError::Provider(format!("invalid memory revalidation outcome: {error}"))
     })
