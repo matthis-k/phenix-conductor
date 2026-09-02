@@ -71,6 +71,14 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
             }
         }
     });
+    let configuration = contributions.configuration.as_ref().map(|configuration| {
+        let field = &configuration.field;
+        let ty = &configuration.ty;
+        quote! {
+            Some(::phenix_sdk::StaticPluginConfigDescriptor::of::<#ty>(stringify!(#field)))
+        }
+    });
+    let configuration = configuration.unwrap_or_else(|| quote!(None));
     let id = resolve_plugin_id(args, &item.ident)?;
     let name = &item.ident;
     let identity_impl = plugin_identity_impl(name, &id);
@@ -89,6 +97,12 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
                         #(::phenix_sdk::StaticPluginDependency::of::<#dependencies>()),*
                     ],
                 }
+            }
+        }
+
+        impl ::phenix_sdk::StaticPluginConfiguration for #name {
+            fn configuration() -> Option<::phenix_sdk::StaticPluginConfigDescriptor> {
+                #configuration
             }
         }
 
@@ -161,6 +175,13 @@ fn expand_module(args: TokenStream, mut item: ItemMod) -> syn::Result<TokenStrea
             }
         }
     };
+    let configuration_impl: Item = parse_quote! {
+        impl ::phenix_sdk::StaticPluginConfiguration for Plugin {
+            fn configuration() -> Option<::phenix_sdk::StaticPluginConfigDescriptor> {
+                None
+            }
+        }
+    };
     let component_definition: Item = parse_quote! {
         impl ::phenix_sdk::StaticComponentDefinition for Component {}
     };
@@ -186,6 +207,7 @@ fn expand_module(args: TokenStream, mut item: ItemMod) -> syn::Result<TokenStrea
         component,
         identity_impl,
         definition_impl,
+        configuration_impl,
         component_definition,
         component_behavior,
         components_impl,
@@ -308,8 +330,14 @@ fn explicit_plugin_id(args: TokenStream) -> syn::Result<Option<LitStr>> {
 #[derive(Default)]
 struct FieldContributions {
     dependencies: Vec<Type>,
+    configuration: Option<ConfigContribution>,
     components: Vec<ComponentContribution>,
     resources: Vec<ResourceContribution>,
+}
+
+struct ConfigContribution {
+    field: Ident,
+    ty: Type,
 }
 
 struct ComponentContribution {
@@ -327,6 +355,7 @@ struct ResourceContribution {
 
 enum FieldRole {
     Dependency,
+    Config,
     Component {
         id: Option<LitStr>,
     },
@@ -362,6 +391,19 @@ fn field_contributions(item: &mut ItemStruct) -> syn::Result<FieldContributions>
 
         match role {
             Some(FieldRole::Dependency) => contributions.dependencies.push(field.ty.clone()),
+            Some(FieldRole::Config) => {
+                if contributions.configuration.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        field,
+                        "a plugin may declare only one configuration field",
+                    ));
+                }
+                let name = field.ident.clone().expect("named field has an identifier");
+                contributions.configuration = Some(ConfigContribution {
+                    field: name,
+                    ty: field.ty.clone(),
+                });
+            }
             Some(FieldRole::Component { id }) => {
                 let name = field.ident.clone().expect("named field has an identifier");
                 contributions.components.push(ComponentContribution {
@@ -402,14 +444,23 @@ fn field_role(attribute: &Attribute) -> syn::Result<FieldRole> {
         ));
     };
 
-    if role.is_ident("dep") {
+    if role.is_ident("dep") || role.is_ident("config") {
         if let Some(argument) = arguments.next() {
+            let role_name = if role.is_ident("dep") {
+                "dependency"
+            } else {
+                "configuration"
+            };
             return Err(syn::Error::new_spanned(
                 argument,
-                "dependency fields do not accept metadata",
+                format!("{role_name} fields do not accept metadata"),
             ));
         }
-        return Ok(FieldRole::Dependency);
+        return Ok(if role.is_ident("dep") {
+            FieldRole::Dependency
+        } else {
+            FieldRole::Config
+        });
     }
     let kind = if role.is_ident("component") {
         "component"
@@ -584,6 +635,44 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("reserve"));
+    }
+
+    #[test]
+    fn config_field_is_lowered_to_typed_schema_metadata() {
+        let output = expand(
+            quote!("phenix.configured"),
+            quote! {
+                struct Plugin {
+                    #[phenix(config)]
+                    config: Settings,
+                }
+            },
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(output.contains("StaticPluginConfiguration for Plugin"));
+        assert!(output.contains("StaticPluginConfigDescriptor :: of :: < Settings >"));
+        assert!(output.contains("stringify ! (config)"));
+        assert!(!output.contains("phenix (config"));
+    }
+
+    #[test]
+    fn multiple_config_fields_are_rejected() {
+        let mut item: ItemStruct = parse_quote! {
+            struct Plugin {
+                #[phenix(config)]
+                first: Settings,
+                #[phenix(config)]
+                second: Settings,
+            }
+        };
+
+        let error = match field_contributions(&mut item) {
+            Ok(_) => panic!("multiple configuration fields must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("only one configuration field"));
     }
 
     #[test]
