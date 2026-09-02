@@ -55,7 +55,7 @@ fn retained_portable_model_and_tool_history_is_exactly_addressable() {
     let path = temp_db();
     let session_id = SessionId::parse("memory-source").unwrap();
     let callable_id = CallableId::parse("tools.read_file").unwrap();
-    let arguments = SessionHistoryValue::from(PhenixValue::Object(BTreeMap::from([(
+    let arguments = SessionHistoryValue::from(PhenixValue::Map(BTreeMap::from([(
         "path".into(),
         PhenixValue::String("README.md".into()),
     )])));
