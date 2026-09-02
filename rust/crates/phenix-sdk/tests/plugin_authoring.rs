@@ -673,6 +673,16 @@ mod attribute_composition {
         #[phenix(migrate(from = 2))]
         fn v2_to_v3() {}
     }
+
+    #[phenix_sdk::plugin("fixture.attr.resource-owner")]
+    pub struct ResourceOwner {
+        #[phenix(
+            resource,
+            id = "fixture.attr.plans",
+            features(Transactions, Migrations)
+        )]
+        pub plans: phenix_sdk::Durable<PlanStore>,
+    }
 }
 
 #[test]
@@ -749,4 +759,23 @@ fn resource_attribute_owns_schema_and_migration_metadata() {
     assert_eq!(migrations[0].from_version, 2);
     assert_eq!(migrations[0].to_version, 3);
     assert_eq!(migrations[0].method, "v2_to_v3");
+}
+
+#[test]
+fn plugin_resource_field_preserves_identity_schema_and_backend_features() {
+    let resources =
+        <attribute_composition::ResourceOwner as phenix_sdk::StaticPluginResources>::resources();
+
+    assert_eq!(resources.len(), 1);
+    assert_eq!(resources[0].id.as_str(), "fixture.attr.plans");
+    assert_eq!(resources[0].schema.version, 3);
+    assert_eq!(resources[0].field, "plans");
+    assert!(resources[0]
+        .schema
+        .required_features
+        .contains(&phenix_sdk::BackendFeature::Transactions));
+    assert!(resources[0]
+        .schema
+        .required_features
+        .contains(&phenix_sdk::BackendFeature::Migrations));
 }
