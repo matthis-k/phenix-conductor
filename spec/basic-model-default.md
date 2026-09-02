@@ -1,8 +1,6 @@
 # Basic model default
 
-## Status
-
-Implementation slice for the default-model requirement in `plugin-hygiene.md`.
+status: implemented
 
 ## Goal
 

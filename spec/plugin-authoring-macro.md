@@ -1,5 +1,7 @@
 # Plugin authoring macro
 
+status: implemented
+
 `phenix_plugin!` removes plugin declaration and ABI wiring boilerplate while keeping provider and consumer Rust types independent.
 
 The implementation lives in the passive `phenix-sdk` library. Plugin ABI values remain stable identifiers plus `PhenixValue`.
