@@ -68,18 +68,19 @@ impl PluginInstance for Provider {
         if service != &model_inference_service() {
             return Err(format!("unsupported fixture service: {service}"));
         }
-        let request: ModelInferenceRequest =
+        let input: PhenixValue =
             serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let request: ModelInferenceRequest = input.project().map_err(|error| error.to_string())?;
         let output = match request.model.as_str() {
             "extract" => "extracted durable fact",
             "consolidate" => "consolidated durable fact",
             "fail" => return Err("fixture maintenance failure".into()),
             model => return Err(format!("unexpected maintenance model: {model}")),
         };
-        serde_json::to_vec(&ModelInferenceResponse {
+        serde_json::to_vec(&PhenixValue::from(&ModelInferenceResponse {
             output: Bytes::new(output.as_bytes().to_vec()),
             provider_metadata: BTreeMap::new(),
-        })
+        }))
         .map_err(|error| error.to_string())
     }
 }
