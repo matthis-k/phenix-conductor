@@ -450,8 +450,13 @@ mod tests {
 
     #[test]
     fn plugin_package_metadata_uses_the_canonical_runtime_manifest() {
-        let metadata = package_metadata(PluginExecution::External {
-            executable: "third-party-host".into(),
+        let metadata = package_metadata(PluginExecution::Runtime {
+            runtime: crate::RuntimeId::parse("vendor.runtime").unwrap(),
+            artifact: crate::PluginArtifact {
+                locator: "plugin.wasm".into(),
+                revision: "sha256:fixture".into(),
+                configuration: std::collections::BTreeMap::new(),
+            },
         });
 
         metadata.validate_pre_activation().unwrap();
@@ -459,8 +464,12 @@ mod tests {
         let encoded = serde_json::to_value(&metadata).unwrap();
         assert_eq!(encoded["id"], "third-party");
         assert_eq!(encoded["version"], 1);
-        assert_eq!(encoded["execution"]["kind"], "external");
-        assert_eq!(encoded["execution"]["executable"], "third-party-host");
+        assert_eq!(encoded["execution"]["kind"], "runtime");
+        assert_eq!(encoded["execution"]["runtime"], "vendor.runtime");
+        assert_eq!(
+            encoded["execution"]["artifact"]["revision"],
+            "sha256:fixture"
+        );
     }
 
     #[test]

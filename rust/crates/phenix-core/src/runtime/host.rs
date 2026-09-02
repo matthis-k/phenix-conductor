@@ -148,20 +148,6 @@ impl<'a> PluginHost<'a> {
         )
     }
 
-    pub(crate) fn continuation_binding(&self) -> Result<ContinuationBinding, KernelError> {
-        let continuation = self
-            .continuation
-            .as_ref()
-            .ok_or(KernelError::ContinuationUnavailable)?;
-        Ok(ContinuationBinding {
-            graph_generation: self.graph_generation.cloned(),
-            policy_identity: continuation.chain.policy_identity,
-            service: continuation.chain.service.clone(),
-            authority: self.authority.clone(),
-            next_position: continuation.next_position,
-        })
-    }
-
     pub fn task_scope(&self) -> Option<TaskScope<'_>> {
         Some(TaskScope::new(
             self.tasks,

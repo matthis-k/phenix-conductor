@@ -26,7 +26,6 @@ impl Kernel {
             config,
             states,
             embedded_factories: BTreeMap::new(),
-            external_factories: BTreeMap::new(),
             instances: BTreeMap::new(),
             events: Arc::new(EventBus::default()),
             tasks: TaskRuntime::default(),
@@ -114,33 +113,6 @@ impl Kernel {
         self.embedded_factories.insert(plugin, Arc::new(factory));
     }
 
-    pub fn register_external_factory<F>(
-        &mut self,
-        plugin: PluginId,
-        factory: F,
-    ) -> Result<(), KernelError>
-    where
-        F: Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync + 'static,
-    {
-        let manifest = self
-            .config
-            .manifest(&plugin)
-            .ok_or_else(|| KernelError::UnknownPlugin(plugin.clone()))?;
-        if !matches!(manifest.execution, PluginExecution::External { .. }) {
-            return Err(KernelError::WrongExecutionKind(plugin));
-        }
-        self.preload_external_factory(plugin, factory);
-        Ok(())
-    }
-
-    /// Preload an external-host implementation for a plugin that may enter a future graph generation.
-    pub fn preload_external_factory<F>(&mut self, plugin: PluginId, factory: F)
-    where
-        F: Fn(&PluginManifest) -> Result<Box<dyn PluginInstance>, String> + Send + Sync + 'static,
-    {
-        self.external_factories.insert(plugin, Arc::new(factory));
-    }
-
     pub fn activate_all(&mut self) -> Result<(), KernelError> {
         for plugin in self.config.activation_order().to_vec() {
             self.activate(&plugin)?;
@@ -159,25 +131,46 @@ impl Kernel {
             .ok_or_else(|| KernelError::UnknownPlugin(plugin.clone()))?
             .clone();
 
-        match manifest.execution {
+        match &manifest.execution {
             PluginExecution::ResourceOnly => {}
             PluginExecution::Embedded => {
                 let factory = self
                     .embedded_factories
                     .get(plugin)
                     .ok_or_else(|| KernelError::EmbeddedFactoryMissing(plugin.clone()))?;
-                let instance = factory();
-                self.start_instance(plugin, &manifest, instance)?;
+                self.start_instance(plugin, &manifest, factory())?;
             }
-            PluginExecution::External { .. } => {
-                let factory = self
-                    .external_factories
-                    .get(plugin)
-                    .ok_or_else(|| KernelError::ExternalHostUnavailable(plugin.clone()))?;
-                let instance = factory(&manifest).map_err(|message| KernelError::PluginStart {
-                    plugin: plugin.clone(),
-                    message,
-                })?;
+            PluginExecution::Runtime { runtime, artifact } => {
+                let binding = self
+                    .config
+                    .runtime_binding(plugin)
+                    .cloned()
+                    .ok_or_else(|| KernelError::RuntimeProviderUnavailable(runtime.clone()))?;
+                let provider = self
+                    .instances
+                    .get(&binding.provider)
+                    .cloned()
+                    .ok_or_else(|| KernelError::PluginNotActive(binding.provider.clone()))?;
+                let instance = {
+                    let mut provider = provider.lock().expect("plugin instance mutex poisoned");
+                    let contract = provider.runtime_provider().ok_or_else(|| {
+                        KernelError::RuntimeProviderContractUnavailable {
+                            runtime: runtime.clone(),
+                            provider: binding.provider.clone(),
+                        }
+                    })?;
+                    contract
+                        .prepare(RuntimePluginCandidate {
+                            manifest: &manifest,
+                            artifact,
+                            guest_authority: &manifest.maximum_authority,
+                        })
+                        .map_err(|message| KernelError::RuntimePrepare {
+                            plugin: plugin.clone(),
+                            runtime: runtime.clone(),
+                            message,
+                        })?
+                };
                 self.start_instance(plugin, &manifest, instance)?;
             }
         }

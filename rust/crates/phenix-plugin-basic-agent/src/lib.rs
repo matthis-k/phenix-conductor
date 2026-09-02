@@ -7,8 +7,6 @@ pub use phenix_plugin_basic_tools::*;
 
 #[cfg(test)]
 mod component_regression;
-#[cfg(test)]
-mod external_replacement_regression;
 
 #[cfg(test)]
 mod tests {

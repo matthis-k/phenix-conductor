@@ -144,7 +144,7 @@ let
             manifest = {
               id = pluginId;
               version = 1;
-              execution = "embedded";
+              execution.kind = "embedded";
             };
           }
         ) pluginIds;
