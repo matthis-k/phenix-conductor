@@ -26,7 +26,9 @@ fn memory_kernel(path: &PathBuf) -> Kernel {
     let plugin = manifest.id.clone();
     let persistence = LocalPersistence::open(path).unwrap();
     let mut kernel = Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
-    kernel.register_embedded_factory(plugin, memory_factory).unwrap();
+    kernel
+        .register_embedded_factory(plugin, memory_factory)
+        .unwrap();
     kernel.activate_all().unwrap();
     kernel
 }
