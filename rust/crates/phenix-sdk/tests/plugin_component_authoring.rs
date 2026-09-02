@@ -1,5 +1,5 @@
 use phenix_sdk::{
-    Call, Optional, Required, StaticComponentBehavior, StaticComponentImports,
+    Call, Emit, Host, Optional, Required, StaticComponentBehavior, StaticComponentImports,
     StaticPluginComponents,
 };
 
@@ -18,6 +18,12 @@ struct Api {
 
     #[phenix(import)]
     fallback: Optional<Call<ModelsInference, ConsumerRequest, ConsumerResponse>>,
+
+    #[phenix(host)]
+    model_host: Host<ModelsInference>,
+
+    #[phenix(event("fixture.models.emitted"))]
+    emitted: Emit<ConsumerResponse>,
 }
 
 #[phenix_sdk::component]
@@ -55,6 +61,17 @@ fn component_fields_lower_to_typed_import_export_and_plugin_metadata() {
     assert_eq!(imports[1].interface.as_str(), "fixture.models.inference@1");
     assert_eq!(imports[1].field, "fallback");
     assert!(!imports[1].required);
+
+    let hosts = <Api as StaticComponentImports>::hosts();
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].interface.as_str(), "fixture.models.inference@1");
+    assert_eq!(hosts[0].field, "model_host");
+
+    let events = <Api as StaticComponentImports>::events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event.as_str(), "fixture.models.emitted");
+    assert_eq!(events[0].field, "emitted");
+    assert!(events[0].payload_type.ends_with("::ConsumerResponse"));
 
     let exports = <Api as StaticComponentBehavior>::exports();
     assert_eq!(exports.len(), 1);
