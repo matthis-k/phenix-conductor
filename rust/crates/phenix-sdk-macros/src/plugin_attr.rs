@@ -29,7 +29,27 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
     }
 
     let contributions = field_contributions(&mut item)?;
-    let dependencies = contributions.dependencies;
+    let dependency_types = contributions.dependencies.iter().map(|dependency| &dependency.ty);
+    let dependency_modules = contributions.dependencies.iter().map(|dependency| {
+        let field = &dependency.field;
+        let ty = &dependency.ty;
+        quote! {
+            pub mod #field {
+                pub type Plugin = #ty;
+            }
+        }
+    });
+    let dependency_access = if item.ident == "Plugin" {
+        quote! {
+            pub mod plugin {
+                pub mod dependencies {
+                    #(#dependency_modules)*
+                }
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
     let component_descriptors = contributions.components.iter().map(|component| {
         let field = &component.field;
         let ty = &component.ty;
@@ -88,13 +108,15 @@ fn expand_struct(args: TokenStream, mut item: ItemStruct) -> syn::Result<TokenSt
 
         #identity_impl
 
+        #dependency_access
+
         impl ::phenix_sdk::StaticPluginDefinition for #name {
             fn descriptor() -> ::phenix_sdk::StaticPluginDescriptor {
                 ::phenix_sdk::StaticPluginDescriptor {
                     id: Self::plugin_id(),
                     definition: concat!(module_path!(), "::", stringify!(#name)),
                     dependencies: vec![
-                        #(::phenix_sdk::StaticPluginDependency::of::<#dependencies>()),*
+                        #(::phenix_sdk::StaticPluginDependency::of::<#dependency_types>()),*
                     ],
                 }
             }
@@ -329,10 +351,15 @@ fn explicit_plugin_id(args: TokenStream) -> syn::Result<Option<LitStr>> {
 
 #[derive(Default)]
 struct FieldContributions {
-    dependencies: Vec<Type>,
+    dependencies: Vec<DependencyContribution>,
     configuration: Option<ConfigContribution>,
     components: Vec<ComponentContribution>,
     resources: Vec<ResourceContribution>,
+}
+
+struct DependencyContribution {
+    field: Ident,
+    ty: Type,
 }
 
 struct ConfigContribution {
@@ -390,7 +417,13 @@ fn field_contributions(item: &mut ItemStruct) -> syn::Result<FieldContributions>
         field.attrs = retained;
 
         match role {
-            Some(FieldRole::Dependency) => contributions.dependencies.push(field.ty.clone()),
+            Some(FieldRole::Dependency) => {
+                let name = field.ident.clone().expect("named field has an identifier");
+                contributions.dependencies.push(DependencyContribution {
+                    field: name,
+                    ty: field.ty.clone(),
+                });
+            }
             Some(FieldRole::Config) => {
                 if contributions.configuration.is_some() {
                     return Err(syn::Error::new_spanned(
@@ -635,6 +668,30 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("reserve"));
+    }
+
+    #[test]
+    fn direct_dependencies_are_exposed_only_under_their_field_namespace() {
+        let output = expand(
+            quote!("phenix.parent"),
+            quote! {
+                struct Plugin {
+                    #[phenix(dep)]
+                    sessions: phenix_plugin_sessions::Plugin,
+                    #[phenix(dep)]
+                    models: phenix_plugin_models::Plugin,
+                }
+            },
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(output.contains("pub mod plugin"));
+        assert!(output.contains("pub mod dependencies"));
+        assert!(output.contains("pub mod sessions"));
+        assert!(output.contains("pub type Plugin = phenix_plugin_sessions :: Plugin"));
+        assert!(output.contains("pub mod models"));
+        assert!(output.contains("pub type Plugin = phenix_plugin_models :: Plugin"));
     }
 
     #[test]
