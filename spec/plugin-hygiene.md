@@ -1,5 +1,7 @@
 # Plugin hygiene
 
+temporary: true
+
 ## Status
 
 Specification only. This PR defines ownership and packaging rules for the existing plugin set. It depends conceptually on #444, which defines stable domain and host interfaces.
