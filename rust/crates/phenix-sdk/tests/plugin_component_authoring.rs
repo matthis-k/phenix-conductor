@@ -54,3 +54,17 @@ fn component_fields_lower_to_typed_import_export_and_plugin_metadata() {
     assert_eq!(components[0].id.as_str(), "fixture.component-owner.api");
     assert_eq!(components[0].field, "api");
 }
+
+#[phenix_sdk::plugin("fixture.legacy-component-owner")]
+struct LegacyPlugin {
+    #[phenix(component, id = "legacy.component.api")]
+    api: Api,
+}
+
+#[test]
+fn explicit_component_identity_preserves_stable_runtime_id() {
+    let components = <LegacyPlugin as StaticPluginComponents>::components();
+
+    assert_eq!(components.len(), 1);
+    assert_eq!(components[0].id.as_str(), "legacy.component.api");
+}
