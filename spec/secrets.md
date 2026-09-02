@@ -1,6 +1,6 @@
 # Secrets
 
-Status: proposed
+status: specification-only
 
 ## Goal
 
