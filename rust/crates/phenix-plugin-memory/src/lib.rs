@@ -24,6 +24,8 @@ pub use phenix_sdk::{
 };
 
 #[cfg(test)]
+mod embedding_integration;
+#[cfg(test)]
 mod freshness_integration;
 #[cfg(test)]
 mod provenance_integration;
