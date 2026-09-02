@@ -35,13 +35,28 @@ fn expand_struct(item: ItemStruct) -> syn::Result<TokenStream> {
         ));
     }
     let mut item = item;
-    let imports = component_imports(&mut item)?;
+    let contributions = component_fields(&mut item)?;
     let name = &item.ident;
-    let descriptors = imports.iter().map(|import| {
+    let imports = contributions.imports.iter().map(|import| {
         let field = &import.field;
         let ty = &import.ty;
         quote! {
             ::phenix_sdk::StaticComponentImport::of::<#ty>(stringify!(#field))
+        }
+    });
+    let hosts = contributions.hosts.iter().map(|host| {
+        let field = &host.field;
+        let ty = &host.ty;
+        quote! {
+            ::phenix_sdk::StaticComponentHost::of::<#ty>(stringify!(#field))
+        }
+    });
+    let events = contributions.events.iter().map(|event| {
+        let field = &event.field;
+        let ty = &event.ty;
+        let id = &event.event;
+        quote! {
+            ::phenix_sdk::StaticComponentEvent::of::<#ty>(#id, stringify!(#field))
         }
     });
 
@@ -52,10 +67,25 @@ fn expand_struct(item: ItemStruct) -> syn::Result<TokenStream> {
 
         impl ::phenix_sdk::StaticComponentImports for #name {
             fn imports() -> Vec<::phenix_sdk::StaticComponentImport> {
-                vec![#(#descriptors),*]
+                vec![#(#imports),*]
+            }
+
+            fn hosts() -> Vec<::phenix_sdk::StaticComponentHost> {
+                vec![#(#hosts),*]
+            }
+
+            fn events() -> Vec<::phenix_sdk::StaticComponentEvent> {
+                vec![#(#events),*]
             }
         }
     })
+}
+
+#[derive(Default)]
+struct ComponentFieldContributions {
+    imports: Vec<ImportContribution>,
+    hosts: Vec<ImportContribution>,
+    events: Vec<EventFieldContribution>,
 }
 
 struct ImportContribution {
@@ -63,11 +93,23 @@ struct ImportContribution {
     ty: Type,
 }
 
-fn component_imports(item: &mut ItemStruct) -> syn::Result<Vec<ImportContribution>> {
+struct EventFieldContribution {
+    field: Ident,
+    ty: Type,
+    event: LitStr,
+}
+
+enum FieldRole {
+    Import(ImportContribution),
+    Host(ImportContribution),
+    Event(EventFieldContribution),
+}
+
+fn component_fields(item: &mut ItemStruct) -> syn::Result<ComponentFieldContributions> {
     let Fields::Named(fields) = &mut item.fields else {
-        return Ok(Vec::new());
+        return Ok(ComponentFieldContributions::default());
     };
-    let mut imports = Vec::new();
+    let mut contributions = ComponentFieldContributions::default();
 
     for field in &mut fields.named {
         let mut retained = Vec::new();
@@ -91,26 +133,49 @@ fn component_imports(item: &mut ItemStruct) -> syn::Result<Vec<ImportContributio
             };
             let arguments =
                 Punctuated::<Meta, Token![,]>::parse_terminated.parse2(meta.tokens.clone())?;
-            if arguments.len() != 1
-                || !matches!(arguments.first(), Some(Meta::Path(path)) if path.is_ident("import"))
-            {
-                return Err(syn::Error::new_spanned(
-                    attribute,
-                    "unsupported component field contribution",
-                ));
-            }
-            contribution = Some(ImportContribution {
-                field: field.ident.clone().expect("named field has an identifier"),
-                ty: field.ty.clone(),
+            let name = field.ident.clone().expect("named field has an identifier");
+            contribution = Some(match arguments.first() {
+                Some(Meta::Path(path)) if arguments.len() == 1 && path.is_ident("import") => {
+                    FieldRole::Import(ImportContribution {
+                        field: name,
+                        ty: field.ty.clone(),
+                    })
+                }
+                Some(Meta::Path(path)) if arguments.len() == 1 && path.is_ident("host") => {
+                    FieldRole::Host(ImportContribution {
+                        field: name,
+                        ty: field.ty.clone(),
+                    })
+                }
+                Some(Meta::List(event)) if arguments.len() == 1 && event.path.is_ident("event") => {
+                    let id = syn::parse2::<LitStr>(event.tokens.clone())?;
+                    validate_event_id(&id.value())
+                        .map_err(|error| syn::Error::new_spanned(&id, error))?;
+                    FieldRole::Event(EventFieldContribution {
+                        field: name,
+                        ty: field.ty.clone(),
+                        event: id,
+                    })
+                }
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        attribute,
+                        "unsupported component field contribution",
+                    ));
+                }
             });
         }
         field.attrs = retained;
         if let Some(contribution) = contribution {
-            imports.push(contribution);
+            match contribution {
+                FieldRole::Import(value) => contributions.imports.push(value),
+                FieldRole::Host(value) => contributions.hosts.push(value),
+                FieldRole::Event(value) => contributions.events.push(value),
+            }
         }
     }
 
-    Ok(imports)
+    Ok(contributions)
 }
 
 fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
