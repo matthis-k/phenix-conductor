@@ -3,6 +3,7 @@
 mod credentials;
 mod oauth;
 mod providers;
+mod schema_adapter;
 
 use credentials::{CredentialStore, StoredCredential};
 use futures::StreamExt;
@@ -455,11 +456,12 @@ impl PhenixSession {
             .callables()
             .iter()
             .map(|descriptor| {
-                Tool::new(descriptor.id.as_str())
+                let schema = schema_adapter::json_schema(&descriptor.input_schema)?;
+                Ok(Tool::new(descriptor.id.as_str())
                     .with_description(descriptor.description.clone())
-                    .with_schema(descriptor.input_schema.clone())
+                    .with_schema(schema))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, BackendError>>()?;
         let reasoning_effort = model
             .inference
             .effort
