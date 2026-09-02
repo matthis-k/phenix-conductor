@@ -335,7 +335,7 @@
                       ${repositoryRoot}
                       bash scripts/check-plugin-architecture.sh
                       bash scripts/check-spec-lifecycle-fixtures.sh
-                      bash scripts/check-spec-lifecycle.sh spec/spec-coverage-lifecycle.md
+                      bash scripts/check-spec-lifecycle.sh
                     '';
                   };
 
