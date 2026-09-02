@@ -76,6 +76,12 @@
           label = "phenix-sdk / plugin_authoring";
         }
         {
+          id = "sdk-incompatible-schema";
+          package = "phenix-sdk";
+          test = "incompatible_schema";
+          label = "phenix-sdk / incompatible_schema";
+        }
+        {
           id = "harness-component-graph";
           package = "phenix-harness";
           test = "component_graph";
