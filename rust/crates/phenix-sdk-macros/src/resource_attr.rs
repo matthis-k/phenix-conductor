@@ -21,10 +21,17 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
             continue;
         };
         let mut retained = Vec::new();
+        let mut migration = None;
         for attribute in std::mem::take(&mut method.attrs) {
             if !attribute.path().is_ident("phenix") {
                 retained.push(attribute);
                 continue;
+            }
+            if migration.is_some() {
+                return Err(syn::Error::new_spanned(
+                    attribute,
+                    "a resource method may declare only one Phenix contribution",
+                ));
             }
             let from = parse_migration(&attribute)?;
             if from >= schema {
@@ -33,9 +40,12 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
                     "resource migration source must be older than the declared schema",
                 ));
             }
-            migrations.push((from, method.sig.ident.clone()));
+            migration = Some((from, method.sig.ident.clone()));
         }
         method.attrs = retained;
+        if let Some(migration) = migration {
+            migrations.push(migration);
+        }
     }
 
     migrations.sort_by_key(|(from, _)| *from);
@@ -188,5 +198,22 @@ mod tests {
         assert!(output.contains("from_version : 2"));
         assert!(output.contains("to_version : 3"));
         assert!(!output.contains("phenix (migrate"));
+    }
+
+    #[test]
+    fn resource_impl_rejects_multiple_contributions_on_one_method() {
+        let error = expand(
+            quote!(schema = 3),
+            quote! {
+                impl Store {
+                    #[phenix(migrate(from = 1))]
+                    #[phenix(migrate(from = 2))]
+                    fn migrate() {}
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("only one Phenix contribution"));
     }
 }
