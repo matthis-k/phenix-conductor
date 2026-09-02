@@ -1,6 +1,6 @@
 # Artifact service, readers, and reuse
 
-Status: implementation contract and pressure test.
+status: implemented
 
 ## Purpose
 

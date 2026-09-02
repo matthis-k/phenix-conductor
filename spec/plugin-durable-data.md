@@ -1,6 +1,6 @@
 # Plugin durable data
 
-Status: normative implementation contract.
+status: implemented
 
 ## Purpose
 

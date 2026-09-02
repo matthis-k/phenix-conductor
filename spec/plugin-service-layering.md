@@ -1,6 +1,6 @@
 # Layered service invocation
 
-Status: normative architecture and implementation contract.
+status: implemented
 
 ## Purpose
 
