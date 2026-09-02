@@ -537,8 +537,8 @@ mod tests {
             10,
             Authority::default(),
         );
-        left.value = serde_json::json!({"mode":"strict"});
-        right.value = serde_json::json!({"mode":"relaxed"});
+        left.value = serde_json::json!({"mode":"strict"}).into();
+        right.value = serde_json::json!({"mode":"relaxed"}).into();
 
         assert_eq!(
             ResolvedConfigContributions::try_resolve([left, right], &Authority::default(),)
