@@ -148,7 +148,10 @@ fn parse_export(attribute: &Attribute) -> syn::Result<ExportContribution> {
 
     let interface = if let Ok(id) = syn::parse2::<LitStr>(export.tokens.clone()) {
         if id.value().is_empty() {
-            return Err(syn::Error::new_spanned(&id, "export interface id must not be empty"));
+            return Err(syn::Error::new_spanned(
+                &id,
+                "export interface id must not be empty",
+            ));
         }
         ExportInterface::Literal(id)
     } else {

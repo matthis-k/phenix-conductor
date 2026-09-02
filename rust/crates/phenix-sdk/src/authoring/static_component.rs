@@ -34,7 +34,8 @@ impl StaticComponentDescriptor {
 
     #[must_use]
     pub fn explicit<T: StaticComponentDefinition>(id: &str, field: &'static str) -> Self {
-        let id = ComponentId::parse(id).expect("component attribute validated the static component id");
+        let id =
+            ComponentId::parse(id).expect("component attribute validated the static component id");
         Self::new::<T>(id, field)
     }
 
