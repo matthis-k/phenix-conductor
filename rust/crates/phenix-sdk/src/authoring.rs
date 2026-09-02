@@ -1,6 +1,7 @@
 mod context;
 mod plugin;
 mod static_component;
+mod static_import;
 mod static_resource;
 
 pub use context::*;
@@ -11,6 +12,9 @@ pub use plugin::{
 pub use static_component::{
     InterfaceMarker, StaticComponentBehavior, StaticComponentDefinition, StaticComponentDescriptor,
     StaticComponentExport, StaticPluginComponents,
+};
+pub use static_import::{
+    Call, Optional, Required, StaticComponentImport, StaticComponentImports, StaticImportField,
 };
 pub use static_resource::{
     Durable, StaticPluginResources, StaticResourceDefinition, StaticResourceDescriptor,
