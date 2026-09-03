@@ -144,6 +144,45 @@
 //! }
 //! ```
 //!
+//! Exposed field names are one local segment, and authority belongs to callable
+//! methods rather than recursive field mounts.
+//!
+//! ```compile_fail
+//! struct Nested;
+//!
+//! #[phenix_sdk::plugin(root, id = "phenix.invalid-exposed-name")]
+//! struct Plugin {
+//!     #[phenix(expose(name = "nested/path"))]
+//!     nested: Nested,
+//! }
+//! ```
+//!
+//! ```compile_fail
+//! struct Nested;
+//!
+//! #[phenix_sdk::plugin(root, id = "phenix.invalid-exposed-authority")]
+//! struct Plugin {
+//!     #[phenix(expose(authority = phenix_sdk::Authority::default()))]
+//!     nested: Nested,
+//! }
+//! ```
+//!
+//! A selected field must provide a relative static exposure projection.
+//!
+//! ```compile_fail
+//! #[phenix_sdk::plugin(root, id = "phenix.invalid-exposed-type")]
+//! struct Plugin {
+//!     #[phenix(expose)]
+//!     value: u64,
+//! }
+//!
+//! #[phenix_sdk::plugin]
+//! impl Plugin {
+//!     #[phenix(expose)]
+//!     fn run(&mut self) {}
+//! }
+//! ```
+//!
 //! A plugin also has one configuration owner. Two configuration fields are a
 //! statically invalid declaration rather than a runtime merge problem.
 //!

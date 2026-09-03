@@ -338,7 +338,9 @@ pub use phenix_provider_sdk::{
     ApiTokenSource, Auth, AuthDescriptor, AuthKind, EnvironmentVariable, ProviderAuthCommand,
     ProviderAuthInterface, ProviderAuthResponse, ProviderError, RateLimits,
 };
-pub use phenix_sdk_macros::{component, interface, plugin, resource, PhenixContract, PhenixValue};
+pub use phenix_sdk_macros::{
+    component, expose, interface, plugin, resource, PhenixContract, PhenixValue,
+};
 pub use providers::{Provider, ProviderSdkError, ProviderSdkExt, Providers};
 pub use public_projection::*;
 

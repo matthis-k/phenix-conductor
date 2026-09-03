@@ -3,8 +3,8 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::BTreeSet;
 use syn::{
-    parse::Parser, parse_quote, punctuated::Punctuated, Attribute, Expr, ExprLit, Fields, ImplItem,
-    ItemImpl, ItemStruct, Lit, LitStr, Meta, Token, Type,
+    parse::Parser, parse_quote, punctuated::Punctuated, spanned::Spanned, Attribute, Expr, ExprLit,
+    Fields, ImplItem, ItemImpl, ItemStruct, Lit, LitStr, Meta, Token, Type,
 };
 
 pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<TokenStream> {
@@ -36,6 +36,15 @@ fn expand_struct(mut item: ItemStruct) -> syn::Result<TokenStream> {
 
     let fields = exposed_fields(&mut item)?;
     let name = &item.ident;
+    let fields_impl = exposed_fields_impl(name, &fields);
+
+    Ok(quote! {
+        #item
+        #fields_impl
+    })
+}
+
+pub(crate) fn exposed_fields_impl(name: &syn::Ident, fields: &[ExposedField]) -> TokenStream {
     let export_fields = fields.iter().map(|field| {
         let ty = &field.ty;
         let mount = &field.mount;
@@ -65,9 +74,7 @@ fn expand_struct(mut item: ItemStruct) -> syn::Result<TokenStream> {
         }
     });
 
-    Ok(quote! {
-        #item
-
+    quote! {
         impl ::phenix_sdk::StaticExposeFields for #name {
             fn exposed_field_exports_for(
                 owner: &str,
@@ -88,7 +95,7 @@ fn expand_struct(mut item: ItemStruct) -> syn::Result<TokenStream> {
                 None
             }
         }
-    })
+    }
 }
 
 fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
@@ -150,6 +157,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
             });
             markers.push(quote! {
                 #[doc(hidden)]
+                #[allow(non_camel_case_types)]
                 struct #marker;
 
                 impl ::phenix_sdk::InterfaceMarker for #marker {
@@ -169,13 +177,24 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
     })
 }
 
-struct ExposedField {
+pub(crate) struct ExposedField {
     field: syn::Ident,
     ty: Type,
     mount: LitStr,
 }
 
-fn exposed_fields(item: &mut ItemStruct) -> syn::Result<Vec<ExposedField>> {
+pub(crate) fn exposed_fields(item: &mut ItemStruct) -> syn::Result<Vec<ExposedField>> {
+    take_exposed_fields(item, false)
+}
+
+pub(crate) fn plugin_exposed_fields(item: &mut ItemStruct) -> syn::Result<Vec<ExposedField>> {
+    take_exposed_fields(item, true)
+}
+
+fn take_exposed_fields(
+    item: &mut ItemStruct,
+    allow_other_roles: bool,
+) -> syn::Result<Vec<ExposedField>> {
     let Fields::Named(fields) = &mut item.fields else {
         return Ok(Vec::new());
     };
@@ -184,12 +203,18 @@ fn exposed_fields(item: &mut ItemStruct) -> syn::Result<Vec<ExposedField>> {
 
     for field in &mut fields.named {
         let mut retained = Vec::new();
+        let mut contribution = None;
+        let phenix_roles = field
+            .attrs
+            .iter()
+            .filter(|attribute| attribute.path().is_ident("phenix"))
+            .count();
         for attribute in std::mem::take(&mut field.attrs) {
             if !attribute.path().is_ident("phenix") {
                 retained.push(attribute);
                 continue;
             }
-            let Some(expose) = expose_declaration(
+            let expose = expose_declaration(
                 &attribute,
                 field
                     .ident
@@ -197,13 +222,35 @@ fn exposed_fields(item: &mut ItemStruct) -> syn::Result<Vec<ExposedField>> {
                     .expect("named field has an identifier")
                     .to_string()
                     .as_str(),
-            )?
-            else {
+            )?;
+            let expose = match expose {
+                Some(expose) => expose,
+                None if allow_other_roles => {
+                    retained.push(attribute);
+                    continue;
+                }
+                None => {
+                    return Err(syn::Error::new_spanned(
+                        attribute,
+                        "exposed struct fields accept only #[phenix(expose...)]",
+                    ));
+                }
+            };
+            if phenix_roles > 1 || contribution.is_some() {
                 return Err(syn::Error::new_spanned(
                     attribute,
-                    "exposed struct fields accept only #[phenix(expose...)]",
+                    "an exposed field may declare only one Phenix role",
                 ));
-            };
+            }
+            if expose.authority.is_some() {
+                return Err(syn::Error::new_spanned(
+                    attribute,
+                    "exposed fields do not accept authority metadata",
+                ));
+            }
+            contribution = Some(expose);
+        }
+        if let Some(expose) = contribution {
             let mount = expose.name;
             if !mounts.insert(mount.value()) {
                 return Err(syn::Error::new_spanned(
@@ -267,7 +314,7 @@ fn expose_declaration(
                 "expose metadata must use name = \"...\" or authority = <expression>",
             ));
         };
-        if value.path.is_ident("name") || value.path.is_ident("path") {
+        if value.path.is_ident("name") {
             if name.is_some() {
                 return Err(syn::Error::new_spanned(value, "duplicate expose path"));
             }
@@ -283,7 +330,7 @@ fn expose_declaration(
                     ));
                 }
             };
-            validate_public_path(&path)?;
+            validate_public_segment(&path)?;
             name = Some(path);
         } else if value.path.is_ident("authority") {
             if authority.is_some() {
@@ -299,23 +346,20 @@ fn expose_declaration(
     }
 
     let name = name.unwrap_or_else(|| LitStr::new(default_name, attribute.span()));
-    validate_public_path(&name)?;
+    validate_public_segment(&name)?;
     Ok(Some(ExposeDeclaration { name, authority }))
 }
 
-fn validate_public_path(value: &LitStr) -> syn::Result<()> {
-    let path = value.value();
-    if path.is_empty()
-        || path.split('/').any(|segment| {
-            segment.is_empty()
-                || !segment
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-        })
+fn validate_public_segment(value: &LitStr) -> syn::Result<()> {
+    let name = value.value();
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
     {
         return Err(syn::Error::new_spanned(
             value,
-            "public path must contain non-empty alphanumeric, '_' or '-' segments",
+            "public member name must be one non-empty alphanumeric, '_' or '-' path segment",
         ));
     }
     Ok(())
@@ -356,7 +400,7 @@ mod tests {
         .to_string();
 
         assert!(output.contains("StaticExposeFields for Models"));
-        assert!(output.contains("StaticExpose >:: exposed_exports"));
+        assert!(output.contains("StaticExpose > :: exposed_exports"));
         assert!(output.contains("providers"));
         assert!(!output.contains("phenix (expose"));
     }
@@ -384,5 +428,65 @@ mod tests {
         assert!(output.contains("current"));
         assert!(output.contains("refresh_cache"));
         assert!(!output.contains("phenix (expose"));
+    }
+
+    #[test]
+    fn exposed_members_reject_multi_segment_local_names() {
+        let error = expand(
+            TokenStream::new(),
+            quote! {
+                struct Models {
+                    #[phenix(expose(name = "nested/providers"))]
+                    registry: Providers,
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("one non-empty"));
+    }
+
+    #[test]
+    fn exposed_fields_reject_authority_and_multiple_roles() {
+        let authority = expand(
+            TokenStream::new(),
+            quote! {
+                struct Models {
+                    #[phenix(expose(authority = Authority::default()))]
+                    registry: Providers,
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(authority.to_string().contains("do not accept authority"));
+
+        let roles = expand(
+            TokenStream::new(),
+            quote! {
+                struct Models {
+                    #[phenix(expose)]
+                    #[phenix(expose(name = "providers"))]
+                    registry: Providers,
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(roles.to_string().contains("only one Phenix role"));
+    }
+
+    #[test]
+    fn exposed_members_reject_removed_path_alias() {
+        let error = expand(
+            TokenStream::new(),
+            quote! {
+                impl Models {
+                    #[phenix(expose(path = "current"))]
+                    fn selected(&mut self) {}
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unsupported expose metadata"));
     }
 }

@@ -3,6 +3,7 @@ mod core;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use std::collections::BTreeSet;
 use syn::{
     parse::Parser, parse_quote, punctuated::Punctuated, Attribute, Expr, ExprLit, Fields, Ident,
     ImplItem, Item, ItemImpl, ItemStruct, Lit, LitStr, Meta, Token, Type,
@@ -24,21 +25,43 @@ pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<Token
         return core::expand(args, input);
     };
 
-    let (args, root) = split_root_argument(args)?;
-    expand_struct(args, item, root)
+    let (args, root, remaps) = split_root_arguments(args)?;
+    expand_struct(args, item, root, &remaps)
 }
 
 fn expand_struct(
     args: TokenStream,
-    item: ItemStruct,
+    mut item: ItemStruct,
     root_requested: bool,
+    remaps: &[ExposeRemap],
 ) -> syn::Result<TokenStream> {
     let root = should_inject_root(&args, &item, root_requested)?;
-    let name = &item.ident;
-    let root_ident = root_component_ident(name);
+    let name = item.ident.clone();
+    let root_ident = root_component_ident(&name);
+    let exposed_fields = if root {
+        crate::expose_attr::plugin_exposed_fields(&mut item)?
+    } else {
+        Vec::new()
+    };
+    let exposed_fields_impl = root.then(|| {
+        let fields_impl = crate::expose_attr::exposed_fields_impl(&name, &exposed_fields);
+        let remaps = remaps.iter().map(|remap| {
+            let from = &remap.from;
+            let to = &remap.to;
+            quote!(::phenix_sdk::StaticExposeRemap::new(#from, #to))
+        });
+        quote! {
+            #fields_impl
+
+            impl ::phenix_sdk::StaticRootExpose for #name {
+                const EXPOSED_REMAPS: &'static [::phenix_sdk::StaticExposeRemap] =
+                    &[#(#remaps),*];
+            }
+        }
+    });
 
     let expanded = if root {
-        let id = plugin_id_literal(args.clone(), name)?;
+        let id = plugin_id_literal(args.clone(), &name)?;
         let mut core_item = item.clone();
         let Fields::Named(fields) = &mut core_item.fields else {
             unreachable!("root injection is restricted to named plugin structs")
@@ -50,7 +73,7 @@ fn expand_struct(
         };
         fields.named.push(field);
         let expanded = core::expand(args.clone(), quote!(#core_item))?;
-        strip_synthetic_root(expanded, name)?
+        strip_synthetic_root(expanded, &name)?
     } else {
         core::expand(args.clone(), quote!(#item))?
     };
@@ -251,6 +274,8 @@ fn expand_struct(
     Ok(quote! {
         #expanded
 
+        #exposed_fields_impl
+
         impl ::phenix_sdk::StaticPluginComponentDispatch for #name {
             fn dispatch_component(
                 &mut self,
@@ -313,7 +338,7 @@ fn expand_root_impl(args: TokenStream, item: ItemImpl) -> syn::Result<TokenStrea
     let lifecycle = lifecycle_trait_impl(&item)?;
     let (behavior, markers) = normalize_root_behavior(item.clone())?;
     let expanded = crate::component_runtime_attr::expand(TokenStream::new(), quote!(#behavior))?;
-    let expanded = retarget_behavior(expanded, &root_ident)?;
+    let expanded = retarget_behavior(expanded, &root_ident, &item.self_ty)?;
     let expanded = quote! {
         #expanded
         #lifecycle
@@ -366,6 +391,7 @@ fn normalize_root_behavior(mut item: ItemImpl) -> syn::Result<(ItemImpl, Vec<Tok
     let self_ty = (*item.self_ty).clone();
     let self_ident = self_type_ident(&item)?;
     let mut markers = Vec::new();
+    let mut exposed_names = BTreeSet::new();
 
     for member in &mut item.items {
         let ImplItem::Fn(method) = member else {
@@ -395,6 +421,12 @@ fn normalize_root_behavior(mut item: ItemImpl) -> syn::Result<(ItemImpl, Vec<Tok
             if let Some(expose) = expose_declaration(&attribute, &method.sig.ident)? {
                 let marker = expose_marker_ident(&self_ident, &method.sig.ident);
                 let public_name = expose.name;
+                if !exposed_names.insert(public_name.value()) {
+                    return Err(syn::Error::new_spanned(
+                        public_name,
+                        "duplicate exposed method path",
+                    ));
+                }
                 let authority = expose.authority;
                 let export: Attribute = match authority {
                     Some(authority) => parse_quote! {
@@ -407,16 +439,14 @@ fn normalize_root_behavior(mut item: ItemImpl) -> syn::Result<(ItemImpl, Vec<Tok
                 retained.push(export);
                 markers.push(quote! {
                     #[doc(hidden)]
+                    #[allow(non_camel_case_types)]
                     struct #marker;
 
                     impl ::phenix_sdk::InterfaceMarker for #marker {
                         fn interface_id() -> ::phenix_sdk::__phenix_plugin::InterfaceId {
-                            ::phenix_sdk::__phenix_plugin::InterfaceId::parse(format!(
-                                "{}/public/{}@1",
-                                <#self_ty>::plugin_id().as_str(),
+                            <#self_ty as ::phenix_sdk::StaticRootExpose>::root_exposed_interface(
                                 #public_name,
-                            ))
-                            .expect("exposed plugin method derives a valid private interface id")
+                            )
                         }
                     }
                 });
@@ -550,7 +580,11 @@ fn normalize_on_event(attribute: &mut Attribute) -> syn::Result<()> {
     Ok(())
 }
 
-fn retarget_behavior(expanded: TokenStream, root: &Ident) -> syn::Result<TokenStream> {
+fn retarget_behavior(
+    expanded: TokenStream,
+    root: &Ident,
+    plugin: &Type,
+) -> syn::Result<TokenStream> {
     let mut file = syn::parse2::<syn::File>(expanded)?;
     let target: Type = parse_quote!(#root);
     let mut found = false;
@@ -559,8 +593,52 @@ fn retarget_behavior(expanded: TokenStream, root: &Ident) -> syn::Result<TokenSt
             continue;
         };
         if trait_is(item, "StaticComponentBehavior") {
-            item.self_ty = Box::new(target.clone());
+            *item.self_ty = target.clone();
+            let exports = item.items.iter_mut().find_map(|member| match member {
+                ImplItem::Fn(method) if method.sig.ident == "exports" => Some(method),
+                _ => None,
+            });
+            let Some(exports) = exports else {
+                return Err(syn::Error::new_spanned(
+                    item,
+                    "plugin root export metadata was not generated",
+                ));
+            };
+            let direct = exports.block.clone();
+            exports.block = parse_quote!({
+                let mut exports = (|| #direct)();
+                exports.extend(
+                    <#plugin as ::phenix_sdk::StaticRootExpose>::root_exposed_field_exports(),
+                );
+                exports
+            });
             found = true;
+        }
+        if trait_is(item, "StaticComponentRuntimeDispatch") {
+            let dispatch = item.items.iter_mut().find_map(|member| match member {
+                ImplItem::Fn(method) if method.sig.ident == "dispatch_runtime" => Some(method),
+                _ => None,
+            });
+            let Some(dispatch) = dispatch else {
+                return Err(syn::Error::new_spanned(
+                    item,
+                    "plugin root runtime dispatch was not generated",
+                ));
+            };
+            let direct = dispatch.block.clone();
+            dispatch.block = parse_quote!({
+                if let Some(result) =
+                    <#plugin as ::phenix_sdk::StaticRootExpose>::dispatch_root_exposed_field(
+                        self,
+                        service,
+                        input,
+                        host,
+                    )
+                {
+                    return result;
+                }
+                #direct
+            });
         }
     }
     if !found {
@@ -655,10 +733,10 @@ fn should_inject_root(
             "plugin root behavior requires named struct fields",
         ));
     }
-    if !component_fields(item)?.is_empty() || has_root_fields(item)? {
+    if has_root_fields(item)? {
         return Err(syn::Error::new_spanned(
             item,
-            "plugin root behavior cannot be combined with explicit or structural root components",
+            "plugin root behavior cannot be combined with structural root component fields",
         ));
     }
     if !embedded_execution(args.clone())? {
@@ -670,13 +748,19 @@ fn should_inject_root(
     Ok(true)
 }
 
-fn split_root_argument(args: TokenStream) -> syn::Result<(TokenStream, bool)> {
+struct ExposeRemap {
+    from: LitStr,
+    to: LitStr,
+}
+
+fn split_root_arguments(args: TokenStream) -> syn::Result<(TokenStream, bool, Vec<ExposeRemap>)> {
     if args.is_empty() || syn::parse2::<LitStr>(args.clone()).is_ok() {
-        return Ok((args, false));
+        return Ok((args, false, Vec::new()));
     }
 
-    let arguments = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(args)?;
+    let arguments = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(args.clone())?;
     let mut root = false;
+    let mut remaps = Vec::new();
     let mut retained = Punctuated::<Meta, Token![,]>::new();
     for argument in arguments {
         if matches!(&argument, Meta::Path(path) if path.is_ident("root")) {
@@ -689,9 +773,111 @@ fn split_root_argument(args: TokenStream) -> syn::Result<(TokenStream, bool)> {
             root = true;
             continue;
         }
+        if matches!(&argument, Meta::List(list) if list.path.is_ident("remap")) {
+            let Meta::List(remap) = argument else {
+                unreachable!("remap match requires list metadata")
+            };
+            remaps.push(parse_expose_remap(remap)?);
+            continue;
+        }
         retained.push(argument);
     }
-    Ok((quote!(#retained), root))
+    if !remaps.is_empty() && !root {
+        return Err(syn::Error::new_spanned(
+            args,
+            "public path remapping requires plugin root behavior",
+        ));
+    }
+    validate_expose_remaps(&remaps)?;
+    Ok((quote!(#retained), root, remaps))
+}
+
+fn parse_expose_remap(remap: syn::MetaList) -> syn::Result<ExposeRemap> {
+    let arguments = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(remap.tokens.clone())?;
+    let mut from = None;
+    let mut to = None;
+    for argument in arguments {
+        let Meta::NameValue(value) = argument else {
+            return Err(syn::Error::new_spanned(
+                argument,
+                "remap metadata must use from = \"...\" and to = \"...\"",
+            ));
+        };
+        let path = match value.value {
+            Expr::Lit(ExprLit {
+                lit: Lit::Str(value),
+                ..
+            }) => value,
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "remap paths must be string literals",
+                ));
+            }
+        };
+        validate_public_path(&path)?;
+        if value.path.is_ident("from") {
+            if from.replace(path).is_some() {
+                return Err(syn::Error::new_spanned(
+                    value.path,
+                    "duplicate remap source",
+                ));
+            }
+        } else if value.path.is_ident("to") {
+            if to.replace(path).is_some() {
+                return Err(syn::Error::new_spanned(
+                    value.path,
+                    "duplicate remap destination",
+                ));
+            }
+        } else {
+            return Err(syn::Error::new_spanned(
+                value.path,
+                "remap metadata supports only from and to",
+            ));
+        }
+    }
+    let from = from.ok_or_else(|| syn::Error::new_spanned(&remap.path, "remap requires from"))?;
+    let to = to.ok_or_else(|| syn::Error::new_spanned(&remap.path, "remap requires to"))?;
+    Ok(ExposeRemap { from, to })
+}
+
+fn validate_expose_remaps(remaps: &[ExposeRemap]) -> syn::Result<()> {
+    let mut sources = BTreeSet::new();
+    let mut destinations = BTreeSet::new();
+    for remap in remaps {
+        if !sources.insert(remap.from.value()) {
+            return Err(syn::Error::new_spanned(
+                &remap.from,
+                "duplicate remap source creates an ambiguous equal-specificity declaration",
+            ));
+        }
+        if !destinations.insert(remap.to.value()) {
+            return Err(syn::Error::new_spanned(
+                &remap.to,
+                "duplicate remap destination creates an ambiguous reverse declaration",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_public_path(value: &LitStr) -> syn::Result<()> {
+    let path = value.value();
+    if path.is_empty()
+        || path.split('/').any(|segment| {
+            segment.is_empty()
+                || !segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        })
+    {
+        return Err(syn::Error::new_spanned(
+            value,
+            "public path must contain non-empty alphanumeric, '_' or '-' segments",
+        ));
+    }
+    Ok(())
 }
 
 fn embedded_execution(args: TokenStream) -> syn::Result<bool> {
@@ -807,12 +993,7 @@ fn strip_synthetic_root(expanded: TokenStream, plugin: &Ident) -> syn::Result<To
             .named
             .clone()
             .into_iter()
-            .filter(|field| {
-                field
-                    .ident
-                    .as_ref()
-                    .is_none_or(|ident| ident.to_string() != ROOT_FIELD)
-            })
+            .filter(|field| field.ident.as_ref().is_none_or(|ident| ident != ROOT_FIELD))
             .collect();
         break;
     }
@@ -1074,7 +1255,7 @@ mod tests {
 
         assert!(output.contains("StaticComponentBehavior for __PhenixPluginRootComponentForPlugin"));
         assert!(output.contains("StaticComponentRuntimeDispatch for Plugin"));
-        assert!(output.contains("/public/"));
+        assert!(output.contains("root_exposed_interface"));
         assert!(output.contains("fixture.changed"));
         assert!(!output.contains("on_event"));
     }
@@ -1095,6 +1276,86 @@ mod tests {
         assert!(output.contains("__PhenixPluginRootComponentForPlugin"));
         assert!(output.contains("fixture.root"));
         assert!(!output.contains("__phenix_root :"));
+    }
+
+    #[test]
+    fn root_struct_collects_exposed_fields_and_remaps() {
+        let output = expand(
+            quote!(
+                root,
+                id = "fixture.root",
+                remap(from = "models/current", to = "api/model")
+            ),
+            quote! {
+                struct Plugin {
+                    #[phenix(expose(name = "models"))]
+                    repository: Repository,
+                    #[phenix(component)]
+                    worker: Worker,
+                }
+            },
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(output.contains("StaticExposeFields for Plugin"));
+        assert!(output.contains("StaticRootExpose for Plugin"));
+        assert!(output.contains("models/current"));
+        assert!(output.contains("api/model"));
+        assert!(output.contains("worker"));
+        assert!(!output.contains("phenix (expose"));
+    }
+
+    #[test]
+    fn root_remaps_reject_duplicate_sources_and_destinations() {
+        let source = expand(
+            quote!(
+                root,
+                id = "fixture.root",
+                remap(from = "old", to = "first"),
+                remap(from = "old", to = "second")
+            ),
+            quote!(
+                struct Plugin {}
+            ),
+        )
+        .unwrap_err();
+        assert!(source.to_string().contains("duplicate remap source"));
+
+        let destination = expand(
+            quote!(
+                root,
+                id = "fixture.root",
+                remap(from = "first", to = "new"),
+                remap(from = "second", to = "new")
+            ),
+            quote!(
+                struct Plugin {}
+            ),
+        )
+        .unwrap_err();
+        assert!(destination
+            .to_string()
+            .contains("duplicate remap destination"));
+    }
+
+    #[test]
+    fn root_impl_rejects_duplicate_exposed_method_names() {
+        let error = expand(
+            TokenStream::new(),
+            quote! {
+                impl Plugin {
+                    #[phenix(expose(name = "same"))]
+                    fn first(&mut self) {}
+
+                    #[phenix(expose(name = "same"))]
+                    fn second(&mut self) {}
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("duplicate exposed method path"));
     }
 
     #[test]

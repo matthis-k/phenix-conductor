@@ -90,6 +90,63 @@ impl<T> StaticExpose for T where
 }
 
 #[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StaticExposeRemap {
+    from: &'static str,
+    to: &'static str,
+}
+
+impl StaticExposeRemap {
+    #[must_use]
+    pub const fn new(from: &'static str, to: &'static str) -> Self {
+        Self { from, to }
+    }
+}
+
+#[doc(hidden)]
+pub trait StaticRootExpose: StaticPluginDefinition + StaticExposeFields + Sized {
+    const EXPOSED_REMAPS: &'static [StaticExposeRemap];
+
+    fn root_exposed_interface(path: &str) -> InterfaceId {
+        let owner = Self::descriptor().id;
+        let path = remap_public_path(path, Self::EXPOSED_REMAPS);
+        InterfaceId::parse(format!("{}/public/{path}@1", owner.as_str()))
+            .expect("plugin exposure paths are validated by the plugin attribute")
+    }
+
+    fn root_exposed_field_exports() -> Vec<StaticComponentExport> {
+        let owner = Self::descriptor().id;
+        <Self as StaticExposeFields>::exposed_field_exports_for(owner.as_str())
+            .into_iter()
+            .map(|export| remap_root_exposed_export(&owner, Self::EXPOSED_REMAPS, export))
+            .collect()
+    }
+
+    fn dispatch_root_exposed_field(
+        &mut self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Option<Result<Vec<u8>, String>> {
+        let owner = Self::descriptor().id;
+        let service = <Self as StaticExposeFields>::exposed_field_exports_for(owner.as_str())
+            .into_iter()
+            .find_map(|export| {
+                let original = ServiceId::parse(export.interface.as_str()).ok()?;
+                let remapped = remap_root_exposed_export(&owner, Self::EXPOSED_REMAPS, export);
+                (remapped.interface.as_str() == service.as_str()).then_some(original)
+            })?;
+        <Self as StaticExposeFields>::dispatch_exposed_field_for(
+            self,
+            owner.as_str(),
+            &service,
+            input,
+            host,
+        )
+    }
+}
+
+#[doc(hidden)]
 #[must_use]
 pub fn exposed_owner<T>() -> String {
     let type_name = std::any::type_name::<T>();
@@ -136,6 +193,45 @@ pub fn remap_exposed_service<T>(
     let public_prefix = format!("{owner}/public/{prefix}/");
     let rest = service.as_str().strip_prefix(&public_prefix)?;
     ServiceId::parse(format!("{}/public/{rest}", exposed_owner::<T>())).ok()
+}
+
+fn remap_root_exposed_export(
+    owner: &crate::PluginId,
+    remaps: &[StaticExposeRemap],
+    mut export: StaticComponentExport,
+) -> StaticComponentExport {
+    let prefix = format!("{}/public/", owner.as_str());
+    let Some(encoded) = export.interface.as_str().strip_prefix(&prefix) else {
+        return export;
+    };
+    let Some((path, version)) = encoded.rsplit_once('@') else {
+        return export;
+    };
+    let path = remap_public_path(path, remaps);
+    export.interface = InterfaceId::parse(format!("{prefix}{path}@{version}"))
+        .expect("plugin exposure paths are validated by the plugin attribute");
+    export
+}
+
+fn remap_public_path(path: &str, remaps: &[StaticExposeRemap]) -> String {
+    let selected = remaps
+        .iter()
+        .filter_map(|remap| {
+            path_suffix(path, remap.from).map(|suffix| (remap.from, remap.to, suffix))
+        })
+        .max_by_key(|(prefix, _, _)| prefix.split('/').count());
+
+    let Some((_, replacement, suffix)) = selected else {
+        return path.to_owned();
+    };
+    join_public_path(replacement, suffix)
+}
+
+fn path_suffix<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
+    if path == prefix {
+        return Some("");
+    }
+    path.strip_prefix(prefix)?.strip_prefix('/')
 }
 
 pub trait StaticPluginPublicProjection: StaticPluginDefinition + StaticPluginComponents {
