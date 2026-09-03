@@ -103,22 +103,6 @@ mod tests {
         kernel
     }
 
-    fn invoke<T: serde::Serialize, R: serde::de::DeserializeOwned>(
-        kernel: &mut Kernel,
-        service: &phenix_core::ServiceId,
-        request: &T,
-    ) -> R {
-        let output = kernel
-            .invoke(
-                service,
-                &serde_json::to_vec(request).unwrap(),
-                &authority(),
-                None,
-            )
-            .unwrap();
-        serde_json::from_slice(&output).unwrap()
-    }
-
     fn invoke_structural<T, R>(
         kernel: &mut Kernel,
         service: &phenix_core::ServiceId,
@@ -203,7 +187,7 @@ mod tests {
         let path = temp_db();
         {
             let mut first = kernel(&path);
-            let _: ToolResponse = invoke(
+            let _: ToolResponse = invoke_structural(
                 &mut first,
                 &tool_service(),
                 &ToolCommand::Register {
@@ -215,7 +199,7 @@ mod tests {
                     },
                 },
             );
-            let _: SkillResponse = invoke(
+            let _: SkillResponse = invoke_structural(
                 &mut first,
                 &skill_service(),
                 &SkillCommand::Register {
@@ -225,7 +209,7 @@ mod tests {
                     },
                 },
             );
-            let registered: ContextResponse = invoke(
+            let registered: ContextResponse = invoke_structural(
                 &mut first,
                 &context_service(),
                 &ContextCommand::Register {
@@ -240,7 +224,7 @@ mod tests {
         }
 
         let mut restored = kernel(&path);
-        let tool: ToolResponse = invoke(
+        let tool: ToolResponse = invoke_structural(
             &mut restored,
             &tool_service(),
             &ToolCommand::Invoke {
@@ -254,12 +238,13 @@ mod tests {
                 output: b"tool:hello".to_vec().into()
             }
         );
-        let skills: SkillResponse = invoke(&mut restored, &skill_service(), &SkillCommand::List);
+        let skills: SkillResponse =
+            invoke_structural(&mut restored, &skill_service(), &SkillCommand::List);
         assert!(
             matches!(skills, SkillResponse::Skills { skills } if skills[0].id.as_str() == "review")
         );
         let context: ContextResponse =
-            invoke(&mut restored, &context_service(), &ContextCommand::List);
+            invoke_structural(&mut restored, &context_service(), &ContextCommand::List);
         assert!(
             matches!(context, ContextResponse::Resources { descriptors } if descriptors[0].resource_id.as_str() == "readme")
         );
