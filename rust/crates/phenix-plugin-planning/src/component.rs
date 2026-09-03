@@ -2,8 +2,6 @@ use crate::Plugin;
 use phenix_core::{ComponentId, ComponentManifest};
 use phenix_sdk::StaticPluginDefinition;
 
-const PLANNING_PLUGIN: &str = "phenix.planning";
-
 #[must_use]
 pub fn planning_component_id() -> ComponentId {
     planning_component_manifest().id
@@ -23,6 +21,8 @@ mod tests {
     use crate::planning_manifest;
     use phenix_core::{ComponentInterface, ResolvedComponentGraph};
     use phenix_sdk::PlanningInterface;
+
+    const PLANNING_PLUGIN: &str = "phenix.planning";
 
     #[test]
     fn planning_is_exposed_as_an_ordinary_typed_component() {
