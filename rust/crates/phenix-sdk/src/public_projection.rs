@@ -1,5 +1,8 @@
-use crate::{Authority, ComponentId, StaticPluginComponents, StaticPluginDefinition};
-use phenix_core::{InterfaceId, InterfaceSchema, PhenixSchema};
+use crate::{
+    Authority, ComponentId, StaticComponentBehavior, StaticComponentExport,
+    StaticComponentRuntimeDispatch, StaticPluginComponents, StaticPluginDefinition,
+};
+use phenix_core::{InterfaceId, InterfaceSchema, PhenixSchema, PluginHost, ServiceId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaticPublicCallable {
@@ -24,6 +27,115 @@ pub struct StaticPublicValue {
 pub struct StaticPublicProjection {
     pub callables: Vec<StaticPublicCallable>,
     pub values: Vec<StaticPublicValue>,
+}
+
+/// Recursive public members declared by fields on one Rust value.
+///
+/// Implementations are generated from individually annotated fields. The
+/// caller supplies the public owner so the same nested Rust type can be
+/// mounted at different plugin paths without knowing those paths itself.
+pub trait StaticExposeFields {
+    fn exposed_field_exports_for(_owner: &str) -> Vec<StaticComponentExport> {
+        Vec::new()
+    }
+
+    #[doc(hidden)]
+    fn dispatch_exposed_field_for(
+        &mut self,
+        _owner: &str,
+        _service: &ServiceId,
+        _input: &[u8],
+        _host: &PluginHost<'_>,
+    ) -> Option<Result<Vec<u8>, String>> {
+        None
+    }
+}
+
+/// Relative public projection for a reusable Rust value.
+///
+/// Direct methods use a type-local internal owner. Parents remount the
+/// resulting relative paths under their annotated field path.
+pub trait StaticExpose:
+    StaticExposeFields + StaticComponentBehavior + StaticComponentRuntimeDispatch + Sized
+{
+    fn exposed_exports() -> Vec<StaticComponentExport> {
+        let owner = exposed_owner::<Self>();
+        let mut exports = <Self as StaticComponentBehavior>::exports();
+        exports.extend(<Self as StaticExposeFields>::exposed_field_exports_for(
+            &owner,
+        ));
+        exports
+    }
+
+    #[doc(hidden)]
+    fn dispatch_exposed(
+        &mut self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        let owner = exposed_owner::<Self>();
+        if let Some(result) = <Self as StaticExposeFields>::dispatch_exposed_field_for(
+            self, &owner, service, input, host,
+        ) {
+            return result;
+        }
+        <Self as StaticComponentRuntimeDispatch>::dispatch_runtime(self, service, input, host)
+    }
+}
+
+impl<T> StaticExpose for T where
+    T: StaticExposeFields + StaticComponentBehavior + StaticComponentRuntimeDispatch + Sized
+{
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn exposed_owner<T>() -> String {
+    let type_name = std::any::type_name::<T>();
+    let mut owner = String::from("phenix.expose/");
+    for character in type_name.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-' | ':' | '/') {
+            owner.push(character);
+        } else {
+            owner.push('_');
+        }
+    }
+    owner
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn exposed_interface<T>(path: &str) -> InterfaceId {
+    InterfaceId::parse(format!("{}/public/{path}@1", exposed_owner::<T>()))
+        .expect("exposed Rust member path derives a valid internal interface id")
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn remount_exposed_export(
+    owner: &str,
+    prefix: &str,
+    mut export: StaticComponentExport,
+) -> StaticComponentExport {
+    let (relative, version) = public_interface_parts(&export.interface)
+        .expect("StaticExpose exports use generated public interface identities");
+    let path = join_public_path(prefix, relative);
+    export.interface = InterfaceId::parse(format!("{owner}/public/{path}@{version}"))
+        .expect("annotated public path derives a valid interface id");
+    export
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn remap_exposed_service<T>(
+    owner: &str,
+    prefix: &str,
+    service: &ServiceId,
+) -> Option<ServiceId> {
+    let public_prefix = format!("{owner}/public/{prefix}/");
+    let rest = service.as_str().strip_prefix(&public_prefix)?;
+    ServiceId::parse(format!("{}/public/{rest}", exposed_owner::<T>())).ok()
 }
 
 pub trait StaticPluginPublicProjection: StaticPluginDefinition + StaticPluginComponents {
@@ -67,12 +179,9 @@ pub trait StaticPluginPublicProjection: StaticPluginDefinition + StaticPluginCom
 }
 
 fn callable_path(interface: &InterfaceId, method: &str) -> Vec<String> {
-    let Some((_, encoded)) = interface.as_str().rsplit_once("/public/") else {
+    let Some((path, _version)) = public_interface_parts(interface) else {
         return vec![method.to_owned()];
     };
-    let path = encoded
-        .rsplit_once('@')
-        .map_or(encoded, |(path, _version)| path);
     let segments = path
         .split('/')
         .filter(|segment| !segment.is_empty())
@@ -82,6 +191,19 @@ fn callable_path(interface: &InterfaceId, method: &str) -> Vec<String> {
         vec![method.to_owned()]
     } else {
         segments
+    }
+}
+
+fn public_interface_parts(interface: &InterfaceId) -> Option<(&str, &str)> {
+    let (_, encoded) = interface.as_str().rsplit_once("/public/")?;
+    encoded.rsplit_once('@')
+}
+
+fn join_public_path(prefix: &str, relative: &str) -> String {
+    match (prefix.trim_matches('/'), relative.trim_matches('/')) {
+        ("", relative) => relative.to_owned(),
+        (prefix, "") => prefix.to_owned(),
+        (prefix, relative) => format!("{prefix}/{relative}"),
     }
 }
 
