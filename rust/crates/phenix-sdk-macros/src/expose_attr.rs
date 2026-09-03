@@ -120,7 +120,8 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
                     "an exposed method may declare only one Phenix role",
                 ));
             }
-            let Some(expose) = expose_declaration(&attribute, &method.sig.ident.to_string())? else {
+            let Some(expose) = expose_declaration(&attribute, &method.sig.ident.to_string())?
+            else {
                 return Err(syn::Error::new_spanned(
                     attribute,
                     "nested exposed behavior currently accepts only #[phenix(expose...)] methods",
@@ -196,7 +197,8 @@ fn exposed_fields(item: &mut ItemStruct) -> syn::Result<Vec<ExposedField>> {
                     .expect("named field has an identifier")
                     .to_string()
                     .as_str(),
-            )? else {
+            )?
+            else {
                 return Err(syn::Error::new_spanned(
                     attribute,
                     "exposed struct fields accept only #[phenix(expose...)]",
@@ -225,7 +227,10 @@ struct ExposeDeclaration {
     authority: Option<Expr>,
 }
 
-fn expose_declaration(attribute: &Attribute, default_name: &str) -> syn::Result<Option<ExposeDeclaration>> {
+fn expose_declaration(
+    attribute: &Attribute,
+    default_name: &str,
+) -> syn::Result<Option<ExposeDeclaration>> {
     let Meta::List(meta) = &attribute.meta else {
         return Ok(None);
     };
