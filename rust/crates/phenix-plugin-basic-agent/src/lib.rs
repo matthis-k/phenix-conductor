@@ -1,9 +1,21 @@
 #![forbid(unsafe_code)]
 
-pub use phenix_plugin_basic_context::*;
-pub use phenix_plugin_basic_model::*;
-pub use phenix_plugin_basic_skills::*;
-pub use phenix_plugin_basic_tools::*;
+pub use phenix_plugin_basic_context::{
+    basic_context_component_id, basic_context_component_manifest, basic_context_factory,
+    basic_context_manifest, BasicContextInterface, BASIC_CONTEXT_COMPONENT, BASIC_CONTEXT_PLUGIN,
+};
+pub use phenix_plugin_basic_model::{
+    basic_model_component_manifest, basic_model_factory, basic_model_manifest,
+    BASIC_MODEL_COMPONENT, BASIC_MODEL_PLUGIN,
+};
+pub use phenix_plugin_basic_skills::{
+    basic_skills_component_id, basic_skills_component_manifest, basic_skills_factory,
+    basic_skills_manifest, BasicSkillsInterface, BASIC_SKILLS_COMPONENT, BASIC_SKILLS_PLUGIN,
+};
+pub use phenix_plugin_basic_tools::{
+    basic_tools_component_id, basic_tools_component_manifest, basic_tools_factory,
+    basic_tools_manifest, BasicToolsInterface, BASIC_TOOLS_COMPONENT, BASIC_TOOLS_PLUGIN,
+};
 
 #[cfg(test)]
 mod component_regression;
