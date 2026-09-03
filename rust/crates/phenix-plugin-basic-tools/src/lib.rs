@@ -1,7 +1,7 @@
 use phenix_core::{
-    Authority, CallableId, CapabilityId, ComponentId, ComponentInterface,
-    ComponentManifest, InterfaceId, PluginContext, PluginInstance, PluginManifest,
-    ResourceNamespace, ToolCommand, ToolDefinition, ToolResponse, TransactionOp, TOOL_SERVICE,
+    Authority, CallableId, CapabilityId, ComponentId, ComponentInterface, ComponentManifest,
+    InterfaceId, PluginContext, PluginInstance, PluginManifest, ResourceNamespace, ToolCommand,
+    ToolDefinition, ToolResponse, TransactionOp, TOOL_SERVICE,
 };
 use phenix_sdk::{StaticPluginComponentDispatch, StaticPluginDefinition};
 
