@@ -31,7 +31,9 @@ pub fn artifact_component_manifest() -> ComponentManifest {
 mod tests {
     use super::*;
     use crate::artifact_manifest;
-    use phenix_core::{ComponentImport, PluginExecution, PluginId, PluginManifest, ResolvedComponentGraph};
+    use phenix_core::{
+        ComponentImport, PluginExecution, PluginId, PluginManifest, ResolvedComponentGraph,
+    };
 
     #[test]
     fn artifact_service_binds_as_an_ordinary_typed_component() {
