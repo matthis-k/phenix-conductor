@@ -45,6 +45,17 @@ where
     }
 }
 
+/// Author-free component routing generated for a stateful plugin struct.
+pub trait StaticPluginComponentDispatch {
+    fn dispatch_component(
+        &mut self,
+        component: &ComponentId,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String>;
+}
+
 pub type StaticPluginStart<T> = fn(&mut T, &PluginHost<'_>) -> Result<(), String>;
 pub type StaticPluginStop<T> = fn(&mut T, &PluginHost<'_>) -> Result<(), String>;
 pub type StaticPluginInvoke<T> =
@@ -74,6 +85,16 @@ where
             stop: None,
             invoke,
         }
+    }
+}
+
+impl<T> StaticPluginInstance<T>
+where
+    T: StaticPluginResources + StaticPluginComponentDispatch,
+{
+    #[must_use]
+    pub fn from_component_dispatch(plugin: T) -> Self {
+        Self::new(plugin, T::dispatch_component)
     }
 }
 
