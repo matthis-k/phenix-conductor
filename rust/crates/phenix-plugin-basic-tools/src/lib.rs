@@ -1,5 +1,5 @@
 use phenix_core::{
-    tool_service, Authority, CallableId, CapabilityId, ComponentId, ComponentInterface,
+    Authority, CallableId, CapabilityId, ComponentId, ComponentInterface,
     ComponentManifest, InterfaceId, PluginContext, PluginInstance, PluginManifest,
     ResourceNamespace, ToolCommand, ToolDefinition, ToolResponse, TransactionOp, TOOL_SERVICE,
 };
@@ -176,7 +176,7 @@ mod tests {
         let manifest = basic_tools_manifest();
         assert_eq!(manifest.id.as_str(), BASIC_TOOLS_PLUGIN);
         assert_eq!(manifest.services.len(), 1);
-        assert_eq!(manifest.services[0].service, tool_service());
+        assert_eq!(manifest.services[0].service, phenix_core::tool_service());
         assert_eq!(manifest.resource_namespaces, vec![namespace()]);
 
         let component = basic_tools_component_manifest();
