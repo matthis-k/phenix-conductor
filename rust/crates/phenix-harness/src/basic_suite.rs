@@ -73,20 +73,18 @@ mod tests {
         ))
     }
 
-    fn invoke<T: serde::Serialize, R: serde::de::DeserializeOwned>(
+    fn invoke<T, R>(
         harness: &mut PhenixHarness,
         service: &phenix_core::ServiceId,
         request: &T,
-    ) -> R {
-        let output = harness
-            .invoke(
-                service,
-                &serde_json::to_vec(request).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
-            .unwrap();
-        serde_json::from_slice(&output).unwrap()
+    ) -> R
+    where
+        for<'value> PhenixValue: From<&'value T>,
+        for<'value> R: TryFrom<Project<&'value PhenixValue>, Error = phenix_core::ValueError>,
+    {
+        let request = PhenixValue::from(request);
+        let output = invoke_structural(harness, service, &request);
+        R::try_from(Project(&output)).unwrap()
     }
 
     fn invoke_structural(
