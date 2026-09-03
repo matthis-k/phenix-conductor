@@ -19,9 +19,15 @@ fn generated_authoring_preserves_the_public_runtime_contract() {
     assert_eq!(manifest.services[0].role, ServiceRole::Terminal);
     assert_eq!(manifest.services[0].service, options_service());
     assert_eq!(manifest.services[0].priority, 100);
-    assert_eq!(manifest.services[0].required_authority, Authority::default());
+    assert_eq!(
+        manifest.services[0].required_authority,
+        Authority::default()
+    );
     assert_eq!(manifest.resource_namespaces.len(), 1);
-    assert_eq!(manifest.resource_namespaces[0].as_str(), "phenix.options.state");
+    assert_eq!(
+        manifest.resource_namespaces[0].as_str(),
+        "phenix.options.state"
+    );
     for value in [
         "kernel.persistence.schema",
         "kernel.persistence.read",
@@ -35,9 +41,15 @@ fn generated_authoring_preserves_the_public_runtime_contract() {
     assert_eq!(component.owner, manifest.id);
     assert!(component.imports.is_empty());
     assert_eq!(component.exports.len(), 1);
-    assert_eq!(component.exports[0].interface, OptionsInterface::interface_id());
+    assert_eq!(
+        component.exports[0].interface,
+        OptionsInterface::interface_id()
+    );
     assert_eq!(component.exports[0].schema, OptionsInterface::schema());
     assert_eq!(component.exports[0].priority, 100);
-    assert_eq!(component.exports[0].required_authority, Authority::default());
+    assert_eq!(
+        component.exports[0].required_authority,
+        Authority::default()
+    );
     assert_eq!(component.maximum_authority, manifest.maximum_authority);
 }
