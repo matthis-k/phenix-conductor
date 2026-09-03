@@ -1,15 +1,51 @@
-name: Worker patch executor (disabled)
+name: Worker comment guard
 
-# Patch transport through PR comments is intentionally disabled.
-# Workers persist executable state in branch commits and the PR checklist only.
 on:
-  workflow_dispatch:
+  issue_comment:
+    types: [created]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
-  disabled:
+  purge-historical-patch-comments:
+    if: >-
+      github.event_name == 'push' &&
+      contains(github.event.head_commit.message, '[cleanup-worker-comments]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete historical worker patch transport comments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/comments?per_page=100" \
+            --jq '.[] | select((.body // "") | startswith("<!-- phenix-worker-patch-v1 -->")) | .id' \
+            > "$RUNNER_TEMP/worker-patch-comment-ids"
+
+          count=0
+          while IFS= read -r id; do
+            test -n "$id" || continue
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id"
+            count=$((count + 1))
+          done < "$RUNNER_TEMP/worker-patch-comment-ids"
+
+          echo "Deleted $count historical worker patch transport comments."
+
+  delete-new-patch-comment:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      startsWith(github.event.comment.body, '<!-- phenix-worker-patch-v1 -->')
     runs-on: ubuntu-latest
     steps:
-      - run: echo "PR-comment patch execution is disabled; workers must push branch commits directly."
+      - name: Delete forbidden worker patch transport comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID"
