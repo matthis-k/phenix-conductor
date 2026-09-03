@@ -5,6 +5,7 @@ use phenix_core::{InterfaceId, InterfaceSchema, PhenixSchema};
 pub struct StaticPublicCallable {
     pub component: ComponentId,
     pub interface: InterfaceId,
+    pub path: Vec<String>,
     pub method: &'static str,
     pub schema: InterfaceSchema,
     pub required_authority: Authority,
@@ -38,6 +39,7 @@ pub trait StaticPluginPublicProjection: StaticPluginDefinition + StaticPluginCom
                     .map(|export| StaticPublicCallable {
                         component: component.id.clone(),
                         interface: export.interface.clone(),
+                        path: callable_path(&export.interface, export.method),
                         method: export.method,
                         schema: export.schema.clone(),
                         required_authority: export.required_authority.clone(),
@@ -61,6 +63,25 @@ pub trait StaticPluginPublicProjection: StaticPluginDefinition + StaticPluginCom
         }
 
         projection
+    }
+}
+
+fn callable_path(interface: &InterfaceId, method: &str) -> Vec<String> {
+    let Some((_, encoded)) = interface.as_str().rsplit_once("/public/") else {
+        return vec![method.to_owned()];
+    };
+    let path = encoded
+        .rsplit_once('@')
+        .map_or(encoded, |(path, _version)| path);
+    let segments = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if segments.is_empty() {
+        vec![method.to_owned()]
+    } else {
+        segments
     }
 }
 
