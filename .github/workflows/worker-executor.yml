@@ -12,19 +12,19 @@ permissions:
   pull-requests: write
 
 jobs:
-  purge-historical-patch-comments:
+  purge-pr-462-patch-comments:
     if: >-
       github.event_name == 'push' &&
       contains(github.event.head_commit.message, '[cleanup-worker-comments]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Delete historical worker patch transport comments
+      - name: Delete historical worker patch transport comments from PR 462
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/comments?per_page=100" \
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/462/comments?per_page=100" \
             --jq '.[] | select((.body // "") | startswith("<!-- phenix-worker-patch-v1 -->")) | .id' \
             > "$RUNNER_TEMP/worker-patch-comment-ids"
 
@@ -35,7 +35,7 @@ jobs:
             count=$((count + 1))
           done < "$RUNNER_TEMP/worker-patch-comment-ids"
 
-          echo "Deleted $count historical worker patch transport comments."
+          echo "Deleted $count historical worker patch transport comments from PR 462."
 
   delete-new-patch-comment:
     if: >-
