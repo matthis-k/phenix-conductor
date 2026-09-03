@@ -103,23 +103,7 @@ mod tests {
         kernel
     }
 
-    fn invoke<T: serde::Serialize, R: serde::de::DeserializeOwned>(
-        kernel: &mut Kernel,
-        service: &phenix_core::ServiceId,
-        request: &T,
-    ) -> R {
-        let output = kernel
-            .invoke(
-                service,
-                &serde_json::to_vec(request).unwrap(),
-                &authority(),
-                None,
-            )
-            .unwrap();
-        serde_json::from_slice(&output).unwrap()
-    }
-
-    fn invoke_structural<T, R>(
+    fn invoke<T, R>(
         kernel: &mut Kernel,
         service: &phenix_core::ServiceId,
         request: &T,
@@ -177,7 +161,7 @@ mod tests {
     fn basic_model_is_direct_and_policy_light() {
         let path = temp_db();
         let mut kernel = kernel(&path);
-        let response: ModelInferenceResponse = invoke_structural(
+        let response: ModelInferenceResponse = invoke(
             &mut kernel,
             &model_inference_service(),
             &ModelInferenceRequest {
