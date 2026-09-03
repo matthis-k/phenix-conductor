@@ -52,6 +52,26 @@ struct Plugin {
     api: Api,
 }
 
+#[phenix_sdk::plugin(root, id = "fixture.root-public")]
+struct RootPlugin {
+    calls: usize,
+}
+
+#[phenix_sdk::plugin]
+impl RootPlugin {
+    #[phenix(expose(name = "run"))]
+    async fn execute(&mut self, request: Request) -> Response {
+        self.calls += 1;
+        Response {
+            value: request.value,
+        }
+    }
+
+    fn helper(&self) -> usize {
+        self.calls
+    }
+}
+
 #[test]
 fn public_projection_is_derived_from_ordinary_component_contributions() {
     let projection = Plugin::public_projection();
@@ -65,6 +85,7 @@ fn public_projection_is_derived_from_ordinary_component_contributions() {
         projection.callables[0].interface.as_str(),
         "fixture.public-projection.call@1"
     );
+    assert_eq!(projection.callables[0].path, ["public_call"]);
     assert_eq!(projection.callables[0].method, "public_call");
 
     assert_eq!(projection.values.len(), 1);
@@ -97,4 +118,25 @@ fn public_projection_is_derived_from_ordinary_component_contributions() {
     assert_eq!(private.value, "private");
     assert_eq!(plugin.api.status(), 1);
     assert_eq!(plugin.api.internal(), 0);
+}
+
+#[test]
+fn root_exposure_uses_member_name_without_an_api_redirect() {
+    let projection = RootPlugin::public_projection();
+
+    assert_eq!(projection.callables.len(), 1);
+    let callable = &projection.callables[0];
+    assert_eq!(callable.component.as_str(), "fixture.root-public");
+    assert_eq!(callable.interface.as_str(), "fixture.root-public/public/run@1");
+    assert_eq!(callable.path, ["run"]);
+    assert_eq!(callable.method, "execute");
+
+    let components = RootPlugin::component_manifests();
+    assert_eq!(components.len(), 1);
+    assert_eq!(components[0].id.as_str(), "fixture.root-public");
+    assert_eq!(components[0].exports.len(), 1);
+
+    let plugin = RootPlugin { calls: 0 };
+    assert_eq!(plugin.helper(), 0);
+    drop(plugin.__phenix_into_plugin_instance());
 }
