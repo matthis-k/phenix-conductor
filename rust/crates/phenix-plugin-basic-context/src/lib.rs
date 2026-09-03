@@ -4,7 +4,7 @@ use phenix_core::{
     ContextRevisionId, InterfaceId, PluginContext, PluginInstance, PluginManifest,
     ResourceNamespace, TransactionOp, CONTEXT_SERVICE,
 };
-use phenix_sdk::{StaticPluginComponentDispatch, StaticPluginDefinition};
+use phenix_sdk::StaticPluginDefinition;
 use sha2::{Digest, Sha256};
 
 pub const BASIC_CONTEXT_PLUGIN: &str = "phenix.basic-context";
@@ -27,11 +27,14 @@ struct ContextStore;
 #[phenix_sdk::resource(schema = 1)]
 impl ContextStore {}
 
-#[phenix_sdk::component]
-struct Api;
+#[phenix_sdk::plugin(root, id = "phenix.basic-context", authority = persistence_authority())]
+pub struct Plugin {
+    #[phenix(resource, id = "phenix.basic-context.state")]
+    _state: phenix_sdk::Durable<ContextStore>,
+}
 
-#[phenix_sdk::component]
-impl Api {
+#[phenix_sdk::plugin]
+impl Plugin {
     #[phenix(export("phenix.context@1"), terminal, priority = 10)]
     fn handle(
         &mut self,
@@ -40,15 +43,6 @@ impl Api {
     ) -> Result<ContextResponse, String> {
         handle(context, command)
     }
-}
-
-#[phenix_sdk::plugin(id = "phenix.basic-context", authority = persistence_authority())]
-pub struct Plugin {
-    #[phenix(component, id = "phenix.basic-context")]
-    api: Api,
-
-    #[phenix(resource, id = "phenix.basic-context.state")]
-    _state: phenix_sdk::Durable<ContextStore>,
 }
 
 #[must_use]
@@ -66,10 +60,10 @@ pub fn basic_context_component_manifest() -> ComponentManifest {
 
 #[must_use]
 pub fn basic_context_factory() -> Box<dyn PluginInstance> {
-    StaticPluginComponentDispatch::into_plugin_instance(Plugin {
-        api: Api,
+    Plugin {
         _state: phenix_sdk::Durable::new(),
-    })
+    }
+    .__phenix_into_plugin_instance()
 }
 
 #[must_use]
