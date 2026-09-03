@@ -1,36 +1,28 @@
-use crate::planning_manifest;
-use phenix_core::{ComponentExport, ComponentId, ComponentInterface, ComponentManifest, PluginId};
-use phenix_sdk::PlanningInterface;
-
-const PLANNING_COMPONENT: &str = "phenix.planning";
-const PLANNING_PLUGIN: &str = "phenix.planning";
+use crate::Plugin;
+use phenix_core::{ComponentId, ComponentManifest};
+use phenix_sdk::StaticPluginDefinition;
 
 #[must_use]
 pub fn planning_component_id() -> ComponentId {
-    ComponentId::parse(PLANNING_COMPONENT).expect("static planning component id is valid")
+    planning_component_manifest().id
 }
 
 #[must_use]
 pub fn planning_component_manifest() -> ComponentManifest {
-    let authority = planning_manifest().maximum_authority;
-    ComponentManifest {
-        id: planning_component_id(),
-        owner: PluginId::parse(PLANNING_PLUGIN).expect("static planning plugin id is valid"),
-        imports: Vec::new(),
-        exports: vec![ComponentExport {
-            interface: PlanningInterface::interface_id(),
-            schema: PlanningInterface::schema(),
-            priority: 100,
-            required_authority: authority.clone(),
-        }],
-        maximum_authority: authority,
-    }
+    Plugin::component_manifests()
+        .into_iter()
+        .next()
+        .expect("planning plugin has one generated component")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::ResolvedComponentGraph;
+    use crate::planning_manifest;
+    use phenix_core::{ComponentInterface, ResolvedComponentGraph};
+    use phenix_sdk::PlanningInterface;
+
+    const PLANNING_PLUGIN: &str = "phenix.planning";
 
     #[test]
     fn planning_is_exposed_as_an_ordinary_typed_component() {

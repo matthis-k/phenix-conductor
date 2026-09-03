@@ -212,7 +212,7 @@ impl PluginInstance for SdkPlugin {
             let interface = SdkSessionInterface::interface_id();
             let command = context
                 .kernel
-                .decode_projected::<SdkSessionCommand>(&interface, input)
+                .decode::<SdkSessionCommand>(&interface, input)
                 .map_err(|error| error.to_string())?;
             let response = session_command(&context, command)?;
             return context
@@ -224,7 +224,7 @@ impl PluginInstance for SdkPlugin {
             let interface = SdkToolsInterface::interface_id();
             let command = context
                 .kernel
-                .decode_projected::<SdkToolCommand>(&interface, input)
+                .decode::<SdkToolCommand>(&interface, input)
                 .map_err(|error| error.to_string())?;
             let response = tool_command(&context, command)?;
             return context
@@ -236,7 +236,7 @@ impl PluginInstance for SdkPlugin {
             let interface = SdkSkillsInterface::interface_id();
             let command = context
                 .kernel
-                .decode_projected::<SdkSkillCommand>(&interface, input)
+                .decode::<SdkSkillCommand>(&interface, input)
                 .map_err(|error| error.to_string())?;
             let response = skill_command(&context, command)?;
             return context
@@ -248,7 +248,7 @@ impl PluginInstance for SdkPlugin {
             let interface = SdkConfigInterface::interface_id();
             let command = context
                 .kernel
-                .decode_projected::<SdkConfigCommand>(&interface, input)
+                .decode::<SdkConfigCommand>(&interface, input)
                 .map_err(|error| error.to_string())?;
             let root = context
                 .plugin
@@ -319,7 +319,7 @@ fn open_session(
     let existing = match context
         .sdk
         .sessions
-        .invoke_projected(&SessionCommand::Get { id: id.clone() })
+        .invoke(&SessionCommand::Get { id: id.clone() })
         .map_err(|error| error.to_string())?
     {
         SessionResponse::Session { session } => session,
@@ -347,7 +347,7 @@ fn open_session(
     match context
         .sdk
         .sessions
-        .invoke_projected(&SessionCommand::Create { id })
+        .invoke(&SessionCommand::Create { id })
         .map_err(|error| error.to_string())?
     {
         SessionResponse::Created { session } => Ok(SdkSessionResponse::Opened {
@@ -371,7 +371,7 @@ fn tool_command(
             let response = context
                 .sdk
                 .execution
-                .invoke_projected::<ExecutionCommand, ExecutionResponse>(
+                .invoke::<ExecutionCommand, ExecutionResponse>(
                     &ExecutionCommand::RegisterCallable {
                         id,
                         service,
@@ -398,13 +398,11 @@ fn tool_command(
             let response = context
                 .sdk
                 .execution
-                .invoke_projected::<ExecutionCommand, ExecutionResponse>(
-                    &ExecutionCommand::InvokeCallable {
-                        execution_id,
-                        callable_id: id,
-                        input,
-                    },
-                )
+                .invoke::<ExecutionCommand, ExecutionResponse>(&ExecutionCommand::InvokeCallable {
+                    execution_id,
+                    callable_id: id,
+                    input,
+                })
                 .map_err(|error| error.to_string())?;
             let ExecutionResponse::Invocation { output } = response else {
                 return Err("unexpected execution response while invoking SDK tool".into());

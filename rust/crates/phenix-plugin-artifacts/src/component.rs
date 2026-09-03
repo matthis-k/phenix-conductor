@@ -1,11 +1,6 @@
-use crate::{artifact_manifest, ARTIFACT_SERVICE};
-use phenix_core::{
-    Authority, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
-    PluginId,
-};
-
-const ARTIFACT_COMPONENT: &str = "phenix.artifacts";
-const ARTIFACT_PLUGIN: &str = "phenix.artifacts";
+use crate::{Plugin, ARTIFACT_SERVICE};
+use phenix_core::{ComponentId, ComponentInterface, ComponentManifest, InterfaceId};
+use phenix_sdk::StaticPluginDefinition;
 
 pub struct ArtifactInterface;
 
@@ -21,29 +16,24 @@ impl ComponentInterface for ArtifactInterface {
 
 #[must_use]
 pub fn artifact_component_id() -> ComponentId {
-    ComponentId::parse(ARTIFACT_COMPONENT).expect("static artifact component id is valid")
+    artifact_component_manifest().id
 }
 
 #[must_use]
 pub fn artifact_component_manifest() -> ComponentManifest {
-    ComponentManifest {
-        id: artifact_component_id(),
-        owner: PluginId::parse(ARTIFACT_PLUGIN).expect("static artifact plugin id is valid"),
-        imports: Vec::new(),
-        exports: vec![ComponentExport {
-            interface: ArtifactInterface::interface_id(),
-            schema: ArtifactInterface::schema(),
-            priority: 100,
-            required_authority: Authority::default(),
-        }],
-        maximum_authority: artifact_manifest().maximum_authority,
-    }
+    Plugin::component_manifests()
+        .into_iter()
+        .next()
+        .expect("artifacts plugin has one generated component")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{ComponentImport, PluginExecution, PluginManifest, ResolvedComponentGraph};
+    use crate::artifact_manifest;
+    use phenix_core::{
+        ComponentImport, PluginExecution, PluginId, PluginManifest, ResolvedComponentGraph,
+    };
 
     #[test]
     fn artifact_service_binds_as_an_ordinary_typed_component() {
@@ -54,7 +44,7 @@ mod tests {
             dependencies: Vec::new(),
             services: Vec::new(),
             resource_namespaces: Vec::new(),
-            maximum_authority: Authority::default(),
+            maximum_authority: phenix_core::Authority::default(),
         };
         let consumer = ComponentManifest {
             id: ComponentId::parse("fixture.artifact-consumer").unwrap(),
@@ -63,10 +53,10 @@ mod tests {
                 interface: ArtifactInterface::interface_id(),
                 schema: ArtifactInterface::schema(),
                 required: true,
-                authority: Authority::default(),
+                authority: phenix_core::Authority::default(),
             }],
             exports: Vec::new(),
-            maximum_authority: Authority::default(),
+            maximum_authority: phenix_core::Authority::default(),
         };
         let graph = ResolvedComponentGraph::compile(
             [consumer_plugin, artifact_manifest()],

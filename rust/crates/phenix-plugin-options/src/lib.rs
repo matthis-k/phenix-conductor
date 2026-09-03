@@ -1,11 +1,10 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{
-    Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface, ComponentManifest,
-    DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, ServiceRole,
-    TransactionOp,
+    Authority, CapabilityId, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
+    PluginContext, PluginInstance, PluginManifest, ResourceNamespace, ServiceId, TransactionOp,
 };
+use phenix_sdk::StaticPluginDefinition;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
@@ -20,12 +19,6 @@ const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 
 type OptionsContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
-
-fn plugin_context<'host, 'runtime>(
-    host: &'host PluginHost<'runtime>,
-) -> OptionsContext<'host, 'runtime> {
-    PluginContext::new(host, (), (), ())
-}
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct OptionKey(String);
@@ -441,6 +434,40 @@ impl ComponentInterface for OptionsInterface {
     }
 }
 
+struct OptionsStore;
+
+#[phenix_sdk::resource(schema = 1)]
+impl OptionsStore {}
+
+#[phenix_sdk::component]
+struct Api;
+
+#[phenix_sdk::component]
+impl Api {
+    #[phenix(
+        export("phenix.options@1"),
+        terminal,
+        priority = 100,
+        authority = persistence_authority()
+    )]
+    fn handle(
+        &mut self,
+        context: &phenix_sdk::PluginContext<'_, '_, ()>,
+        command: OptionCommand,
+    ) -> Result<OptionResponse, String> {
+        handle(context, command)
+    }
+}
+
+#[phenix_sdk::plugin(id = "phenix.options", authority = persistence_authority())]
+pub struct Plugin {
+    #[phenix(component, id = "phenix.options")]
+    api: Api,
+
+    #[phenix(resource, id = "phenix.options.state")]
+    _state: phenix_sdk::Durable<OptionsStore>,
+}
+
 #[must_use]
 pub fn options_service() -> ServiceId {
     ServiceId::parse(OPTIONS_SERVICE).expect("static options service id is valid")
@@ -448,46 +475,28 @@ pub fn options_service() -> ServiceId {
 
 #[must_use]
 pub fn options_component_id() -> ComponentId {
-    ComponentId::parse(OPTIONS_COMPONENT).expect("static options component id is valid")
+    options_component_manifest().id
 }
 
 #[must_use]
 pub fn options_manifest() -> PluginManifest {
-    PluginManifest {
-        id: PluginId::parse(OPTIONS_PLUGIN).expect("static options plugin id is valid"),
-        version: 1,
-        execution: PluginExecution::Embedded,
-        dependencies: Vec::new(),
-        services: vec![ServiceContribution {
-            role: ServiceRole::Terminal,
-            service: options_service(),
-            priority: 100,
-            required_authority: Authority::default(),
-        }],
-        resource_namespaces: vec![options_namespace()],
-        maximum_authority: persistence_authority(),
-    }
+    Plugin::manifest()
 }
 
 #[must_use]
 pub fn options_component_manifest() -> ComponentManifest {
-    ComponentManifest {
-        id: options_component_id(),
-        owner: PluginId::parse(OPTIONS_PLUGIN).expect("static options plugin id is valid"),
-        imports: Vec::new(),
-        exports: vec![ComponentExport {
-            interface: OptionsInterface::interface_id(),
-            schema: OptionsInterface::schema(),
-            priority: 100,
-            required_authority: Authority::default(),
-        }],
-        maximum_authority: persistence_authority(),
-    }
+    Plugin::component_manifests()
+        .into_iter()
+        .next()
+        .expect("options plugin has one generated component")
 }
 
 #[must_use]
 pub fn options_factory() -> Box<dyn PluginInstance> {
-    Box::new(OptionsPlugin)
+    phenix_sdk::StaticPluginComponentDispatch::into_plugin_instance(Plugin {
+        api: Api,
+        _state: phenix_sdk::Durable::new(),
+    })
 }
 
 pub fn default_option_definitions() -> Vec<OptionDefinition> {
@@ -764,39 +773,6 @@ fn value_at<'a>(
     values.get(&scope.storage_key())?.get(key)
 }
 
-struct OptionsPlugin;
-
-impl PluginInstance for OptionsPlugin {
-    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        plugin_context(host)
-            .kernel
-            .register_durable_schema(&DurableSchema::new(options_namespace(), 1))
-            .map_err(|error| error.to_string())
-    }
-
-    fn invoke(
-        &mut self,
-        service: &ServiceId,
-        input: &[u8],
-        host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        if service != &options_service() {
-            return Err(format!("unsupported options service: {service}"));
-        }
-        let context = plugin_context(host);
-        let interface = OptionsInterface::interface_id();
-        let command = context
-            .kernel
-            .decode_projected::<OptionCommand>(&interface, input)
-            .map_err(|error| error.to_string())?;
-        let response = handle(&context, command)?;
-        context
-            .kernel
-            .encode_value(&response)
-            .map_err(|error| error.to_string())
-    }
-}
-
 fn handle(
     context: &OptionsContext<'_, '_>,
     command: OptionCommand,
@@ -912,6 +888,22 @@ mod tests {
 
     fn key(value: &str) -> OptionKey {
         OptionKey::parse(value).unwrap()
+    }
+
+    #[test]
+    fn options_authoring_generates_runtime_metadata() {
+        let manifest = options_manifest();
+        let component = options_component_manifest();
+        assert_eq!(manifest.id.as_str(), OPTIONS_PLUGIN);
+        assert_eq!(component.id.as_str(), OPTIONS_COMPONENT);
+        assert_eq!(component.owner, manifest.id);
+        assert_eq!(component.exports.len(), 1);
+        assert_eq!(
+            component.exports[0].interface,
+            OptionsInterface::interface_id()
+        );
+        assert_eq!(manifest.resource_namespaces, vec![options_namespace()]);
+        assert_eq!(manifest.maximum_authority, persistence_authority());
     }
 
     #[test]

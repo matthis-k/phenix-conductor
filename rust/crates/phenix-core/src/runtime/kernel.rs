@@ -26,6 +26,7 @@ impl Kernel {
             config,
             states,
             embedded_factories: BTreeMap::new(),
+            prepared_embedded_instances: BTreeMap::new(),
             instances: BTreeMap::new(),
             events: Arc::new(EventBus::default()),
             tasks: TaskRuntime::default(),
@@ -113,6 +114,30 @@ impl Kernel {
         self.embedded_factories.insert(plugin, Arc::new(factory));
     }
 
+    /// Preload one already-constructed embedded implementation for the next activation.
+    /// Stateful plugins with real construction inputs use this path instead of pretending to have
+    /// a reusable zero-argument factory.
+    pub fn preload_embedded_instance(
+        &mut self,
+        plugin: PluginId,
+        instance: Box<dyn PluginInstance>,
+    ) {
+        self.prepared_embedded_instances.insert(plugin, instance);
+    }
+
+    pub(super) fn take_embedded_instance(
+        &mut self,
+        plugin: &PluginId,
+    ) -> Result<Box<dyn PluginInstance>, KernelError> {
+        if let Some(instance) = self.prepared_embedded_instances.remove(plugin) {
+            return Ok(instance);
+        }
+        self.embedded_factories
+            .get(plugin)
+            .map(|factory| factory())
+            .ok_or_else(|| KernelError::EmbeddedFactoryMissing(plugin.clone()))
+    }
+
     pub fn activate_all(&mut self) -> Result<(), KernelError> {
         for plugin in self.config.activation_order().to_vec() {
             self.activate(&plugin)?;
@@ -134,11 +159,8 @@ impl Kernel {
         match &manifest.execution {
             PluginExecution::ResourceOnly => {}
             PluginExecution::Embedded => {
-                let factory = self
-                    .embedded_factories
-                    .get(plugin)
-                    .ok_or_else(|| KernelError::EmbeddedFactoryMissing(plugin.clone()))?;
-                self.start_instance(plugin, &manifest, factory())?;
+                let instance = self.take_embedded_instance(plugin)?;
+                self.start_instance(plugin, &manifest, instance)?;
             }
             PluginExecution::Runtime { runtime, artifact } => {
                 let binding = self
@@ -276,11 +298,32 @@ impl Kernel {
     }
 
     pub fn stop(&mut self, plugin: &PluginId) -> Result<(), KernelError> {
+        let manifest = self
+            .config
+            .manifest(plugin)
+            .ok_or_else(|| KernelError::UnknownPlugin(plugin.clone()))?;
+        self.tasks.cancel_plugin(plugin);
         if let Some(instance) = self.instances.get(plugin) {
+            let host = PluginHost {
+                graph_generation: self.graph_generation.as_ref(),
+                component_graph: &self.component_graph,
+                config: &self.config,
+                states: &self.states,
+                instances: &self.instances,
+                plugin,
+                authority: &manifest.maximum_authority,
+                call_stack: BTreeSet::from([plugin.clone()]),
+                events: &self.events,
+                tasks: &self.tasks,
+                persistence: &self.persistence,
+                provenance: &self.provenance,
+                continuation: None,
+                active_services: BTreeSet::new(),
+            };
             instance
                 .lock()
                 .expect("plugin instance mutex poisoned")
-                .stop()
+                .stop(&host)
                 .map_err(|message| KernelError::PluginStop {
                     plugin: plugin.clone(),
                     message,
@@ -290,7 +333,7 @@ impl Kernel {
         let state = self
             .states
             .get_mut(plugin)
-            .ok_or_else(|| KernelError::UnknownPlugin(plugin.clone()))?;
+            .expect("plugin manifest and lifecycle state stay aligned");
         *state = PluginState::Stopped;
         self.events
             .publish(KernelEvent::PluginStopped(plugin.clone()));

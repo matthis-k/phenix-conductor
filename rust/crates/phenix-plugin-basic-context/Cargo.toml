@@ -9,5 +9,6 @@ role = "runtime-plugin"
 
 [dependencies]
 phenix-core = { path = "../phenix-core" }
+phenix-sdk = { path = "../phenix-sdk" }
 serde_json.workspace = true
 sha2.workspace = true

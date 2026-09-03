@@ -4,8 +4,8 @@ use crate::{
 };
 use phenix_core::{
     Authority, ComponentInterface, ComponentInvocationError, PhenixValue, PluginContext,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, SdkClient,
-    ServiceContribution, ServiceId,
+    PluginExecution, PluginHost, PluginInstance, PluginManifest, SdkClient, ServiceContribution,
+    ServiceId,
 };
 use phenix_sdk::{
     ContextInterface, FrontendInterface, JobInterface, ModelRoutingInterface, PlanningInterface,
@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const DEBUG_SERVICE: &str = "phenix.debug@1";
-const DEBUG_PLUGIN: &str = "phenix.debug";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, phenix_sdk_macros::PhenixValue)]
 #[serde(tag = "operation", rename_all = "snake_case")]
@@ -44,7 +43,7 @@ pub enum DebugResponse {
 #[must_use]
 pub fn debug_manifest(maximum_authority: Authority) -> PluginManifest {
     PluginManifest {
-        id: PluginId::parse(DEBUG_PLUGIN).expect("static plugin id is valid"),
+        id: crate::Plugin::plugin_id(),
         version: 1,
         execution: PluginExecution::Embedded,
         dependencies: Vec::new(),
@@ -61,7 +60,7 @@ pub fn debug_manifest(maximum_authority: Authority) -> PluginManifest {
 
 #[must_use]
 pub fn debug_factory() -> Box<dyn PluginInstance> {
-    Box::new(DebugPlugin)
+    Box::new(crate::Plugin)
 }
 
 #[must_use]
@@ -97,9 +96,7 @@ fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> DebugContext<'
     )
 }
 
-struct DebugPlugin;
-
-impl PluginInstance for DebugPlugin {
+impl PluginInstance for crate::Plugin {
     fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
     }
