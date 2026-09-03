@@ -1,7 +1,7 @@
 use phenix_core::{
-    skill_service, Authority, CapabilityId, ComponentId, ComponentInterface, ComponentManifest,
-    InterfaceId, PluginContext, PluginInstance, PluginManifest, ResourceNamespace, ServiceId,
-    SkillCommand, SkillDefinition, SkillId, SkillResponse, TransactionOp, SKILL_SERVICE,
+    Authority, CapabilityId, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
+    PluginContext, PluginInstance, PluginManifest, ResourceNamespace, SkillCommand, SkillDefinition,
+    SkillId, SkillResponse, TransactionOp, SKILL_SERVICE,
 };
 use phenix_sdk::{StaticPluginComponentDispatch, StaticPluginDefinition};
 
@@ -171,7 +171,7 @@ mod tests {
         let manifest = basic_skills_manifest();
         assert_eq!(manifest.id.as_str(), BASIC_SKILLS_PLUGIN);
         assert_eq!(manifest.services.len(), 1);
-        assert_eq!(manifest.services[0].service, skill_service());
+        assert_eq!(manifest.services[0].service, phenix_core::skill_service());
         assert_eq!(manifest.resource_namespaces, vec![namespace()]);
 
         let component = basic_skills_component_manifest();
