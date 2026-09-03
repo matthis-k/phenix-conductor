@@ -223,7 +223,7 @@ pub trait PluginInstance: Send {
         self.invoke(service, input, host).map(LayerResult::Handled)
     }
 
-    fn stop(&mut self) -> Result<(), String> {
+    fn stop(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
     }
 }

@@ -1,6 +1,47 @@
 use super::*;
 use crate::ResolvedHarness;
 
+#[derive(Clone, Copy)]
+struct StopView<'a> {
+    generation: Option<&'a GraphGenerationId>,
+    graph: &'a ResolvedComponentGraph,
+    config: &'a KernelConfig,
+    states: &'a BTreeMap<PluginId, PluginState>,
+    instances: &'a BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
+    events: &'a EventBus,
+    tasks: &'a TaskRuntime,
+    persistence: &'a Mutex<Box<dyn PersistenceBackend>>,
+    provenance: &'a Mutex<Vec<ServiceInvocationProvenance>>,
+}
+
+impl StopView<'_> {
+    fn stop(&self, plugin: &PluginId, instance: &Arc<Mutex<Box<dyn PluginInstance>>>) {
+        let Some(manifest) = self.config.manifest(plugin) else {
+            return;
+        };
+        let host = PluginHost {
+            graph_generation: self.generation,
+            component_graph: self.graph,
+            config: self.config,
+            states: self.states,
+            instances: self.instances,
+            plugin,
+            authority: &manifest.maximum_authority,
+            call_stack: BTreeSet::from([plugin.clone()]),
+            events: self.events,
+            tasks: self.tasks,
+            persistence: self.persistence,
+            provenance: self.provenance,
+            continuation: None,
+            active_services: BTreeSet::new(),
+        };
+        let _ = instance
+            .lock()
+            .expect("plugin instance mutex poisoned during stop")
+            .stop(&host);
+    }
+}
+
 impl Kernel {
     /// Replace the active runtime topology with one fully resolved candidate generation.
     /// Candidate implementations are staged before the canonical config/graph swap so a
@@ -107,7 +148,20 @@ impl Kernel {
                             match prepared {
                                 Ok(instance) => Some(instance),
                                 Err(error) => {
-                                    cleanup_staged(&staged, &next_instances);
+                                    cleanup_staged(
+                                        &staged,
+                                        StopView {
+                                            generation: Some(candidate.generation()),
+                                            graph: candidate.component_graph(),
+                                            config: &candidate_config,
+                                            states: &next_states,
+                                            instances: &next_instances,
+                                            events: &self.events,
+                                            tasks: &self.tasks,
+                                            persistence: &self.persistence,
+                                            provenance: &self.provenance,
+                                        },
+                                    );
                                     return Err(error);
                                 }
                             }
@@ -131,7 +185,20 @@ impl Kernel {
                         active_services: BTreeSet::new(),
                     };
                     if let Err(message) = instance.start(&host) {
-                        cleanup_staged(&staged, &next_instances);
+                        cleanup_staged(
+                            &staged,
+                            StopView {
+                                generation: Some(candidate.generation()),
+                                graph: candidate.component_graph(),
+                                config: &candidate_config,
+                                states: &next_states,
+                                instances: &next_instances,
+                                events: &self.events,
+                                tasks: &self.tasks,
+                                persistence: &self.persistence,
+                                provenance: &self.provenance,
+                            },
+                        );
                         return Err(KernelError::PluginStart {
                             plugin: plugin.clone(),
                             message,
@@ -157,6 +224,11 @@ impl Kernel {
             })
             .collect();
 
+        let old_generation = self.graph_generation.clone();
+        let old_graph = self.component_graph.clone();
+        let old_config = self.config.clone();
+        let old_states = self.states.clone();
+        let old_instances = self.instances.clone();
         self.config = candidate_config;
         self.states = next_states;
         self.instances = next_instances;
@@ -167,11 +239,19 @@ impl Kernel {
         );
         self.runtime_active = active_runtime;
 
+        let retired_view = StopView {
+            generation: old_generation.as_ref(),
+            graph: &old_graph,
+            config: &old_config,
+            states: &old_states,
+            instances: &old_instances,
+            events: &self.events,
+            tasks: &self.tasks,
+            persistence: &self.persistence,
+            provenance: &self.provenance,
+        };
         for (plugin, instance) in retired {
-            let _ = instance
-                .lock()
-                .expect("retired plugin instance mutex poisoned")
-                .stop();
+            retired_view.stop(&plugin, &instance);
             self.events.publish(KernelEvent::PluginStopped(plugin));
         }
         for plugin in staged {
@@ -211,16 +291,10 @@ fn runtime_restart_closure(
     }
 }
 
-fn cleanup_staged(
-    staged: &[PluginId],
-    instances: &BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
-) {
+fn cleanup_staged(staged: &[PluginId], view: StopView<'_>) {
     for plugin in staged.iter().rev() {
-        if let Some(instance) = instances.get(plugin) {
-            let _ = instance
-                .lock()
-                .expect("staged plugin instance mutex poisoned")
-                .stop();
+        if let Some(instance) = view.instances.get(plugin) {
+            view.stop(plugin, instance);
         }
     }
 }

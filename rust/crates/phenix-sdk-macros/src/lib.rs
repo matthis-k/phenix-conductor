@@ -6,6 +6,39 @@ use syn::{
     parse_macro_input, parse_quote, Data, DeriveInput, Fields, Generics, Ident, LitStr, Type,
 };
 
+mod component_attr;
+mod interface_attr;
+mod plugin_attr;
+mod resource_attr;
+
+#[proc_macro_attribute]
+pub fn component(args: TokenStream, input: TokenStream) -> TokenStream {
+    component_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_attribute]
+pub fn interface(args: TokenStream, input: TokenStream) -> TokenStream {
+    interface_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_attribute]
+pub fn plugin(args: TokenStream, input: TokenStream) -> TokenStream {
+    plugin_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_attribute]
+pub fn resource(args: TokenStream, input: TokenStream) -> TokenStream {
+    resource_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 #[proc_macro_derive(PhenixValue, attributes(phenix))]
 pub fn derive_phenix_value(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -68,6 +101,14 @@ fn derive_value(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         impl #impl_generics ::std::convert::From<&#name #type_generics> for ::phenix_core::PhenixValue #where_clause {
             fn from(value: &#name #type_generics) -> ::phenix_core::PhenixValue {
                 <#name #type_generics as ::phenix_core::ValueCodec>::to_value(value)
+            }
+        }
+
+        impl #impl_generics ::std::convert::TryFrom<&::phenix_core::PhenixValue> for #name #type_generics #where_clause {
+            type Error = ::phenix_core::ValueError;
+
+            fn try_from(value: &::phenix_core::PhenixValue) -> ::std::result::Result<Self, ::phenix_core::ValueError> {
+                <Self as ::phenix_core::ValueCodec>::project_from_value(value)
             }
         }
 

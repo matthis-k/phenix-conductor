@@ -149,10 +149,11 @@ impl<'a> PluginHost<'a> {
     }
 
     pub fn task_scope(&self) -> Option<TaskScope<'_>> {
-        Some(TaskScope::new(
+        Some(TaskScope::new_owned(
             self.tasks,
             self.graph_generation?,
             self.authority,
+            self.plugin,
         ))
     }
 

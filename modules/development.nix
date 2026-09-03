@@ -76,10 +76,76 @@
           label = "phenix-sdk / plugin_authoring";
         }
         {
+          id = "sdk-plugin-attribute-only-gate";
+          package = "phenix-sdk";
+          test = "plugin_attribute_only_gate";
+          label = "phenix-sdk / plugin_attribute_only_gate";
+        }
+        {
+          id = "sdk-plugin-component-authoring";
+          package = "phenix-sdk";
+          test = "plugin_component_authoring";
+          label = "phenix-sdk / plugin_component_authoring";
+        }
+        {
+          id = "sdk-plugin-config-authoring";
+          package = "phenix-sdk";
+          test = "plugin_config_authoring";
+          label = "phenix-sdk / plugin_config_authoring";
+        }
+        {
+          id = "sdk-plugin-dependency-authoring";
+          package = "phenix-sdk";
+          test = "plugin_dependency_authoring";
+          label = "phenix-sdk / plugin_dependency_authoring";
+        }
+        {
+          id = "sdk-plugin-import-authoring";
+          package = "phenix-sdk";
+          test = "plugin_import_authoring";
+          label = "phenix-sdk / plugin_import_authoring";
+        }
+        {
+          id = "sdk-plugin-layer-authority";
+          package = "phenix-sdk";
+          test = "plugin_layer_authority";
+          label = "phenix-sdk / plugin_layer_authority";
+        }
+        {
+          id = "sdk-plugin-lifecycle-authoring";
+          package = "phenix-sdk";
+          test = "plugin_lifecycle_authoring";
+          label = "phenix-sdk / plugin_lifecycle_authoring";
+        }
+        {
+          id = "sdk-plugin-manifest-authoring";
+          package = "phenix-sdk";
+          test = "plugin_manifest_authoring";
+          label = "phenix-sdk / plugin_manifest_authoring";
+        }
+        {
+          id = "sdk-plugin-public-projection";
+          package = "phenix-sdk";
+          test = "plugin_public_projection";
+          label = "phenix-sdk / plugin_public_projection";
+        }
+        {
           id = "sdk-incompatible-schema";
           package = "phenix-sdk";
           test = "incompatible_schema";
           label = "phenix-sdk / incompatible_schema";
+        }
+        {
+          id = "sdk-plugin-resource-authoring";
+          package = "phenix-sdk";
+          test = "plugin_resource_authoring";
+          label = "phenix-sdk / plugin_resource_authoring";
+        }
+        {
+          id = "sdk-plugin-stateless-manifest-authoring";
+          package = "phenix-sdk";
+          test = "plugin_stateless_manifest_authoring";
+          label = "phenix-sdk / plugin_stateless_manifest_authoring";
         }
         {
           id = "harness-component-graph";

@@ -88,9 +88,9 @@ impl PluginInstance for ExecutionPackagePlugin {
         self.execution.invoke(service, input, host)
     }
 
-    fn stop(&mut self) -> Result<(), String> {
-        self.agent_loop.stop()?;
-        self.configuration.stop()?;
-        self.execution.stop()
+    fn stop(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
+        self.agent_loop.stop(host)?;
+        self.configuration.stop(host)?;
+        self.execution.stop(host)
     }
 }

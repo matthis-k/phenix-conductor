@@ -7,6 +7,8 @@ cd "$repo_root"
 pattern='std::any::Any|std::any::\{[^}]*Any|any::Any|dyn[[:space:]]+Any'
 json_field_pattern='pub[[:space:]]+[[:alnum:]_]+[[:space:]]*:[^,]*serde_json::Value'
 raw_invoke_pattern='\.invoke_value[[:space:]]*\('
+legacy_plugin_authoring_pattern='phenix_plugin![[:space:]]*'
+hidden_static_discovery_pattern='inventory::|linkme::|link_section'
 
 check_fixture() {
   local pattern="$1"
@@ -40,6 +42,22 @@ if [[ -n "${PHENIX_RAW_INVOKE_FIXTURE:-}" ]]; then
     "$raw_invoke_pattern" \
     "$PHENIX_RAW_INVOKE_FIXTURE" \
     "statically known plugin consumers must use typed invocation helpers"
+  exit
+fi
+
+if [[ -n "${PHENIX_LEGACY_PLUGIN_AUTHORING_FIXTURE:-}" ]]; then
+  check_fixture \
+    "$legacy_plugin_authoring_pattern" \
+    "$PHENIX_LEGACY_PLUGIN_AUTHORING_FIXTURE" \
+    "first-party runtime plugins must use the canonical attribute authoring API"
+  exit
+fi
+
+if [[ -n "${PHENIX_HIDDEN_STATIC_DISCOVERY_FIXTURE:-}" ]]; then
+  check_fixture \
+    "$hidden_static_discovery_pattern" \
+    "$PHENIX_HIDDEN_STATIC_DISCOVERY_FIXTURE" \
+    "static plugin wiring must not use hidden global discovery"
   exit
 fi
 
@@ -85,6 +103,23 @@ for crate in rust/crates/phenix-plugin-*; do
   fi
 done
 
+for crate in rust/crates/phenix-plugin-*; do
+  [[ -d "$crate/src" ]] || continue
+  if git grep -n -E "$legacy_plugin_authoring_pattern" -- "$crate/src"; then
+    printf '%s\n' "first-party runtime plugins must use the canonical attribute authoring API" >&2
+    exit 1
+  fi
+  if git grep -n -E "$hidden_static_discovery_pattern" -- "$crate/src"; then
+    printf '%s\n' "static plugin wiring must not use hidden global discovery" >&2
+    exit 1
+  fi
+done
+
+if git grep -n -E "$hidden_static_discovery_pattern" -- rust/crates/phenix-sdk-macros/src; then
+  printf '%s\n' "static plugin wiring must not use hidden global discovery" >&2
+  exit 1
+fi
+
 fixture='pub type ErasedBoundary = Box<dyn std::any::Any>;'
 if PHENIX_STRUCTURAL_BOUNDARY_FIXTURE="$fixture" \
   bash "$repo_root/scripts/check-structural-boundaries.sh" >/dev/null 2>&1; then
@@ -103,6 +138,20 @@ raw_invoke_fixture='context.sdk.models.invoke_value(&request);'
 if PHENIX_RAW_INVOKE_FIXTURE="$raw_invoke_fixture" \
   bash "$repo_root/scripts/check-structural-boundaries.sh" >/dev/null 2>&1; then
   printf '%s\n' "structural boundary fixture unexpectedly accepted raw static invocation" >&2
+  exit 1
+fi
+
+legacy_plugin_authoring_fixture='phenix_plugin! { "fixture.legacy"; }'
+if PHENIX_LEGACY_PLUGIN_AUTHORING_FIXTURE="$legacy_plugin_authoring_fixture" \
+  bash "$repo_root/scripts/check-structural-boundaries.sh" >/dev/null 2>&1; then
+  printf '%s\n' "structural boundary fixture unexpectedly accepted legacy static plugin authoring" >&2
+  exit 1
+fi
+
+hidden_static_discovery_fixture='inventory::submit! { Plugin }'
+if PHENIX_HIDDEN_STATIC_DISCOVERY_FIXTURE="$hidden_static_discovery_fixture" \
+  bash "$repo_root/scripts/check-structural-boundaries.sh" >/dev/null 2>&1; then
+  printf '%s\n' "structural boundary fixture unexpectedly accepted hidden static plugin discovery" >&2
   exit 1
 fi
 

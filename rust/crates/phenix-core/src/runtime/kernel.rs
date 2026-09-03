@@ -276,11 +276,32 @@ impl Kernel {
     }
 
     pub fn stop(&mut self, plugin: &PluginId) -> Result<(), KernelError> {
+        let manifest = self
+            .config
+            .manifest(plugin)
+            .ok_or_else(|| KernelError::UnknownPlugin(plugin.clone()))?;
+        self.tasks.cancel_plugin(plugin);
         if let Some(instance) = self.instances.get(plugin) {
+            let host = PluginHost {
+                graph_generation: self.graph_generation.as_ref(),
+                component_graph: &self.component_graph,
+                config: &self.config,
+                states: &self.states,
+                instances: &self.instances,
+                plugin,
+                authority: &manifest.maximum_authority,
+                call_stack: BTreeSet::from([plugin.clone()]),
+                events: &self.events,
+                tasks: &self.tasks,
+                persistence: &self.persistence,
+                provenance: &self.provenance,
+                continuation: None,
+                active_services: BTreeSet::new(),
+            };
             instance
                 .lock()
                 .expect("plugin instance mutex poisoned")
-                .stop()
+                .stop(&host)
                 .map_err(|message| KernelError::PluginStop {
                     plugin: plugin.clone(),
                     message,
@@ -290,7 +311,7 @@ impl Kernel {
         let state = self
             .states
             .get_mut(plugin)
-            .ok_or_else(|| KernelError::UnknownPlugin(plugin.clone()))?;
+            .expect("plugin manifest and lifecycle state stay aligned");
         *state = PluginState::Stopped;
         self.events
             .publish(KernelEvent::PluginStopped(plugin.clone()));

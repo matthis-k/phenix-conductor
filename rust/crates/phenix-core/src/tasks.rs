@@ -1,9 +1,10 @@
-use crate::{Authority, EventBus, GraphGenerationId, KernelEvent};
+use crate::{Authority, EventBus, GraphGenerationId, KernelEvent, PluginId};
 use std::{
+    collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver},
-        Arc,
+        Arc, Mutex, Weak,
     },
     thread::{self, JoinHandle},
 };
@@ -67,9 +68,11 @@ pub struct TaskScope<'a> {
     runtime: &'a TaskRuntime,
     graph_generation: &'a GraphGenerationId,
     authority: &'a Authority,
+    plugin: Option<&'a PluginId>,
 }
 
 impl<'a> TaskScope<'a> {
+    #[cfg(test)]
     pub(crate) fn new(
         runtime: &'a TaskRuntime,
         graph_generation: &'a GraphGenerationId,
@@ -79,6 +82,21 @@ impl<'a> TaskScope<'a> {
             runtime,
             graph_generation,
             authority,
+            plugin: None,
+        }
+    }
+
+    pub(crate) fn new_owned(
+        runtime: &'a TaskRuntime,
+        graph_generation: &'a GraphGenerationId,
+        authority: &'a Authority,
+        plugin: &'a PluginId,
+    ) -> Self {
+        Self {
+            runtime,
+            graph_generation,
+            authority,
+            plugin: Some(plugin),
         }
     }
 
@@ -90,12 +108,17 @@ impl<'a> TaskScope<'a> {
         self.authority
     }
 
+    pub fn plugin(&self) -> Option<&PluginId> {
+        self.plugin
+    }
+
     pub fn spawn<T, F>(&self, requested_authority: &Authority, worker: F) -> TaskHandle<T>
     where
         T: Send + 'static,
         F: FnOnce(CancellationToken) -> T + Send + 'static,
     {
-        self.runtime.spawn(
+        self.runtime.spawn_scoped(
+            self.plugin,
             self.graph_generation,
             self.authority,
             requested_authority,
@@ -105,9 +128,16 @@ impl<'a> TaskScope<'a> {
 }
 
 #[derive(Debug)]
+struct OwnedTask {
+    id: u64,
+    cancelled: Weak<AtomicBool>,
+}
+
+#[derive(Debug)]
 pub struct TaskRuntime {
     next_id: AtomicU64,
     events: Arc<EventBus>,
+    owned: Mutex<BTreeMap<PluginId, Vec<OwnedTask>>>,
 }
 
 impl Default for TaskRuntime {
@@ -115,6 +145,7 @@ impl Default for TaskRuntime {
         Self {
             next_id: AtomicU64::new(0),
             events: Arc::new(EventBus::default()),
+            owned: Mutex::new(BTreeMap::new()),
         }
     }
 }
@@ -135,8 +166,38 @@ impl TaskRuntime {
         T: Send + 'static,
         F: FnOnce(CancellationToken) -> T + Send + 'static,
     {
+        self.spawn_scoped(
+            None,
+            graph_generation,
+            parent_authority,
+            requested_authority,
+            worker,
+        )
+    }
+
+    fn spawn_scoped<T, F>(
+        &self,
+        owner: Option<&PluginId>,
+        graph_generation: &GraphGenerationId,
+        parent_authority: &Authority,
+        requested_authority: &Authority,
+        worker: F,
+    ) -> TaskHandle<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(CancellationToken) -> T + Send + 'static,
+    {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let cancelled = Arc::new(AtomicBool::new(false));
+        if let Some(owner) = owner {
+            let mut owned = self.owned.lock().expect("task ownership mutex poisoned");
+            let tasks = owned.entry(owner.clone()).or_default();
+            tasks.retain(|task| task.cancelled.strong_count() != 0);
+            tasks.push(OwnedTask {
+                id,
+                cancelled: Arc::downgrade(&cancelled),
+            });
+        }
         let token = CancellationToken {
             cancelled: Arc::clone(&cancelled),
             authority: parent_authority.attenuate(requested_authority),
@@ -156,6 +217,30 @@ impl TaskRuntime {
             join,
             events: Arc::clone(&self.events),
         }
+    }
+
+    pub fn cancel_plugin(&self, plugin: &PluginId) -> usize {
+        let tasks = self
+            .owned
+            .lock()
+            .expect("task ownership mutex poisoned")
+            .remove(plugin)
+            .unwrap_or_default();
+        tasks
+            .into_iter()
+            .filter_map(|task| {
+                task.cancelled
+                    .upgrade()
+                    .map(|cancelled| (task.id, cancelled))
+            })
+            .filter(|(id, cancelled)| {
+                if cancelled.swap(true, Ordering::AcqRel) {
+                    return false;
+                }
+                self.events.publish(KernelEvent::TaskCancelled(*id));
+                true
+            })
+            .count()
     }
 }
 
@@ -239,6 +324,7 @@ mod tests {
 
         assert_eq!(scope.graph_generation(), &generation);
         assert_eq!(scope.authority(), &authority);
+        assert_eq!(scope.plugin(), None);
         let requested = Authority::new([read.clone(), write.clone()]);
         let handle = scope.spawn(&requested, move |token| {
             (
@@ -247,6 +333,31 @@ mod tests {
             )
         });
         assert_eq!(handle.join().unwrap(), (true, false));
+    }
+
+    #[test]
+    fn plugin_task_cancellation_is_scoped_to_the_owner() {
+        let runtime = TaskRuntime::default();
+        let authority = Authority::default();
+        let generation = generation();
+        let owner = PluginId::parse("fixture.controller-owner").unwrap();
+        let other = PluginId::parse("fixture.other-owner").unwrap();
+        let owner_scope = TaskScope::new_owned(&runtime, &generation, &authority, &owner);
+        let other_scope = TaskScope::new_owned(&runtime, &generation, &authority, &other);
+
+        let owned = owner_scope.spawn(&authority, |token| {
+            while !token.is_cancelled() {
+                thread::yield_now();
+            }
+            token.graph_generation().clone()
+        });
+        let unrelated = other_scope.spawn(&authority, |token| token.is_cancelled());
+
+        assert_eq!(owner_scope.plugin(), Some(&owner));
+        assert_eq!(runtime.cancel_plugin(&owner), 1);
+        assert_eq!(owned.join().unwrap(), generation);
+        assert!(!unrelated.join().unwrap());
+        assert_eq!(runtime.cancel_plugin(&owner), 0);
     }
 
     #[test]

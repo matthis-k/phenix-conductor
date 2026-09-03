@@ -100,6 +100,13 @@ if [[ -n "$errors" ]]; then
 fi
 
 if [[ -z "${PHENIX_PLUGIN_ARCHITECTURE_FIXTURE_MODE:-}" ]]; then
+  legacy_dsl_matches="$(grep -RFn --include='*.rs' 'phenix_plugin!' "$repo_root"/rust/crates/phenix-plugin-*/src 2>/dev/null || true)"
+  if [[ -n "$legacy_dsl_matches" ]]; then
+    printf '%s\n' "legacy phenix_plugin! authoring is forbidden in first-party runtime plugins:" >&2
+    printf '%s\n' "$legacy_dsl_matches" >&2
+    exit 1
+  fi
+
   fixture='{"packages":[{"name":"phenix-plugin-a","metadata":{"phenix":{"role":"runtime-plugin","contract-debt":{}}},"dependencies":[]}]}'
   if fixture_errors="$(
     PHENIX_PLUGIN_ARCHITECTURE_METADATA_JSON="$fixture" \
