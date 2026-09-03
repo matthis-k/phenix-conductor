@@ -78,25 +78,12 @@ mod tests {
         for<'value> PhenixValue: From<&'value T>,
         for<'value> R: TryFrom<Project<&'value PhenixValue>, Error = phenix_core::ValueError>,
     {
-        let request = PhenixValue::from(request);
-        let output = invoke_structural(harness, service, &request);
-        R::try_from(Project(&output)).unwrap()
-    }
-
-    fn invoke_structural(
-        harness: &mut PhenixHarness,
-        service: &phenix_core::ServiceId,
-        request: &PhenixValue,
-    ) -> PhenixValue {
+        let input = serde_json::to_vec(&PhenixValue::from(request)).unwrap();
         let output = harness
-            .invoke(
-                service,
-                &serde_json::to_vec(request).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
+            .invoke(service, &input, &default_suite_authority(), None)
             .unwrap();
-        serde_json::from_slice(&output).unwrap()
+        let value: PhenixValue = serde_json::from_slice(&output).unwrap();
+        R::try_from(Project(&value)).unwrap()
     }
 
     #[test]
