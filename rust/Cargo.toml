@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/phenix-acp",
+  "crates/phenix-adapter-acp",
   "crates/phenix-core",
   "crates/phenix-domain",
   "crates/phenix-client",

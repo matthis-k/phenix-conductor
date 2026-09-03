@@ -46,18 +46,6 @@ let
         ''}
       '';
 
-  mkPhenixClient =
-    {
-      pkgs,
-      name,
-      package,
-    }:
-    pkgs.runCommand "phenix-client-${name}" { } ''
-      mkdir -p "$out/share/phenix-client"
-      printf '%s\n' ${pkgs.lib.escapeShellArg name} > "$out/share/phenix-client/name"
-      ln -s ${package} "$out/share/phenix-client/rust-package"
-    '';
-
   mkPhenix =
     {
       pkgs,
@@ -167,7 +155,7 @@ in
 {
   flake = {
     lib = {
-      inherit mkPhenix mkPhenixClient mkPhenixPlugin;
+      inherit mkPhenix mkPhenixPlugin;
     };
     wrappers.phenix.wrap = mkPhenix;
   };

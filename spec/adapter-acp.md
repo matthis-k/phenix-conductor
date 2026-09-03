@@ -1,8 +1,8 @@
 # ACP adapter
 
-status: specification-only
+status: partial
 
-Canonical application-integration terminology is defined by #442. Implementation follows repository cleanup.
+Canonical application-integration terminology is defined by #442. The canonical package and runtime identity are implemented; standard ACP dispatch and the stdio composition remain incomplete.
 
 ## Goal
 
@@ -11,6 +11,14 @@ Provide ACP as the primary compatibility protocol for rich Phenix applications w
 The first-party runtime package is `phenix-adapter-acp`, with plugin identity `phenix.adapter.acp` and package-set entry `phenixPlugins.${system}.adapter-acp`.
 
 The adapter owns ACP translation only. It owns no Phenix session, transcript, routing, authority, credential, execution, persistence, process, or transport state.
+
+## Current implementation
+
+The repository packages `phenix-adapter-acp` as the ordinary runtime plugin `phenix.adapter.acp`. The old `phenixClients.acp` package category and `mkPhenixClient` helper are gone.
+
+The adapter no longer exposes the internal `phenix-client` envelope as ACP API. Its public Rust surface is the ACP protocol plus the runtime plugin identity. Standard ACP session, prompt, cancellation, capability, and extension dispatch described below still need implementation before applications can use the adapter as a complete ACP agent.
+
+`phenix-acp-stdio` is not implemented yet. Until that package exists, the adapter has no owned stdio executable or process lifecycle.
 
 ## Application boundary
 
@@ -89,7 +97,7 @@ Expected extension families include:
 
 Use a Phenix-owned namespace such as `_phenix/...`; never use application-specific names such as `_nvim/...`.
 
-Extensions expose Phenix semantics, not internal transport envelopes. Remove `_phenix/client/envelope` as an ordinary application path once standard ACP plus domain extensions cover its consumers.
+Extensions expose Phenix semantics, not internal transport envelopes. Do not reintroduce the removed internal envelope bridge as an application path.
 
 ## Streaming
 
@@ -122,12 +130,12 @@ ACP semantics are transport-independent.
 
 ## Completion
 
-- [ ] `phenix-adapter-acp` is the ordinary first-party ACP adapter plugin;
+- [x] `phenix-adapter-acp` is the ordinary first-party ACP adapter plugin;
 - [ ] standard ACP covers every concept it represents cleanly;
 - [ ] Phenix-only concepts use versioned capability-negotiated ACP extensions;
 - [ ] applications do not require the internal `phenix-client` protocol;
-- [ ] no parallel session, transcript, routing, authority, credential, execution, or persistence state exists;
-- [ ] ACP semantics are independent of transport;
+- [x] no parallel session, transcript, routing, authority, credential, execution, or persistence state exists;
+- [x] ACP semantics are independent of transport;
 - [ ] stdio process ownership lives in #443 rather than this adapter package;
-- [ ] obsolete `phenixClients.acp` packaging is removed when unused;
+- [x] obsolete `phenixClients.acp` packaging is removed when unused;
 - [ ] exact-head Source, Rust, Product, and Maintenance validation passes.
