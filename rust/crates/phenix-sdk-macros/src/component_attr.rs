@@ -264,13 +264,13 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
             MethodContribution::Export(export) => {
                 let (request, response) = export_signature_types(&method.sig, true)?;
                 let (decoded_request, projection) = component_request_projection(&request)?;
-                let has_context = method
+                let context = method
                     .sig
                     .inputs
                     .iter()
                     .nth(1)
-                    .is_some_and(is_call_context_parameter);
-                let has_request = method.sig.inputs.len() > 1 + usize::from(has_context);
+                    .and_then(export_context_parameter);
+                let has_request = method.sig.inputs.len() > 1 + usize::from(context.is_some());
                 exports.push((
                     method.sig.ident.clone(),
                     export,
@@ -278,7 +278,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
                     response,
                     decoded_request,
                     projection,
-                    has_context,
+                    context,
                     has_request,
                     signature_returns_result(&method.sig),
                     method.sig.asyncness.is_some(),
@@ -364,7 +364,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
             _response,
             decoded_request,
             projection,
-            has_context,
+            context,
             has_request,
             returns_result,
             is_async,
@@ -390,11 +390,17 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
                 }
                 ComponentRequestProjection::Exact => quote!(::phenix_sdk::Exact(request)),
             };
-            let call = match (*has_context, *has_request) {
-                (true, true) => quote!(self.#method(&call_context, #request)),
-                (true, false) => quote!(self.#method(&call_context)),
-                (false, true) => quote!(self.#method(#request)),
-                (false, false) => quote!(self.#method()),
+            let call = match (*context, *has_request) {
+                (Some(ExportContext::Call), true) => {
+                    quote!(self.#method(&plugin_context.call, #request))
+                }
+                (Some(ExportContext::Call), false) => quote!(self.#method(&plugin_context.call)),
+                (Some(ExportContext::Plugin), true) => {
+                    quote!(self.#method(&plugin_context, #request))
+                }
+                (Some(ExportContext::Plugin), false) => quote!(self.#method(&plugin_context)),
+                (None, true) => quote!(self.#method(#request)),
+                (None, false) => quote!(self.#method()),
             };
             let request_binding = if *has_request {
                 quote!(request)
@@ -418,10 +424,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
                 {
                     let interface = #interface;
                     if service.as_str() == interface.as_str() {
-                        let call_context = ::phenix_sdk::CallContext {
-                            authority: host.authority(),
-                            graph_generation: host.graph_generation(),
-                        };
+                        let plugin_context = ::phenix_sdk::PluginContext::new(host, (), (), ());
                         return #dispatch(host, &interface, input, #handler);
                     }
                 }
@@ -469,6 +472,12 @@ enum ComponentRequestProjection {
     Projected,
     ExplicitProject,
     Exact,
+}
+
+#[derive(Clone, Copy)]
+enum ExportContext {
+    Call,
+    Plugin,
 }
 
 fn component_request_projection(request: &Type) -> syn::Result<(Type, ComponentRequestProjection)> {
@@ -792,7 +801,12 @@ pub(crate) fn export_signature_types(
         }
     }
 
-    if inputs.clone().next().is_some_and(is_call_context_parameter) {
+    if inputs
+        .clone()
+        .next()
+        .and_then(export_context_parameter)
+        .is_some()
+    {
         inputs.next();
     }
 
@@ -809,14 +823,32 @@ pub(crate) fn export_signature_types(
     if inputs.next().is_some() {
         return Err(syn::Error::new_spanned(
             signature,
-            "exports accept at most one typed request parameter after an optional &CallContext",
+            "exports accept at most one typed request parameter after an optional &CallContext or &PluginContext",
         ));
     }
 
     Ok((request, export_response_type(&signature.output)?))
 }
 
+fn export_context_parameter(argument: &FnArg) -> Option<ExportContext> {
+    if is_call_context_parameter(argument) {
+        return Some(ExportContext::Call);
+    }
+    if is_plugin_context_parameter(argument) {
+        return Some(ExportContext::Plugin);
+    }
+    None
+}
+
 pub(crate) fn is_call_context_parameter(argument: &FnArg) -> bool {
+    is_named_context_parameter(argument, "CallContext")
+}
+
+fn is_plugin_context_parameter(argument: &FnArg) -> bool {
+    is_named_context_parameter(argument, "PluginContext")
+}
+
+fn is_named_context_parameter(argument: &FnArg, name: &str) -> bool {
     let FnArg::Typed(argument) = argument else {
         return false;
     };
@@ -832,7 +864,7 @@ pub(crate) fn is_call_context_parameter(argument: &FnArg) -> bool {
             .path
             .segments
             .last()
-            .is_some_and(|segment| segment.ident == "CallContext")
+            .is_some_and(|segment| segment.ident == name)
 }
 
 fn export_response_type(output: &ReturnType) -> syn::Result<Type> {
@@ -1486,6 +1518,30 @@ mod tests {
         assert!(!output.contains("phenix (layer"));
         assert!(!output.contains("phenix (listen"));
         assert!(!output.contains("phenix (value"));
+    }
+
+    #[test]
+    fn component_impl_accepts_plugin_context() {
+        let output = expand(
+            TokenStream::new(),
+            quote! {
+                impl Api {
+                    #[phenix(export("fixture.api.run@1"))]
+                    fn run(
+                        &mut self,
+                        _context: &PluginContext<'_, '_, ()>,
+                        request: Request,
+                    ) -> Response {
+                        todo!()
+                    }
+                }
+            },
+        )
+        .expect("component exports may request plugin context")
+        .to_string();
+
+        assert!(output.contains("PluginContext :: new"));
+        assert!(output.contains("self . run (& plugin_context , request)"));
     }
 
     #[test]
