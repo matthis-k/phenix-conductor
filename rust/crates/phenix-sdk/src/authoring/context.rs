@@ -154,12 +154,10 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
     ) -> Result<OpenedSession<'host, 'runtime>, SdkError> {
         let response = self
             .policy
-            .invoke_projected::<SdkSessionCommand, SdkSessionResponse>(
-                &SdkSessionCommand::Open {
-                    id: id.into(),
-                    agent,
-                },
-            )?;
+            .invoke::<SdkSessionCommand, SdkSessionResponse>(&SdkSessionCommand::Open {
+                id: id.into(),
+                agent,
+            })?;
         let SdkSessionResponse::Opened { session, created } = response;
         Ok(OpenedSession {
             session: Session::new(session, self.clone()),
@@ -175,7 +173,7 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
             kind: "session",
             message,
         })?;
-        let response = self.storage.invoke_projected(&SessionCommand::Get { id })?;
+        let response = self.storage.invoke(&SessionCommand::Get { id })?;
         let SessionResponse::Session { session } = response else {
             return Err(SdkError::UnexpectedResponse {
                 operation: "finding session",
@@ -185,7 +183,7 @@ impl<'host, 'runtime> Sessions<'host, 'runtime> {
     }
 
     pub fn iter(&self) -> Result<impl Iterator<Item = Session<'host, 'runtime>>, SdkError> {
-        let response = self.storage.invoke_projected(&SessionCommand::List)?;
+        let response = self.storage.invoke(&SessionCommand::List)?;
         let SessionResponse::Sessions { sessions: records } = response else {
             return Err(SdkError::UnexpectedResponse {
                 operation: "listing sessions",
@@ -304,7 +302,7 @@ mod tests {
             let context: PluginContext<'_, '_, ()> = PluginContext::new(host, (), (), ());
             let request = context
                 .kernel
-                .decode_projected::<EchoRequest>(&EchoInterface::interface_id(), input)
+                .decode::<EchoRequest>(&EchoInterface::interface_id(), input)
                 .map_err(|error| error.to_string())?;
             context
                 .kernel
@@ -374,7 +372,7 @@ mod tests {
             let echo = SdkObject::new("echo", sdk.require::<EchoSdk>());
             let echo: EchoResponse = echo
                 .client()
-                .invoke_projected(&EchoRequest {
+                .invoke(&EchoRequest {
                     value: refreshed.id().to_owned(),
                 })
                 .map_err(|error| error.to_string())?;

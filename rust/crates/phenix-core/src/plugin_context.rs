@@ -110,6 +110,23 @@ impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
         )
     }
 
+    /// Decode a structural request using the matching policy encoded in `T`.
+    pub fn decode<T>(
+        &self,
+        interface: &InterfaceId,
+        input: &[u8],
+    ) -> Result<T, ComponentInvocationError>
+    where
+        for<'value> T: TryFrom<&'value PhenixValue, Error = ValueError>,
+    {
+        let value = serde_json::from_slice::<PhenixValue>(input)
+            .map_err(|error| ComponentInvocationError::Decode(error.to_string()))?;
+        T::try_from(&value).map_err(|error| {
+            report_structural_mismatch(self.host, interface, "request", &error);
+            ComponentInvocationError::Decode(error.to_string())
+        })
+    }
+
     /// Decode a structural request using the provider's local projected view.
     pub fn decode_projected<T>(
         &self,
@@ -230,6 +247,23 @@ impl<'host, 'runtime, I: ComponentInterface> SdkClient<'host, 'runtime, I> {
         request: &PhenixValue,
     ) -> Result<PhenixValue, ComponentInvocationError> {
         self.host.invoke_import::<I>(&self.component, request)
+    }
+
+    /// Invoke and decode the response using the matching policy encoded in `Response`.
+    pub fn invoke<Request, Response>(
+        &self,
+        request: &Request,
+    ) -> Result<Response, ComponentInvocationError>
+    where
+        for<'value> PhenixValue: From<&'value Request>,
+        for<'value> Response: TryFrom<&'value PhenixValue, Error = ValueError>,
+    {
+        let request = PhenixValue::from(request);
+        let response = self.invoke_value(&request)?;
+        Response::try_from(&response).map_err(|error| {
+            report_structural_mismatch(self.host, &I::interface_id(), "response", &error);
+            ComponentInvocationError::Decode(error.to_string())
+        })
     }
 
     /// Invoke and let the consumer project the provider response into its local type.

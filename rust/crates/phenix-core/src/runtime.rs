@@ -223,7 +223,7 @@ pub trait PluginInstance: Send {
         self.invoke(service, input, host).map(LayerResult::Handled)
     }
 
-    fn stop(&mut self) -> Result<(), String> {
+    fn stop(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
     }
 }
@@ -250,6 +250,7 @@ pub struct Kernel {
     config: KernelConfig,
     states: BTreeMap<PluginId, PluginState>,
     embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,
+    prepared_embedded_instances: BTreeMap<PluginId, Box<dyn PluginInstance>>,
     instances: BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
     events: Arc<EventBus>,
     tasks: TaskRuntime,

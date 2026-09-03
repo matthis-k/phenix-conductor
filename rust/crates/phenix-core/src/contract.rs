@@ -16,6 +16,28 @@ pub struct Exact<T>(pub T);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Project<T>(pub T);
 
+impl<'value, T> TryFrom<&'value PhenixValue> for Exact<T>
+where
+    T: TryFrom<Exact<&'value PhenixValue>, Error = ValueError>,
+{
+    type Error = ValueError;
+
+    fn try_from(value: &'value PhenixValue) -> Result<Self, Self::Error> {
+        T::try_from(Exact(value)).map(Self)
+    }
+}
+
+impl<'value, T> TryFrom<&'value PhenixValue> for Project<T>
+where
+    T: TryFrom<Project<&'value PhenixValue>, Error = ValueError>,
+{
+    type Error = ValueError;
+
+    fn try_from(value: &'value PhenixValue) -> Result<Self, Self::Error> {
+        T::try_from(Project(value)).map(Self)
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Key(String);
 

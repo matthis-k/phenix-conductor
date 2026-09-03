@@ -218,7 +218,7 @@ mod replacement_consumer {
                 input,
                 |request: RunRequest| -> Result<RunResponse, String> {
                     let context = phenix_plugin::context(host, (), ());
-                    let response = context
+                    let response: ModelResponse = context
                         .sdk
                         .models
                         .invoke(&ModelRequest {

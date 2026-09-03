@@ -20,9 +20,8 @@ impl ValueCodec for Type {
     }
 
     fn to_value(&self) -> PhenixValue {
-        serde_json::to_value(self)
-            .expect("Phenix schemas are serializable")
-            .into()
+        let json = serde_json::to_value(self).expect("Phenix schemas are serializable");
+        <serde_json::Value as ValueCodec>::to_value(&json)
     }
 
     fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
@@ -59,6 +58,8 @@ mod tests {
             ),
         ]));
 
-        assert_eq!(Type::from_value(&schema.to_value()).unwrap(), schema);
+        let encoded = schema.to_value();
+        assert!(matches!(encoded, PhenixValue::Map(_)));
+        assert_eq!(Type::from_value(&encoded).unwrap(), schema);
     }
 }
