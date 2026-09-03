@@ -1,6 +1,6 @@
 use phenix_core::{
-    context_service, Authority, CapabilityId, ComponentId, ComponentInterface, ComponentManifest,
-    ContextCommand, ContextDescriptor, ContextResourceId, ContextResourceRevision, ContextResponse,
+    Authority, CapabilityId, ComponentId, ComponentInterface, ComponentManifest, ContextCommand,
+    ContextDescriptor, ContextResourceId, ContextResourceRevision, ContextResponse,
     ContextRevisionId, InterfaceId, PluginContext, PluginInstance, PluginManifest,
     ResourceNamespace, TransactionOp, CONTEXT_SERVICE,
 };
@@ -215,7 +215,7 @@ mod tests {
         let manifest = basic_context_manifest();
         assert_eq!(manifest.id.as_str(), BASIC_CONTEXT_PLUGIN);
         assert_eq!(manifest.services.len(), 1);
-        assert_eq!(manifest.services[0].service, context_service());
+        assert_eq!(manifest.services[0].service, phenix_core::context_service());
         assert_eq!(manifest.resource_namespaces, vec![namespace()]);
 
         let component = basic_context_component_manifest();
