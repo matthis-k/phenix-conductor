@@ -898,7 +898,10 @@ mod tests {
         assert_eq!(component.id.as_str(), OPTIONS_COMPONENT);
         assert_eq!(component.owner, manifest.id);
         assert_eq!(component.exports.len(), 1);
-        assert_eq!(component.exports[0].interface, OptionsInterface::interface_id());
+        assert_eq!(
+            component.exports[0].interface,
+            OptionsInterface::interface_id()
+        );
         assert_eq!(manifest.resource_namespaces, vec![options_namespace()]);
         assert_eq!(manifest.maximum_authority, persistence_authority());
     }
