@@ -78,48 +78,12 @@ mod tests {
         for<'value> PhenixValue: From<&'value T>,
         for<'value> R: TryFrom<Project<&'value PhenixValue>, Error = phenix_core::ValueError>,
     {
-        let request = PhenixValue::from(request);
+        let input = serde_json::to_vec(&PhenixValue::from(request)).unwrap();
         let output = harness
-            .invoke(
-                service,
-                &serde_json::to_vec(&request).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
+            .invoke(service, &input, &default_suite_authority(), None)
             .unwrap();
-        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
-        R::try_from(Project(&output)).unwrap()
-    }
-
-    fn invoke_structural(
-        harness: &mut PhenixHarness,
-        service: &phenix_core::ServiceId,
-        request: &PhenixValue,
-    ) -> PhenixValue {
-        let output = harness
-            .invoke(
-                service,
-                &serde_json::to_vec(request).unwrap(),
-                &default_suite_authority(),
-                None,
-            )
-            .unwrap();
-        serde_json::from_slice(&output).unwrap()
-    }
-
-    fn invoke_model(
-        harness: &mut PhenixHarness,
-        request: &ModelInferenceRequest,
-    ) -> ModelInferenceResponse {
-        let request = PhenixValue::from(request);
-        let output = invoke_structural(harness, &model_inference_service(), &request);
-        ModelInferenceResponse::try_from(Project(&output)).unwrap()
-    }
-
-    fn invoke_session(harness: &mut PhenixHarness, request: &SessionCommand) -> SessionResponse {
-        let request = PhenixValue::from(request);
-        let output = invoke_structural(harness, &session_service(), &request);
-        SessionResponse::try_from(Project(&output)).unwrap()
+        let value: PhenixValue = serde_json::from_slice(&output).unwrap();
+        R::try_from(Project(&value)).unwrap()
     }
 
     #[test]
@@ -186,8 +150,9 @@ mod tests {
             let mut harness = PhenixHarness::basic_suite_with_persistence(persistence).unwrap();
             harness.activate().unwrap();
 
-            let _ = invoke_session(
+            let _: SessionResponse = invoke(
                 &mut harness,
+                &session_service(),
                 &SessionCommand::Create {
                     id: SessionId::parse("root").unwrap(),
                 },
@@ -225,8 +190,9 @@ mod tests {
                     content: b"project context".to_vec().into(),
                 },
             );
-            let model = invoke_model(
+            let model: ModelInferenceResponse = invoke(
                 &mut harness,
+                &model_inference_service(),
                 &ModelInferenceRequest {
                     model: ModelId::parse("direct").unwrap(),
                     input: b"hello".to_vec().into(),
@@ -239,7 +205,8 @@ mod tests {
         let persistence = LocalPersistence::open(&path).unwrap();
         let mut restored = PhenixHarness::basic_suite_with_persistence(persistence).unwrap();
         restored.activate().unwrap();
-        let sessions = invoke_session(&mut restored, &SessionCommand::List);
+        let sessions: SessionResponse =
+            invoke(&mut restored, &session_service(), &SessionCommand::List);
         assert!(
             matches!(sessions, SessionResponse::Sessions { sessions } if sessions[0].id.as_str() == "root")
         );
