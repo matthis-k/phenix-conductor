@@ -103,11 +103,7 @@ mod tests {
         kernel
     }
 
-    fn invoke<T, R>(
-        kernel: &mut Kernel,
-        service: &phenix_core::ServiceId,
-        request: &T,
-    ) -> R
+    fn invoke<T, R>(kernel: &mut Kernel, service: &phenix_core::ServiceId, request: &T) -> R
     where
         for<'value> PhenixValue: From<&'value T>,
         for<'value> R:
