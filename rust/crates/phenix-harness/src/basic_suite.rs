@@ -73,11 +73,7 @@ mod tests {
         ))
     }
 
-    fn invoke<T, R>(
-        harness: &mut PhenixHarness,
-        service: &phenix_core::ServiceId,
-        request: &T,
-    ) -> R
+    fn invoke<T, R>(harness: &mut PhenixHarness, service: &phenix_core::ServiceId, request: &T) -> R
     where
         for<'value> PhenixValue: From<&'value T>,
         for<'value> R: TryFrom<Project<&'value PhenixValue>, Error = phenix_core::ValueError>,
