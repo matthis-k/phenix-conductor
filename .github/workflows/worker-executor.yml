@@ -12,38 +12,42 @@ permissions:
   pull-requests: write
 
 jobs:
-  purge-pr-462-patch-comments:
+  purge-pr-462-transport-comments:
     if: >-
       github.event_name == 'push' &&
       contains(github.event.head_commit.message, '[cleanup-worker-comments]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Delete historical worker patch transport comments from PR 462
+      - name: Delete historical worker transport comments from PR 462
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh api --paginate "repos/$GITHUB_REPOSITORY/issues/462/comments?per_page=100" \
-            --jq '.[] | select((.body // "") | startswith("<!-- phenix-worker-patch-v1 -->")) | .id' \
-            > "$RUNNER_TEMP/worker-patch-comment-ids"
+            --jq '.[] | select(
+              ((.body // "") | startswith("<!-- phenix-worker-patch-v1 -->")) or
+              ((.body // "") | startswith("worker-exec\n")) or
+              ((.body // "") == "<!-- obsolete automated worker patch transport removed -->")
+            ) | .id' \
+            > "$RUNNER_TEMP/worker-transport-comment-ids"
 
-          count=0
-          while IFS= read -r id; do
-            test -n "$id" || continue
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id"
-            count=$((count + 1))
-          done < "$RUNNER_TEMP/worker-patch-comment-ids"
+          count="$(wc -l < "$RUNNER_TEMP/worker-transport-comment-ids")"
+          export GITHUB_REPOSITORY GH_TOKEN
+          xargs -r -P 8 -n 1 sh -c '
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$1" >/dev/null 2>&1 || true
+          ' _ < "$RUNNER_TEMP/worker-transport-comment-ids"
 
-          echo "Deleted $count historical worker patch transport comments from PR 462."
+          echo "Processed $count historical worker transport comments from PR 462."
 
-  delete-new-patch-comment:
+  delete-new-transport-comment:
     if: >-
       github.event_name == 'issue_comment' &&
-      startsWith(github.event.comment.body, '<!-- phenix-worker-patch-v1 -->')
+      (startsWith(github.event.comment.body, '<!-- phenix-worker-patch-v1 -->') ||
+       startsWith(github.event.comment.body, 'worker-exec'))
     runs-on: ubuntu-latest
     steps:
-      - name: Delete forbidden worker patch transport comment
+      - name: Delete forbidden worker transport comment
         env:
           GH_TOKEN: ${{ github.token }}
           COMMENT_ID: ${{ github.event.comment.id }}
