@@ -10,6 +10,11 @@ struct Response {
     value: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk::PhenixValue)]
+struct Changed {
+    value: String,
+}
+
 #[phenix_sdk::interface("fixture.public-projection.call@1")]
 struct PublicCall;
 
@@ -65,6 +70,11 @@ impl RootPlugin {
         Response {
             value: request.value,
         }
+    }
+
+    #[phenix(on_event("fixture.root-public.changed"))]
+    async fn changed(&mut self, _context: &phenix_sdk::EventContext, _event: Changed) {
+        self.calls += 1;
     }
 
     fn helper(&self) -> usize {
@@ -138,6 +148,11 @@ fn root_exposure_uses_member_name_without_an_api_redirect() {
     assert_eq!(components.len(), 1);
     assert_eq!(components[0].id.as_str(), "fixture.root-public");
     assert_eq!(components[0].exports.len(), 1);
+    assert_eq!(components[0].listeners.len(), 1);
+    assert_eq!(
+        components[0].listeners[0].event_type.as_str(),
+        "fixture.root-public.changed"
+    );
 
     let plugin = RootPlugin { calls: 0 };
     assert_eq!(plugin.helper(), 0);
