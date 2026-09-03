@@ -218,7 +218,8 @@ mod tests {
         let persistence = LocalPersistence::open(&path).unwrap();
         let mut restored = PhenixHarness::basic_suite_with_persistence(persistence).unwrap();
         restored.activate().unwrap();
-        let sessions: SessionResponse = invoke(&mut restored, &session_service(), &SessionCommand::List);
+        let sessions: SessionResponse =
+            invoke(&mut restored, &session_service(), &SessionCommand::List);
         assert!(
             matches!(sessions, SessionResponse::Sessions { sessions } if sessions[0].id.as_str() == "root")
         );
