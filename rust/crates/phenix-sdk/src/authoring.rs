@@ -429,8 +429,8 @@ pub use static_component::{
 };
 pub use static_config::{StaticPluginConfigDescriptor, StaticPluginConfiguration};
 pub use static_dispatch::{
-    StaticComponentDispatch, StaticPluginInstance, StaticPluginInvoke, StaticPluginStart,
-    StaticPluginStop,
+    StaticComponentDispatch, StaticPluginComponentDispatch, StaticPluginInstance,
+    StaticPluginInvoke, StaticPluginStart, StaticPluginStop,
 };
 pub use static_import::{
     Call, Emit, Host, Optional, Required, StaticComponentEvent, StaticComponentHost,

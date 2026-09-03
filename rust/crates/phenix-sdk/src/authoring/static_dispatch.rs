@@ -54,6 +54,18 @@ pub trait StaticPluginComponentDispatch {
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String>;
+
+    /// Adapt an already-constructed stateful plugin value to the kernel's erased runtime ABI.
+    ///
+    /// Construction stays ordinary Rust so non-`Default` plugin state does not need a fake
+    /// no-argument factory. Once constructed, the generated component router is sufficient for
+    /// the kernel-generic adapter.
+    fn into_plugin_instance(self) -> Box<dyn PluginInstance>
+    where
+        Self: Sized + StaticPluginResources + Send + 'static,
+    {
+        Box::new(StaticPluginInstance::from_component_dispatch(self))
+    }
 }
 
 pub type StaticPluginStart<T> = fn(&mut T, &PluginHost<'_>) -> Result<(), String>;
@@ -193,6 +205,19 @@ mod tests {
         }
     }
 
+    impl StaticPluginComponentDispatch for StatefulPlugin {
+        fn dispatch_component(
+            &mut self,
+            _component: &ComponentId,
+            _service: &ServiceId,
+            input: &[u8],
+            _host: &PluginHost<'_>,
+        ) -> Result<Vec<u8>, String> {
+            self.calls += 1;
+            Ok(input.to_vec())
+        }
+    }
+
     static STARTS: AtomicUsize = AtomicUsize::new(0);
     static STOPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -215,6 +240,12 @@ mod tests {
     ) -> Result<Vec<u8>, String> {
         plugin.calls += 1;
         Ok(input.to_vec())
+    }
+
+    #[test]
+    fn generated_stateful_plugin_dispatch_adapts_to_plugin_instance() {
+        let instance: Box<dyn PluginInstance> = StatefulPlugin { calls: 7 }.into_plugin_instance();
+        drop(instance);
     }
 
     #[test]

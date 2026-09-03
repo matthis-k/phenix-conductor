@@ -1,7 +1,7 @@
 use phenix_sdk::{
-    Authority, Call, CapabilityId, Emit, Required, StaticComponentBehavior, StaticPluginComponents,
-    StaticPluginComponentDispatch, StaticPluginConfiguration, StaticPluginLifecycle,
-    StaticPluginResources,
+    Authority, Call, CapabilityId, Emit, Required, StaticComponentBehavior,
+    StaticPluginComponentDispatch, StaticPluginComponents, StaticPluginConfiguration,
+    StaticPluginLifecycle, StaticPluginResources,
 };
 
 mod sessions {
@@ -131,6 +131,18 @@ impl Plugin {
 fn attribute_only_plugin_builds_graph_and_manifest_without_parallel_wiring() {
     fn assert_generated_dispatch<T: StaticPluginComponentDispatch>() {}
     assert_generated_dispatch::<Plugin>();
+
+    let plugin = Plugin {
+        sessions: sessions::Plugin,
+        api: Api {
+            models: Required::default(),
+            completed: Emit::default(),
+        },
+        state: phenix_sdk::Durable::default(),
+        config: Settings { retries: 3 },
+    };
+    let instance = StaticPluginComponentDispatch::into_plugin_instance(plugin);
+    drop(instance);
 
     let graph = phenix_sdk::StaticPluginGraph::compose::<Plugin>().unwrap();
     let ids = graph
