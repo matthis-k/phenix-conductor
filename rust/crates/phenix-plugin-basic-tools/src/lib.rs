@@ -182,6 +182,9 @@ mod tests {
         let component = basic_tools_component_manifest();
         assert_eq!(component.id.as_str(), BASIC_TOOLS_COMPONENT);
         assert_eq!(component.exports.len(), 1);
-        assert_eq!(component.exports[0].interface, BasicToolsInterface::interface_id());
+        assert_eq!(
+            component.exports[0].interface,
+            BasicToolsInterface::interface_id()
+        );
     }
 }

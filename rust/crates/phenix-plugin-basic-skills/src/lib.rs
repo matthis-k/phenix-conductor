@@ -177,6 +177,9 @@ mod tests {
         let component = basic_skills_component_manifest();
         assert_eq!(component.id.as_str(), BASIC_SKILLS_COMPONENT);
         assert_eq!(component.exports.len(), 1);
-        assert_eq!(component.exports[0].interface, BasicSkillsInterface::interface_id());
+        assert_eq!(
+            component.exports[0].interface,
+            BasicSkillsInterface::interface_id()
+        );
     }
 }
