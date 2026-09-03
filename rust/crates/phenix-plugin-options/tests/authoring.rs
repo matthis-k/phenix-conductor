@@ -28,13 +28,14 @@ fn generated_authoring_preserves_the_public_runtime_contract() {
         manifest.resource_namespaces[0].as_str(),
         "phenix.options.state"
     );
-    for value in [
-        "kernel.persistence.schema",
-        "kernel.persistence.read",
-        "kernel.persistence.write",
-    ] {
-        assert!(manifest.maximum_authority.permits(&capability(value)));
-    }
+    assert_eq!(
+        manifest.maximum_authority,
+        Authority::new([
+            capability("kernel.persistence.schema"),
+            capability("kernel.persistence.read"),
+            capability("kernel.persistence.write"),
+        ])
+    );
 
     let component = options_component_manifest();
     assert_eq!(component.id.as_str(), OPTIONS_COMPONENT);
