@@ -208,6 +208,12 @@ enum Projection {
     Exact,
 }
 
+#[derive(Clone, Copy)]
+enum ExportContext {
+    Call,
+    Plugin,
+}
+
 fn unwrap_projection(ty: &Type) -> syn::Result<(Type, Projection)> {
     let Type::Path(path) = ty else {
         return Ok((ty.clone(), Projection::Projected));
@@ -247,11 +253,8 @@ fn export_arm(method: &syn::ImplItemFn, interface: Interface) -> syn::Result<Tok
     let name = &method.sig.ident;
     let mut inputs = method.sig.inputs.iter();
     let _receiver = inputs.next();
-    let has_context = inputs
-        .clone()
-        .next()
-        .is_some_and(|argument| is_named_ref(argument, "CallContext"));
-    if has_context {
+    let context = inputs.clone().next().and_then(export_context);
+    if context.is_some() {
         inputs.next();
     }
     let request = match inputs.next() {
@@ -277,11 +280,16 @@ fn export_arm(method: &syn::ImplItemFn, interface: Interface) -> syn::Result<Tok
         Projection::Exact => quote!(::phenix_sdk::Exact(request)),
         Projection::Projected => quote!(request),
     };
-    let call = match (has_context, request.is_some()) {
-        (true, true) => quote!(self.#name(&call_context, #request_arg)),
-        (true, false) => quote!(self.#name(&call_context)),
-        (false, true) => quote!(self.#name(#request_arg)),
-        (false, false) => quote!(self.#name()),
+    let context_arg = match context {
+        Some(ExportContext::Call) => Some(quote!(&plugin_context.call)),
+        Some(ExportContext::Plugin) => Some(quote!(&plugin_context)),
+        None => None,
+    };
+    let call = match (context_arg, request.is_some()) {
+        (Some(context), true) => quote!(self.#name(#context, #request_arg)),
+        (Some(context), false) => quote!(self.#name(#context)),
+        (None, true) => quote!(self.#name(#request_arg)),
+        (None, false) => quote!(self.#name()),
     };
     let call = if method.sig.asyncness.is_some() {
         quote!(::phenix_sdk::block_on_static(#call))
@@ -299,10 +307,7 @@ fn export_arm(method: &syn::ImplItemFn, interface: Interface) -> syn::Result<Tok
         {
             let interface = #interface;
             if service.as_str() == interface.as_str() {
-                let call_context = ::phenix_sdk::CallContext {
-                    authority: host.authority(),
-                    graph_generation: host.graph_generation(),
-                };
+                let plugin_context = ::phenix_sdk::PluginContext::new(host, (), (), ());
                 #request_binding
                 let response = #call;
                 return ::phenix_sdk::encode_runtime(host, &response);
@@ -470,6 +475,16 @@ fn listener_arm(method: &syn::ImplItemFn) -> syn::Result<TokenStream> {
             return Some(#result);
         }
     })
+}
+
+fn export_context(argument: &FnArg) -> Option<ExportContext> {
+    if is_named_ref(argument, "CallContext") {
+        return Some(ExportContext::Call);
+    }
+    if is_named_ref(argument, "PluginContext") {
+        return Some(ExportContext::Plugin);
+    }
+    None
 }
 
 fn is_named_ref(argument: &FnArg, name: &str) -> bool {
