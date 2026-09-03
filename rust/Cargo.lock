@@ -1613,6 +1613,7 @@ name = "phenix-plugin-basic-context"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk",
  "serde_json",
  "sha2",
 ]
@@ -1631,6 +1632,7 @@ name = "phenix-plugin-basic-skills"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk",
  "serde_json",
 ]
 
@@ -1639,6 +1641,7 @@ name = "phenix-plugin-basic-tools"
 version = "0.1.0"
 dependencies = [
  "phenix-core",
+ "phenix-sdk",
  "serde_json",
 ]
 
