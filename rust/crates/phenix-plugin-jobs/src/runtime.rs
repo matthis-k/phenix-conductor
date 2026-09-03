@@ -1,5 +1,7 @@
 use crate::{implementation, job_component_id};
-use phenix_core::{ComponentId, LayerResult, PluginHost, PluginInstance, PluginRuntimeProvider, ServiceId};
+use phenix_core::{
+    ComponentId, LayerResult, PluginHost, PluginInstance, PluginRuntimeProvider, ServiceId,
+};
 
 struct JobInstance {
     inner: Box<dyn PluginInstance>,
