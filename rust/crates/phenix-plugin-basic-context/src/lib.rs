@@ -1,10 +1,10 @@
 use phenix_core::{
-    context_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, ContextCommand, ContextDescriptor, ContextResourceId,
-    ContextResourceRevision, ContextResponse, ContextRevisionId, DurableSchema, InterfaceId,
-    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ResourceNamespace, ServiceContribution, ServiceId, ServiceRole, TransactionOp, CONTEXT_SERVICE,
+    context_service, Authority, CapabilityId, ComponentId, ComponentInterface, ComponentManifest,
+    ContextCommand, ContextDescriptor, ContextResourceId, ContextResourceRevision, ContextResponse,
+    ContextRevisionId, InterfaceId, PluginContext, PluginInstance, PluginManifest,
+    ResourceNamespace, TransactionOp, CONTEXT_SERVICE,
 };
+use phenix_sdk::{StaticPluginComponentDispatch, StaticPluginDefinition};
 use sha2::{Digest, Sha256};
 
 pub const BASIC_CONTEXT_PLUGIN: &str = "phenix.basic-context";
@@ -14,12 +14,6 @@ const INDEX_KEY: &str = "context/@all";
 
 type BasicContextContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
 
-fn context<'host, 'runtime>(
-    host: &'host PluginHost<'runtime>,
-) -> BasicContextContext<'host, 'runtime> {
-    PluginContext::new(host, (), (), ())
-}
-
 pub struct BasicContextInterface;
 
 impl ComponentInterface for BasicContextInterface {
@@ -28,68 +22,59 @@ impl ComponentInterface for BasicContextInterface {
     }
 }
 
+struct ContextStore;
+
+#[phenix_sdk::resource(schema = 1)]
+impl ContextStore {}
+
+#[phenix_sdk::component]
+struct Api;
+
+#[phenix_sdk::component]
+impl Api {
+    #[phenix(export("phenix.context@1"), terminal, priority = 10)]
+    fn handle(
+        &mut self,
+        context: &phenix_sdk::PluginContext<'_, '_, ()>,
+        command: ContextCommand,
+    ) -> Result<ContextResponse, String> {
+        handle(context, command)
+    }
+}
+
+#[phenix_sdk::plugin(id = "phenix.basic-context", authority = persistence_authority())]
+pub struct Plugin {
+    #[phenix(component, id = "phenix.basic-context")]
+    api: Api,
+
+    #[phenix(resource, id = "phenix.basic-context.state")]
+    _state: phenix_sdk::Durable<ContextStore>,
+}
+
 #[must_use]
 pub fn basic_context_manifest() -> PluginManifest {
-    PluginManifest {
-        id: PluginId::parse(BASIC_CONTEXT_PLUGIN).expect("static plugin id is valid"),
-        version: 1,
-        execution: PluginExecution::Embedded,
-        dependencies: Vec::new(),
-        services: vec![ServiceContribution {
-            role: ServiceRole::Terminal,
-            service: context_service(),
-            priority: 10,
-            required_authority: Authority::default(),
-        }],
-        resource_namespaces: vec![namespace()],
-        maximum_authority: persistence_authority(),
-    }
+    Plugin::manifest()
 }
 
 #[must_use]
 pub fn basic_context_component_manifest() -> ComponentManifest {
-    ComponentManifest {
-        id: ComponentId::parse(BASIC_CONTEXT_COMPONENT).expect("static component id is valid"),
-        owner: basic_context_manifest().id,
-        imports: Vec::new(),
-        exports: vec![ComponentExport {
-            interface: BasicContextInterface::interface_id(),
-            schema: BasicContextInterface::schema(),
-            priority: 10,
-            required_authority: Authority::default(),
-        }],
-        maximum_authority: persistence_authority(),
-    }
+    Plugin::component_manifests()
+        .into_iter()
+        .next()
+        .expect("basic context plugin has one generated component")
 }
 
 #[must_use]
 pub fn basic_context_factory() -> Box<dyn PluginInstance> {
-    Box::new(BasicContext)
+    StaticPluginComponentDispatch::into_plugin_instance(Plugin {
+        api: Api,
+        _state: phenix_sdk::Durable::new(),
+    })
 }
 
-struct BasicContext;
-
-impl PluginInstance for BasicContext {
-    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        context(host)
-            .kernel
-            .register_durable_schema(&DurableSchema::new(namespace(), 1))
-            .map_err(|error| error.to_string())
-    }
-
-    fn invoke(
-        &mut self,
-        service: &ServiceId,
-        input: &[u8],
-        host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        if service != &context_service() {
-            return Err(format!("unsupported basic context service: {service}"));
-        }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
-    }
+#[must_use]
+pub fn basic_context_component_id() -> ComponentId {
+    basic_context_component_manifest().id
 }
 
 fn handle(
@@ -219,4 +204,26 @@ fn persistence_authority() -> Authority {
 
 fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).expect("static capability is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_authoring_preserves_stable_identity() {
+        let manifest = basic_context_manifest();
+        assert_eq!(manifest.id.as_str(), BASIC_CONTEXT_PLUGIN);
+        assert_eq!(manifest.services.len(), 1);
+        assert_eq!(manifest.services[0].service, context_service());
+        assert_eq!(manifest.resource_namespaces, vec![namespace()]);
+
+        let component = basic_context_component_manifest();
+        assert_eq!(component.id.as_str(), BASIC_CONTEXT_COMPONENT);
+        assert_eq!(component.exports.len(), 1);
+        assert_eq!(
+            component.exports[0].interface,
+            BasicContextInterface::interface_id()
+        );
+    }
 }
