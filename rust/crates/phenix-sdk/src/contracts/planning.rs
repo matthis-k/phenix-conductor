@@ -109,3 +109,9 @@ impl ComponentInterface for PlanningInterface {
         InterfaceSchema::of::<PlanningCommand, PlanningResponse>()
     }
 }
+
+impl crate::InterfaceMarker for PlanningInterface {
+    fn interface_id() -> InterfaceId {
+        <Self as ComponentInterface>::interface_id()
+    }
+}
