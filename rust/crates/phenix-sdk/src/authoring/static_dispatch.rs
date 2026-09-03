@@ -1,6 +1,4 @@
-use super::{
-    EventContext, StaticComponentListener, StaticPluginComponents, StaticPluginResources,
-};
+use super::{EventContext, StaticComponentListener, StaticPluginComponents, StaticPluginResources};
 use phenix_core::{
     Authority, ComponentId, EventBus, EventEnvelope, EventFailurePolicy, EventHandler,
     EventSubscription, EventTypeId, Exact, InterfaceId, LayerResult, PhenixValue, PluginContext,
@@ -474,7 +472,11 @@ fn register_resources<T: StaticPluginResources>(host: &PluginHost<'_>) -> Result
 
 impl<T> PluginInstance for StaticPluginInstance<T>
 where
-    T: StaticPluginComponents + StaticPluginResources + StaticPluginComponentDispatch + Send + 'static,
+    T: StaticPluginComponents
+        + StaticPluginResources
+        + StaticPluginComponentDispatch
+        + Send
+        + 'static,
 {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
         register_resources::<T>(host)?;
@@ -504,9 +506,10 @@ where
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
         let mut matches = T::components().into_iter().filter(|component| {
-            component.exports().iter().any(|export| {
-                export.terminal && export.interface.as_str() == service.as_str()
-            })
+            component
+                .exports()
+                .iter()
+                .any(|export| export.terminal && export.interface.as_str() == service.as_str())
         });
         let component = matches
             .next()
