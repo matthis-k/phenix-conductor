@@ -1,4 +1,6 @@
-use super::{EventContext, StaticComponentListener, StaticPluginResources};
+use super::{
+    EventContext, StaticComponentListener, StaticPluginComponents, StaticPluginResources,
+};
 use phenix_core::{
     Authority, ComponentId, EventBus, EventEnvelope, EventFailurePolicy, EventHandler,
     EventSubscription, EventTypeId, Exact, InterfaceId, LayerResult, PhenixValue, PluginContext,
@@ -287,7 +289,7 @@ pub trait StaticPluginComponentDispatch {
     /// Adapt an already-constructed stateful plugin value to the kernel's erased runtime ABI.
     fn into_plugin_instance(self) -> Box<dyn PluginInstance>
     where
-        Self: Sized + StaticPluginResources + Send + 'static,
+        Self: Sized + StaticPluginComponents + StaticPluginResources + Send + 'static,
     {
         Box::new(StaticPluginInstance::from_component_dispatch(self))
     }
@@ -472,7 +474,7 @@ fn register_resources<T: StaticPluginResources>(host: &PluginHost<'_>) -> Result
 
 impl<T> PluginInstance for StaticPluginInstance<T>
 where
-    T: StaticPluginResources + StaticPluginComponentDispatch + Send + 'static,
+    T: StaticPluginComponents + StaticPluginResources + StaticPluginComponentDispatch + Send + 'static,
 {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
         register_resources::<T>(host)?;
@@ -493,6 +495,26 @@ where
             let _ = host.remove_event_subscriptions(listener_ids);
         }
         result
+    }
+
+    fn invoke(
+        &mut self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        let mut matches = T::components().into_iter().filter(|component| {
+            component.exports().iter().any(|export| {
+                export.terminal && export.interface.as_str() == service.as_str()
+            })
+        });
+        let component = matches
+            .next()
+            .ok_or_else(|| format!("unsupported static plugin service: {service}"))?;
+        if matches.next().is_some() {
+            return Err(format!("ambiguous static plugin service: {service}"));
+        }
+        self.invoke_component(&component.id, service, input, host)
     }
 
     fn invoke_component(
@@ -546,7 +568,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StaticResourceDescriptor;
+    use crate::{StaticComponentDescriptor, StaticResourceDescriptor};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Default)]
@@ -597,6 +619,12 @@ mod tests {
 
     struct StatefulPlugin {
         calls: usize,
+    }
+
+    impl StaticPluginComponents for StatefulPlugin {
+        fn components() -> Vec<StaticComponentDescriptor> {
+            Vec::new()
+        }
     }
 
     impl StaticPluginResources for StatefulPlugin {
