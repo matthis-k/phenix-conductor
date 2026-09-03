@@ -42,7 +42,7 @@ pub struct Plugin {
     api: Api,
 
     #[phenix(resource, id = "phenix.jobs.state")]
-    state: phenix_sdk::Durable<JobStore>,
+    _state: phenix_sdk::Durable<JobStore>,
 }
 
 #[must_use]
@@ -54,7 +54,7 @@ pub fn job_manifest() -> PluginManifest {
 pub fn job_factory() -> Box<dyn PluginInstance> {
     phenix_sdk::StaticPluginComponentDispatch::into_plugin_instance(Plugin {
         api: Api,
-        state: phenix_sdk::Durable::new(),
+        _state: phenix_sdk::Durable::new(),
     })
 }
 
