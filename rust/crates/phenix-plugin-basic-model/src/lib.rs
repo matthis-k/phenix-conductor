@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use phenix_core::{
-    ComponentManifest, ModelInferenceRequest, ModelInferenceResponse, PluginInstance, PluginManifest,
+    ComponentManifest, ModelInferenceRequest, ModelInferenceResponse, PluginInstance,
+    PluginManifest,
 };
 use phenix_sdk::StaticPluginDefinition;
 use std::collections::BTreeMap;
