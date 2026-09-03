@@ -1,53 +1,21 @@
-name: Worker comment guard
+name: Reject worker comment transport
 
 on:
   issue_comment:
     types: [created]
-  push:
-    branches: [main]
 
 permissions:
-  contents: read
   issues: write
   pull-requests: write
 
 jobs:
-  purge-pr-462-transport-comments:
+  delete-forbidden-transport-comment:
     if: >-
-      github.event_name == 'push' &&
-      contains(github.event.head_commit.message, '[cleanup-worker-comments]')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Delete historical worker transport comments from PR 462
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/462/comments?per_page=100" \
-            --jq '.[] | select(
-              ((.body // "") | startswith("<!-- phenix-worker-patch-v1 -->")) or
-              ((.body // "") | startswith("worker-exec\n")) or
-              ((.body // "") == "<!-- obsolete automated worker patch transport removed -->")
-            ) | .id' \
-            > "$RUNNER_TEMP/worker-transport-comment-ids"
-
-          count="$(wc -l < "$RUNNER_TEMP/worker-transport-comment-ids")"
-          export GITHUB_REPOSITORY GH_TOKEN
-          xargs -r -P 8 -n 1 sh -c '
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$1" >/dev/null 2>&1 || true
-          ' _ < "$RUNNER_TEMP/worker-transport-comment-ids"
-
-          echo "Processed $count historical worker transport comments from PR 462."
-
-  delete-new-transport-comment:
-    if: >-
-      github.event_name == 'issue_comment' &&
-      (startsWith(github.event.comment.body, '<!-- phenix-worker-patch-v1 -->') ||
-       startsWith(github.event.comment.body, 'worker-exec'))
+      startsWith(github.event.comment.body, '<!-- phenix-worker-patch-v1 -->') ||
+      startsWith(github.event.comment.body, 'worker-exec')
     runs-on: ubuntu-latest
     steps:
-      - name: Delete forbidden worker transport comment
+      - name: Delete worker transport comment
         env:
           GH_TOKEN: ${{ github.token }}
           COMMENT_ID: ${{ github.event.comment.id }}
