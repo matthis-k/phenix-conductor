@@ -681,7 +681,10 @@ fn split_root_argument(args: TokenStream) -> syn::Result<(TokenStream, bool)> {
     for argument in arguments {
         if matches!(&argument, Meta::Path(path) if path.is_ident("root")) {
             if root {
-                return Err(syn::Error::new_spanned(argument, "duplicate plugin root flag"));
+                return Err(syn::Error::new_spanned(
+                    argument,
+                    "duplicate plugin root flag",
+                ));
             }
             root = true;
             continue;

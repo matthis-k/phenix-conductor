@@ -127,7 +127,10 @@ fn root_exposure_uses_member_name_without_an_api_redirect() {
     assert_eq!(projection.callables.len(), 1);
     let callable = &projection.callables[0];
     assert_eq!(callable.component.as_str(), "fixture.root-public");
-    assert_eq!(callable.interface.as_str(), "fixture.root-public/public/run@1");
+    assert_eq!(
+        callable.interface.as_str(),
+        "fixture.root-public/public/run@1"
+    );
     assert_eq!(callable.path, ["run"]);
     assert_eq!(callable.method, "execute");
 
