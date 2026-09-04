@@ -1,6 +1,6 @@
 use crate::{
-    Authority, ComponentGraphError, ComponentId, ComponentManifest, ConfigContribution, InterfaceId,
-    PluginManifest, ResolvedComponentGraph, ResolvedHarness, ResolvedHarnessError,
+    Authority, ComponentGraphError, ComponentId, ComponentManifest, ConfigContribution,
+    InterfaceId, PluginManifest, ResolvedComponentGraph, ResolvedHarness, ResolvedHarnessError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -48,21 +48,13 @@ impl ProviderCompositionPolicy {
     }
 
     #[must_use]
-    pub fn with_explicit_binding(
-        mut self,
-        interface: InterfaceId,
-        provider: ComponentId,
-    ) -> Self {
+    pub fn with_explicit_binding(mut self, interface: InterfaceId, provider: ComponentId) -> Self {
         self.interfaces.entry(interface).or_default().explicit = Some(provider);
         self
     }
 
     #[must_use]
-    pub fn with_disabled_provider(
-        mut self,
-        interface: InterfaceId,
-        provider: ComponentId,
-    ) -> Self {
+    pub fn with_disabled_provider(mut self, interface: InterfaceId, provider: ComponentId) -> Self {
         self.interfaces
             .entry(interface)
             .or_default()
@@ -245,7 +237,10 @@ mod tests {
             &ProviderCompositionPolicy::default(),
         )
         .unwrap();
-        assert_eq!(selected(&default, &interface), ComponentId::parse("a-provider").unwrap());
+        assert_eq!(
+            selected(&default, &interface),
+            ComponentId::parse("a-provider").unwrap()
+        );
 
         let policy = ProviderCompositionPolicy::new().with_priority(
             interface.clone(),
@@ -253,13 +248,13 @@ mod tests {
             10,
         );
         let preferred = ResolvedComponentGraph::compile_with_provider_policy(
-            plugins,
-            components,
-            &authority,
-            &policy,
+            plugins, components, &authority, &policy,
         )
         .unwrap();
-        assert_eq!(selected(&preferred, &interface), ComponentId::parse("z-provider").unwrap());
+        assert_eq!(
+            selected(&preferred, &interface),
+            ComponentId::parse("z-provider").unwrap()
+        );
     }
 
     #[test]
@@ -297,13 +292,13 @@ mod tests {
         );
 
         let graph = ResolvedComponentGraph::compile_with_provider_policy(
-            plugins,
-            components,
-            &caller,
-            &policy,
+            plugins, components, &caller, &policy,
         )
         .unwrap();
-        assert_eq!(selected(&graph, &interface), ComponentId::parse("a-authorized").unwrap());
+        assert_eq!(
+            selected(&graph, &interface),
+            ComponentId::parse("a-authorized").unwrap()
+        );
     }
 
     #[test]
@@ -331,10 +326,8 @@ mod tests {
             plugin("plugin-b-provider", Authority::default()),
             plugin("plugin-consumer", Authority::default()),
         ];
-        let policy = ProviderCompositionPolicy::new().with_disabled_provider(
-            interface.clone(),
-            ComponentId::parse("a-provider").unwrap(),
-        );
+        let policy = ProviderCompositionPolicy::new()
+            .with_disabled_provider(interface.clone(), ComponentId::parse("a-provider").unwrap());
 
         let graph = ResolvedComponentGraph::compile_with_provider_policy(
             plugins,
@@ -343,7 +336,10 @@ mod tests {
             &policy,
         )
         .unwrap();
-        assert_eq!(selected(&graph, &interface), ComponentId::parse("b-provider").unwrap());
+        assert_eq!(
+            selected(&graph, &interface),
+            ComponentId::parse("b-provider").unwrap()
+        );
     }
 
     #[test]
