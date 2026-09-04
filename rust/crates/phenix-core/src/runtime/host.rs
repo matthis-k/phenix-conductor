@@ -52,7 +52,9 @@ impl<'a> PluginHost<'a> {
         {
             (fallback, Some(ProviderFallbackReason::PrimaryUnavailable))
         } else {
-            return Err(KernelError::PluginNotActive(plan.primary().owning_plugin().clone()).into());
+            return Err(
+                KernelError::PluginNotActive(plan.primary().owning_plugin().clone()).into(),
+            );
         };
         let service = ServiceId::parse(interface.as_str().to_owned()).map_err(|message| {
             ComponentInvocationError::InvalidInterface {

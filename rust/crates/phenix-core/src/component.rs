@@ -188,15 +188,13 @@ pub struct ResolvedImport {
 
 impl ResolvedImport {
     fn provider_plan(&self) -> Option<ResolvedProviderPlan> {
-        self.binding
-            .as_ref()
-            .map(|primary| ResolvedProviderPlan {
-                primary: primary.clone(),
-                fallbacks: self.fallbacks.clone(),
-                selection_reason: self
-                    .selection_reason
-                    .expect("resolved provider binding has a selection reason"),
-            })
+        self.binding.as_ref().map(|primary| ResolvedProviderPlan {
+            primary: primary.clone(),
+            fallbacks: self.fallbacks.clone(),
+            selection_reason: self
+                .selection_reason
+                .expect("resolved provider binding has a selection reason"),
+        })
     }
 }
 
@@ -341,8 +339,8 @@ impl ResolvedComponentGraph {
                 .attenuate(&manifest.maximum_authority);
             let mut imports = Vec::with_capacity(manifest.imports.len());
             for import in &manifest.imports {
-                let explicit = provider_policy
-                    .and_then(|policy| policy.explicit_binding(&import.interface));
+                let explicit =
+                    provider_policy.and_then(|policy| policy.explicit_binding(&import.interface));
                 let mut eligible = Vec::new();
                 let mut incompatible = None;
                 if let Some(candidates) = exporters.get(&import.interface) {
@@ -771,10 +769,7 @@ mod tests {
             .with_interface_fallback(demo.clone())
             .with_fallback_enabled(demo.clone());
         let preferred = ResolvedComponentGraph::compile_with_provider_policy(
-            plugins,
-            components,
-            &authority,
-            &policy,
+            plugins, components, &authority, &policy,
         )
         .unwrap();
         let plan = preferred
@@ -797,10 +792,8 @@ mod tests {
         authorized.exports[0].required_authority = Authority::new([read]);
         let mut unauthorized = exporter("z-unauthorized", 0, broad.clone());
         unauthorized.exports[0].required_authority = Authority::new([network]);
-        let policy = ProviderCompositionPolicy::new().with_explicit_binding(
-            interface("phenix.demo@1"),
-            component("z-unauthorized"),
-        );
+        let policy = ProviderCompositionPolicy::new()
+            .with_explicit_binding(interface("phenix.demo@1"), component("z-unauthorized"));
         let graph = ResolvedComponentGraph::compile_with_provider_policy(
             vec![
                 plugin_manifest("plugin-consumer", caller.clone()),

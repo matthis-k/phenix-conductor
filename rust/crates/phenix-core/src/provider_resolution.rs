@@ -109,11 +109,7 @@ impl ProviderCompositionPolicy {
             .and_then(|policy| policy.explicit.as_ref())
     }
 
-    pub(crate) fn provider_enabled(
-        &self,
-        interface: &InterfaceId,
-        provider: &ComponentId,
-    ) -> bool {
+    pub(crate) fn provider_enabled(&self, interface: &InterfaceId, provider: &ComponentId) -> bool {
         !self
             .interfaces
             .get(interface)
@@ -132,20 +128,16 @@ impl ProviderCompositionPolicy {
             .unwrap_or_default()
     }
 
-    pub(crate) fn has_priority(
-        &self,
-        interface: &InterfaceId,
-        provider: &ComponentId,
-    ) -> bool {
+    pub(crate) fn has_priority(&self, interface: &InterfaceId, provider: &ComponentId) -> bool {
         self.interfaces
             .get(interface)
             .is_some_and(|policy| policy.priorities.contains_key(provider))
     }
 
     pub(crate) fn fallback_enabled(&self, interface: &InterfaceId) -> bool {
-        self.interfaces.get(interface).is_some_and(|policy| {
-            policy.interface_allows_fallback && policy.fallback_enabled
-        })
+        self.interfaces
+            .get(interface)
+            .is_some_and(|policy| policy.interface_allows_fallback && policy.fallback_enabled)
     }
 }
 
