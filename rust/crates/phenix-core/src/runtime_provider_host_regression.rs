@@ -3,7 +3,10 @@ use crate::{
     PluginArtifact, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
     PluginRuntimeProvider, RuntimeId, RuntimePluginCandidate, ServiceContribution, ServiceRole,
 };
-use std::{collections::BTreeMap, sync::{Arc, Mutex}};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 
 fn plugin(value: &str) -> PluginId {
     PluginId::parse(value).unwrap()
