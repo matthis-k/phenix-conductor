@@ -30,6 +30,13 @@ pub enum LiveReconciliationError {
 }
 
 impl GraphReconciler {
+    pub(crate) fn preflight_live_reconciliation(
+        &self,
+        kernel: &Kernel,
+    ) -> Result<(), LiveReconciliationError> {
+        validate_live_reconciliation(self, kernel)
+    }
+
     /// Apply one fully resolved development candidate to a live kernel.
     ///
     /// Candidate resolution happens before this operation. The method verifies that
@@ -41,7 +48,7 @@ impl GraphReconciler {
         kernel: &mut Kernel,
         candidate: ResolvedHarness,
     ) -> Result<ReconciliationResult, LiveReconciliationError> {
-        validate_live_reconciliation(self, kernel)?;
+        self.preflight_live_reconciliation(kernel)?;
         let preview = self.preview_candidate(&candidate);
         let restart_plugins =
             restart_plugins_for_plan(self.active(), &candidate, &preview.transition_plan);
@@ -63,7 +70,7 @@ impl GraphReconciler {
         candidate: ResolvedHarness,
         candidate_metadata: &ResolvedCompositionMetadata,
     ) -> Result<ReconciliationResult, LiveReconciliationError> {
-        validate_live_reconciliation(self, kernel)?;
+        self.preflight_live_reconciliation(kernel)?;
         let preview = self
             .preview_candidate_with_metadata(active_metadata, &candidate, candidate_metadata)
             .map_err(LiveReconciliationError::MetadataPolicy)?;

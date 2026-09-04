@@ -469,7 +469,7 @@ mod tests {
                 runtime: runtime.clone(),
                 artifact: crate::PluginArtifact {
                     locator: "plugin.wasm".into(),
-                    revision: "sha256:fixture".into(),
+                    revision: crate::ArtifactRevision::from_content(b"fixture"),
                     configuration: BTreeMap::new(),
                 },
             },
@@ -501,7 +501,7 @@ mod tests {
                 runtime: crate::RuntimeId::parse("vendor.runtime").unwrap(),
                 artifact: crate::PluginArtifact {
                     locator: "plugin.wasm".into(),
-                    revision: "sha256:fixture".into(),
+                    revision: crate::ArtifactRevision::from_content(b"fixture"),
                     configuration: BTreeMap::new(),
                 },
             })

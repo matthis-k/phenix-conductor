@@ -373,7 +373,7 @@ mod tests {
                     runtime: runtime.clone(),
                     artifact: PluginArtifact {
                         locator: "fixture.plugin".into(),
-                        revision: revision.into(),
+                        revision: crate::ArtifactRevision::from_content(revision.as_bytes()),
                         configuration: BTreeMap::new(),
                     },
                 },

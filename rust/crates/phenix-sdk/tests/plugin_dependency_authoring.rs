@@ -49,7 +49,7 @@ fn external_execution() -> phenix_sdk::PluginExecution {
         runtime: phenix_sdk::RuntimeId::parse("fixture.runtime-provider").unwrap(),
         artifact: phenix_sdk::PluginArtifact {
             locator: "fixture.wasm".into(),
-            revision: "sha256:fixture".into(),
+            revision: phenix_sdk::ArtifactRevision::from_content(b"fixture"),
             configuration: std::collections::BTreeMap::new(),
         },
     }
@@ -109,7 +109,10 @@ fn plugin_execution_preserves_resource_only_and_runtime_metadata() {
     };
     assert_eq!(runtime.as_str(), "fixture.runtime-provider");
     assert_eq!(artifact.locator, "fixture.wasm");
-    assert_eq!(artifact.revision, "sha256:fixture");
+    assert_eq!(
+        artifact.revision,
+        phenix_sdk::ArtifactRevision::from_content(b"fixture")
+    );
 }
 
 #[test]

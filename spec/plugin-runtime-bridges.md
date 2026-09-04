@@ -237,13 +237,13 @@ Lifecycle methods such as `start` and `stop` are not public management operation
 
 ### Load request
 
-The exact artifact revision is pinned by the canonical manifest's `PluginExecution::Runtime` entry and its runtime binding, not by a separate load-time artifact input:
+The load manifest uses the generic artifact slot to carry a ready artifact or build plan. Management normalizes it to the default concrete `PluginManifest<PluginArtifact>` before candidate resolution:
 
 ```rust
 struct PluginLoadRequest {
-    manifest: PluginManifest,
+    manifest: PluginManifest<PluginArtifactInput>,
     components: Vec<ComponentManifest>,
-    expected_active_revision: Option<String>,
+    expected_active_revision: Option<ArtifactRevision>,
 }
 ```
 
@@ -254,7 +254,7 @@ The optional expected revision provides compare-and-swap semantics for developme
 ```rust
 struct PluginUnloadRequest {
     plugin: PluginId,
-    expected_active_revision: Option<String>,
+    expected_active_revision: Option<ArtifactRevision>,
 }
 ```
 
@@ -275,13 +275,11 @@ This is the canonical internal model. `load` and `unload` are convenience mutati
 
 ## Artifact inputs
 
-The implemented load request references the exact artifact already pinned in the canonical manifest: `PluginExecution::Runtime` carries the runtime ID and immutable artifact revision, and the resolved runtime binding records the chosen provider. A separate load-time artifact input is not part of the implemented subset.
-
-Future work may add a ready-reference/build-plan split:
+The implemented load request supports this split:
 
 ```rust
 enum PluginArtifactInput {
-    Ready(ArtifactRef),
+    Ready(PluginArtifact),
     Build(PluginBuildPlan),
 }
 ```
@@ -290,7 +288,7 @@ The runtime ID comes from the canonical manifest. Build machinery does not infer
 
 ## Build plans
 
-Build plans are future work and are not implemented. They exist so compiled or bundled plugin languages fit the same load path.
+Build plans let compiled or bundled plugin languages enter the same load path.
 
 Examples include:
 
@@ -307,27 +305,29 @@ struct PluginBuildPlan {
     source: BuildSource,
     steps: Vec<BuildStep>,
     artifact_output: RelativePath,
+    configuration: Map<String, PhenixValue>,
+    requested_authority: Authority,
 }
 
 struct BuildStep {
-    program: String,
-    args: Vec<String>,
-    cwd: RelativePath,
+    executable: BuildExecutable,
+    argv: Vec<BuildArgument>,
+    working_directory: RelativePath,
     environment: BuildEnvironment,
 }
 ```
 
 Do not model a build step as one shell command string. Use executable plus arguments so quoting and shell injection are not implicit semantics.
 
-The exact build-plan schema may evolve, but it must support deterministic ordered steps and one declared final artifact output.
+Executables, arguments, source identity/revision, environment names and values, working directories, and the single artifact output are parsed into validated types. Working directories and output paths are relative, and plans contain at least one deterministic ordered step.
 
 ### Build execution boundary
 
-Build execution is future work and is not implemented. When it lands, the kernel owns the build transaction, request authorization, output selection, provenance, and rollback behavior.
+Core injects a narrow `PluginBuildExecutor` into trusted management context. The executor contract requires isolated staging, explicit environment, ordered steps, and return of only the one declared output locator and its exact bytes. It returns bounded provenance and diagnostics on success or typed failure.
 
 The kernel must not gain ambient shell access to implement builds.
 
-Actual process execution runs through an explicit build executor or host process capability under kernel policy.
+Actual process execution is outside Core and runs through that explicit executor under host policy. Core does not use a workspace shell, task runtime, backend process configuration, or artifact plugin as a build executor.
 
 Build authority is separate from the authority later granted to the plugin artifact.
 
@@ -341,13 +341,13 @@ A build receives only explicitly granted capabilities such as:
 
 Secrets, arbitrary host filesystem access, and network access are not implicit.
 
-For agent-authored build requests, effective build authority must be bounded by both kernel build policy and the requesting agent's delegated authority.
+Effective build authority is the intersection of kernel build policy, requesting caller authority, and plan-requested authority. It is separate from guest/plugin authority and runtime-provider authority. The caller authority, policy, CAS, and executor are trusted out-of-band context and are never serialized in `PluginManagementRequest`.
 
 ## Build result and artifact identity
 
-Build production is future work and is not implemented. When it lands, a successful build produces a concrete artifact before runtime validation or graph activation.
+A successful build produces a concrete artifact before runtime validation or graph activation.
 
-The kernel computes or records an immutable `ArtifactRevision` from the exact output artifact and relevant immutable metadata.
+Core computes `ArtifactRevision` from the exact output bytes. Its only accepted form is `sha256:<64 lowercase hexadecimal digits>`; parsing and deserialization reject every non-canonical value.
 
 Graph generations pin the exact artifact revision, not merely the plugin ID or package version.
 
@@ -365,7 +365,7 @@ generation 42
   artifact c770...
 ```
 
-Build logs and build-plan provenance should be attached to the candidate result so agents can diagnose failures.
+Bounded build provenance and diagnostics are returned in successful management results and retained in later candidate/runtime errors so callers can diagnose failures after build completion.
 
 ## Load and hot-replace transaction
 
@@ -373,7 +373,12 @@ The implemented load request follows this semantic sequence:
 
 ```text
 receive request
-  -> validate canonical manifest and runtime bindings
+  -> preflight live reconciler/kernel agreement
+  -> authorize through trusted caller/policy context
+  -> preflight content-addressed storage
+  -> verify a ready artifact or execute the typed build plan
+  -> hash and store the exact declared build output
+  -> normalize to a concrete PluginArtifact
   -> resolve runtime provider and dependency order
   -> reject cycles and unavailable runtimes
   -> resolve candidate component graph
@@ -384,7 +389,7 @@ receive request
   -> stop retired instances
 ```
 
-Request authorization is product policy applied outside core before the request reaches the kernel.
+Core enforces the trusted policy and caller authority supplied out of band. Product policy chooses those values and supplies concrete CAS/executor implementations.
 
 No step before graph commit may make the candidate visible to ordinary component invocations.
 
@@ -443,6 +448,10 @@ The implemented subset covers kernel-owned desired-state plugin management throu
 
 - typed `PluginManagementRequest` over load, unload, and desired-set reconcile;
 - `expected_active_revision` compare-and-swap on load and unload;
+- ready artifacts and validated structured build plans normalized before resolution;
+- management authorization and effective build authority attenuation through trusted context;
+- injected CAS and isolated build-executor contracts with bounded evidence;
+- core-computed immutable artifact revisions from exact output bytes;
 - runtime-provider resolution with cycle and unavailable-runtime rejection before commit;
 - atomic generation commit through the existing resolved-generation reconciliation path;
 - synchronous retirement of stopped instances after commit;
@@ -454,14 +463,18 @@ Initial embedded loading activates, replaces, or unloads implementations whose e
 
 Do not add native dynamic-library loading as an implicit part of `embedded`.
 
-Build plans, explicit quiesce/drain retirement, and non-embedded bridge packages remain future work. A successful build whose declared runtime is unavailable must produce a clear `RuntimeUnavailable` result and must not alter the active graph.
+Explicit quiesce/drain retirement, concrete production build executors, and non-embedded bridge packages remain future work. A successful build whose declared runtime is unavailable produces a direct `RuntimeUnavailable` result with build evidence and does not alter the active graph.
 
 ## Error model
 
 Plugin management failures must identify the failed phase and preserve the previous active generation.
 
-The implemented subset distinguishes:
+The implemented subset distinguishes direct management phases for:
 
+- authorization denial;
+- build failure;
+- missing declared output;
+- invalid or unavailable CAS artifact;
 - runtime unavailable;
 - runtime-provider dependency cycle;
 - graph resolution failure, including unsatisfied required imports;
@@ -470,7 +483,7 @@ The implemented subset distinguishes:
 - stale expected artifact revision;
 - unknown unload target.
 
-Request authorization, manifest/build validation, build failure, and artifact-output failures are future phases outside the current transaction.
+Build reports are also retained on later candidate resolution, runtime prepare, and activation failures.
 
 Post-commit retirement failures are operational errors. They do not roll the graph pointer back to a generation that has already been replaced.
 
@@ -487,9 +500,9 @@ Implementation must preserve these invariants:
 7. Canonical manifests are inspectable before executing plugin code.
 8. Load, unload, replace, and reconcile are kernel-domain operations.
 9. Public management requests express desired state rather than raw lifecycle transitions.
-10. Build steps may be included in load requests for compiled or bundled languages (future work).
-11. Build execution is explicitly sandboxed/capability-bound and is not ambient kernel shell access (future work).
-12. Build authority is distinct from plugin runtime authority (future work).
+10. Build steps may be included in load requests for compiled or bundled languages.
+11. Build execution is explicitly isolated/capability-bound and is not ambient kernel shell access.
+12. Build authority is distinct from plugin and runtime-provider authority.
 13. Graph generations pin exact artifact revisions and runtime providers.
 14. Candidate validation, prepare, or start failure leaves the active generation unchanged.
 15. Existing calls remain pinned to their old generation during replacement.
@@ -499,7 +512,7 @@ Implementation must preserve these invariants:
 
 ## Validation
 
-The implemented subset is covered by `rust/crates/phenix-core/src/plugin_management_regression.rs` and `rust/crates/phenix-core/src/runtime_provider_regression.rs`, which prove:
+The implemented subset is covered by `rust/crates/phenix-core/src/plugin_build_loading_regression.rs`, `rust/crates/phenix-core/src/plugin_management_regression.rs`, and `rust/crates/phenix-core/src/runtime_provider_regression.rs`, which prove:
 
 - a runtime plugin can be loaded and unloaded through the kernel management interface;
 - replacing an active plugin with a new artifact creates a new graph generation;
@@ -510,9 +523,14 @@ The implemented subset is covered by `rust/crates/phenix-core/src/plugin_managem
 - runtime-provider dependency cycles are rejected;
 - removing a runtime provider with dependents is rejected;
 - old invocations remain pinned while new invocations use the replacement generation;
-- runtime-bridge authority cannot leak to a guest plugin.
-
-Future work still requires build requests that use structured executable/argument steps rather than shell strings, build authority bounded independently from plugin authority, immutable artifact revisions for produced builds, and exact-head Source, Rust, Product, and Maintenance validation at completion.
+- runtime-bridge authority cannot leak to a guest plugin;
+- structured argv preserves shell metacharacters as literal arguments and cwd/environment are explicit;
+- build authority is the policy/caller/request intersection and remains separate from guest authority;
+- CAS preflight precedes build execution;
+- missing output and failed builds preserve the active generation;
+- exact output bytes deterministically produce an immutable revision;
+- unavailable runtimes and runtime rejection preserve build evidence without graph mutation;
+- ready and built artifacts enter the identical concrete downstream generation.
 
 ## Simplification audit
 

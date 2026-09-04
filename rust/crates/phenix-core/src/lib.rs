@@ -5,6 +5,7 @@
 
 mod activation;
 mod agent;
+mod artifact;
 mod authority;
 mod component;
 mod composition_metadata;
@@ -25,6 +26,8 @@ mod metadata_inspection;
 mod metadata_reconciliation;
 mod persistence;
 mod persistence_value;
+mod plugin_build;
+mod plugin_build_execution;
 mod plugin_context;
 mod reconciliation;
 mod reconciliation_inspection;
@@ -52,6 +55,8 @@ mod metadata_semantic_identity_regression;
 #[path = "../tests/persistence_backend_conformance.rs"]
 mod persistence_backend_conformance;
 #[cfg(test)]
+mod plugin_build_loading_regression;
+#[cfg(test)]
 mod plugin_management_regression;
 #[cfg(test)]
 mod provider_rebind_generation_regression;
@@ -76,6 +81,7 @@ pub use agent::{
     SkillDefinition, SkillResponse, ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE,
     MODEL_INFERENCE_SERVICE, SKILL_SERVICE, TOOL_SERVICE,
 };
+pub use artifact::{ArtifactRevision, ArtifactRevisionParseError};
 pub use authority::Authority;
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
@@ -110,7 +116,8 @@ pub use identity::{
 pub use inspection::{ResolvedHarnessInspection, ResolvedListenerInspection};
 pub use live_reconciliation::LiveReconciliationError;
 pub use management::{
-    PluginLoadRequest, PluginManagementError, PluginManagementRequest, PluginSetRequest,
+    PluginBuildReport, PluginLoadRequest, PluginManagementContext, PluginManagementError,
+    PluginManagementPolicy, PluginManagementRequest, PluginManagementResult, PluginSetRequest,
     PluginUnloadRequest,
 };
 pub use manifest::{
@@ -127,6 +134,15 @@ pub use metadata_reconciliation::{
 pub use persistence::{
     BackendFeature, DurableSchema, LocalPersistence, NamespaceTransaction, PersistenceBackend,
     PersistenceError, SchemaMigration, TransactionOp,
+};
+pub use plugin_build::{
+    BuildArgument, BuildArtifactOutput, BuildEnvironment, BuildEnvironmentName, BuildExecutable,
+    BuildSourceIdentity, BuildSourceRevision, BuildWorkingDirectory, PluginArtifactInput,
+    PluginBuildPlan, PluginBuildPlanError, PluginBuildSource, PluginBuildStep,
+};
+pub use plugin_build_execution::{
+    PluginArtifactStore, PluginArtifactStoreError, PluginBuildEvidence, PluginBuildExecution,
+    PluginBuildExecutor, PluginBuildFailure, PluginBuildOutput,
 };
 pub use plugin_context::{
     CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,

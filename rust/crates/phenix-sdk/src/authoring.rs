@@ -411,7 +411,7 @@
 //!         runtime: phenix_sdk::RuntimeId::parse("fixture.runtime").unwrap(),
 //!         artifact: phenix_sdk::PluginArtifact {
 //!             locator: "fixture.wasm".into(),
-//!             revision: "sha256:fixture".into(),
+//!             revision: phenix_sdk::ArtifactRevision::from_content(b"fixture"),
 //!             configuration: std::collections::BTreeMap::new(),
 //!         },
 //!     }
@@ -432,7 +432,7 @@
 //!         runtime: phenix_sdk::RuntimeId::parse("fixture.runtime").unwrap(),
 //!         artifact: phenix_sdk::PluginArtifact {
 //!             locator: "fixture.wasm".into(),
-//!             revision: "sha256:fixture".into(),
+//!             revision: phenix_sdk::ArtifactRevision::from_content(b"fixture"),
 //!             configuration: std::collections::BTreeMap::new(),
 //!         },
 //!     }

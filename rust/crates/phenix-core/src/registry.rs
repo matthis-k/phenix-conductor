@@ -1,6 +1,6 @@
 use crate::{
-    Authority, ComponentGraphError, ComponentId, EventError, PluginExecution, PluginId,
-    PluginManifest, ResourceNamespace, RuntimeId, ServiceId, ServiceRole,
+    ArtifactRevision, Authority, ComponentGraphError, ComponentId, EventError, PluginExecution,
+    PluginId, PluginManifest, ResourceNamespace, RuntimeId, ServiceId, ServiceRole,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -18,7 +18,7 @@ pub struct RuntimeBinding {
     pub guest: PluginId,
     pub runtime: RuntimeId,
     pub provider: PluginId,
-    pub artifact_revision: String,
+    pub artifact_revision: ArtifactRevision,
 }
 
 #[must_use]

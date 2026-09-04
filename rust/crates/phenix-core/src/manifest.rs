@@ -1,6 +1,7 @@
 use crate::{
-    Authority, ComponentId, EventFailurePolicy, EventTypeId, InterfaceId, InterfaceSchema,
-    PhenixSchema, PhenixValue, PluginId, ResourceNamespace, RuntimeId, ServiceId, SubscriptionId,
+    ArtifactRevision, Authority, ComponentId, EventFailurePolicy, EventTypeId, InterfaceId,
+    InterfaceSchema, PhenixSchema, PhenixValue, PluginId, ResourceNamespace, RuntimeId, ServiceId,
+    SubscriptionId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -8,19 +9,16 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PluginArtifact {
     pub locator: String,
-    pub revision: String,
+    pub revision: ArtifactRevision,
     #[serde(default)]
     pub configuration: BTreeMap<String, PhenixValue>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum PluginExecution {
+pub enum PluginExecution<A = PluginArtifact> {
     Embedded,
-    Runtime {
-        runtime: RuntimeId,
-        artifact: PluginArtifact,
-    },
+    Runtime { runtime: RuntimeId, artifact: A },
     ResourceOnly,
 }
 
@@ -102,14 +100,36 @@ pub struct ComponentManifest {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct PluginManifest {
+pub struct PluginManifest<A = PluginArtifact> {
     pub id: PluginId,
     pub version: u32,
-    pub execution: PluginExecution,
+    pub execution: PluginExecution<A>,
     pub dependencies: Vec<PluginId>,
     pub services: Vec<ServiceContribution>,
     pub resource_namespaces: Vec<ResourceNamespace>,
     pub maximum_authority: Authority,
+}
+
+impl<A> PluginManifest<A> {
+    pub fn map_artifact<B>(self, map: impl FnOnce(A) -> B) -> PluginManifest<B> {
+        let execution = match self.execution {
+            PluginExecution::Embedded => PluginExecution::Embedded,
+            PluginExecution::Runtime { runtime, artifact } => PluginExecution::Runtime {
+                runtime,
+                artifact: map(artifact),
+            },
+            PluginExecution::ResourceOnly => PluginExecution::ResourceOnly,
+        };
+        PluginManifest {
+            id: self.id,
+            version: self.version,
+            execution,
+            dependencies: self.dependencies,
+            services: self.services,
+            resource_namespaces: self.resource_namespaces,
+            maximum_authority: self.maximum_authority,
+        }
+    }
 }
 
 impl PluginManifest {
@@ -139,7 +159,7 @@ mod tests {
                 runtime: RuntimeId::parse("vendor.runtime").unwrap(),
                 artifact: PluginArtifact {
                     locator: "plugin.wasm".into(),
-                    revision: "sha256:fixture".into(),
+                    revision: ArtifactRevision::from_content(b"fixture"),
                     configuration: BTreeMap::from([(
                         "entrypoint".into(),
                         PhenixValue::String("start".into()),
@@ -160,7 +180,7 @@ mod tests {
         assert_eq!(encoded["execution"]["artifact"]["locator"], "plugin.wasm");
         assert_eq!(
             encoded["execution"]["artifact"]["revision"],
-            "sha256:fixture"
+            ArtifactRevision::from_content(b"fixture").as_ref()
         );
     }
 }
