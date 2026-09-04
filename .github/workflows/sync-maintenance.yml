@@ -32,12 +32,6 @@ jobs:
           set -euo pipefail
           nix run --quiet .#phenix-maintenance-command-1c6e6c4c02e5 -- fix
           nix develop --command bash -lc 'cd rust && cargo metadata --format-version 1 >/dev/null'
-
-          system="$(nix eval --impure --raw --expr builtins.currentSystem)"
-          nix eval --raw \
-            ".#packages.$system.phenix-maintenance.phenixMaintenance.ci.github.workflow" \
-            > .github/workflows/ci.yml
-
           git diff --check
 
       - name: Commit autofixes
