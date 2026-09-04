@@ -505,7 +505,8 @@ fn validate_text(label: &str, value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, LocalPersistence};
+    use crate::planning_component_manifest;
+    use phenix_core::{Kernel, LocalPersistence, ResolvedHarness, ResolvedHarnessActivation};
     use std::{
         fs,
         path::PathBuf,
@@ -526,9 +527,16 @@ mod tests {
     fn kernel_with(path: &PathBuf) -> Kernel {
         let manifest = planning_manifest();
         let plugin = manifest.id.clone();
+        let resolved = ResolvedHarness::resolve(
+            [manifest],
+            [planning_component_manifest()],
+            [],
+            &planning_manifest().maximum_authority,
+        )
+        .unwrap();
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel =
-            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        let mut kernel = Kernel::with_persistence(resolved.kernel_config().clone(), persistence);
+        kernel.activate_resolved_harness(&resolved).unwrap();
         kernel
             .register_embedded_factory(plugin, planning_factory)
             .unwrap();
@@ -538,12 +546,14 @@ mod tests {
 
     fn invoke(kernel: &mut Kernel, command: PlanningCommand) -> Result<PlanningResponse, String> {
         let input = serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap();
+        let component = planning_component_manifest();
         let output = kernel
-            .invoke(
+            .invoke_component(
+                &component.id,
                 &planning_service(),
                 &input,
                 &planning_manifest().maximum_authority,
-                None,
+                &component.owner,
             )
             .map_err(|error| error.to_string())?;
         let output: phenix_core::PhenixValue =

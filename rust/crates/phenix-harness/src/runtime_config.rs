@@ -4,10 +4,11 @@ use phenix_core::{
 };
 use phenix_harness::{default_suite_authority, PhenixHarness};
 use phenix_plugin_catalog::{
-    execution_configuration_service, model_routing_service, options_service, AgentDefinition,
-    ExecutionConfigurationCommand, ExecutionConfigurationResponse, ModelCommand, ModelResponse,
-    ModelTarget, OptionAssignment, OptionCommand, OptionKey, OptionResponse, OptionScope,
-    OptionStartupPrecedence, OptionSubjectId, OptionValue, OrchestrationDefinition, RoutingProfile,
+    execution_configuration_service, model_routing_service, options_component_manifest,
+    options_service, AgentDefinition, ExecutionConfigurationCommand,
+    ExecutionConfigurationResponse, ModelCommand, ModelResponse, ModelTarget, OptionAssignment,
+    OptionCommand, OptionKey, OptionResponse, OptionScope, OptionStartupPrecedence,
+    OptionSubjectId, OptionValue, OrchestrationDefinition, RoutingProfile,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -123,14 +124,8 @@ pub(super) fn apply_startup_settings(
     let file_values = settings_assignments(file_settings);
     let nix_values = settings_assignments(nix_settings);
 
-    let service = options_service();
-    let has_options = harness.kernel().config().manifests().any(|manifest| {
-        manifest
-            .services
-            .iter()
-            .any(|contribution| contribution.service == service)
-    });
-    if !has_options {
+    let component = options_component_manifest();
+    if harness.component_graph().component(&component.id).is_none() {
         if file_values.is_empty() && nix_values.is_empty() {
             return Ok(());
         }
@@ -142,12 +137,16 @@ pub(super) fn apply_startup_settings(
         nix_values,
         precedence,
     };
-    match invoke_projected::<_, OptionResponse>(
-        harness,
-        &service,
-        &command,
+    let input = PhenixValue::from(&command);
+    let output = harness.kernel_mut().invoke_component(
+        &component.id,
+        &options_service(),
+        &serde_json::to_vec(&input)?,
         &default_suite_authority(),
-    )? {
+        &component.owner,
+    )?;
+    let output: PhenixValue = serde_json::from_slice(&output)?;
+    match OptionResponse::try_from(Project(&output))? {
         OptionResponse::Configured { .. } => Ok(()),
         _ => Err("options service rejected startup settings".into()),
     }
@@ -301,8 +300,12 @@ fn ensure_routing_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_plugin_catalog::{ExecutionConfigurationCommand, ModelCommand};
+    use phenix_plugin_catalog::{
+        ExecutionConfigurationCommand, ModelCommand, OptionContext, OptionValueLayer,
+        OptionValueSource,
+    };
     use serde_json::json;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn sample_runtime() -> RuntimeConfiguration {
         serde_json::from_value(json!({
@@ -388,10 +391,55 @@ mod tests {
 
     #[test]
     fn startup_settings_use_structural_options_boundary() {
+        let directory = std::env::temp_dir().join(format!(
+            "phenix-startup-settings-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("settings.json"),
+            r#"{"global":{"session.auto_create":false}}"#,
+        )
+        .unwrap();
         let mut harness = PhenixHarness::default_suite().unwrap();
         harness.activate().unwrap();
 
-        apply_startup_settings(&mut harness, None, None, OptionStartupPrecedence::Nix).unwrap();
+        apply_startup_settings(
+            &mut harness,
+            Some(&directory),
+            None,
+            OptionStartupPrecedence::Nix,
+        )
+        .unwrap();
+
+        let component = options_component_manifest();
+        let command = OptionCommand::Resolve {
+            key: OptionKey::parse("session.auto_create").unwrap(),
+            context: OptionContext::default(),
+        };
+        let output = harness
+            .kernel_mut()
+            .invoke_component(
+                &component.id,
+                &options_service(),
+                &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
+                &default_suite_authority(),
+                &component.owner,
+            )
+            .unwrap();
+        let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+        assert!(matches!(
+            OptionResponse::try_from(Project(&output)).unwrap(),
+            OptionResponse::Value { option }
+                if option.value == OptionValue::Bool(false)
+                    && option.source == OptionValueSource::Global
+                    && option.layer == OptionValueLayer::File
+        ));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

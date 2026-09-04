@@ -75,6 +75,7 @@ fn stateless_plugin_runs_through_generated_factory_and_dispatch() {
     let authority = phenix_sdk::Authority::default();
     let manifest = <plugin::Plugin as phenix_sdk::StaticPluginDefinition>::manifest();
     let components = <plugin::Plugin as phenix_sdk::StaticPluginDefinition>::component_manifests();
+    let component = components[0].id.clone();
     let resolved =
         phenix_core::ResolvedHarness::resolve([manifest.clone()], components, [], &authority)
             .unwrap();
@@ -86,22 +87,19 @@ fn stateless_plugin_runs_through_generated_factory_and_dispatch() {
     kernel.activate_resolved_harness(&resolved).unwrap();
     kernel.activate_all().unwrap();
 
-    for service in ["run", "projected", "exact"] {
+    for method in ["run", "projected", "exact"] {
         let input = serde_json::to_vec(&phenix_sdk::PhenixValue::from(&Request {
-            value: service.into(),
+            value: method.into(),
         }))
         .unwrap();
+        let service =
+            phenix_core::ServiceId::parse(format!("fixture.manifest.stateless.{method}@1"))
+                .unwrap();
         let output = kernel
-            .invoke(
-                &phenix_core::ServiceId::parse(format!("fixture.manifest.stateless.{service}@1"))
-                    .unwrap(),
-                &input,
-                &authority,
-                None,
-            )
+            .invoke_component(&component, &service, &input, &authority, &manifest.id)
             .unwrap();
         let value: phenix_sdk::PhenixValue = serde_json::from_slice(&output).unwrap();
         let response = Response::try_from(phenix_sdk::Project(&value)).unwrap();
-        assert_eq!(response.value, service);
+        assert_eq!(response.value, method);
     }
 }

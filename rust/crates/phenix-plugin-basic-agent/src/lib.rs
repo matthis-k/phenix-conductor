@@ -25,8 +25,8 @@ mod tests {
     use super::*;
     use phenix_core::{
         context_service, skill_service, tool_service, Authority, CallableId, ComponentInterface,
-        ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
-        Kernel, KernelConfig, LocalPersistence, ModelId, PhenixSchema, PhenixValue,
+        ComponentManifest, ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse,
+        ContextScope, Kernel, KernelConfig, LocalPersistence, ModelId, PhenixSchema, PhenixValue,
         ResolvedHarness, ResolvedHarnessActivation, SkillCommand, SkillDefinition, SkillId,
         SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
     };
@@ -103,14 +103,27 @@ mod tests {
         kernel
     }
 
-    fn invoke<T, R>(kernel: &mut Kernel, service: &phenix_core::ServiceId, request: &T) -> R
+    fn invoke<T, R>(
+        kernel: &mut Kernel,
+        component: ComponentManifest,
+        service: &phenix_core::ServiceId,
+        request: &T,
+    ) -> R
     where
         for<'value> PhenixValue: From<&'value T>,
         for<'value> R:
             TryFrom<phenix_core::Project<&'value PhenixValue>, Error = phenix_core::ValueError>,
     {
         let input = serde_json::to_vec(&PhenixValue::from(request)).unwrap();
-        let output = kernel.invoke(service, &input, &authority(), None).unwrap();
+        let output = kernel
+            .invoke_component(
+                &component.id,
+                service,
+                &input,
+                &authority(),
+                &component.owner,
+            )
+            .unwrap();
         let value: PhenixValue = serde_json::from_slice(&output).unwrap();
         R::try_from(phenix_core::Project(&value)).unwrap()
     }
@@ -159,6 +172,7 @@ mod tests {
         let mut kernel = kernel(&path);
         let response: ModelInferenceResponse = invoke(
             &mut kernel,
+            basic_model_component_manifest(),
             &model_inference_service(),
             &ModelInferenceRequest {
                 model: ModelId::parse("direct").unwrap(),
@@ -185,6 +199,7 @@ mod tests {
             let mut first = kernel(&path);
             let _: ToolResponse = invoke(
                 &mut first,
+                basic_tools_component_manifest(),
                 &tool_service(),
                 &ToolCommand::Register {
                     tool: ToolDefinition {
@@ -197,6 +212,7 @@ mod tests {
             );
             let _: SkillResponse = invoke(
                 &mut first,
+                basic_skills_component_manifest(),
                 &skill_service(),
                 &SkillCommand::Register {
                     skill: SkillDefinition {
@@ -207,6 +223,7 @@ mod tests {
             );
             let registered: ContextResponse = invoke(
                 &mut first,
+                basic_context_component_manifest(),
                 &context_service(),
                 &ContextCommand::Register {
                     resource_id: ContextResourceId::parse("readme").unwrap(),
@@ -222,6 +239,7 @@ mod tests {
         let mut restored = kernel(&path);
         let tool: ToolResponse = invoke(
             &mut restored,
+            basic_tools_component_manifest(),
             &tool_service(),
             &ToolCommand::Invoke {
                 id: CallableId::parse("echo").unwrap(),
@@ -234,12 +252,21 @@ mod tests {
                 output: b"tool:hello".to_vec().into()
             }
         );
-        let skills: SkillResponse = invoke(&mut restored, &skill_service(), &SkillCommand::List);
+        let skills: SkillResponse = invoke(
+            &mut restored,
+            basic_skills_component_manifest(),
+            &skill_service(),
+            &SkillCommand::List,
+        );
         assert!(
             matches!(skills, SkillResponse::Skills { skills } if skills[0].id.as_str() == "review")
         );
-        let context: ContextResponse =
-            invoke(&mut restored, &context_service(), &ContextCommand::List);
+        let context: ContextResponse = invoke(
+            &mut restored,
+            basic_context_component_manifest(),
+            &context_service(),
+            &ContextCommand::List,
+        );
         assert!(
             matches!(context, ContextResponse::Resources { descriptors } if descriptors[0].resource_id.as_str() == "readme")
         );

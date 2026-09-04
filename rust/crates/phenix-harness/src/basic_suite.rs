@@ -47,10 +47,10 @@ mod tests {
     use super::*;
     use phenix_core::{
         context_service, model_inference_service, skill_service, tool_service, CallableId,
-        ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse, ContextScope,
-        InterfaceId, LocalPersistence, ModelId, ModelInferenceRequest, ModelInferenceResponse,
-        PhenixSchema, PhenixValue, Project, SessionId, SkillCommand, SkillDefinition, SkillId,
-        SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
+        ComponentManifest, ContextCommand, ContextResourceId, ContextResourceKind, ContextResponse,
+        ContextScope, InterfaceId, LocalPersistence, ModelId, ModelInferenceRequest,
+        ModelInferenceResponse, PhenixSchema, PhenixValue, Project, SessionId, SkillCommand,
+        SkillDefinition, SkillId, SkillResponse, ToolCommand, ToolDefinition, ToolResponse,
     };
     use phenix_plugin_catalog::{
         context_component_id, memory_component_id, session_service, SessionCommand, SessionResponse,
@@ -81,6 +81,31 @@ mod tests {
         let input = serde_json::to_vec(&PhenixValue::from(request)).unwrap();
         let output = harness
             .invoke(service, &input, &default_suite_authority(), None)
+            .unwrap();
+        let value: PhenixValue = serde_json::from_slice(&output).unwrap();
+        R::try_from(Project(&value)).unwrap()
+    }
+
+    fn invoke_component<T, R>(
+        harness: &mut PhenixHarness,
+        component: ComponentManifest,
+        service: &phenix_core::ServiceId,
+        request: &T,
+    ) -> R
+    where
+        for<'value> PhenixValue: From<&'value T>,
+        for<'value> R: TryFrom<Project<&'value PhenixValue>, Error = phenix_core::ValueError>,
+    {
+        let input = serde_json::to_vec(&PhenixValue::from(request)).unwrap();
+        let output = harness
+            .kernel_mut()
+            .invoke_component(
+                &component.id,
+                service,
+                &input,
+                &default_suite_authority(),
+                &component.owner,
+            )
             .unwrap();
         let value: PhenixValue = serde_json::from_slice(&output).unwrap();
         R::try_from(Project(&value)).unwrap()
@@ -157,8 +182,9 @@ mod tests {
                     id: SessionId::parse("root").unwrap(),
                 },
             );
-            let _: SkillResponse = invoke(
+            let _: SkillResponse = invoke_component(
                 &mut harness,
+                basic_skills_component_manifest(),
                 &skill_service(),
                 &SkillCommand::Register {
                     skill: SkillDefinition {
@@ -167,8 +193,9 @@ mod tests {
                     },
                 },
             );
-            let _: ToolResponse = invoke(
+            let _: ToolResponse = invoke_component(
                 &mut harness,
+                basic_tools_component_manifest(),
                 &tool_service(),
                 &ToolCommand::Register {
                     tool: ToolDefinition {
@@ -179,8 +206,9 @@ mod tests {
                     },
                 },
             );
-            let _: ContextResponse = invoke(
+            let _: ContextResponse = invoke_component(
                 &mut harness,
+                basic_context_component_manifest(),
                 &context_service(),
                 &ContextCommand::Register {
                     resource_id: ContextResourceId::parse("project").unwrap(),
@@ -190,8 +218,9 @@ mod tests {
                     content: b"project context".to_vec().into(),
                 },
             );
-            let model: ModelInferenceResponse = invoke(
+            let model: ModelInferenceResponse = invoke_component(
                 &mut harness,
+                basic_model_component_manifest(),
                 &model_inference_service(),
                 &ModelInferenceRequest {
                     model: ModelId::parse("direct").unwrap(),
@@ -210,14 +239,28 @@ mod tests {
         assert!(
             matches!(sessions, SessionResponse::Sessions { sessions } if sessions[0].id.as_str() == "root")
         );
-        let skills: SkillResponse = invoke(&mut restored, &skill_service(), &SkillCommand::List);
+        let skills: SkillResponse = invoke_component(
+            &mut restored,
+            basic_skills_component_manifest(),
+            &skill_service(),
+            &SkillCommand::List,
+        );
         assert!(
             matches!(skills, SkillResponse::Skills { skills } if skills[0].id.as_str() == "review")
         );
-        let tools: ToolResponse = invoke(&mut restored, &tool_service(), &ToolCommand::List);
+        let tools: ToolResponse = invoke_component(
+            &mut restored,
+            basic_tools_component_manifest(),
+            &tool_service(),
+            &ToolCommand::List,
+        );
         assert!(matches!(tools, ToolResponse::Tools { tools } if tools[0].id.as_str() == "echo"));
-        let context: ContextResponse =
-            invoke(&mut restored, &context_service(), &ContextCommand::List);
+        let context: ContextResponse = invoke_component(
+            &mut restored,
+            basic_context_component_manifest(),
+            &context_service(),
+            &ContextCommand::List,
+        );
         assert!(
             matches!(context, ContextResponse::Resources { descriptors } if descriptors[0].resource_id.as_str() == "project")
         );

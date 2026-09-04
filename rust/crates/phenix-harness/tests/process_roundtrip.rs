@@ -1,7 +1,7 @@
 use phenix_core::{ContextResourceId, PhenixValue, Project, SessionId, ValueError};
 use phenix_plugin_catalog::{
-    ContextCommand, ContextResourceKind, ContextResponse, ContextScope, PlanningCommand,
-    PlanningResponse, SessionCommand, SessionRecord, SessionResponse,
+    ContextCommand, ContextResourceKind, ContextResponse, ContextScope, SessionCommand,
+    SessionRecord, SessionResponse,
 };
 use serde_json::Value;
 use std::{
@@ -87,18 +87,9 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
                     content: b"process".to_vec().into(),
                 })
             }),
-            serde_json::json!({
-                "id": 3,
-                "service": "phenix.planning@1",
-                "input": structural_input(&PlanningCommand::CreateObjective {
-                    id: "process-objective".into(),
-                    title: "Process parity".into(),
-                    parent: None,
-                })
-            }),
         ],
     );
-    assert_eq!(first.len(), 3);
+    assert_eq!(first.len(), 2);
     assert_eq!(first[0]["status"], "ok");
     assert_eq!(
         structural_output::<SessionResponse>(&first[0]["output"]),
@@ -113,14 +104,6 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
         panic!("context register returned the wrong response")
     };
     assert_eq!(resource.descriptor.resource_id, context_id);
-    assert_eq!(first[2]["status"], "ok");
-    let PlanningResponse::Objective {
-        objective: Some(objective),
-    } = structural_output(&first[2]["output"])
-    else {
-        panic!("planning create returned the wrong response")
-    };
-    assert_eq!(objective.id, "process-objective");
 
     let second = run_harness(
         &state,
@@ -135,14 +118,9 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
                 "service": "phenix.context@1",
                 "input": structural_input(&ContextCommand::List)
             }),
-            serde_json::json!({
-                "id": 6,
-                "service": "phenix.planning@1",
-                "input": structural_input(&PlanningCommand::GetObjective { id: "process-objective".into() })
-            }),
         ],
     );
-    assert_eq!(second.len(), 3);
+    assert_eq!(second.len(), 2);
     assert_eq!(second[0]["status"], "ok");
     assert_eq!(
         structural_output::<SessionResponse>(&second[0]["output"]),
@@ -157,14 +135,6 @@ fn process_roundtrip_routes_and_restores_plugin_owned_state() {
     assert!(descriptors
         .iter()
         .any(|descriptor| descriptor.resource_id.as_str() == "process:context"));
-    assert_eq!(second[2]["status"], "ok");
-    let PlanningResponse::Objective {
-        objective: Some(objective),
-    } = structural_output(&second[2]["output"])
-    else {
-        panic!("planning get returned the wrong response")
-    };
-    assert_eq!(objective.id, "process-objective");
 
     let _ = fs::remove_file(&state);
 }
