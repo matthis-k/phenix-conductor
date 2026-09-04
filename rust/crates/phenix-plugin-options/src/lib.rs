@@ -445,7 +445,7 @@ struct Api;
 #[phenix_sdk::component]
 impl Api {
     #[phenix(
-        export(OptionsInterface),
+        export("phenix.options@1"),
         terminal,
         priority = 100,
         authority = persistence_authority()
