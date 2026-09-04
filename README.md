@@ -1,6 +1,6 @@
 # Phenix AI
 
-This repository owns the generic Phenix runtime, conductor, shared client contracts, independently packaged first-party plugins, client adapters, and the supported Harness product.
+This repository owns the generic Phenix runtime, conductor, internal client wire, independently packaged first-party plugins and protocol adapters, and the supported Harness product.
 
 The Neovim frontend lives in `matthis-k/phenix-nvim`. This repository owns server-side behavior and frontend-neutral contracts.
 
@@ -29,30 +29,30 @@ frontends / protocol adapters
 
 `phenix-conductor` owns the generic server process and client transport. It hosts only configured plugins. A zero-plugin conductor has no first-party fallback behavior.
 
-First-party `phenix-plugin-*` crates own Phenix agent-domain services through the same core contracts available to alternate providers. A thin `phenix-plugin-catalog` collects embedded factories but owns no durable state or product policy.
+First-party `phenix-plugin-*` and `phenix-adapter-*` crates own independently selectable runtime behavior through the same core contracts available to alternate providers. A thin `phenix-plugin-catalog` collects embedded factories but owns no durable state or product policy.
 
 `phenix-harness` owns the supported product assembly. It selects plugins, grants authority, chooses persistence, loads product configuration and skills, and exposes the wrapped `phenix` product.
 
-`phenix-client` owns the canonical client/server contract. `phenix-acp` translates that contract to ACP without owning application semantics.
+`phenix-client` owns the internal conductor client/server wire; it is not a public Client SDK. `phenix-adapter-acp` is the transport-independent ACP runtime plugin. Its package and runtime identity exist, while standard ACP dispatch remains unimplemented.
 
 ### Rust boundaries
 
 | Crate or package | Responsibility |
 | --- | --- |
 | `phenix-core` | Generic plugin host, trust boundaries, persistence enforcement, events, tasks |
-| `phenix-client` | Canonical client/server contracts |
+| `phenix-client` | Internal conductor client/server wire |
 | `phenix-conductor` | Generic configured server and transport |
 | `phenix-plugin-*` | Independently owned first-party services |
+| `phenix-adapter-acp` | Stateless ACP adapter runtime plugin |
 | `phenix-plugin-catalog` | Thin embedded-factory catalog |
 | `phenix-harness` | Supported conductor + selected-plugin product assembly |
-| `phenix-acp` | ACP adapter to `phenix-client` |
 | `phenix-backend-*` | Provider/backend adapters |
 
 ## Product composition
 
 The normal `phenix` package is the supported Harness composition. It is built through the same public package interfaces available to users.
 
-Nix exposes independently packaged first-party plugins through `phenixPlugins.<system>.*` and client adapters through `phenixClients.<system>.*`. `wrappers.phenix.wrap` and `lib.mkPhenix` assemble a conductor with an explicit plugin selection. Omitting a plugin removes its service unless another selected provider supplies the same contract.
+Nix exposes independently packaged first-party runtime plugins, including adapters, through `phenixPlugins.<system>.*`. `wrappers.phenix.wrap` and `lib.mkPhenix` assemble a conductor with an explicit plugin selection. Omitting a plugin removes its service unless another selected provider supplies the same contract.
 
 The resolved component graph is the canonical runtime composition for component imports and event listeners. A `ComponentExport` identifies the executable endpoint. It does not need a duplicate terminal `ServiceContribution`. Plugin service contributions remain available for ordinary service dispatch and explicit interposition layers. Embedded and external hosts execute the same graph-selected component identity. Development reconciliation replaces kernel configuration, component graph, listener bindings, resources, and generation as one resolved runtime topology.
 
@@ -76,15 +76,13 @@ The flake exposes:
 - `packages.<system>.phenix-harness`;
 - `packages.<system>.phenix`;
 - `phenixPlugins.<system>.*`;
-- `phenixClients.<system>.*`;
 - `wrappers.phenix.wrap`;
 - `lib.mkPhenixPlugin`;
-- `lib.mkPhenixClient`;
 - `lib.mkPhenix`.
 
 ## Protocol and provider boundaries
 
-Frontends and protocol adapters reach configured conductor services through the canonical client contract. They do not own durable application state.
+The conductor wire remains internal. Protocol adapters translate external protocols to configured runtime services without owning durable application state.
 
 Backend adapters translate execution requests into provider protocols. Provider conversation state is disposable. Durable Phenix state stays with the owning plugins.
 

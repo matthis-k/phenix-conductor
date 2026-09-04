@@ -10,6 +10,8 @@ Provide a spawnable ACP stdio entrypoint for applications that want to launch Ph
 
 The package is `phenix-acp-stdio`. It owns the `phenix-acp` executable.
 
+Neither that package nor binary exists in the current tree; this document specifies future work only.
+
 It is not a new protocol, runtime plugin, Client SDK, or application UI. It is a concrete composition of the ACP adapter with stdio transport and a configured Phenix runtime boundary.
 
 ## Architecture

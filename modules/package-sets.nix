@@ -53,6 +53,7 @@ let
     };
 
   pluginIds = {
+    adapter-acp = "phenix.adapter.acp";
     api = "phenix.api";
     artifacts = "phenix.artifacts";
     basic-context = "phenix.basic-context";
@@ -78,6 +79,7 @@ let
   };
 
   basicPluginCrates = {
+    adapter-acp = "phenix-adapter-acp";
     api = "phenix-plugin-api";
     basic-context = "phenix-plugin-basic-context";
     basic-model = "phenix-plugin-basic-model";
@@ -153,27 +155,10 @@ let
     ) systems
   );
 
-  clientSets = builtins.listToAttrs (
-    map (
-      system:
-      let
-        pkgs = inputs.nixpkgs.legacyPackages.${system};
-      in
-      {
-        name = system;
-        value.acp = self.lib.mkPhenixClient {
-          inherit pkgs;
-          name = "acp";
-          package = mkRustPackage pkgs "phenix-acp";
-        };
-      }
-    ) systems
-  );
 in
 {
   flake = {
     phenixPlugins = pluginSets;
-    phenixClients = clientSets;
   };
 
   perSystem =
