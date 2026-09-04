@@ -254,6 +254,16 @@ pub trait PluginRuntimeProvider: Send {
         &mut self,
         candidate: RuntimePluginCandidate<'_>,
     ) -> Result<Box<dyn PluginInstance>, String>;
+
+    /// Canonical preparation entry point. Core supplies the runtime provider's own host separately
+    /// from the guest authority carried by `candidate`.
+    fn prepare_with_host(
+        &mut self,
+        candidate: RuntimePluginCandidate<'_>,
+        _host: &PluginHost<'_>,
+    ) -> Result<Box<dyn PluginInstance>, String> {
+        self.prepare(candidate)
+    }
 }
 
 pub trait PluginInstance: Send {
