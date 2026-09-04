@@ -50,11 +50,32 @@ jobs:
       - name: "Structural boundaries"
         run: nix run --quiet .#phenix-maintenance-command-d0a2e91a2adf -- check source structural-boundaries
 
-      - name: "Test target classification"
-        run: nix run --quiet .#phenix-maintenance-command-fe564e52f93c -- check source test-targets
-
       - name: "Generated workflow"
         run: nix run --quiet .#phenix-maintenance-command-9383b20a4494 -- check source workflow-sync
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  clippy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "Clippy"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
 
       - name: "Clippy"
         run: nix run --quiet .#phenix-maintenance-command-ed54c0f878db -- check rust
@@ -67,13 +88,11 @@ jobs:
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
 
-  ci:
+  build-rust-workspace:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    name: "CI"
+    name: "CI / Build / Rust workspace"
     runs-on: "ubuntu-latest"
     timeout-minutes: 120
-    needs:
-      - source
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -85,12 +104,439 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: "CI"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/phenix-cargo-home
+            ${{ runner.temp }}/phenix-cargo-target
+          key: "phenix-rust-${{ runner.os }}-${{ github.sha }}"
+          restore-keys: |
+            phenix-rust-${{ runner.os }}-
+
+      - name: "Rust workspace"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-23bf0d244a4c -- pipeline
+        run: nix run --quiet .#phenix-maintenance-command-9f427854ccf4 -- jobs build-rust-workspace
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  build-stitch-mcp:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Build / Stitch MCP package"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: "Stitch MCP package"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-4bc3015e6d16 -- jobs build-stitch-mcp
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  integration-backend-acp:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Integration / ACP backend integration"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    needs:
+      - build-rust-workspace
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/phenix-cargo-home
+            ${{ runner.temp }}/phenix-cargo-target
+          key: "phenix-rust-${{ runner.os }}-${{ github.sha }}"
+          restore-keys: |
+            phenix-rust-${{ runner.os }}-
+
+      - name: "ACP backend integration"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-66085e40dda1 -- jobs integration-backend-acp
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  integration-plugin-packaging:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Integration / Plugin packaging integration"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: "Plugin packaging integration"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-e0dcc81ccb75 -- jobs integration-plugin-packaging
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  product-phenix:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Product / Phenix supported product journey"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: "Phenix supported product journey"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-733891df94ef -- jobs product-phenix
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  runtime-process-roundtrip:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Runtime / Harness process roundtrip"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    needs:
+      - build-rust-workspace
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/phenix-cargo-home
+            ${{ runner.temp }}/phenix-cargo-target
+          key: "phenix-rust-${{ runner.os }}-${{ github.sha }}"
+          restore-keys: |
+            phenix-rust-${{ runner.os }}-
+
+      - name: "Harness process roundtrip"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-9fea1a4ca22d -- jobs runtime-process-roundtrip
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  runtime-stitch:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Runtime / Stitch runtime smoke"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - name: "Stitch runtime smoke"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-7656c9860f44 -- jobs runtime-stitch
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  test-adapter-domain:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Test / Adapter and domain tests"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    needs:
+      - build-rust-workspace
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/phenix-cargo-home
+            ${{ runner.temp }}/phenix-cargo-target
+          key: "phenix-rust-${{ runner.os }}-${{ github.sha }}"
+          restore-keys: |
+            phenix-rust-${{ runner.os }}-
+
+      - name: "Adapter and domain tests"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-7ab072e3fff1 -- jobs test-adapter-domain
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  test-docs:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Test / Rust doc tests"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    needs:
+      - build-rust-workspace
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/phenix-cargo-home
+            ${{ runner.temp }}/phenix-cargo-target
+          key: "phenix-rust-${{ runner.os }}-${{ github.sha }}"
+          restore-keys: |
+            phenix-rust-${{ runner.os }}-
+
+      - name: "Rust doc tests"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-e6addd50a09b -- jobs test-docs
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  test-harness:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Test / Harness code tests"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    needs:
+      - build-rust-workspace
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/phenix-cargo-home
+            ${{ runner.temp }}/phenix-cargo-target
+          key: "phenix-rust-${{ runner.os }}-${{ github.sha }}"
+          restore-keys: |
+            phenix-rust-${{ runner.os }}-
+
+      - name: "Harness code tests"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-f766ec56e144 -- jobs test-harness
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  test-sdk:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Test / SDK tests"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    needs:
+      - build-rust-workspace
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/phenix-cargo-home
+            ${{ runner.temp }}/phenix-cargo-target
+          key: "phenix-rust-${{ runner.os }}-${{ github.sha }}"
+          restore-keys: |
+            phenix-rust-${{ runner.os }}-
+
+      - name: "SDK tests"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-bc6ecb56c868 -- jobs test-sdk
+
+      - name: Repository remains clean
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+
+  test-unit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: "CI / Test / Rust unit tests"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 120
+    needs:
+      - build-rust-workspace
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            max-jobs = auto
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/phenix-cargo-home
+            ${{ runner.temp }}/phenix-cargo-target
+          key: "phenix-rust-${{ runner.os }}-${{ github.sha }}"
+          restore-keys: |
+            phenix-rust-${{ runner.os }}-
+
+      - name: "Rust unit tests"
+        env:
+          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
+          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
+          CARGO_TERM_QUIET: "true"
+        run: nix run --quiet .#phenix-maintenance-command-b3d8df2854c7 -- jobs test-unit
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -105,11 +551,35 @@ jobs:
     name: "Maintenance checks"
     needs:
       - source
-      - ci
+      - clippy
+      - build-rust-workspace
+      - build-stitch-mcp
+      - integration-backend-acp
+      - integration-plugin-packaging
+      - product-phenix
+      - runtime-process-roundtrip
+      - runtime-stitch
+      - test-adapter-domain
+      - test-docs
+      - test-harness
+      - test-sdk
+      - test-unit
     runs-on: ubuntu-latest
     steps:
       - name: Verify all maintenance jobs passed
         run: |
           set -euo pipefail
           [[ '${{ needs.source.result }}' == success ]]
-          [[ '${{ needs.ci.result }}' == success ]]
+          [[ '${{ needs.clippy.result }}' == success ]]
+          [[ '${{ needs.build-rust-workspace.result }}' == success ]]
+          [[ '${{ needs.build-stitch-mcp.result }}' == success ]]
+          [[ '${{ needs.integration-backend-acp.result }}' == success ]]
+          [[ '${{ needs.integration-plugin-packaging.result }}' == success ]]
+          [[ '${{ needs.product-phenix.result }}' == success ]]
+          [[ '${{ needs.runtime-process-roundtrip.result }}' == success ]]
+          [[ '${{ needs.runtime-stitch.result }}' == success ]]
+          [[ '${{ needs.test-adapter-domain.result }}' == success ]]
+          [[ '${{ needs.test-docs.result }}' == success ]]
+          [[ '${{ needs.test-harness.result }}' == success ]]
+          [[ '${{ needs.test-sdk.result }}' == success ]]
+          [[ '${{ needs.test-unit.result }}' == success ]]
