@@ -309,11 +309,7 @@ impl StaticComponentDescriptor {
 
     #[must_use]
     pub fn services(&self) -> Vec<ServiceContribution> {
-        self.exports
-            .iter()
-            .filter_map(StaticComponentExport::service)
-            .chain(self.layers.iter().map(StaticComponentLayer::service))
-            .collect()
+        self.layers.iter().map(StaticComponentLayer::service).collect()
     }
 
     #[must_use]
@@ -487,9 +483,8 @@ mod tests {
         assert_eq!(component.listeners()[0].event.as_str(), "fixture.completed");
         assert_eq!(component.values().len(), 1);
         assert_eq!(component.values()[0].id.as_str(), "fixture.status@1");
-        assert_eq!(services.len(), 2);
-        assert_eq!(services[0].role, ServiceRole::Terminal);
-        assert_eq!(services[1].role, ServiceRole::Layer);
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].role, ServiceRole::Layer);
     }
 
     #[test]
