@@ -1,16 +1,18 @@
 use phenix_core::{
-    Authority, ModelId, PhenixValue, PluginExecution, PluginHost, PluginId, PluginInstance,
-    PluginManifest, Project, RoutingProfileId, ServiceContribution, ServiceId, ValueError,
+    Authority, ComponentManifest, ModelId, PhenixValue, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, Project, RoutingProfileId, ServiceContribution, ServiceId,
+    ValueError,
 };
 use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};
 use phenix_plugin_catalog::{
-    model_inference_service, ArtifactCommand, ArtifactResponse, CliProbeRequest, ContextCommand,
-    ContextResponse, DebugCommand, DebugResponse, ExecutionAuthority, ExecutionCommand,
-    ExecutionResponse, FrontendCommand, FrontendResponse, HookCommand, HookResponse, JobCommand,
-    JobResponse, LanguageCommand, LanguageResponse, ModelCommand, ModelInferenceRequest,
-    ModelInferenceResponse, ModelResponse, ModelTarget, PlanningCommand, PlanningResponse,
-    RepositoryWorkSnapshot, RoutingProfile, SessionCommand, SessionResponse, SessionTreeCommand,
-    SessionTreeResponse, WorkspaceCommand, WorkspaceResponse,
+    artifact_component_manifest, model_inference_service, planning_component_manifest,
+    ArtifactCommand, ArtifactResponse, CliProbeRequest, ContextCommand, ContextResponse,
+    DebugCommand, DebugResponse, ExecutionAuthority, ExecutionCommand, ExecutionResponse,
+    FrontendCommand, FrontendResponse, HookCommand, HookResponse, JobCommand, JobResponse,
+    LanguageCommand, LanguageResponse, ModelCommand, ModelInferenceRequest, ModelInferenceResponse,
+    ModelResponse, ModelTarget, PlanningCommand, PlanningResponse, RepositoryWorkSnapshot,
+    RoutingProfile, SessionCommand, SessionResponse, SessionTreeCommand, SessionTreeResponse,
+    WorkspaceCommand, WorkspaceResponse,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
@@ -40,7 +42,12 @@ fn invoke(harness: &mut PhenixHarness, service: &str, input: Value) -> Value {
             )
         }
         "phenix.artifacts@1" => {
-            invoke_structural_json::<ArtifactCommand, ArtifactResponse>(harness, service, input)
+            invoke_component_structural_json::<ArtifactCommand, ArtifactResponse>(
+                harness,
+                artifact_component_manifest(),
+                service,
+                input,
+            )
         }
         "phenix.context@1" => {
             invoke_structural_json::<ContextCommand, ContextResponse>(harness, service, input)
@@ -52,14 +59,22 @@ fn invoke(harness: &mut PhenixHarness, service: &str, input: Value) -> Value {
             invoke_structural_json::<LanguageCommand, LanguageResponse>(harness, service, input)
         }
         "phenix.planning@1" => {
-            invoke_structural_json::<PlanningCommand, PlanningResponse>(harness, service, input)
+            invoke_component_structural_json::<PlanningCommand, PlanningResponse>(
+                harness,
+                planning_component_manifest(),
+                service,
+                input,
+            )
         }
         "phenix.models.routing@1" => {
             invoke_structural_json::<ModelCommand, ModelResponse>(harness, service, input)
         }
-        "phenix.jobs@1" => {
-            invoke_structural_json::<JobCommand, JobResponse>(harness, service, input)
-        }
+        "phenix.jobs@1" => invoke_component_structural_json::<JobCommand, JobResponse>(
+            harness,
+            phenix_plugin_catalog::job_component_manifest(),
+            service,
+            input,
+        ),
         "phenix.frontend-services@1" => {
             invoke_structural_json::<FrontendCommand, FrontendResponse>(harness, service, input)
         }
@@ -111,6 +126,36 @@ where
         harness, service, &request,
     ))
     .unwrap()
+}
+
+fn invoke_component_structural_json<Request, Response>(
+    harness: &mut PhenixHarness,
+    component: ComponentManifest,
+    service: &str,
+    input: Value,
+) -> Value
+where
+    Request: DeserializeOwned,
+    for<'value> PhenixValue: From<&'value Request>,
+    for<'value> Response: TryFrom<Project<&'value PhenixValue>, Error = ValueError> + Serialize,
+{
+    let request = serde_json::from_value(input).unwrap();
+    let service = ServiceId::parse(service).unwrap();
+    let output = harness
+        .kernel_mut()
+        .invoke_component(
+            &component.id,
+            &service,
+            &serde_json::to_vec(&PhenixValue::from(&request)).unwrap(),
+            &default_suite_authority(),
+            &component.owner,
+        )
+        .unwrap_or_else(|error| panic!("{service}: {error}"));
+    let output: PhenixValue =
+        serde_json::from_slice(&output).unwrap_or_else(|error| panic!("{service}: {error}"));
+    let response =
+        Response::try_from(Project(&output)).unwrap_or_else(|error| panic!("{service}: {error}"));
+    serde_json::to_value(response).unwrap()
 }
 
 fn invoke_structural<Request, Response>(

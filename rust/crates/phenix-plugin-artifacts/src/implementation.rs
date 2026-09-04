@@ -548,7 +548,8 @@ fn read_result_key(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{Kernel, KernelConfig, LocalPersistence};
+    use crate::artifact_component_manifest;
+    use phenix_core::{Kernel, LocalPersistence, ResolvedHarness, ResolvedHarnessActivation};
     use std::{
         fs,
         path::PathBuf,
@@ -559,10 +560,21 @@ mod tests {
         artifact_manifest().maximum_authority
     }
 
+    fn resolved() -> ResolvedHarness {
+        ResolvedHarness::resolve(
+            [artifact_manifest()],
+            [artifact_component_manifest()],
+            [],
+            &authority(),
+        )
+        .unwrap()
+    }
+
     fn kernel() -> Kernel {
-        let manifest = artifact_manifest();
-        let plugin = manifest.id.clone();
-        let mut kernel = Kernel::new(KernelConfig::new([manifest]).unwrap());
+        let resolved = resolved();
+        let plugin = artifact_manifest().id;
+        let mut kernel = Kernel::new(resolved.kernel_config().clone());
+        kernel.activate_resolved_harness(&resolved).unwrap();
         kernel
             .register_embedded_factory(plugin, artifact_factory)
             .unwrap();
@@ -571,11 +583,11 @@ mod tests {
     }
 
     fn kernel_with(path: &PathBuf) -> Kernel {
-        let manifest = artifact_manifest();
-        let plugin = manifest.id.clone();
+        let resolved = resolved();
+        let plugin = artifact_manifest().id;
         let persistence = LocalPersistence::open(path).unwrap();
-        let mut kernel =
-            Kernel::with_persistence(KernelConfig::new([manifest]).unwrap(), persistence);
+        let mut kernel = Kernel::with_persistence(resolved.kernel_config().clone(), persistence);
+        kernel.activate_resolved_harness(&resolved).unwrap();
         kernel
             .register_embedded_factory(plugin, artifact_factory)
             .unwrap();
@@ -596,8 +608,15 @@ mod tests {
 
     fn invoke(kernel: &mut Kernel, command: ArtifactCommand) -> ArtifactResponse {
         let input = serde_json::to_vec(&phenix_core::PhenixValue::from(&command)).unwrap();
+        let component = artifact_component_manifest();
         let output = kernel
-            .invoke(&artifact_service(), &input, &authority(), None)
+            .invoke_component(
+                &component.id,
+                &artifact_service(),
+                &input,
+                &authority(),
+                &component.owner,
+            )
             .unwrap();
         let output: phenix_core::PhenixValue = serde_json::from_slice(&output).unwrap();
         output.project().unwrap()

@@ -291,42 +291,19 @@ in
             "${defaultComposition}/bin/phenix" --list-services > "$TMPDIR/default-services.json"
             jq -e '(.plugins | length == 17) and (.plugins | index("phenix.adapter.acp") == null) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
 
-            assert_option() {
-              local file="$1"
-              local expected_value="$2"
-              local expected_layer="$3"
-              jq -e --argjson expected_value "$expected_value" --arg expected_layer "$expected_layer" '
-                .status == "ok"
-                and .output.type == "variant"
-                and .output.value.tag == "Value"
-                and (.output.value.value.value.option.value |
-                  .value.value.tag == "Bool"
-                  and .value.value.value.type == "bool"
-                  and .value.value.value.value == $expected_value
-                  and .source.value.tag == "Global"
-                  and .layer.value.tag == $expected_layer
-                )
-              ' "$file" >/dev/null
-            }
-
             export PHENIX_STATE_DB="$TMPDIR/settings.sqlite"
-            printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Resolve","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"context":{"type":"table","value":{"session":{"type":"option","value":null},"agent":{"type":"option","value":null}}}}}}}}' \
-              | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-option.json"
-            assert_option "$TMPDIR/settings-option.json" false Nix
+            printf '%s\n' '{"id":1,"service":"phenix.api.sessions@1","input":{"type":"variant","value":{"tag":"Open","value":{"type":"table","value":{"id":{"type":"string","value":"settings-nix-disabled"},"agent":{"type":"option","value":null}}}}}}' \
+              | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-session.json"
+            jq -e '.status == "error" and (.error | contains("auto-create is disabled"))' "$TMPDIR/settings-session.json" >/dev/null
             printf '%s\n' '{"id":2,"service":"phenix.api.config@1","input":{"type":"variant","value":{"tag":"Read","value":{"type":"table","value":{"path":{"type":"string","value":"settings.json"}}}}}}' \
               | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-config.json"
             jq -e '.status == "ok" and .output.type == "variant" and .output.value.tag == "File" and ((.output.value.value.value.content.value | implode | fromjson).global["session.auto_create"] == true)' \
               "$TMPDIR/settings-config.json" >/dev/null
-            printf '%s\n' '{"id":3,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Set","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"scope":{"type":"variant","value":{"tag":"Global","value":{"type":"unit"}}},"value":{"type":"variant","value":{"tag":"Bool","value":{"type":"bool","value":true}}}}}}}}' \
-              | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-runtime-set.json"
-            printf '%s\n' '{"id":4,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Resolve","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"context":{"type":"table","value":{"session":{"type":"option","value":null},"agent":{"type":"option","value":{"type":"string","value":"agent.scout"}}}}}}}}}' \
-              | "${settingsComposition}/bin/phenix" > "$TMPDIR/settings-runtime-resolve.json"
-            assert_option "$TMPDIR/settings-runtime-resolve.json" true Runtime
 
             export PHENIX_STATE_DB="$TMPDIR/settings-file-first.sqlite"
-            printf '%s\n' '{"id":1,"service":"phenix.options@1","input":{"type":"variant","value":{"tag":"Resolve","value":{"type":"table","value":{"key":{"type":"string","value":"session.auto_create"},"context":{"type":"table","value":{"session":{"type":"option","value":null},"agent":{"type":"option","value":null}}}}}}}}' \
+            printf '%s\n' '{"id":1,"service":"phenix.api.sessions@1","input":{"type":"variant","value":{"tag":"Open","value":{"type":"table","value":{"id":{"type":"string","value":"settings-file-created"},"agent":{"type":"option","value":null}}}}}}' \
               | "${filePrecedenceComposition}/bin/phenix" > "$TMPDIR/settings-file-first.json"
-            assert_option "$TMPDIR/settings-file-first.json" true File
+            jq -e '.status == "ok" and .output.type == "variant" and .output.value.tag == "Opened" and .output.value.value.value.created.type == "bool" and .output.value.value.value.created.value == true' "$TMPDIR/settings-file-first.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/session-only.sqlite"
             "${sessionOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/session-only.json"

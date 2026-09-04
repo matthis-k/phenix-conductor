@@ -1,12 +1,13 @@
 use crate::{
-    Authority, CapabilityId, ComponentGraphError, ComponentId, ComponentInterface,
-    ComponentInvocationError, DurableSchema, EventBus, EventDispatchReport, EventEnvelope,
-    EventError, EventHandler, EventSubscription, EventTypeId, GraphGenerationId, KernelConfig,
-    KernelError, KernelEvent, KernelPolicyIdentity, LocalPersistence, NamespaceTransaction,
-    PersistenceBackend, PluginArtifact, PluginExecution, PluginId, PluginManifest,
-    ResolvedComponentGraph, ResolvedListener, ResolvedServiceChain, ResourceNamespace,
-    SchemaMigration, ServiceId, ServiceRole, SkillResourceMetadata, TaskRuntime, TaskScope,
-    TransactionOp,
+    ArtifactRevision, Authority, CapabilityId, ComponentGraphError, ComponentId,
+    ComponentInterface, ComponentInvocationError, DurableSchema, EventBus, EventDispatchReport,
+    EventEnvelope, EventError, EventHandler, EventSubscription, EventTypeId, GraphGenerationId,
+    InterfaceId, KernelConfig, KernelError, KernelEvent, KernelPolicyIdentity, LocalPersistence,
+    NamespaceTransaction, PersistenceBackend, PluginArtifact, PluginExecution, PluginId,
+    PluginManifest, ProviderFallbackReason, ProviderSelectionReason, ResolvedComponentGraph,
+    ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan, ResolvedServiceChain,
+    ResourceNamespace, RuntimeId, SchemaMigration, ServiceId, ServiceRole, SkillResourceMetadata,
+    TaskRuntime, TaskScope, TransactionOp,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -52,11 +53,72 @@ pub struct ServiceParticipantProvenance {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderEndpointProvenance {
+    pub component: ComponentId,
+    pub plugin: PluginId,
+    pub runtime: Option<RuntimeId>,
+    pub artifact_revision: Option<ArtifactRevision>,
+}
+
+impl ProviderEndpointProvenance {
+    fn from_handle(handle: &ResolvedImportHandle) -> Self {
+        let (runtime, artifact_revision) = match handle.execution() {
+            PluginExecution::Runtime { runtime, artifact } => {
+                (Some(runtime.clone()), Some(artifact.revision.clone()))
+            }
+            PluginExecution::Embedded | PluginExecution::ResourceOnly => (None, None),
+        };
+        Self {
+            component: handle.exporter().clone(),
+            plugin: handle.owning_plugin().clone(),
+            runtime,
+            artifact_revision,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComponentProviderProvenance {
+    pub interface: InterfaceId,
+    pub primary: ProviderEndpointProvenance,
+    pub fallbacks: Vec<ProviderEndpointProvenance>,
+    pub selection_reason: ProviderSelectionReason,
+    pub executed_provider: ProviderEndpointProvenance,
+    pub fallback_reason: Option<ProviderFallbackReason>,
+    pub effective_authority: Authority,
+}
+
+impl ComponentProviderProvenance {
+    fn from_plan(
+        interface: InterfaceId,
+        plan: &ResolvedProviderPlan,
+        executed: &ResolvedImportHandle,
+        fallback_reason: Option<ProviderFallbackReason>,
+        effective_authority: Authority,
+    ) -> Self {
+        Self {
+            interface,
+            primary: ProviderEndpointProvenance::from_handle(plan.primary()),
+            fallbacks: plan
+                .fallbacks()
+                .iter()
+                .map(ProviderEndpointProvenance::from_handle)
+                .collect(),
+            selection_reason: plan.selection_reason(),
+            executed_provider: ProviderEndpointProvenance::from_handle(executed),
+            fallback_reason,
+            effective_authority,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServiceInvocationProvenance {
     pub graph_generation: Option<GraphGenerationId>,
     pub policy_identity: KernelPolicyIdentity,
     pub service: ServiceId,
     pub planned_chain: ResolvedServiceChain,
+    pub component_provider: Option<ComponentProviderProvenance>,
     pub caller_authority: Authority,
     pub participants: Vec<ServiceParticipantProvenance>,
     pub terminal_reached: bool,
@@ -75,6 +137,7 @@ struct InvocationTrace {
     graph_generation: Option<GraphGenerationId>,
     service: ServiceId,
     planned_chain: ResolvedServiceChain,
+    component_provider: Option<ComponentProviderProvenance>,
     caller_authority: Authority,
     participants: Vec<PendingParticipantProvenance>,
     terminal_reached: bool,
@@ -85,11 +148,13 @@ impl InvocationTrace {
         chain: &ResolvedServiceChain,
         caller_authority: &Authority,
         graph_generation: Option<&GraphGenerationId>,
+        component_provider: Option<ComponentProviderProvenance>,
     ) -> Self {
         Self {
             graph_generation: graph_generation.cloned(),
             service: chain.service.clone(),
             planned_chain: chain.clone(),
+            component_provider,
             caller_authority: caller_authority.clone(),
             participants: Vec::new(),
             terminal_reached: false,
@@ -125,6 +190,7 @@ impl InvocationTrace {
             policy_identity: self.planned_chain.policy_identity,
             service: self.service,
             planned_chain: self.planned_chain,
+            component_provider: self.component_provider,
             caller_authority: self.caller_authority,
             participants: self
                 .participants

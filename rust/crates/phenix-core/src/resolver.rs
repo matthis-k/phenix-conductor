@@ -2,8 +2,8 @@ use crate::{
     Authority, CapabilityId, ComponentGraphError, ComponentManifest, CompositionMetadataError,
     ConfigContribution, ConfigMergeError, ConfigurationFrontendId, ConfigurationFrontendMetadata,
     FrontendConfigContribution, FrontendConfigError, InterfaceId, KernelConfig, KernelError,
-    LayerPolicy, PluginId, PluginManifest, ResolvedComponentGraph, ResolvedConfigContributions,
-    ServiceId, ServiceRole, SkillResourceMetadata,
+    LayerPolicy, PluginId, PluginManifest, ProviderCompositionPolicy, ResolvedComponentGraph,
+    ResolvedConfigContributions, ServiceId, ServiceRole, SkillResourceMetadata,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -168,6 +168,7 @@ pub struct ResolvedHarness {
     kernel_config: KernelConfig,
     component_graph: ResolvedComponentGraph,
     layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+    provider_policy: ProviderCompositionPolicy,
 }
 
 impl ResolvedHarness {
@@ -177,12 +178,31 @@ impl ResolvedHarness {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_and_layer_policies(
+        Self::resolve_with_resources_layer_policies_and_provider_policy(
             plugin_manifests,
             component_manifests,
             [],
             contributions,
             BTreeMap::new(),
+            ProviderCompositionPolicy::default(),
+            authority_ceiling,
+        )
+    }
+
+    pub fn resolve_with_provider_policy(
+        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
+        component_manifests: impl IntoIterator<Item = ComponentManifest>,
+        contributions: impl IntoIterator<Item = ConfigContribution>,
+        provider_policy: ProviderCompositionPolicy,
+        authority_ceiling: &Authority,
+    ) -> Result<Self, ResolvedHarnessError> {
+        Self::resolve_with_resources_layer_policies_and_provider_policy(
+            plugin_manifests,
+            component_manifests,
+            [],
+            contributions,
+            BTreeMap::new(),
+            provider_policy,
             authority_ceiling,
         )
     }
@@ -194,12 +214,13 @@ impl ResolvedHarness {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_and_layer_policies(
+        Self::resolve_with_resources_layer_policies_and_provider_policy(
             plugin_manifests,
             component_manifests,
             resources,
             contributions,
             BTreeMap::new(),
+            ProviderCompositionPolicy::default(),
             authority_ceiling,
         )
     }
@@ -211,12 +232,13 @@ impl ResolvedHarness {
         layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_and_layer_policies(
+        Self::resolve_with_resources_layer_policies_and_provider_policy(
             plugin_manifests,
             component_manifests,
             [],
             contributions,
             layer_policies,
+            ProviderCompositionPolicy::default(),
             authority_ceiling,
         )
     }
@@ -226,7 +248,27 @@ impl ResolvedHarness {
         component_manifests: impl IntoIterator<Item = ComponentManifest>,
         resources: impl IntoIterator<Item = SkillResourceMetadata>,
         contributions: impl IntoIterator<Item = ConfigContribution>,
+        layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+        authority_ceiling: &Authority,
+    ) -> Result<Self, ResolvedHarnessError> {
+        Self::resolve_with_resources_layer_policies_and_provider_policy(
+            plugin_manifests,
+            component_manifests,
+            resources,
+            contributions,
+            layer_policies,
+            ProviderCompositionPolicy::default(),
+            authority_ceiling,
+        )
+    }
+
+    fn resolve_with_resources_layer_policies_and_provider_policy(
+        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
+        component_manifests: impl IntoIterator<Item = ComponentManifest>,
+        resources: impl IntoIterator<Item = SkillResourceMetadata>,
+        contributions: impl IntoIterator<Item = ConfigContribution>,
         mut layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+        provider_policy: ProviderCompositionPolicy,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
         let mut plugins: Vec<_> = plugin_manifests.into_iter().collect();
@@ -249,10 +291,11 @@ impl ResolvedHarness {
         for (service, layers) in &layer_policies {
             kernel_config = kernel_config.with_layer_policy(service.clone(), layers.clone())?;
         }
-        let component_graph = ResolvedComponentGraph::compile(
+        let component_graph = ResolvedComponentGraph::compile_with_provider_policy(
             plugins.clone(),
             components.clone(),
             authority_ceiling,
+            &provider_policy,
         )?;
         let generation = generation_identity(
             &plugins,
@@ -260,6 +303,7 @@ impl ResolvedHarness {
             &resources,
             &configuration,
             &layer_policies,
+            &provider_policy,
             authority_ceiling,
         );
 
@@ -272,6 +316,7 @@ impl ResolvedHarness {
             kernel_config,
             component_graph,
             layer_policies,
+            provider_policy,
         })
     }
 
@@ -345,14 +390,18 @@ impl ResolvedHarness {
         &self.layer_policies
     }
 
+    pub fn provider_policy(&self) -> &ProviderCompositionPolicy {
+        &self.provider_policy
+    }
+
     pub(crate) fn incorporate_semantic_metadata<T: Serialize>(&mut self, metadata: &T) {
         self.generation.incorporate_semantic_metadata(metadata);
     }
 
     /// Re-resolve a sibling harness that shares this harness's resources,
-    /// configuration, and layer policies but uses a complete desired plugin
-    /// and component set. Kernel plugin management uses this to turn a
-    /// desired plugin set into one atomic candidate generation.
+    /// configuration, layer policies, and provider policy but uses a complete
+    /// desired plugin and component set. Kernel plugin management uses this to
+    /// turn a desired plugin set into one atomic candidate generation.
     pub(crate) fn with_plugin_set(
         &self,
         plugins: Vec<PluginManifest>,
@@ -367,10 +416,11 @@ impl ResolvedHarness {
         for (service, layers) in &self.layer_policies {
             kernel_config = kernel_config.with_layer_policy(service.clone(), layers.clone())?;
         }
-        let component_graph = ResolvedComponentGraph::compile(
+        let component_graph = ResolvedComponentGraph::compile_with_provider_policy(
             plugins.clone(),
             components.clone(),
             authority_ceiling,
+            &self.provider_policy,
         )?;
         let generation = generation_identity(
             &plugins,
@@ -378,6 +428,7 @@ impl ResolvedHarness {
             &self.resources,
             &self.configuration,
             &self.layer_policies,
+            &self.provider_policy,
             authority_ceiling,
         );
         Ok(Self {
@@ -389,6 +440,7 @@ impl ResolvedHarness {
             kernel_config,
             component_graph,
             layer_policies: self.layer_policies.clone(),
+            provider_policy: self.provider_policy.clone(),
         })
     }
 }
@@ -400,6 +452,7 @@ struct SemanticGeneration<'a> {
     resources: &'a [SkillResourceMetadata],
     configuration: serde_json::Value,
     layer_policies: serde_json::Value,
+    provider_policy: &'a ProviderCompositionPolicy,
     authority_ceiling: &'a Authority,
 }
 
@@ -538,6 +591,7 @@ fn generation_identity(
     resources: &[SkillResourceMetadata],
     configuration: &ResolvedConfigContributions,
     layer_policies: &BTreeMap<ServiceId, Vec<LayerPolicy>>,
+    provider_policy: &ProviderCompositionPolicy,
     authority_ceiling: &Authority,
 ) -> GraphGenerationId {
     let payload = SemanticGeneration {
@@ -546,6 +600,7 @@ fn generation_identity(
         resources,
         configuration: configuration.semantic_payload(),
         layer_policies: layer_policy_payload(layer_policies),
+        provider_policy,
         authority_ceiling,
     };
     let encoded = serde_json::to_vec(&payload).expect("resolved generation metadata serializes");
@@ -946,6 +1001,76 @@ mod tests {
         .unwrap();
 
         assert_ne!(baseline.generation(), changed.generation());
+    }
+
+    #[test]
+    fn provider_policy_is_part_of_canonical_resolution_and_reconciliation() {
+        let provider_interface = interface("fixture.echo@1");
+        let provider_a = ComponentManifest {
+            listeners: Vec::new(),
+            id: component("provider-a"),
+            owner: plugin("provider-a-owner"),
+            imports: Vec::new(),
+            exports: vec![ComponentExport {
+                interface: provider_interface.clone(),
+                schema: Default::default(),
+                priority: 100,
+                required_authority: Authority::default(),
+            }],
+            maximum_authority: Authority::default(),
+        };
+        let provider_b = ComponentManifest {
+            id: component("provider-b"),
+            owner: plugin("provider-b-owner"),
+            ..provider_a.clone()
+        };
+        let consumer = consumer(Authority::default());
+        let plugins = vec![
+            owner("consumer-owner", Authority::default()),
+            owner("provider-a-owner", Authority::default()),
+            owner("provider-b-owner", Authority::default()),
+        ];
+        let components = vec![consumer.clone(), provider_a, provider_b];
+        let baseline = ResolvedHarness::resolve(
+            plugins.clone(),
+            components.clone(),
+            [],
+            &Authority::default(),
+        )
+        .unwrap();
+        let policy = ProviderCompositionPolicy::new()
+            .with_explicit_binding(provider_interface.clone(), component("provider-b"));
+        let resolved = ResolvedHarness::resolve_with_provider_policy(
+            plugins,
+            components,
+            [],
+            policy.clone(),
+            &Authority::default(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.provider_policy(), &policy);
+        assert_ne!(baseline.generation(), resolved.generation());
+        assert_eq!(
+            resolved
+                .component_graph()
+                .provider_plan(&consumer.id, &provider_interface)
+                .unwrap()
+                .unwrap()
+                .primary()
+                .exporter(),
+            &component("provider-b")
+        );
+
+        let sibling = resolved
+            .with_plugin_set(
+                resolved.plugins().to_vec(),
+                resolved.components().to_vec(),
+                &Authority::default(),
+            )
+            .unwrap();
+        assert_eq!(sibling.provider_policy(), &policy);
+        assert_eq!(sibling.generation(), resolved.generation());
     }
 
     #[test]

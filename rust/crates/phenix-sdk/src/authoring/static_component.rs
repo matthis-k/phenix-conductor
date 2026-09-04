@@ -25,19 +25,6 @@ pub struct StaticComponentExport {
     pub required_authority: Authority,
 }
 
-impl StaticComponentExport {
-    #[must_use]
-    pub fn service(&self) -> Option<ServiceContribution> {
-        self.terminal.then(|| ServiceContribution {
-            service: ServiceId::parse(self.interface.as_str())
-                .expect("interface identity is a valid service identity"),
-            role: ServiceRole::Terminal,
-            priority: self.priority,
-            required_authority: self.required_authority.clone(),
-        })
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StaticComponentLayer {
     pub interface: InterfaceId,
@@ -309,10 +296,9 @@ impl StaticComponentDescriptor {
 
     #[must_use]
     pub fn services(&self) -> Vec<ServiceContribution> {
-        self.exports
+        self.layers
             .iter()
-            .filter_map(StaticComponentExport::service)
-            .chain(self.layers.iter().map(StaticComponentLayer::service))
+            .map(StaticComponentLayer::service)
             .collect()
     }
 
@@ -487,9 +473,8 @@ mod tests {
         assert_eq!(component.listeners()[0].event.as_str(), "fixture.completed");
         assert_eq!(component.values().len(), 1);
         assert_eq!(component.values()[0].id.as_str(), "fixture.status@1");
-        assert_eq!(services.len(), 2);
-        assert_eq!(services[0].role, ServiceRole::Terminal);
-        assert_eq!(services[1].role, ServiceRole::Layer);
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].role, ServiceRole::Layer);
     }
 
     #[test]
