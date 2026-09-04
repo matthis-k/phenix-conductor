@@ -40,12 +40,14 @@ fn invoke(harness: &mut PhenixHarness, service: &str, input: Value) -> Value {
                 harness, service, input,
             )
         }
-        "phenix.artifacts@1" => invoke_component_structural_json::<ArtifactCommand, ArtifactResponse>(
-            harness,
-            artifact_component_manifest(),
-            service,
-            input,
-        ),
+        "phenix.artifacts@1" => {
+            invoke_component_structural_json::<ArtifactCommand, ArtifactResponse>(
+                harness,
+                artifact_component_manifest(),
+                service,
+                input,
+            )
+        }
         "phenix.context@1" => {
             invoke_structural_json::<ContextCommand, ContextResponse>(harness, service, input)
         }
