@@ -254,12 +254,7 @@ fn plugin_panic_is_normalized_and_closes_live_call_scope() {
     kernel.activate_all().unwrap();
 
     let error = kernel
-        .invoke(
-            &service("panic@1"),
-            b"boom",
-            &Authority::default(),
-            None,
-        )
+        .invoke(&service("panic@1"), b"boom", &Authority::default(), None)
         .unwrap_err();
 
     assert!(matches!(error, KernelError::ServiceInvoke { .. }));

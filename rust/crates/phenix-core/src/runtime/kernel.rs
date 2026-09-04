@@ -186,10 +186,13 @@ impl Kernel {
                         let provider_manifest = config
                             .manifest(&binding.provider)
                             .expect("resolved runtime provider is configured");
-                        let provider = next_instances
-                            .get(&binding.provider)
-                            .cloned()
-                            .ok_or_else(|| KernelError::PluginNotActive(binding.provider.clone()))?;
+                        let provider =
+                            next_instances
+                                .get(&binding.provider)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    KernelError::PluginNotActive(binding.provider.clone())
+                                })?;
                         let live_call = self.tasks.begin_call(&binding.provider);
                         let cancellation = live_call.cancellation_token().clone();
                         let host = PluginHost {
