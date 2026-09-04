@@ -377,7 +377,7 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
             &ServiceId::parse("fixture.attribute-gate.internal@1").unwrap(),
             &input,
             &authority("models.layer"),
-            &Plugin::plugin_id(),
+            &sessions::Plugin::plugin_id(),
         )
         .unwrap();
     let output: phenix_sdk::PhenixValue = serde_json::from_slice(&output).unwrap();
