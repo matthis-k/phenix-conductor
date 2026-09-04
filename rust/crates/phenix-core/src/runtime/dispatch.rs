@@ -210,7 +210,9 @@ pub(super) fn invoke_resolved_chain_with(
         trace: Arc::clone(trace),
     });
     let continuation_used = continuation.as_ref().map(|state| Arc::clone(&state.used));
-    let live_call = runtime.tasks.begin_call(&provider.plugin);
+    let live_call = runtime
+        .tasks
+        .begin_call(&provider.plugin, runtime.graph_generation);
     let call_cancellation = live_call.cancellation_token().clone();
     let host = PluginHost {
         graph_generation: runtime.graph_generation,
