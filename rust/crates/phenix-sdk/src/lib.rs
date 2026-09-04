@@ -329,10 +329,10 @@ pub use api::*;
 pub use authoring::*;
 pub use contracts::*;
 pub use phenix_core::{
-    Authority, BackendFeature, Bytes, CallableRef, CapabilityId, ComponentId, Contract, ContractId,
-    ContractValue, DurableSchema, Exact, HasPhenixSchema, Key, LayerResult, ObjectRef,
-    PhenixContract, PhenixSchema, PhenixValue, PluginArtifact, PluginExecution, PluginId, Project,
-    ReferenceId, RuntimeId, Type, TypeKind, ValueError,
+    ArtifactRevision, Authority, BackendFeature, Bytes, CallableRef, CapabilityId, ComponentId,
+    Contract, ContractId, ContractValue, DurableSchema, Exact, HasPhenixSchema, Key, LayerResult,
+    ObjectRef, PhenixContract, PhenixSchema, PhenixValue, PluginArtifact, PluginExecution,
+    PluginId, Project, ReferenceId, RuntimeId, Type, TypeKind, ValueError,
 };
 pub use phenix_provider_sdk::{
     ApiTokenSource, Auth, AuthDescriptor, AuthKind, EnvironmentVariable, ProviderAuthCommand,

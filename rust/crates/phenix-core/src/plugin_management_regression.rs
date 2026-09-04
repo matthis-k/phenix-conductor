@@ -1,8 +1,11 @@
 use crate::{
-    runtime_provider_service, Authority, ComponentExport, ComponentId, ComponentImport,
-    ComponentManifest, GraphReconciler, InterfaceId, Kernel, KernelError, PluginArtifact,
+    runtime_provider_service, ArtifactRevision, Authority, ComponentExport, ComponentId,
+    ComponentImport, ComponentManifest, GraphReconciler, InterfaceId, Kernel, KernelError,
+    PluginArtifact, PluginArtifactInput, PluginArtifactStore, PluginArtifactStoreError,
+    PluginBuildExecution, PluginBuildExecutor, PluginBuildFailure, PluginBuildPlan,
     PluginExecution, PluginHost, PluginId, PluginInstance, PluginLoadRequest,
-    PluginManagementError, PluginManagementRequest, PluginManifest, PluginRuntimeProvider,
+    PluginManagementContext, PluginManagementError, PluginManagementPolicy,
+    PluginManagementRequest, PluginManagementResult, PluginManifest, PluginRuntimeProvider,
     PluginSetRequest, PluginState, PluginUnloadRequest, ResolvedHarness, ResolvedHarnessActivation,
     RuntimeId, RuntimePluginCandidate, ServiceContribution, ServiceId, ServiceRole,
 };
@@ -33,9 +36,67 @@ fn interface(value: &str) -> InterfaceId {
 fn artifact(revision: &str) -> PluginArtifact {
     PluginArtifact {
         locator: "fixture.plugin".into(),
-        revision: revision.into(),
+        revision: ArtifactRevision::from_content(revision.as_bytes()),
         configuration: BTreeMap::new(),
     }
+}
+
+fn ready(manifest: PluginManifest) -> PluginManifest<PluginArtifactInput> {
+    manifest.map_artifact(PluginArtifactInput::Ready)
+}
+
+struct TestArtifactStore;
+
+impl PluginArtifactStore for TestArtifactStore {
+    fn preflight(&mut self) -> Result<(), PluginArtifactStoreError> {
+        Ok(())
+    }
+
+    fn verify_ready(&mut self, _artifact: &PluginArtifact) -> Result<(), PluginArtifactStoreError> {
+        Ok(())
+    }
+
+    fn store_built(
+        &mut self,
+        _artifact: &PluginArtifact,
+        _content: &[u8],
+    ) -> Result<(), PluginArtifactStoreError> {
+        Ok(())
+    }
+}
+
+struct UnexpectedBuildExecutor;
+
+impl PluginBuildExecutor for UnexpectedBuildExecutor {
+    fn execute(
+        &mut self,
+        _plan: &PluginBuildPlan,
+        _effective_authority: &Authority,
+    ) -> Result<PluginBuildExecution, PluginBuildFailure> {
+        panic!("ready-artifact management must not execute a build")
+    }
+}
+
+fn manage(
+    reconciler: &mut GraphReconciler,
+    kernel: &mut Kernel,
+    request: PluginManagementRequest,
+    authority_ceiling: &Authority,
+) -> Result<PluginManagementResult, PluginManagementError> {
+    let policy = PluginManagementPolicy::new(Authority::default(), Authority::default());
+    let mut artifact_store = TestArtifactStore;
+    let mut build_executor = UnexpectedBuildExecutor;
+    reconciler.manage(
+        kernel,
+        request,
+        authority_ceiling,
+        &mut PluginManagementContext {
+            caller_authority: authority_ceiling,
+            policy: &policy,
+            artifact_store: &mut artifact_store,
+            build_executor: &mut build_executor,
+        },
+    )
 }
 
 fn embedded_manifest(id: &str, service: Option<ServiceId>) -> PluginManifest {
@@ -185,7 +246,7 @@ impl PluginRuntimeProvider for Bridge {
         }
         Ok(Box::new(Guest {
             starts: Arc::clone(&self.guest_starts),
-            revision: candidate.artifact.revision.clone(),
+            revision: candidate.artifact.revision.to_string(),
         }))
     }
 }
@@ -286,20 +347,23 @@ fn load_activates_a_new_guest_in_a_new_generation() {
     );
     let mut reconciler = GraphReconciler::new(initial);
 
-    let result = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::load(PluginLoadRequest {
-                manifest: guest.clone(),
-                components: vec![guest_component.clone()],
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap();
+    let result = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::load(PluginLoadRequest {
+            manifest: ready(guest.clone()),
+            components: vec![guest_component.clone()],
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap();
 
-    assert_ne!(result.active_generation, initial_generation);
-    assert_eq!(kernel.graph_generation(), Some(&result.active_generation));
+    assert_ne!(result.reconciliation.active_generation, initial_generation);
+    assert_eq!(
+        kernel.graph_generation(),
+        Some(&result.reconciliation.active_generation)
+    );
     assert_eq!(kernel.config().manifest(&guest.id), Some(&guest));
     assert!(kernel
         .component_graph()
@@ -333,19 +397,22 @@ fn unload_stops_an_active_guest_and_commits_a_new_generation() {
     assert_eq!(guest_starts.load(Ordering::Relaxed), 1);
     let mut reconciler = GraphReconciler::new(initial);
 
-    let result = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::Unload(PluginUnloadRequest {
-                plugin: guest.id.clone(),
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap();
+    let result = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::Unload(PluginUnloadRequest {
+            plugin: guest.id.clone(),
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap();
 
-    assert_ne!(result.active_generation, initial_generation);
-    assert_eq!(kernel.graph_generation(), Some(&result.active_generation));
+    assert_ne!(result.reconciliation.active_generation, initial_generation);
+    assert_eq!(
+        kernel.graph_generation(),
+        Some(&result.reconciliation.active_generation)
+    );
     assert!(kernel.config().manifest(&guest.id).is_none());
     assert_eq!(kernel.state(&guest.id), None);
     assert_eq!(kernel.state(&bridge.id), Some(PluginState::Active));
@@ -372,19 +439,19 @@ fn loading_an_active_plugin_with_a_new_artifact_is_a_replacement() {
     assert_eq!(guest_starts.load(Ordering::Relaxed), 1);
     let mut reconciler = GraphReconciler::new(initial);
 
-    let result = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::load(PluginLoadRequest {
-                manifest: second_guest.clone(),
-                components: Vec::new(),
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap();
+    let result = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::load(PluginLoadRequest {
+            manifest: ready(second_guest.clone()),
+            components: Vec::new(),
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap();
 
-    assert_ne!(result.active_generation, initial_generation);
+    assert_ne!(result.reconciliation.active_generation, initial_generation);
     assert_eq!(
         kernel.config().manifest(&second_guest.id),
         Some(&second_guest)
@@ -417,24 +484,24 @@ fn stale_expected_revision_is_rejected_before_commit() {
     );
     let mut reconciler = GraphReconciler::new(initial);
 
-    let error = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::load(PluginLoadRequest {
-                manifest: candidate_guest,
-                components: Vec::new(),
-                expected_active_revision: Some("sha256:unexpected".into()),
-            }),
-            &Authority::default(),
-        )
-        .unwrap_err();
+    let error = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::load(PluginLoadRequest {
+            manifest: ready(candidate_guest),
+            components: Vec::new(),
+            expected_active_revision: Some(ArtifactRevision::from_content(b"unexpected")),
+        }),
+        &Authority::default(),
+    )
+    .unwrap_err();
 
     assert_eq!(
         error,
         PluginManagementError::StaleExpectedRevision {
             plugin: plugin("fixture.guest"),
-            expected: "sha256:unexpected".into(),
-            active: Some("sha256:guest-v1".into()),
+            expected: ArtifactRevision::from_content(b"unexpected"),
+            active: Some(ArtifactRevision::from_content(b"sha256:guest-v1")),
         }
     );
     assert_eq!(kernel.graph_generation(), Some(&active_generation));
@@ -453,23 +520,23 @@ fn expected_revision_rejects_load_when_plugin_is_not_active() {
     kernel.activate_resolved_harness(&initial).unwrap();
     let mut reconciler = GraphReconciler::new(initial);
 
-    let error = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::load(PluginLoadRequest {
-                manifest: guest,
-                components: Vec::new(),
-                expected_active_revision: Some("sha256:guest-v0".into()),
-            }),
-            &Authority::default(),
-        )
-        .unwrap_err();
+    let error = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::load(PluginLoadRequest {
+            manifest: ready(guest),
+            components: Vec::new(),
+            expected_active_revision: Some(ArtifactRevision::from_content(b"guest-v0")),
+        }),
+        &Authority::default(),
+    )
+    .unwrap_err();
 
     assert_eq!(
         error,
         PluginManagementError::StaleExpectedRevision {
             plugin: plugin("fixture.guest"),
-            expected: "sha256:guest-v0".into(),
+            expected: ArtifactRevision::from_content(b"guest-v0"),
             active: None,
         }
     );
@@ -505,23 +572,24 @@ fn failed_start_keeps_the_previous_generation_active() {
     fail.store(true, Ordering::Release);
     let mut reconciler = GraphReconciler::new(initial);
 
-    let error = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::load(PluginLoadRequest {
-                manifest: candidate_guest,
-                components: Vec::new(),
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap_err();
+    let error = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::load(PluginLoadRequest {
+            manifest: ready(candidate_guest),
+            components: Vec::new(),
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap_err();
 
+    let PluginManagementError::Reconciliation { error, build: None } = error else {
+        panic!("candidate start should fail during reconciliation");
+    };
     assert!(matches!(
-        error,
-        PluginManagementError::Reconciliation(crate::LiveReconciliationError::Runtime(
-            KernelError::PluginStart { .. }
-        ))
+        *error,
+        crate::LiveReconciliationError::Runtime(KernelError::PluginStart { .. })
     ));
     assert_eq!(kernel.graph_generation(), Some(&active_generation));
     assert_eq!(reconciler.active().generation(), &active_generation);
@@ -547,25 +615,28 @@ fn unload_is_rejected_when_required_imports_become_unsatisfied() {
     kernel.activate_resolved_harness(&initial).unwrap();
     let mut reconciler = GraphReconciler::new(initial);
 
-    let error = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::Unload(PluginUnloadRequest {
-                plugin: provider_owner.id.clone(),
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap_err();
+    let error = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::Unload(PluginUnloadRequest {
+            plugin: provider_owner.id.clone(),
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap_err();
 
+    let PluginManagementError::Candidate { error, build: None } = error else {
+        panic!("missing import should fail candidate resolution");
+    };
     assert!(matches!(
-        error,
-        PluginManagementError::Candidate(crate::ResolvedHarnessError::ComponentGraph(
+        *error,
+        crate::ResolvedHarnessError::ComponentGraph(
             crate::ComponentGraphError::MissingRequiredImport {
                 component,
                 interface: missing_interface,
             }
-        )) if component == ComponentId::parse("consumer.component").unwrap()
+        ) if component == ComponentId::parse("consumer.component").unwrap()
             && missing_interface == interface("fixture.echo@1")
     ));
     assert_eq!(kernel.graph_generation(), Some(&active_generation));
@@ -585,23 +656,22 @@ fn unknown_runtime_is_rejected_before_commit() {
     let invalid_guest = guest_manifest("fixture.guest", missing.clone(), "sha256:guest-v1");
     let mut reconciler = GraphReconciler::new(initial);
 
-    let error = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::load(PluginLoadRequest {
-                manifest: invalid_guest,
-                components: Vec::new(),
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap_err();
+    let error = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::load(PluginLoadRequest {
+            manifest: ready(invalid_guest),
+            components: Vec::new(),
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap_err();
 
     assert!(matches!(
         error,
-        PluginManagementError::Candidate(crate::ResolvedHarnessError::Kernel(
-            KernelError::RuntimeProviderUnavailable(found)
-        )) if found == missing
+        PluginManagementError::RuntimeUnavailable { runtime: found, build: None }
+            if found == missing
     ));
     assert_eq!(kernel.graph_generation(), Some(&active_generation));
 }
@@ -628,22 +698,23 @@ fn runtime_provider_cycle_is_rejected_during_desired_set_reconcile() {
     kernel.activate_resolved_harness(&initial).unwrap();
     let mut reconciler = GraphReconciler::new(initial);
 
-    let error = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::Reconcile(PluginSetRequest {
-                plugins: vec![bridge_a, bridge_b],
-                components: Vec::new(),
-            }),
-            &Authority::default(),
-        )
-        .unwrap_err();
+    let error = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::Reconcile(PluginSetRequest {
+            plugins: vec![bridge_a, bridge_b],
+            components: Vec::new(),
+        }),
+        &Authority::default(),
+    )
+    .unwrap_err();
 
+    let PluginManagementError::Candidate { error, build: None } = error else {
+        panic!("runtime cycle should fail candidate resolution");
+    };
     assert!(matches!(
-        error,
-        PluginManagementError::Candidate(crate::ResolvedHarnessError::Kernel(
-            KernelError::DependencyCycle(_)
-        ))
+        *error,
+        crate::ResolvedHarnessError::Kernel(KernelError::DependencyCycle(_))
     ));
     assert_eq!(kernel.graph_generation(), Some(&active_generation));
 }
@@ -660,22 +731,21 @@ fn removing_a_runtime_provider_with_dependents_is_rejected() {
     kernel.activate_resolved_harness(&initial).unwrap();
     let mut reconciler = GraphReconciler::new(initial);
 
-    let error = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::Unload(PluginUnloadRequest {
-                plugin: bridge.id.clone(),
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap_err();
+    let error = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::Unload(PluginUnloadRequest {
+            plugin: bridge.id.clone(),
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap_err();
 
     assert!(matches!(
         error,
-        PluginManagementError::Candidate(crate::ResolvedHarnessError::Kernel(
-            KernelError::RuntimeProviderUnavailable(found)
-        )) if found == runtime
+        PluginManagementError::RuntimeUnavailable { runtime: found, build: None }
+            if found == runtime
     ));
     assert_eq!(kernel.graph_generation(), Some(&active_generation));
 }
@@ -722,17 +792,17 @@ fn old_and_new_invocations_are_pinned_to_their_generations() {
         }),
     );
     let mut reconciler = GraphReconciler::new(initial);
-    let result = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::load(PluginLoadRequest {
-                manifest: second,
-                components: Vec::new(),
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap();
+    let result = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::load(PluginLoadRequest {
+            manifest: ready(second),
+            components: Vec::new(),
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap();
 
     assert_eq!(
         kernel
@@ -748,7 +818,7 @@ fn old_and_new_invocations_are_pinned_to_their_generations() {
     );
     assert_eq!(
         provenance[1].graph_generation,
-        Some(result.active_generation.clone())
+        Some(result.reconciliation.active_generation.clone())
     );
     assert_ne!(
         provenance[0].graph_generation,
@@ -769,16 +839,16 @@ fn unload_of_an_unknown_plugin_is_rejected() {
     kernel.activate_resolved_harness(&initial).unwrap();
     let mut reconciler = GraphReconciler::new(initial);
 
-    let error = reconciler
-        .manage(
-            &mut kernel,
-            PluginManagementRequest::Unload(PluginUnloadRequest {
-                plugin: plugin("fixture.missing"),
-                expected_active_revision: None,
-            }),
-            &Authority::default(),
-        )
-        .unwrap_err();
+    let error = manage(
+        &mut reconciler,
+        &mut kernel,
+        PluginManagementRequest::Unload(PluginUnloadRequest {
+            plugin: plugin("fixture.missing"),
+            expected_active_revision: None,
+        }),
+        &Authority::default(),
+    )
+    .unwrap_err();
 
     assert_eq!(
         error,

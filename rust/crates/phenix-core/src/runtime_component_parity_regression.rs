@@ -124,7 +124,7 @@ fn runtime_provider_manifest(runtime: RuntimeId) -> PluginManifest {
             runtime,
             artifact: PluginArtifact {
                 locator: "fixture.echo".into(),
-                revision: "sha256:echo-v1".into(),
+                revision: crate::ArtifactRevision::from_content(b"echo-v1"),
                 configuration: BTreeMap::new(),
             },
         },

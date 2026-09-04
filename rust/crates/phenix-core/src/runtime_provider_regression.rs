@@ -1,7 +1,7 @@
 use crate::{
-    runtime_provider_service, Authority, CapabilityId, GraphReconciler, Kernel, KernelConfig,
-    KernelError, LiveReconciliationError, PluginArtifact, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, PluginRuntimeProvider, ResolvedHarness,
+    runtime_provider_service, ArtifactRevision, Authority, CapabilityId, GraphReconciler, Kernel,
+    KernelConfig, KernelError, LiveReconciliationError, PluginArtifact, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, PluginRuntimeProvider, ResolvedHarness,
     ResolvedHarnessActivation, RuntimeId, RuntimePluginCandidate, ServiceContribution, ServiceRole,
 };
 use std::{
@@ -23,7 +23,7 @@ fn runtime(value: &str) -> RuntimeId {
 fn artifact(revision: &str) -> PluginArtifact {
     PluginArtifact {
         locator: "fixture.plugin".into(),
-        revision: revision.into(),
+        revision: ArtifactRevision::from_content(revision.as_bytes()),
         configuration: BTreeMap::new(),
     }
 }
@@ -127,7 +127,10 @@ fn arbitrary_runtime_identity_resolves_through_an_embedded_provider() {
 
     assert_eq!(binding.runtime, runtime);
     assert_eq!(binding.provider, bridge.id);
-    assert_eq!(binding.artifact_revision, "sha256:guest-v1");
+    assert_eq!(
+        binding.artifact_revision,
+        ArtifactRevision::from_content(b"sha256:guest-v1")
+    );
     assert_eq!(config.activation_order(), &[bridge.id, guest.id]);
 }
 
@@ -252,7 +255,7 @@ fn artifact_revision_and_resolved_provider_are_pinned_by_generation() {
             .runtime_binding(&plugin("fixture.guest"))
             .unwrap()
             .artifact_revision,
-        "sha256:guest-v1"
+        ArtifactRevision::from_content(b"sha256:guest-v1")
     );
 }
 

@@ -455,7 +455,7 @@ mod tests {
             runtime: crate::RuntimeId::parse("vendor.runtime").unwrap(),
             artifact: crate::PluginArtifact {
                 locator: "plugin.wasm".into(),
-                revision: "sha256:fixture".into(),
+                revision: crate::ArtifactRevision::from_content(b"fixture"),
                 configuration: std::collections::BTreeMap::new(),
             },
         });
@@ -469,7 +469,7 @@ mod tests {
         assert_eq!(encoded["execution"]["runtime"], "vendor.runtime");
         assert_eq!(
             encoded["execution"]["artifact"]["revision"],
-            "sha256:fixture"
+            crate::ArtifactRevision::from_content(b"fixture").as_ref()
         );
     }
 
