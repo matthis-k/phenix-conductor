@@ -92,10 +92,9 @@ fn stateless_plugin_runs_through_generated_factory_and_dispatch() {
             value: method.into(),
         }))
         .unwrap();
-        let service = phenix_core::ServiceId::parse(format!(
-            "fixture.manifest.stateless.{method}@1"
-        ))
-        .unwrap();
+        let service =
+            phenix_core::ServiceId::parse(format!("fixture.manifest.stateless.{method}@1"))
+                .unwrap();
         let output = kernel
             .invoke_component(&component, &service, &input, &authority, &manifest.id)
             .unwrap();
