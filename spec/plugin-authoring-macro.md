@@ -979,21 +979,69 @@ No global linker registration is used.
 
 ## 32. Public projection syntax
 
-Public API exposure is a modifier on an existing contribution:
+Exposure is an explicit decision on each method or field. Rust visibility does
+not imply exposure:
 
 ```rust
-#[phenix(export(BenchRun), public)]
-fn run(...) -> ...;
+#[phenix_sdk::plugin(root, id = "phenix.example")]
+struct Plugin {
+    #[phenix(expose)]
+    models: Models,
+
+    #[phenix(expose(name = "sessions"))]
+    session_store: Sessions,
+
+    state: State,
+}
+
+#[phenix_sdk::plugin]
+impl Plugin {
+    #[phenix(expose)]
+    async fn run(&mut self, request: Request) -> Response { /* ... */ }
+
+    #[phenix(expose(name = "health"))]
+    fn status(&mut self) -> Status { /* ... */ }
+}
 ```
 
-and:
+Reusable nested types declare relative projections. Only marked fields recurse,
+and calls dispatch to the mounted field instance:
 
 ```rust
-#[phenix(value("phenix.bench.capabilities@1"), public)]
-fn capabilities(...) -> ...;
+#[phenix_sdk::expose]
+struct Models {
+    #[phenix(expose(name = "sources"))]
+    providers: Providers,
+}
+
+#[phenix_sdk::expose]
+impl Models {
+    #[phenix(expose)]
+    fn current(&mut self, request: Request) -> Response { /* ... */ }
+}
 ```
 
-Do not require `sdk { ... }`, `bindings { ... }`, `api { ... }`, or similar blocks that restate the same methods.
+Local `name` values are one path segment. Effective paths compose from field
+and method segments. A root may then rewrite a composed prefix:
+
+```rust
+#[phenix_sdk::plugin(
+    root,
+    id = "phenix.example",
+    remap(from = "models/sources", to = "catalog")
+)]
+struct Plugin { /* ... */ }
+```
+
+Precedence is derived Rust name, local `name`, recursive composition, then the
+longest matching root `remap`. Duplicate remap sources or destinations are
+invalid. Final path collisions are duplicate exports in the canonical component
+graph. Remapping changes only generated `/public/` exposure IDs; explicit
+`export`, runtime identity, schemas, and authority metadata are unchanged.
+
+Existing `#[phenix(export(...), public)]` and public values remain explicit
+runtime contributions. They are not recursively renamed. Do not require
+`sdk { ... }`, `bindings { ... }`, `api { ... }`, or similar parallel trees.
 
 Bindings derive from the resolved public projection.
 

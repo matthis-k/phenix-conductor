@@ -348,6 +348,49 @@ impl ResolvedHarness {
     pub(crate) fn incorporate_semantic_metadata<T: Serialize>(&mut self, metadata: &T) {
         self.generation.incorporate_semantic_metadata(metadata);
     }
+
+    /// Re-resolve a sibling harness that shares this harness's resources,
+    /// configuration, and layer policies but uses a complete desired plugin
+    /// and component set. Kernel plugin management uses this to turn a
+    /// desired plugin set into one atomic candidate generation.
+    pub(crate) fn with_plugin_set(
+        &self,
+        plugins: Vec<PluginManifest>,
+        components: Vec<ComponentManifest>,
+        authority_ceiling: &Authority,
+    ) -> Result<Self, ResolvedHarnessError> {
+        let mut plugins = plugins;
+        plugins.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut components = components;
+        components.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut kernel_config = KernelConfig::new(plugins.clone())?;
+        for (service, layers) in &self.layer_policies {
+            kernel_config = kernel_config.with_layer_policy(service.clone(), layers.clone())?;
+        }
+        let component_graph = ResolvedComponentGraph::compile(
+            plugins.clone(),
+            components.clone(),
+            authority_ceiling,
+        )?;
+        let generation = generation_identity(
+            &plugins,
+            &components,
+            &self.resources,
+            &self.configuration,
+            &self.layer_policies,
+            authority_ceiling,
+        );
+        Ok(Self {
+            generation,
+            plugins,
+            components,
+            resources: self.resources.clone(),
+            configuration: self.configuration.clone(),
+            kernel_config,
+            component_graph,
+            layer_policies: self.layer_policies.clone(),
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -560,6 +603,7 @@ mod tests {
 
     fn provider(authority: Authority) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("provider"),
             owner: plugin("provider-owner"),
             imports: Vec::new(),
@@ -575,6 +619,7 @@ mod tests {
 
     fn consumer(authority: Authority) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("consumer"),
             owner: plugin("consumer-owner"),
             imports: vec![ComponentImport {
@@ -872,6 +917,7 @@ mod tests {
         let baseline = ResolvedHarness::resolve(
             [owner("consumer-owner", Authority::default())],
             [ComponentManifest {
+                listeners: Vec::new(),
                 id: component("consumer"),
                 owner: plugin("consumer-owner"),
                 imports: Vec::new(),
@@ -887,6 +933,7 @@ mod tests {
         let changed = ResolvedHarness::resolve(
             [owner("consumer-owner", Authority::default())],
             [ComponentManifest {
+                listeners: Vec::new(),
                 id: component("consumer"),
                 owner: plugin("consumer-owner"),
                 imports: Vec::new(),
@@ -907,6 +954,7 @@ mod tests {
         let right_interface = interface("fixture.right@1");
         let components = [
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("left"),
                 owner: plugin("left-owner"),
                 imports: vec![ComponentImport {
@@ -924,6 +972,7 @@ mod tests {
                 maximum_authority: Authority::default(),
             },
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("right"),
                 owner: plugin("right-owner"),
                 imports: vec![ComponentImport {

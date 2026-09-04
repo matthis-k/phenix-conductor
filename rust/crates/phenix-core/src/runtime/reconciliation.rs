@@ -2,16 +2,16 @@ use super::*;
 use crate::ResolvedHarness;
 
 #[derive(Clone, Copy)]
-struct StopView<'a> {
-    generation: Option<&'a GraphGenerationId>,
-    graph: &'a ResolvedComponentGraph,
-    config: &'a KernelConfig,
-    states: &'a BTreeMap<PluginId, PluginState>,
-    instances: &'a BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
-    events: &'a EventBus,
-    tasks: &'a TaskRuntime,
-    persistence: &'a Mutex<Box<dyn PersistenceBackend>>,
-    provenance: &'a Mutex<Vec<ServiceInvocationProvenance>>,
+pub(super) struct StopView<'a> {
+    pub(super) generation: Option<&'a GraphGenerationId>,
+    pub(super) graph: &'a ResolvedComponentGraph,
+    pub(super) config: &'a KernelConfig,
+    pub(super) states: &'a BTreeMap<PluginId, PluginState>,
+    pub(super) instances: &'a BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
+    pub(super) events: &'a EventBus,
+    pub(super) tasks: &'a TaskRuntime,
+    pub(super) persistence: &'a Mutex<Box<dyn PersistenceBackend>>,
+    pub(super) provenance: &'a Mutex<Vec<ServiceInvocationProvenance>>,
 }
 
 impl StopView<'_> {
@@ -105,14 +105,10 @@ impl Kernel {
                     continue;
                 }
                 let manifest = &candidate_manifests[plugin];
-                let instance =
+                let instance = (|| -> Result<Option<Box<dyn PluginInstance>>, KernelError> {
                     match &manifest.execution {
-                        PluginExecution::ResourceOnly => None,
-                        PluginExecution::Embedded => {
-                            Some(self.embedded_factories.get(plugin).ok_or_else(|| {
-                                KernelError::EmbeddedFactoryMissing(plugin.clone())
-                            })?())
-                        }
+                        PluginExecution::ResourceOnly => Ok(None),
+                        PluginExecution::Embedded => self.take_embedded_instance(plugin).map(Some),
                         PluginExecution::Runtime { runtime, artifact } => {
                             let binding = candidate_config
                                 .runtime_binding(plugin)
@@ -124,7 +120,7 @@ impl Kernel {
                                 next_instances.get(&binding.provider).cloned().ok_or_else(
                                     || KernelError::PluginNotActive(binding.provider.clone()),
                                 )?;
-                            let prepared = {
+                            {
                                 let mut provider =
                                     provider.lock().expect("plugin instance mutex poisoned");
                                 let contract = provider.runtime_provider().ok_or_else(|| {
@@ -144,29 +140,31 @@ impl Kernel {
                                         runtime: runtime.clone(),
                                         message,
                                     })
-                            };
-                            match prepared {
-                                Ok(instance) => Some(instance),
-                                Err(error) => {
-                                    cleanup_staged(
-                                        &staged,
-                                        StopView {
-                                            generation: Some(candidate.generation()),
-                                            graph: candidate.component_graph(),
-                                            config: &candidate_config,
-                                            states: &next_states,
-                                            instances: &next_instances,
-                                            events: &self.events,
-                                            tasks: &self.tasks,
-                                            persistence: &self.persistence,
-                                            provenance: &self.provenance,
-                                        },
-                                    );
-                                    return Err(error);
-                                }
+                                    .map(Some)
                             }
                         }
-                    };
+                    }
+                })();
+                let instance = match instance {
+                    Ok(instance) => instance,
+                    Err(error) => {
+                        cleanup_staged(
+                            &staged,
+                            StopView {
+                                generation: Some(candidate.generation()),
+                                graph: candidate.component_graph(),
+                                config: &candidate_config,
+                                states: &next_states,
+                                instances: &next_instances,
+                                events: &self.events,
+                                tasks: &self.tasks,
+                                persistence: &self.persistence,
+                                provenance: &self.provenance,
+                            },
+                        );
+                        return Err(error);
+                    }
+                };
                 if let Some(mut instance) = instance {
                     let host = PluginHost {
                         graph_generation: Some(candidate.generation()),
@@ -211,6 +209,32 @@ impl Kernel {
             }
         }
 
+        let subscriptions = match stage_listener_subscriptions(
+            candidate.component_graph(),
+            candidate.generation(),
+            &candidate_config,
+            &next_instances,
+        ) {
+            Ok(subscriptions) => subscriptions,
+            Err(error) => {
+                cleanup_staged(
+                    &staged,
+                    StopView {
+                        generation: Some(candidate.generation()),
+                        graph: candidate.component_graph(),
+                        config: &candidate_config,
+                        states: &next_states,
+                        instances: &next_instances,
+                        events: &self.events,
+                        tasks: &self.tasks,
+                        persistence: &self.persistence,
+                        provenance: &self.provenance,
+                    },
+                );
+                return Err(error);
+            }
+        };
+
         let retired: Vec<_> = old_manifests
             .iter()
             .filter(|(plugin, old_manifest)| {
@@ -229,6 +253,7 @@ impl Kernel {
         let old_config = self.config.clone();
         let old_states = self.states.clone();
         let old_instances = self.instances.clone();
+        self.events.replace_subscriptions(subscriptions)?;
         self.config = candidate_config;
         self.states = next_states;
         self.instances = next_instances;
@@ -291,7 +316,7 @@ fn runtime_restart_closure(
     }
 }
 
-fn cleanup_staged(staged: &[PluginId], view: StopView<'_>) {
+pub(super) fn cleanup_staged(staged: &[PluginId], view: StopView<'_>) {
     for plugin in staged.iter().rev() {
         if let Some(instance) = view.instances.get(plugin) {
             view.stop(plugin, instance);
@@ -348,7 +373,7 @@ mod tests {
                     runtime: runtime.clone(),
                     artifact: PluginArtifact {
                         locator: "fixture.plugin".into(),
-                        revision: revision.into(),
+                        revision: crate::ArtifactRevision::from_content(revision.as_bytes()),
                         configuration: BTreeMap::new(),
                     },
                 },

@@ -124,7 +124,7 @@ fn runtime_provider_manifest(runtime: RuntimeId) -> PluginManifest {
             runtime,
             artifact: PluginArtifact {
                 locator: "fixture.echo".into(),
-                revision: "sha256:echo-v1".into(),
+                revision: crate::ArtifactRevision::from_content(b"echo-v1"),
                 configuration: BTreeMap::new(),
             },
         },
@@ -138,6 +138,7 @@ fn runtime_provider_manifest(runtime: RuntimeId) -> PluginManifest {
 fn components() -> [ComponentManifest; 2] {
     [
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("fixture.consumer"),
             owner: plugin("fixture.consumer"),
             imports: vec![ComponentImport {
@@ -150,6 +151,7 @@ fn components() -> [ComponentManifest; 2] {
             maximum_authority: Authority::default(),
         },
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("fixture.provider"),
             owner: plugin("fixture.provider"),
             imports: Vec::new(),

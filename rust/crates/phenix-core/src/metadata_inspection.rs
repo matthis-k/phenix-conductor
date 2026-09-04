@@ -211,6 +211,7 @@ mod tests {
         };
         let component_metadata = ComponentRuntimeMetadata {
             manifest: ComponentManifest {
+                listeners: Vec::new(),
                 id: component.clone(),
                 owner: plugin.clone(),
                 imports: Vec::new(),

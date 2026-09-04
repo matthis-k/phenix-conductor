@@ -104,7 +104,7 @@ The application-integration terminology is enforced at package boundaries:
 - adapters may be runtime plugins because they implement an external protocol on the Phenix side;
 - client SDKs, bindings, and transports are passive libraries;
 - transport choice cannot create a parallel runtime package category;
-- the prerelease `phenixClients` compatibility category is removed when its remaining consumers move to the canonical application/client-SDK model.
+- the removed prerelease `phenixClients` compatibility category must not be reintroduced.
 
 The terminal CLI identity follows `application-cli.md`.
 

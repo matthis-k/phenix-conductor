@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub use phenix_adapter_acp::{adapter_acp_factory, adapter_acp_manifest, ACP_ADAPTER_PLUGIN};
 pub use phenix_core::{ContextResourceId, ContextRevisionId, SessionId};
 pub use phenix_plugin_api::{
     sdk_component_id, sdk_component_manifest, sdk_config_service, sdk_contribution, sdk_factory,

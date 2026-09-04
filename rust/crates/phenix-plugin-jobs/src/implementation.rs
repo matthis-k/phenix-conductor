@@ -1,52 +1,61 @@
 use phenix_core::{
-    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
-    ServiceId, TransactionOp,
+    Authority, CapabilityId, PluginInstance, PluginManifest, ResourceNamespace, ServiceId,
+    TransactionOp,
 };
 use phenix_sdk::{
-    JobCommand, JobInterface, JobResponse, RuntimeResourceKind, RuntimeResourceRecord,
-    RuntimeResourceState, JOB_SERVICE,
+    JobCommand, JobResponse, RuntimeResourceKind, RuntimeResourceRecord, RuntimeResourceState,
+    StaticPluginDefinition, JOB_SERVICE,
 };
 use std::collections::BTreeSet;
 
-const JOB_PLUGIN: &str = "phenix.jobs";
 const JOB_NAMESPACE: &str = "phenix.jobs.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
 const PERSISTENCE_WRITE: &str = "kernel.persistence.write";
 const INDEX_KEY: &str = "index/resources";
 
-type JobContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
+type JobContext<'host, 'runtime> = phenix_sdk::PluginContext<'host, 'runtime, ()>;
 
-fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> JobContext<'host, 'runtime> {
-    PluginContext::new(host, (), (), ())
+struct JobStore;
+
+#[phenix_sdk::resource(schema = 1)]
+impl JobStore {}
+
+#[phenix_sdk::component]
+struct Api;
+
+#[phenix_sdk::component]
+impl Api {
+    #[phenix(export("phenix.jobs@1"), terminal, priority = 100)]
+    fn handle(
+        &mut self,
+        context: &phenix_sdk::PluginContext<'_, '_, ()>,
+        command: JobCommand,
+    ) -> Result<JobResponse, String> {
+        handle(context, command)
+    }
+}
+
+#[phenix_sdk::plugin(id = "phenix.jobs", authority = persistence_authority())]
+pub struct Plugin {
+    #[phenix(component, id = "phenix.jobs")]
+    api: Api,
+
+    #[phenix(resource, id = "phenix.jobs.state")]
+    _state: phenix_sdk::Durable<JobStore>,
 }
 
 #[must_use]
 pub fn job_manifest() -> PluginManifest {
-    PluginManifest {
-        id: PluginId::parse(JOB_PLUGIN).expect("static plugin id is valid"),
-        version: 1,
-        execution: PluginExecution::Embedded,
-        dependencies: Vec::new(),
-        services: vec![ServiceContribution {
-            role: phenix_core::ServiceRole::Terminal,
-            service: job_service(),
-            priority: 100,
-            required_authority: Authority::default(),
-        }],
-        resource_namespaces: vec![job_namespace()],
-        maximum_authority: Authority::new([
-            capability(PERSISTENCE_SCHEMA),
-            capability(PERSISTENCE_READ),
-            capability(PERSISTENCE_WRITE),
-        ]),
-    }
+    Plugin::manifest()
 }
 
 #[must_use]
 pub fn job_factory() -> Box<dyn PluginInstance> {
-    Box::new(JobPlugin)
+    phenix_sdk::StaticPluginComponentDispatch::into_plugin_instance(Plugin {
+        api: Api,
+        _state: phenix_sdk::Durable::new(),
+    })
 }
 
 #[must_use]
@@ -58,40 +67,16 @@ fn job_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(JOB_NAMESPACE).expect("static namespace is valid")
 }
 
-fn capability(value: &str) -> CapabilityId {
-    CapabilityId::parse(value).expect("static capability is valid")
+fn persistence_authority() -> Authority {
+    Authority::new([
+        capability(PERSISTENCE_SCHEMA),
+        capability(PERSISTENCE_READ),
+        capability(PERSISTENCE_WRITE),
+    ])
 }
 
-struct JobPlugin;
-
-impl PluginInstance for JobPlugin {
-    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        context(host)
-            .kernel
-            .register_durable_schema(&DurableSchema::new(job_namespace(), 1))
-            .map_err(|error| error.to_string())
-    }
-
-    fn invoke(
-        &mut self,
-        service: &ServiceId,
-        input: &[u8],
-        host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        if service != &job_service() {
-            return Err(format!("unsupported job service: {service}"));
-        }
-        let context = context(host);
-        let command = context
-            .kernel
-            .decode_projected::<JobCommand>(&JobInterface::interface_id(), input)
-            .map_err(|error| error.to_string())?;
-        let response = handle(&context, command)?;
-        context
-            .kernel
-            .encode_value(&response)
-            .map_err(|error| error.to_string())
-    }
+fn capability(value: &str) -> CapabilityId {
+    CapabilityId::parse(value).expect("static capability is valid")
 }
 
 fn handle(context: &JobContext<'_, '_>, command: JobCommand) -> Result<JobResponse, String> {

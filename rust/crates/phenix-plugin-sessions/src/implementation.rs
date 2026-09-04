@@ -60,6 +60,7 @@ pub fn session_manifest() -> PluginManifest {
 #[must_use]
 pub fn session_component_manifest() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse(SESSION_COMPONENT).expect("static component id is valid"),
         owner: PluginId::parse(SESSION_PLUGIN).expect("static plugin id is valid"),
         imports: Vec::new(),

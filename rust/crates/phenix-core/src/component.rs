@@ -1,7 +1,10 @@
 use crate::{
-    Authority, ComponentExport, ComponentId, ComponentManifest, InterfaceCompatibility,
+    Authority, ComponentExport, ComponentId, ComponentListener, ComponentManifest, EventBus,
+    EventEnvelope, EventError, EventHandler, EventSubscription, InterfaceCompatibility,
     InterfaceId, InterfaceSchemaMismatch, PluginExecution, PluginId, PluginManifest,
+    SubscriptionSpec,
 };
+use std::sync::Arc;
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
@@ -45,6 +48,7 @@ pub enum ComponentGraphError {
     RequiredImportCycle {
         path: Vec<ComponentId>,
     },
+    ListenerTopology(EventError),
     UnknownComponent(ComponentId),
 }
 
@@ -108,6 +112,7 @@ impl Display for ComponentGraphError {
                     .join(" -> ");
                 write!(f, "required component import cycle: {rendered}")
             }
+            Self::ListenerTopology(error) => write!(f, "invalid listener topology: {error}"),
             Self::UnknownComponent(component) => write!(f, "unknown component: {component}"),
         }
     }
@@ -168,14 +173,40 @@ pub struct ResolvedComponent {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedListener {
+    pub component: ComponentId,
+    pub owning_plugin: PluginId,
+    pub declaration: ComponentListener,
+    pub maximum_authority: Authority,
+}
+
+impl ResolvedListener {
+    pub fn subscription_spec(&self, kernel_policy_revision: u64) -> SubscriptionSpec {
+        SubscriptionSpec {
+            id: self.declaration.id.clone(),
+            owner: self.owning_plugin.clone(),
+            event_type: self.declaration.event.clone(),
+            event_version: self.declaration.event_version,
+            dependencies: self.declaration.dependencies.clone(),
+            failure_policy: self.declaration.failure_policy,
+            required_authority: self.declaration.required_authority.clone(),
+            maximum_authority: self.maximum_authority.clone(),
+            kernel_policy_revision,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedComponentGraph {
     components: BTreeMap<ComponentId, ResolvedComponent>,
+    listeners: Vec<ResolvedListener>,
 }
 
 impl ResolvedComponentGraph {
     pub fn empty() -> Self {
         Self {
             components: BTreeMap::new(),
+            listeners: Vec::new(),
         }
     }
 
@@ -233,6 +264,7 @@ impl ResolvedComponentGraph {
         }
 
         let mut resolved = BTreeMap::new();
+        let mut listeners = Vec::new();
         for manifest in components.values() {
             let owner = &plugins[&manifest.owner];
             let component_authority = harness_authority
@@ -303,15 +335,31 @@ impl ResolvedComponentGraph {
                     owning_plugin: manifest.owner.clone(),
                     execution: owner.execution.clone(),
                     imports,
-                    maximum_authority: component_authority,
+                    maximum_authority: component_authority.clone(),
                 },
             );
+            listeners.extend(manifest.listeners.iter().cloned().map(|declaration| {
+                ResolvedListener {
+                    component: manifest.id.clone(),
+                    owning_plugin: manifest.owner.clone(),
+                    declaration,
+                    maximum_authority: component_authority.clone(),
+                }
+            }));
         }
 
         validate_required_import_dag(&resolved)?;
+        let noop: Arc<dyn EventHandler> =
+            Arc::new(|_: &EventEnvelope, _: &Authority| -> Result<(), String> { Ok(()) });
+        EventBus::validate_subscriptions(listeners.iter().map(|listener| EventSubscription {
+            spec: listener.subscription_spec(0),
+            handler: Arc::clone(&noop),
+        }))
+        .map_err(ComponentGraphError::ListenerTopology)?;
 
         Ok(Self {
             components: resolved,
+            listeners,
         })
     }
 
@@ -321,6 +369,10 @@ impl ResolvedComponentGraph {
 
     pub fn component(&self, component: &ComponentId) -> Option<&ResolvedComponent> {
         self.components.get(component)
+    }
+
+    pub fn listeners(&self) -> impl Iterator<Item = &ResolvedListener> {
+        self.listeners.iter()
     }
 
     pub fn import_handle(
@@ -443,6 +495,7 @@ mod tests {
 
     fn exporter(id: &str, priority: i32, authority: Authority) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component(id),
             owner: plugin(&format!("plugin-{id}")),
             imports: Vec::new(),
@@ -458,6 +511,7 @@ mod tests {
 
     fn importer(required: bool, authority: Authority) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("consumer"),
             owner: plugin("plugin-consumer"),
             imports: vec![ComponentImport {
@@ -668,6 +722,7 @@ mod tests {
         let interface_a = interface("phenix.a@1");
         let interface_b = interface("phenix.b@1");
         let component_a = ComponentManifest {
+            listeners: Vec::new(),
             id: component("component-a"),
             owner: plugin("plugin-a"),
             imports: vec![ComponentImport {
@@ -685,6 +740,7 @@ mod tests {
             maximum_authority: authority.clone(),
         };
         let component_b = ComponentManifest {
+            listeners: Vec::new(),
             id: component("component-b"),
             owner: plugin("plugin-b"),
             imports: vec![ComponentImport {
@@ -731,6 +787,7 @@ mod tests {
     #[test]
     fn component_owner_is_a_real_plugin_trust_boundary() {
         let component = ComponentManifest {
+            listeners: Vec::new(),
             id: component("orphan"),
             owner: plugin("missing-plugin"),
             imports: Vec::new(),
@@ -780,6 +837,7 @@ mod interface_schema_binding_tests {
 
     fn consumer(schema: InterfaceSchema) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("consumer").unwrap(),
             owner: PluginId::parse("consumer-owner").unwrap(),
             imports: vec![crate::ComponentImport {
@@ -795,6 +853,7 @@ mod interface_schema_binding_tests {
 
     fn provider(id: &str, priority: i32, schema: InterfaceSchema) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse(id).unwrap(),
             owner: PluginId::parse(format!("{id}-owner")).unwrap(),
             imports: Vec::new(),

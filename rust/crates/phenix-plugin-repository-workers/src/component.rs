@@ -32,6 +32,7 @@ pub fn repository_worker_component_id() -> ComponentId {
 #[must_use]
 pub fn repository_worker_component_manifest() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: repository_worker_component_id(),
         owner: PluginId::parse(REPOSITORY_WORKER_PLUGIN)
             .expect("static repository worker plugin id is valid"),
@@ -63,6 +64,7 @@ mod tests {
             maximum_authority: Authority::default(),
         };
         let consumer = ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("fixture.repository-worker-consumer").unwrap(),
             owner: consumer_plugin.id.clone(),
             imports: vec![ComponentImport {

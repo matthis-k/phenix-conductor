@@ -15,9 +15,15 @@ impl EventContext {
     #[doc(hidden)]
     #[must_use]
     pub fn from_host(host: &PluginHost<'_>) -> Self {
+        Self::from_event(host.authority(), host.graph_generation())
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn from_event(authority: &Authority, graph_generation: Option<&GraphGenerationId>) -> Self {
         Self {
-            authority: host.authority().clone(),
-            graph_generation: host.graph_generation().cloned(),
+            authority: authority.clone(),
+            graph_generation: graph_generation.cloned(),
         }
     }
 

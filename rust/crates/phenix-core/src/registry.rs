@@ -1,6 +1,6 @@
 use crate::{
-    Authority, ComponentGraphError, PluginExecution, PluginId, PluginManifest, ResourceNamespace,
-    RuntimeId, ServiceId, ServiceRole,
+    ArtifactRevision, Authority, ComponentGraphError, ComponentId, EventError, PluginExecution,
+    PluginId, PluginManifest, ResourceNamespace, RuntimeId, ServiceId, ServiceRole,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -18,7 +18,7 @@ pub struct RuntimeBinding {
     pub guest: PluginId,
     pub runtime: RuntimeId,
     pub provider: PluginId,
-    pub artifact_revision: String,
+    pub artifact_revision: ArtifactRevision,
 }
 
 #[must_use]
@@ -111,6 +111,14 @@ pub enum KernelError {
         plugin: PluginId,
         message: String,
     },
+    ListenerBinding {
+        plugin: PluginId,
+        component: ComponentId,
+        method: String,
+        message: String,
+    },
+    EventTopology(EventError),
+    ResolvedGenerationMissing,
     PluginStop {
         plugin: PluginId,
         message: String,
@@ -228,6 +236,19 @@ impl Display for KernelError {
             Self::PluginStart { plugin, message } => {
                 write!(f, "plugin {plugin} failed to start: {message}")
             }
+            Self::ListenerBinding {
+                plugin,
+                component,
+                method,
+                message,
+            } => write!(
+                f,
+                "plugin {plugin} failed to bind listener {component}/{method}: {message}"
+            ),
+            Self::EventTopology(error) => write!(f, "event topology activation failed: {error}"),
+            Self::ResolvedGenerationMissing => {
+                f.write_str("listener topology requires an active resolved generation")
+            }
             Self::PluginStop { plugin, message } => {
                 write!(f, "plugin {plugin} failed to stop: {message}")
             }
@@ -248,6 +269,12 @@ impl Error for KernelError {}
 impl From<ComponentGraphError> for KernelError {
     fn from(error: ComponentGraphError) -> Self {
         Self::ComponentGraph(error)
+    }
+}
+
+impl From<EventError> for KernelError {
+    fn from(error: EventError) -> Self {
+        Self::EventTopology(error)
     }
 }
 

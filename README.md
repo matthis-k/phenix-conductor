@@ -1,6 +1,6 @@
 # Phenix AI
 
-This repository owns the generic Phenix runtime, conductor, shared application contracts, independently packaged first-party plugins, protocol adapters, and the supported Harness product.
+This repository owns the generic Phenix runtime, conductor, internal client wire, independently packaged first-party plugins and protocol adapters, and the supported Harness product.
 
 The Neovim frontend lives in `matthis-k/phenix-nvim`. This repository owns server-side behavior and frontend-neutral contracts.
 
@@ -29,32 +29,34 @@ frontends / protocol adapters
 
 `phenix-conductor` owns the generic server process and client transport. It hosts only configured plugins. A zero-plugin conductor has no first-party fallback behavior.
 
-First-party `phenix-plugin-*` crates own Phenix agent-domain services through the same core contracts available to alternate providers. A thin `phenix-plugin-catalog` collects embedded factories but owns no durable state or product policy.
+First-party `phenix-plugin-*` and `phenix-adapter-*` crates own independently selectable runtime behavior through the same core contracts available to alternate providers. A thin `phenix-plugin-catalog` collects embedded factories but owns no durable state or product policy.
 
 `phenix-harness` owns the supported product assembly. It selects plugins, grants authority, chooses persistence, loads product configuration and skills, and exposes the wrapped `phenix` product.
 
-`phenix-client` owns the internal conductor wire. `phenix-adapter-acp` exposes ACP through the ordinary runtime-plugin path without owning application semantics.
+`phenix-client` owns the internal conductor client/server wire; it is not a public Client SDK. `phenix-adapter-acp` is the transport-independent ACP runtime plugin. Its package and runtime identity exist, while standard ACP dispatch remains unimplemented.
 
 ### Rust boundaries
 
 | Crate or package | Responsibility |
 | --- | --- |
 | `phenix-core` | Generic plugin host, trust boundaries, persistence enforcement, events, tasks |
-| `phenix-client` | Internal conductor wire contract |
+| `phenix-client` | Internal conductor client/server wire |
 | `phenix-conductor` | Generic configured server and transport |
 | `phenix-plugin-*` | Independently owned first-party services |
+| `phenix-adapter-acp` | Stateless ACP adapter runtime plugin |
 | `phenix-plugin-catalog` | Thin embedded-factory catalog |
 | `phenix-harness` | Supported conductor + selected-plugin product assembly |
-| `phenix-adapter-acp` | ACP protocol adapter runtime plugin |
 | `phenix-backend-*` | Provider/backend adapters |
 
 ## Product composition
 
 The normal `phenix` package is the supported Harness composition. It is built through the same public package interfaces available to users.
 
-Nix exposes independently packaged first-party plugins and protocol adapters through `phenixPlugins.<system>.*`. `wrappers.phenix.wrap` and `lib.mkPhenix` assemble a conductor with an explicit plugin selection. Omitting a plugin removes its service unless another selected provider supplies the same contract.
+Nix exposes independently packaged first-party runtime plugins, including adapters, through `phenixPlugins.<system>.*`. `wrappers.phenix.wrap` and `lib.mkPhenix` assemble a conductor with an explicit plugin selection. Omitting a plugin removes its service unless another selected provider supplies the same contract.
 
-The resolved component graph is the canonical runtime composition for component imports. A `ComponentExport` identifies the executable endpoint. It does not need a duplicate terminal `ServiceContribution`. Plugin service contributions remain available for ordinary service dispatch and explicit interposition layers. Embedded and external hosts execute the same graph-selected component identity. Development reconciliation replaces kernel configuration, component graph, resources, and generation as one resolved runtime topology.
+The resolved component graph is the canonical runtime composition for component imports and event listeners. A `ComponentExport` identifies the executable endpoint. It does not need a duplicate terminal `ServiceContribution`. Plugin service contributions remain available for ordinary service dispatch and explicit interposition layers. Embedded and external hosts execute the same graph-selected component identity. Development reconciliation replaces kernel configuration, component graph, listener bindings, resources, and generation as one resolved runtime topology.
+
+`GraphReconciler::manage` is the sole desired-state plugin load, build, replace, unload, and reconcile path. Runtime load requests carry either a concrete content-addressed artifact or a typed build plan; trusted host policy supplies management authorization, CAS access, and an isolated build executor out of band. Core computes canonical `sha256:<64 lowercase hex>` artifact revisions from exact build output before runtime resolution, and only concrete artifacts can enter a resolved graph or `KernelConfig`.
 
 Plugin-owned durable state is canonical. Core enforces namespace ownership, migrations, transactions, and authority without interpreting first-party domain rows. Process-local handles, connections, caches, and provider generations are disposable and must not become durable identity.
 
@@ -82,7 +84,7 @@ The flake exposes:
 
 ## Protocol and provider boundaries
 
-Frontends and protocol adapters reach configured conductor services through application contracts; the `phenix-client` envelope remains an internal conductor wire. They do not own durable application state.
+The conductor wire remains internal. Protocol adapters translate external protocols to configured runtime services without owning durable application state.
 
 Backend adapters translate execution requests into provider protocols. Provider conversation state is disposable. Durable Phenix state stays with the owning plugins.
 

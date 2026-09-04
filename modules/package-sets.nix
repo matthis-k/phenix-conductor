@@ -154,9 +154,12 @@ let
       }
     ) systems
   );
+
 in
 {
-  flake.phenixPlugins = pluginSets;
+  flake = {
+    phenixPlugins = pluginSets;
+  };
 
   perSystem =
     { pkgs, system, ... }:

@@ -43,6 +43,7 @@ fn package() -> PluginPackageMetadata {
 fn component_metadata() -> ComponentRuntimeMetadata {
     ComponentRuntimeMetadata {
         manifest: ComponentManifest {
+            listeners: Vec::new(),
             id: component(),
             owner: plugin(),
             imports: Vec::new(),

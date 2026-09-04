@@ -69,7 +69,7 @@ targets=(
   rust/crates/phenix-sdk/src
 )
 
-for crate in rust/crates/phenix-plugin-*; do
+for crate in rust/crates/phenix-{adapter,plugin}-*; do
   [[ -d "$crate/src" ]] || continue
   targets+=("$crate/src")
 done
@@ -94,7 +94,7 @@ if git grep -n -E "$json_field_pattern" -- "${json_targets[@]}"; then
   exit 1
 fi
 
-for crate in rust/crates/phenix-plugin-*; do
+for crate in rust/crates/phenix-{adapter,plugin}-*; do
   [[ -d "$crate/src" ]] || continue
   [[ "$crate" == "rust/crates/phenix-plugin-debug" ]] && continue
   if git grep -n -E "$raw_invoke_pattern" -- "$crate/src"; then
@@ -103,7 +103,7 @@ for crate in rust/crates/phenix-plugin-*; do
   fi
 done
 
-for crate in rust/crates/phenix-plugin-*; do
+for crate in rust/crates/phenix-{adapter,plugin}-*; do
   [[ -d "$crate/src" ]] || continue
   if git grep -n -E "$legacy_plugin_authoring_pattern" -- "$crate/src"; then
     printf '%s\n' "first-party runtime plugins must use the canonical attribute authoring API" >&2

@@ -17,6 +17,7 @@ pub fn frontend_component_id() -> ComponentId {
 pub fn frontend_component_manifest(maximum_authority: Authority) -> ComponentManifest {
     let authority = frontend_manifest(maximum_authority).maximum_authority;
     ComponentManifest {
+        listeners: Vec::new(),
         id: frontend_component_id(),
         owner: PluginId::parse(FRONTEND_PLUGIN).expect("static frontend plugin id is valid"),
         imports: vec![ComponentImport {

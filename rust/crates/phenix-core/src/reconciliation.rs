@@ -540,6 +540,7 @@ mod tests {
 
     fn provider(id: &str, owner: &str, priority: i32) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component(id),
             owner: plugin(owner),
             imports: Vec::new(),
@@ -555,6 +556,7 @@ mod tests {
 
     fn consumer() -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("consumer"),
             owner: plugin("consumer-owner"),
             imports: vec![ComponentImport {
@@ -570,6 +572,7 @@ mod tests {
 
     fn optional_component() -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("optional"),
             owner: plugin("optional-owner"),
             imports: Vec::new(),

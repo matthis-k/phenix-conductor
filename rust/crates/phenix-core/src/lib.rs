@@ -5,6 +5,7 @@
 
 mod activation;
 mod agent;
+mod artifact;
 mod authority;
 mod component;
 mod composition_metadata;
@@ -18,12 +19,15 @@ mod frontend_metadata;
 mod identity;
 mod inspection;
 mod live_reconciliation;
+mod management;
 mod manifest;
 mod metadata_input;
 mod metadata_inspection;
 mod metadata_reconciliation;
 mod persistence;
 mod persistence_value;
+mod plugin_build;
+mod plugin_build_execution;
 mod plugin_context;
 mod reconciliation;
 mod reconciliation_inspection;
@@ -51,11 +55,17 @@ mod metadata_semantic_identity_regression;
 #[path = "../tests/persistence_backend_conformance.rs"]
 mod persistence_backend_conformance;
 #[cfg(test)]
+mod plugin_build_loading_regression;
+#[cfg(test)]
+mod plugin_management_regression;
+#[cfg(test)]
 mod provider_rebind_generation_regression;
 #[cfg(test)]
 mod runtime_component_parity_regression;
 #[cfg(test)]
 mod runtime_provider_regression;
+#[cfg(test)]
+mod runtime_topology_generation_regression;
 #[cfg(test)]
 mod service_layer_dispatch_regression;
 #[cfg(test)]
@@ -71,10 +81,11 @@ pub use agent::{
     SkillDefinition, SkillResponse, ToolCommand, ToolDefinition, ToolResponse, CONTEXT_SERVICE,
     MODEL_INFERENCE_SERVICE, SKILL_SERVICE, TOOL_SERVICE,
 };
+pub use artifact::{ArtifactRevision, ArtifactRevisionParseError};
 pub use authority::Authority;
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
-    ResolvedImportHandle,
+    ResolvedImportHandle, ResolvedListener,
 };
 pub use composition_metadata::{
     CompatibilityMetadata, ComponentHostKind, ComponentRuntimeMetadata, ComponentStateClass,
@@ -102,11 +113,16 @@ pub use identity::{
     RoutingProfileId, RuntimeId, SdkNamespace, SdkResourceId, ServiceId, SessionId, SkillId,
     SubscriptionId,
 };
-pub use inspection::ResolvedHarnessInspection;
+pub use inspection::{ResolvedHarnessInspection, ResolvedListenerInspection};
 pub use live_reconciliation::LiveReconciliationError;
+pub use management::{
+    PluginBuildReport, PluginLoadRequest, PluginManagementContext, PluginManagementError,
+    PluginManagementPolicy, PluginManagementRequest, PluginManagementResult, PluginSetRequest,
+    PluginUnloadRequest,
+};
 pub use manifest::{
-    ComponentExport, ComponentImport, ComponentManifest, PluginArtifact, PluginExecution,
-    PluginManifest, ServiceContribution, ServiceRole,
+    ComponentExport, ComponentImport, ComponentListener, ComponentManifest, ListenerProjection,
+    PluginArtifact, PluginExecution, PluginManifest, ServiceContribution, ServiceRole,
 };
 pub use metadata_input::{CompositionMetadataInput, MetadataResolutionError};
 pub use metadata_inspection::ResolvedCompositionMetadata;
@@ -118,6 +134,15 @@ pub use metadata_reconciliation::{
 pub use persistence::{
     BackendFeature, DurableSchema, LocalPersistence, NamespaceTransaction, PersistenceBackend,
     PersistenceError, SchemaMigration, TransactionOp,
+};
+pub use plugin_build::{
+    BuildArgument, BuildArtifactOutput, BuildEnvironment, BuildEnvironmentName, BuildExecutable,
+    BuildSourceIdentity, BuildSourceRevision, BuildWorkingDirectory, PluginArtifactInput,
+    PluginBuildPlan, PluginBuildPlanError, PluginBuildSource, PluginBuildStep,
+};
+pub use plugin_build_execution::{
+    PluginArtifactStore, PluginArtifactStoreError, PluginBuildEvidence, PluginBuildExecution,
+    PluginBuildExecutor, PluginBuildFailure, PluginBuildOutput,
 };
 pub use plugin_context::{
     CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,

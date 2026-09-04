@@ -261,6 +261,10 @@ in
         inherit pkgs;
         plugins = [ self.phenixPlugins.${pkgs.system}.context ];
       };
+      adapterOnlyComposition = mkPhenix {
+        inherit pkgs;
+        plugins = [ self.phenixPlugins.${pkgs.system}.adapter-acp ];
+      };
     in
     {
       packages = {
@@ -285,7 +289,7 @@ in
             test -f "${defaultComposition}/share/phenix/skills/pstack-LICENSE"
             export PHENIX_STATE_DB="$TMPDIR/composition.sqlite"
             "${defaultComposition}/bin/phenix" --list-services > "$TMPDIR/default-services.json"
-            jq -e '(.plugins | length == 17) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
+            jq -e '(.plugins | length == 17) and (.plugins | index("phenix.adapter.acp") == null) and ([.plugins[] | select(startswith("phenix.basic-"))] | length == 0) and (.services | index("phenix.sessions@1") != null)' "$TMPDIR/default-services.json" >/dev/null
 
             assert_option() {
               local file="$1"
@@ -331,6 +335,10 @@ in
             export PHENIX_STATE_DB="$TMPDIR/context-only.sqlite"
             "${contextOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/context-only.json"
             jq -e '((.plugins | sort) == ["phenix.context", "phenix.execution"]) and (.services | index("phenix.context@1") != null) and (.services | index("phenix.sessions@1") == null)' "$TMPDIR/context-only.json" >/dev/null
+
+            export PHENIX_STATE_DB="$TMPDIR/adapter-only.sqlite"
+            "${adapterOnlyComposition}/bin/phenix" --list-services > "$TMPDIR/adapter-only.json"
+            jq -e '(.plugins == ["phenix.adapter.acp"]) and (.services == [])' "$TMPDIR/adapter-only.json" >/dev/null
 
             export PHENIX_STATE_DB="$TMPDIR/resource.sqlite"
             test -e "${resourceComposition}/share/phenix-plugin/resources/README.txt"

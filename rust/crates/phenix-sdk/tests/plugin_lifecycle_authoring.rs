@@ -30,6 +30,14 @@ fn lifecycle_impl_preserves_start_and_stop_semantics() {
 }
 
 #[test]
+fn lifecycle_impl_generates_plugin_instance_adaptation() {
+    let instance: Box<dyn phenix_sdk::__phenix_plugin::PluginInstance> =
+        Plugin.__phenix_into_plugin_instance();
+
+    drop(instance);
+}
+
+#[test]
 fn plugin_identity_remains_owned_by_the_plugin_declaration() {
     assert_eq!(Plugin::plugin_id().as_str(), "fixture.lifecycle");
 }

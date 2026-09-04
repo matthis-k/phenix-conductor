@@ -329,16 +329,18 @@ pub use api::*;
 pub use authoring::*;
 pub use contracts::*;
 pub use phenix_core::{
-    Authority, BackendFeature, Bytes, CallableRef, CapabilityId, ComponentId, Contract, ContractId,
-    ContractValue, DurableSchema, Exact, HasPhenixSchema, Key, LayerResult, ObjectRef,
-    PhenixContract, PhenixSchema, PhenixValue, PluginArtifact, PluginExecution, PluginId, Project,
-    ReferenceId, RuntimeId, Type, TypeKind, ValueError,
+    ArtifactRevision, Authority, BackendFeature, Bytes, CallableRef, CapabilityId, ComponentId,
+    Contract, ContractId, ContractValue, DurableSchema, Exact, HasPhenixSchema, Key, LayerResult,
+    ObjectRef, PhenixContract, PhenixSchema, PhenixValue, PluginArtifact, PluginExecution,
+    PluginId, Project, ReferenceId, RuntimeId, Type, TypeKind, ValueError,
 };
 pub use phenix_provider_sdk::{
     ApiTokenSource, Auth, AuthDescriptor, AuthKind, EnvironmentVariable, ProviderAuthCommand,
     ProviderAuthInterface, ProviderAuthResponse, ProviderError, RateLimits,
 };
-pub use phenix_sdk_macros::{component, interface, plugin, resource, PhenixContract, PhenixValue};
+pub use phenix_sdk_macros::{
+    component, expose, interface, plugin, resource, PhenixContract, PhenixValue,
+};
 pub use providers::{Provider, ProviderSdkError, ProviderSdkExt, Providers};
 pub use public_projection::*;
 

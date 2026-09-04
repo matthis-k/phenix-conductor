@@ -1,16 +1,14 @@
 use phenix_core::{
-    Authority, CapabilityId, ComponentInterface, DurableSchema, PluginContext, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
+    Authority, CapabilityId, PluginContext, PluginInstance, PluginManifest, ResourceNamespace,
     ServiceId, TransactionOp,
 };
 use phenix_sdk::{
     DecisionRecord, HistoryEntry, HistoryKind, ObjectiveRecord, PlanRecord, PlanStep,
-    PlanningCommand, PlanningResponse, PLANNING_SERVICE,
+    PlanningCommand, PlanningInterface, PlanningResponse, StaticPluginDefinition, PLANNING_SERVICE,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-const PLANNING_PLUGIN: &str = "phenix.planning";
 const PLANNING_NAMESPACE: &str = "phenix.planning.state";
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
@@ -21,35 +19,51 @@ const DECISION_INDEX: &str = "index/decisions";
 
 type PlanningContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
 
-fn context<'host, 'runtime>(host: &'host PluginHost<'runtime>) -> PlanningContext<'host, 'runtime> {
-    PluginContext::new(host, (), (), ())
+struct PlanningStore;
+
+#[phenix_sdk::resource(schema = 1)]
+impl PlanningStore {}
+
+#[phenix_sdk::component]
+struct Api;
+
+#[phenix_sdk::component]
+impl Api {
+    #[phenix(
+        export(PlanningInterface),
+        terminal,
+        priority = 100,
+        authority = persistence_authority()
+    )]
+    fn handle(
+        &mut self,
+        context: &phenix_sdk::PluginContext<'_, '_, ()>,
+        command: PlanningCommand,
+    ) -> Result<PlanningResponse, String> {
+        handle(context, command)
+    }
+}
+
+#[phenix_sdk::plugin(id = "phenix.planning", authority = persistence_authority())]
+pub struct Plugin {
+    #[phenix(component, id = "phenix.planning")]
+    api: Api,
+
+    #[phenix(resource, id = "phenix.planning.state")]
+    _state: phenix_sdk::Durable<PlanningStore>,
 }
 
 #[must_use]
 pub fn planning_manifest() -> PluginManifest {
-    PluginManifest {
-        id: PluginId::parse(PLANNING_PLUGIN).expect("static plugin id is valid"),
-        version: 1,
-        execution: PluginExecution::Embedded,
-        dependencies: Vec::new(),
-        services: vec![ServiceContribution {
-            role: phenix_core::ServiceRole::Terminal,
-            service: planning_service(),
-            priority: 100,
-            required_authority: Authority::default(),
-        }],
-        resource_namespaces: vec![planning_namespace()],
-        maximum_authority: Authority::new([
-            capability(PERSISTENCE_SCHEMA),
-            capability(PERSISTENCE_READ),
-            capability(PERSISTENCE_WRITE),
-        ]),
-    }
+    Plugin::manifest()
 }
 
 #[must_use]
 pub fn planning_factory() -> Box<dyn PluginInstance> {
-    Box::new(PlanningPlugin)
+    phenix_sdk::StaticPluginComponentDispatch::into_plugin_instance(Plugin {
+        api: Api,
+        _state: phenix_sdk::Durable::new(),
+    })
 }
 
 #[must_use]
@@ -61,41 +75,16 @@ fn planning_namespace() -> ResourceNamespace {
     ResourceNamespace::parse(PLANNING_NAMESPACE).expect("static namespace is valid")
 }
 
-fn capability(value: &str) -> CapabilityId {
-    CapabilityId::parse(value).expect("static capability is valid")
+fn persistence_authority() -> Authority {
+    Authority::new([
+        capability(PERSISTENCE_SCHEMA),
+        capability(PERSISTENCE_READ),
+        capability(PERSISTENCE_WRITE),
+    ])
 }
 
-struct PlanningPlugin;
-
-impl PluginInstance for PlanningPlugin {
-    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        context(host)
-            .kernel
-            .register_durable_schema(&DurableSchema::new(planning_namespace(), 1))
-            .map_err(|error| error.to_string())
-    }
-
-    fn invoke(
-        &mut self,
-        service: &ServiceId,
-        input: &[u8],
-        host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        if service != &planning_service() {
-            return Err(format!("unsupported planning service: {service}"));
-        }
-        let context = context(host);
-        let interface = crate::PlanningInterface::interface_id();
-        let command = context
-            .kernel
-            .decode_projected::<PlanningCommand>(&interface, input)
-            .map_err(|error| error.to_string())?;
-        let response = handle(&context, command)?;
-        context
-            .kernel
-            .encode_value(&response)
-            .map_err(|error| error.to_string())
-    }
+fn capability(value: &str) -> CapabilityId {
+    CapabilityId::parse(value).expect("static capability is valid")
 }
 
 fn handle(

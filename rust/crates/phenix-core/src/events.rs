@@ -1,4 +1,5 @@
 use crate::{Authority, EventTypeId, PluginId, SubscriptionId};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
@@ -26,7 +27,8 @@ pub struct EventEnvelope {
     pub payload: Vec<u8>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EventFailurePolicy {
     Ignore,
     Warn,
@@ -48,6 +50,16 @@ pub struct SubscriptionSpec {
 
 pub trait EventHandler: Send + Sync {
     fn handle(&self, event: &EventEnvelope, authority: &Authority) -> Result<(), String>;
+
+    #[doc(hidden)]
+    fn handle_with_bus(
+        &self,
+        _bus: &EventBus,
+        event: &EventEnvelope,
+        authority: &Authority,
+    ) -> Result<(), String> {
+        self.handle(event, authority)
+    }
 }
 
 impl<F> EventHandler for F
@@ -136,6 +148,13 @@ impl fmt::Debug for EventBus {
 }
 
 impl EventBus {
+    pub fn validate_subscriptions(
+        subscriptions: impl IntoIterator<Item = EventSubscription>,
+    ) -> Result<(), EventError> {
+        index_subscriptions(subscriptions)
+            .and_then(|subscriptions| validate_dependencies(&subscriptions))
+    }
+
     pub fn subscribe(&self) -> Receiver<KernelEvent> {
         let (sender, receiver) = mpsc::channel();
         self.kernel_subscribers
@@ -156,18 +175,51 @@ impl EventBus {
         &self,
         subscriptions: impl IntoIterator<Item = EventSubscription>,
     ) -> Result<(), EventError> {
-        let mut indexed = BTreeMap::new();
-        for subscription in subscriptions {
-            let id = subscription.spec.id.clone();
-            if indexed.insert(id.clone(), subscription).is_some() {
-                return Err(EventError::DuplicateSubscription(id));
-            }
-        }
+        let indexed = index_subscriptions(subscriptions)?;
         validate_dependencies(&indexed)?;
         *self
             .subscriptions
             .lock()
             .expect("event subscription lock poisoned") = indexed;
+        Ok(())
+    }
+
+    pub fn install_subscriptions(
+        &self,
+        subscriptions: impl IntoIterator<Item = EventSubscription>,
+    ) -> Result<Vec<SubscriptionId>, EventError> {
+        let mut current = self
+            .subscriptions
+            .lock()
+            .expect("event subscription lock poisoned");
+        let mut candidate = current.clone();
+        let mut installed = Vec::new();
+        for subscription in subscriptions {
+            let id = subscription.spec.id.clone();
+            if candidate.insert(id.clone(), subscription).is_some() {
+                return Err(EventError::DuplicateSubscription(id));
+            }
+            installed.push(id);
+        }
+        validate_dependencies(&candidate)?;
+        *current = candidate;
+        Ok(installed)
+    }
+
+    pub fn remove_subscriptions(
+        &self,
+        subscriptions: impl IntoIterator<Item = SubscriptionId>,
+    ) -> Result<(), EventError> {
+        let mut current = self
+            .subscriptions
+            .lock()
+            .expect("event subscription lock poisoned");
+        let mut candidate = current.clone();
+        for subscription in subscriptions {
+            candidate.remove(&subscription);
+        }
+        validate_dependencies(&candidate)?;
+        *current = candidate;
         Ok(())
     }
 
@@ -202,7 +254,9 @@ impl EventBus {
 
             let handler_authority =
                 emitter_authority.attenuate(&subscription.spec.maximum_authority);
-            let result = subscription.handler.handle(event, &handler_authority);
+            let result = subscription
+                .handler
+                .handle_with_bus(self, event, &handler_authority);
             let mut active = self
                 .active_causality
                 .lock()
@@ -234,6 +288,19 @@ impl EventBus {
 
         Ok(report)
     }
+}
+
+fn index_subscriptions(
+    subscriptions: impl IntoIterator<Item = EventSubscription>,
+) -> Result<BTreeMap<SubscriptionId, EventSubscription>, EventError> {
+    let mut indexed = BTreeMap::new();
+    for subscription in subscriptions {
+        let id = subscription.spec.id.clone();
+        if indexed.insert(id.clone(), subscription).is_some() {
+            return Err(EventError::DuplicateSubscription(id));
+        }
+    }
+    Ok(indexed)
 }
 
 fn validate_dependencies(
@@ -370,6 +437,13 @@ mod tests {
         }
     }
 
+    fn subscription_with(id: &str, dependencies: &[&str]) -> EventSubscription {
+        EventSubscription {
+            spec: spec(id, dependencies),
+            handler: Arc::new(|_: &EventEnvelope, _: &Authority| Ok(())),
+        }
+    }
+
     #[test]
     fn kernel_subscribers_receive_generic_kernel_events() {
         let bus = EventBus::default();
@@ -428,6 +502,61 @@ mod tests {
             ])
             .unwrap_err();
         assert!(matches!(error, EventError::DependencyCycle(_)));
+    }
+
+    #[test]
+    fn installing_subscriptions_preserves_existing_entries_and_is_atomic() {
+        let bus = EventBus::default();
+        bus.replace_subscriptions([subscription_with("first", &[])])
+            .unwrap();
+        let installed = bus
+            .install_subscriptions([subscription_with("second", &["first"])])
+            .unwrap();
+        assert_eq!(installed, vec![subscription("second")]);
+
+        let duplicate = bus
+            .install_subscriptions([
+                subscription_with("third", &[]),
+                subscription_with("second", &[]),
+            ])
+            .unwrap_err();
+        assert_eq!(
+            duplicate,
+            EventError::DuplicateSubscription(subscription("second"))
+        );
+
+        let report = bus.dispatch(&envelope(11), &Authority::default()).unwrap();
+        assert_eq!(
+            report.delivered,
+            vec![subscription("first"), subscription("second")]
+        );
+    }
+
+    #[test]
+    fn removing_subscriptions_is_atomic_when_dependencies_would_break() {
+        let bus = EventBus::default();
+        bus.replace_subscriptions([
+            subscription_with("first", &[]),
+            subscription_with("second", &["first"]),
+        ])
+        .unwrap();
+
+        let error = bus
+            .remove_subscriptions([subscription("first")])
+            .unwrap_err();
+        assert_eq!(
+            error,
+            EventError::UnknownDependency {
+                subscription: subscription("second"),
+                dependency: subscription("first"),
+            }
+        );
+
+        let report = bus.dispatch(&envelope(12), &Authority::default()).unwrap();
+        assert_eq!(
+            report.delivered,
+            vec![subscription("first"), subscription("second")]
+        );
     }
 
     #[test]

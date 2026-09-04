@@ -15,6 +15,7 @@ pub fn workspace_component_id() -> ComponentId {
 #[must_use]
 pub fn workspace_component_manifest() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: workspace_component_id(),
         owner: PluginId::parse(WORKSPACE_PLUGIN).expect("static workspace plugin id is valid"),
         imports: Vec::new(),
@@ -53,6 +54,7 @@ mod tests {
 
     fn consumer_component(authority: Authority) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("fixture.workspace-consumer").unwrap(),
             owner: PluginId::parse("fixture.workspace-consumer").unwrap(),
             imports: vec![ComponentImport {

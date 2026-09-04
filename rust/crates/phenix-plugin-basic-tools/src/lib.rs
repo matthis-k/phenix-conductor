@@ -1,10 +1,9 @@
 use phenix_core::{
-    tool_service, Authority, CallableId, CapabilityId, ComponentExport, ComponentId,
-    ComponentInterface, ComponentManifest, DurableSchema, InterfaceId, PluginContext,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace,
-    ServiceContribution, ServiceId, ServiceRole, ToolCommand, ToolDefinition, ToolResponse,
-    TransactionOp, TOOL_SERVICE,
+    Authority, CallableId, CapabilityId, ComponentId, ComponentInterface, ComponentManifest,
+    InterfaceId, PluginContext, PluginInstance, PluginManifest, ResourceNamespace, ToolCommand,
+    ToolDefinition, ToolResponse, TransactionOp, TOOL_SERVICE,
 };
+use phenix_sdk::{StaticPluginComponentDispatch, StaticPluginDefinition};
 
 pub const BASIC_TOOLS_PLUGIN: &str = "phenix.basic-tools";
 pub const BASIC_TOOLS_COMPONENT: &str = "phenix.basic-tools";
@@ -12,12 +11,6 @@ const BASIC_TOOLS_NAMESPACE: &str = "phenix.basic-tools.state";
 const INDEX_KEY: &str = "tools/@all";
 
 type BasicToolsContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
-
-fn context<'host, 'runtime>(
-    host: &'host PluginHost<'runtime>,
-) -> BasicToolsContext<'host, 'runtime> {
-    PluginContext::new(host, (), (), ())
-}
 
 pub struct BasicToolsInterface;
 
@@ -27,68 +20,59 @@ impl ComponentInterface for BasicToolsInterface {
     }
 }
 
+struct ToolStore;
+
+#[phenix_sdk::resource(schema = 1)]
+impl ToolStore {}
+
+#[phenix_sdk::component]
+struct Api;
+
+#[phenix_sdk::component]
+impl Api {
+    #[phenix(export("phenix.tools@1"), terminal, priority = 10)]
+    fn handle(
+        &mut self,
+        context: &phenix_sdk::PluginContext<'_, '_, ()>,
+        command: ToolCommand,
+    ) -> Result<ToolResponse, String> {
+        handle(context, command)
+    }
+}
+
+#[phenix_sdk::plugin(id = "phenix.basic-tools", authority = persistence_authority())]
+pub struct Plugin {
+    #[phenix(component, id = "phenix.basic-tools")]
+    api: Api,
+
+    #[phenix(resource, id = "phenix.basic-tools.state")]
+    _state: phenix_sdk::Durable<ToolStore>,
+}
+
 #[must_use]
 pub fn basic_tools_manifest() -> PluginManifest {
-    PluginManifest {
-        id: PluginId::parse(BASIC_TOOLS_PLUGIN).expect("static plugin id is valid"),
-        version: 1,
-        execution: PluginExecution::Embedded,
-        dependencies: Vec::new(),
-        services: vec![ServiceContribution {
-            role: ServiceRole::Terminal,
-            service: tool_service(),
-            priority: 10,
-            required_authority: Authority::default(),
-        }],
-        resource_namespaces: vec![namespace()],
-        maximum_authority: persistence_authority(),
-    }
+    Plugin::manifest()
 }
 
 #[must_use]
 pub fn basic_tools_component_manifest() -> ComponentManifest {
-    ComponentManifest {
-        id: ComponentId::parse(BASIC_TOOLS_COMPONENT).expect("static component id is valid"),
-        owner: basic_tools_manifest().id,
-        imports: Vec::new(),
-        exports: vec![ComponentExport {
-            interface: BasicToolsInterface::interface_id(),
-            schema: BasicToolsInterface::schema(),
-            priority: 10,
-            required_authority: Authority::default(),
-        }],
-        maximum_authority: persistence_authority(),
-    }
+    Plugin::component_manifests()
+        .into_iter()
+        .next()
+        .expect("basic tools plugin has one generated component")
 }
 
 #[must_use]
 pub fn basic_tools_factory() -> Box<dyn PluginInstance> {
-    Box::new(BasicTools)
+    StaticPluginComponentDispatch::into_plugin_instance(Plugin {
+        api: Api,
+        _state: phenix_sdk::Durable::new(),
+    })
 }
 
-struct BasicTools;
-
-impl PluginInstance for BasicTools {
-    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        context(host)
-            .kernel
-            .register_durable_schema(&DurableSchema::new(namespace(), 1))
-            .map_err(|error| error.to_string())
-    }
-
-    fn invoke(
-        &mut self,
-        service: &ServiceId,
-        input: &[u8],
-        host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        if service != &tool_service() {
-            return Err(format!("unsupported basic tool service: {service}"));
-        }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
-    }
+#[must_use]
+pub fn basic_tools_component_id() -> ComponentId {
+    basic_tools_component_manifest().id
 }
 
 fn handle(
@@ -181,4 +165,26 @@ fn persistence_authority() -> Authority {
 
 fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).expect("static capability is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_authoring_preserves_stable_identity() {
+        let manifest = basic_tools_manifest();
+        assert_eq!(manifest.id.as_str(), BASIC_TOOLS_PLUGIN);
+        assert_eq!(manifest.services.len(), 1);
+        assert_eq!(manifest.services[0].service, phenix_core::tool_service());
+        assert_eq!(manifest.resource_namespaces, vec![namespace()]);
+
+        let component = basic_tools_component_manifest();
+        assert_eq!(component.id.as_str(), BASIC_TOOLS_COMPONENT);
+        assert_eq!(component.exports.len(), 1);
+        assert_eq!(
+            component.exports[0].interface,
+            BasicToolsInterface::interface_id()
+        );
+    }
 }

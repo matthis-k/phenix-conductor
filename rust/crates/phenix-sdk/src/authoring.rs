@@ -144,6 +144,45 @@
 //! }
 //! ```
 //!
+//! Exposed field names are one local segment, and authority belongs to callable
+//! methods rather than recursive field mounts.
+//!
+//! ```compile_fail
+//! struct Nested;
+//!
+//! #[phenix_sdk::plugin(root, id = "phenix.invalid-exposed-name")]
+//! struct Plugin {
+//!     #[phenix(expose(name = "nested/path"))]
+//!     nested: Nested,
+//! }
+//! ```
+//!
+//! ```compile_fail
+//! struct Nested;
+//!
+//! #[phenix_sdk::plugin(root, id = "phenix.invalid-exposed-authority")]
+//! struct Plugin {
+//!     #[phenix(expose(authority = phenix_sdk::Authority::default()))]
+//!     nested: Nested,
+//! }
+//! ```
+//!
+//! A selected field must provide a relative static exposure projection.
+//!
+//! ```compile_fail
+//! #[phenix_sdk::plugin(root, id = "phenix.invalid-exposed-type")]
+//! struct Plugin {
+//!     #[phenix(expose)]
+//!     value: u64,
+//! }
+//!
+//! #[phenix_sdk::plugin]
+//! impl Plugin {
+//!     #[phenix(expose)]
+//!     fn run(&mut self) {}
+//! }
+//! ```
+//!
 //! A plugin also has one configuration owner. Two configuration fields are a
 //! statically invalid declaration rather than a runtime merge problem.
 //!
@@ -372,7 +411,7 @@
 //!         runtime: phenix_sdk::RuntimeId::parse("fixture.runtime").unwrap(),
 //!         artifact: phenix_sdk::PluginArtifact {
 //!             locator: "fixture.wasm".into(),
-//!             revision: "sha256:fixture".into(),
+//!             revision: phenix_sdk::ArtifactRevision::from_content(b"fixture"),
 //!             configuration: std::collections::BTreeMap::new(),
 //!         },
 //!     }
@@ -393,7 +432,7 @@
 //!         runtime: phenix_sdk::RuntimeId::parse("fixture.runtime").unwrap(),
 //!         artifact: phenix_sdk::PluginArtifact {
 //!             locator: "fixture.wasm".into(),
-//!             revision: "sha256:fixture".into(),
+//!             revision: phenix_sdk::ArtifactRevision::from_content(b"fixture"),
 //!             configuration: std::collections::BTreeMap::new(),
 //!         },
 //!     }
@@ -429,8 +468,9 @@ pub use static_component::{
 };
 pub use static_config::{StaticPluginConfigDescriptor, StaticPluginConfiguration};
 pub use static_dispatch::{
-    StaticComponentDispatch, StaticPluginComponentDispatch, StaticPluginInstance,
-    StaticPluginInvoke, StaticPluginStart, StaticPluginStop,
+    block_on_static, decode_exact_runtime, decode_projected_runtime, encode_runtime, LayerContext,
+    StaticComponentDispatch, StaticComponentRuntimeDispatch, StaticPluginComponentDispatch,
+    StaticPluginInstance, StaticPluginInvoke, StaticPluginStart, StaticPluginStop,
 };
 pub use static_import::{
     Call, Emit, Host, Optional, Required, StaticComponentEvent, StaticComponentHost,

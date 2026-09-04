@@ -1,32 +1,31 @@
 #![forbid(unsafe_code)]
 
-//! ACP interoperability boundary.
+//! Transport-independent ACP adapter boundary.
 //!
-//! This crate owns ACP wire translation only. `phenix-client` is an internal
-//! conductor wire, `phenix-conductor` owns the generic server, and first-party
-//! plugins own agent-domain semantics. ACP must not own session, execution,
-//! routing, tool, or durable state.
+//! Standard ACP dispatch is not implemented yet. This crate currently owns the
+//! ACP wire dependency and a stateless runtime plugin identity only.
+
+use phenix_core::{PluginInstance, PluginManifest};
+use phenix_sdk::StaticPluginDefinition;
 
 pub use agent_client_protocol as wire;
 
-/// Independently activatable ACP protocol adapter.
+pub const ACP_ADAPTER_PLUGIN: &str = "phenix.adapter.acp";
+
 #[phenix_sdk::plugin("phenix.adapter.acp")]
-pub struct Plugin;
+mod plugin {}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use plugin::Plugin;
 
-    #[test]
-    fn adapter_is_authored_as_the_canonical_runtime_plugin() {
-        let manifest = <Plugin as phenix_sdk::StaticPluginDefinition>::manifest();
+#[must_use]
+pub fn adapter_acp_manifest() -> PluginManifest {
+    Plugin::manifest()
+}
 
-        assert_eq!(manifest.id.as_str(), "phenix.adapter.acp");
-        assert!(matches!(
-            manifest.execution,
-            phenix_sdk::PluginExecution::Embedded
-        ));
-        assert!(manifest.dependencies.is_empty());
-        assert!(manifest.resource_namespaces.is_empty());
-    }
+#[must_use]
+pub fn adapter_acp_factory() -> Box<dyn PluginInstance> {
+    let factory = Plugin::descriptor()
+        .embedded_factory
+        .expect("stateless ACP adapter has a generated embedded factory");
+    factory()
 }

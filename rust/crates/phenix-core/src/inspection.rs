@@ -2,7 +2,8 @@ use crate::{
     Authority, ComponentGraphError, ComponentId, ComponentManifest, ComponentRuntimeMetadata,
     ConfigurationFrontendMetadata, GraphGenerationId, InterfaceId, LayerPolicy, PluginExecution,
     PluginManifest, PluginPackageMetadata, ResolvedComponentGraph, ResolvedCompositionMetadata,
-    ResolvedConfigContributions, ResolvedHarness, ServiceId, SkillResourceMetadata,
+    ResolvedConfigContributions, ResolvedHarness, ResolvedListener, ServiceId,
+    SkillResourceMetadata,
 };
 use std::collections::BTreeMap;
 
@@ -18,6 +19,12 @@ pub struct ResolvedHarnessInspection {
     package_metadata: Vec<PluginPackageMetadata>,
     component_metadata: Vec<ComponentRuntimeMetadata>,
     frontend_metadata: Vec<ConfigurationFrontendMetadata>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ResolvedListenerInspection<'a> {
+    pub generation: &'a GraphGenerationId,
+    pub listener: &'a ResolvedListener,
 }
 
 impl ResolvedHarnessInspection {
@@ -80,6 +87,15 @@ impl ResolvedHarnessInspection {
 
     pub fn component_graph(&self) -> &ResolvedComponentGraph {
         &self.component_graph
+    }
+
+    pub fn listeners(&self) -> impl Iterator<Item = ResolvedListenerInspection<'_>> {
+        self.component_graph
+            .listeners()
+            .map(|listener| ResolvedListenerInspection {
+                generation: &self.generation,
+                listener,
+            })
     }
 
     pub fn configuration(&self) -> &ResolvedConfigContributions {
@@ -245,6 +261,7 @@ mod tests {
         };
         let component_metadata = ComponentRuntimeMetadata {
             manifest: ComponentManifest {
+                listeners: Vec::new(),
                 id: component_id.clone(),
                 owner: plugin_id,
                 imports: Vec::new(),
@@ -309,6 +326,7 @@ mod tests {
         let interface = interface("fixture.inspect@1");
         let components = [
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("provider"),
                 owner: provider.id.clone(),
                 imports: Vec::new(),
@@ -321,6 +339,7 @@ mod tests {
                 maximum_authority: Authority::new([read.clone()]),
             },
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("consumer"),
                 owner: consumer.id.clone(),
                 imports: vec![ComponentImport {
@@ -450,7 +469,7 @@ mod tests {
                 runtime: runtime.clone(),
                 artifact: crate::PluginArtifact {
                     locator: "plugin.wasm".into(),
-                    revision: "sha256:fixture".into(),
+                    revision: crate::ArtifactRevision::from_content(b"fixture"),
                     configuration: BTreeMap::new(),
                 },
             },
@@ -463,6 +482,7 @@ mod tests {
         let resolved = ResolvedHarness::resolve(
             [bridge, provider.clone()],
             [ComponentManifest {
+                listeners: Vec::new(),
                 id: component_id.clone(),
                 owner: provider.id,
                 imports: Vec::new(),
@@ -481,7 +501,7 @@ mod tests {
                 runtime: crate::RuntimeId::parse("vendor.runtime").unwrap(),
                 artifact: crate::PluginArtifact {
                     locator: "plugin.wasm".into(),
-                    revision: "sha256:fixture".into(),
+                    revision: crate::ArtifactRevision::from_content(b"fixture"),
                     configuration: BTreeMap::new(),
                 },
             })

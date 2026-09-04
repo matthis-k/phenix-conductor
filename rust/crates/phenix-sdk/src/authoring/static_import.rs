@@ -4,29 +4,69 @@ use phenix_core::{
 };
 use std::marker::PhantomData;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Call<I, Request, Response> {
     marker: PhantomData<fn(I, Request) -> Response>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+impl<I, Request, Response> Default for Call<I, Request, Response> {
+    fn default() -> Self {
+        Self {
+            marker: PhantomData,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Required<T> {
     marker: PhantomData<fn() -> T>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+impl<T> Default for Required<T> {
+    fn default() -> Self {
+        Self {
+            marker: PhantomData,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Optional<T> {
     marker: PhantomData<fn() -> T>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+impl<T> Default for Optional<T> {
+    fn default() -> Self {
+        Self {
+            marker: PhantomData,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Host<I> {
     marker: PhantomData<fn() -> I>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+impl<I> Default for Host<I> {
+    fn default() -> Self {
+        Self {
+            marker: PhantomData,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Emit<T> {
     marker: PhantomData<fn() -> T>,
+}
+
+impl<T> Default for Emit<T> {
+    fn default() -> Self {
+        Self {
+            marker: PhantomData,
+        }
+    }
 }
 
 pub trait StaticImportField {
@@ -198,6 +238,15 @@ mod tests {
         fn interface_id() -> InterfaceId {
             InterfaceId::parse("fixture.models@1").unwrap()
         }
+    }
+
+    #[test]
+    fn marker_defaults_do_not_require_payload_defaults() {
+        let _: Call<Models, Completed, Completed> = Call::default();
+        let _: Required<Call<Models, Completed, Completed>> = Required::default();
+        let _: Optional<Call<Models, Completed, Completed>> = Optional::default();
+        let _: Host<Models> = Host::default();
+        let _: Emit<Completed> = Emit::default();
     }
 
     #[test]

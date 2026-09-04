@@ -1,13 +1,15 @@
+use phenix_core::{
+    EventEnvelope, EventFailurePolicy, EventSubscription, EventTypeId, GraphReconciler, Kernel,
+    PluginId, ResolvedHarness, ResolvedHarnessActivation, ServiceId, SubscriptionId,
+    SubscriptionSpec,
+};
 use phenix_sdk::{
     Authority, Call, CapabilityId, Emit, Required, StaticComponentBehavior,
-    StaticPluginComponentDispatch, StaticPluginComponents, StaticPluginConfiguration,
-    StaticPluginLifecycle, StaticPluginResources,
+    StaticComponentRuntimeDispatch, StaticPluginComponentDispatch, StaticPluginComponents,
+    StaticPluginConfiguration, StaticPluginDefinition, StaticPluginLifecycle,
+    StaticPluginResources,
 };
-
-mod sessions {
-    #[phenix_sdk::plugin("fixture.attribute-gate.sessions")]
-    pub struct Plugin;
-}
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk::PhenixValue)]
 struct Settings {
@@ -30,18 +32,60 @@ struct Models;
 #[phenix_sdk::interface("fixture.attribute-gate.internal@1")]
 struct Internal;
 
+#[phenix_sdk::interface("fixture.attribute-gate.dependency@1")]
+struct Dependency;
+
+#[phenix_sdk::plugin("fixture.attribute-gate.sessions")]
+mod sessions {
+    use super::{Dependency, Internal, Request, Response};
+
+    #[phenix(export(Internal), terminal)]
+    fn internal(request: Request) -> Response {
+        Response {
+            value: format!("terminal:{}", request.prompt),
+        }
+    }
+
+    #[phenix(export(Dependency), terminal)]
+    fn dependency(request: Request) -> Response {
+        Response {
+            value: format!("dependency:{}", request.prompt),
+        }
+    }
+}
+
 fn authority(capability: &str) -> Authority {
     Authority::new([CapabilityId::parse(capability).unwrap()])
+}
+
+fn plugin_authority() -> Authority {
+    Authority::new([
+        CapabilityId::parse("plugin.run").unwrap(),
+        CapabilityId::parse("kernel.persistence.schema").unwrap(),
+    ])
+}
+
+fn runtime_authority() -> Authority {
+    Authority::new([
+        CapabilityId::parse("plugin.run").unwrap(),
+        CapabilityId::parse("kernel.persistence.schema").unwrap(),
+        CapabilityId::parse("models.invoke").unwrap(),
+        CapabilityId::parse("models.serve").unwrap(),
+        CapabilityId::parse("models.layer").unwrap(),
+        CapabilityId::parse("events.observe").unwrap(),
+    ])
 }
 
 #[allow(dead_code)]
 #[phenix_sdk::component]
 struct Api {
     #[phenix(import, authority = authority("models.invoke"))]
-    models: Required<Call<Models, Request, Response>>,
+    models: Required<Call<Dependency, Request, Response>>,
 
     #[phenix(event("fixture.attribute-gate.completed"))]
     completed: Emit<Response>,
+
+    observed: usize,
 }
 
 #[allow(dead_code)]
@@ -53,7 +97,7 @@ impl Api {
         terminal,
         authority = authority("models.serve")
     )]
-    fn run(&mut self, request: Request) -> Response {
+    async fn run(&mut self, request: Request) -> Response {
         Response {
             value: request.prompt,
         }
@@ -67,15 +111,22 @@ impl Api {
     }
 
     #[phenix(
-        layer(Models, priority = 17, authority = authority("models.layer"))
+        layer(Internal, priority = 17, authority = authority("models.layer"))
     )]
-    fn policy(&mut self) {}
+    async fn policy(&mut self, _context: &phenix_sdk::LayerContext<'_, '_>, _request: Request) {}
 
     #[phenix(
         listen("fixture.attribute-gate.observed"),
         authority = authority("events.observe")
     )]
-    fn observed(&mut self, _context: &phenix_sdk::EventContext, _response: Response) {}
+    async fn observed(
+        &mut self,
+        _context: &phenix_sdk::EventContext,
+        _response: Response,
+    ) -> Result<(), String> {
+        self.observed += 1;
+        Ok(())
+    }
 
     #[phenix(value("fixture.attribute-gate.status@1"), public)]
     fn status(&self) -> u64 {
@@ -97,7 +148,7 @@ impl Store {}
 #[phenix_sdk::plugin(
     id = "fixture.attribute-gate",
     version = 7,
-    authority = authority("plugin.run")
+    authority = plugin_authority()
 )]
 struct Plugin {
     #[phenix(dep)]
@@ -123,25 +174,38 @@ impl Plugin {
 
     #[phenix(stop)]
     fn stop(&mut self, _context: &phenix_sdk::PluginContext<'_, '_, ()>) -> Result<(), String> {
-        Ok(())
+        if self.api.observed == 1 {
+            Ok(())
+        } else {
+            Err(format!(
+                "generated listener mutated component state {} times",
+                self.api.observed
+            ))
+        }
+    }
+}
+
+fn plugin() -> Plugin {
+    Plugin {
+        sessions: sessions::Plugin,
+        api: Api {
+            models: Required::default(),
+            completed: Emit::default(),
+            observed: 0,
+        },
+        state: phenix_sdk::Durable::default(),
+        config: Settings { retries: 3 },
     }
 }
 
 #[test]
 fn attribute_only_plugin_builds_graph_and_manifest_without_parallel_wiring() {
     fn assert_generated_dispatch<T: StaticPluginComponentDispatch>() {}
+    fn assert_generated_runtime_dispatch<T: StaticComponentRuntimeDispatch>() {}
     assert_generated_dispatch::<Plugin>();
+    assert_generated_runtime_dispatch::<Api>();
 
-    let plugin = Plugin {
-        sessions: sessions::Plugin,
-        api: Api {
-            models: Required::default(),
-            completed: Emit::default(),
-        },
-        state: phenix_sdk::Durable::default(),
-        config: Settings { retries: 3 },
-    };
-    let instance = StaticPluginComponentDispatch::into_plugin_instance(plugin);
+    let instance = plugin().__phenix_into_plugin_instance();
     drop(instance);
 
     let graph = phenix_sdk::StaticPluginGraph::compose::<Plugin>().unwrap();
@@ -156,7 +220,7 @@ fn attribute_only_plugin_builds_graph_and_manifest_without_parallel_wiring() {
     let descriptor = graph
         .descriptor(&Plugin::plugin_id())
         .expect("root plugin descriptor exists");
-    assert_eq!(descriptor.maximum_authority, authority("plugin.run"));
+    assert_eq!(descriptor.maximum_authority, plugin_authority());
 
     let components = <Plugin as StaticPluginComponents>::components();
     assert_eq!(components.len(), 1);
@@ -168,10 +232,7 @@ fn attribute_only_plugin_builds_graph_and_manifest_without_parallel_wiring() {
     );
     let component_manifest =
         components[0].manifest_with_authority(&Plugin::plugin_id(), &descriptor.maximum_authority);
-    assert_eq!(
-        component_manifest.maximum_authority,
-        authority("plugin.run")
-    );
+    assert_eq!(component_manifest.maximum_authority, plugin_authority());
     assert_eq!(
         component_manifest.imports[0].authority,
         authority("models.invoke")
@@ -223,13 +284,174 @@ fn attribute_only_plugin_builds_graph_and_manifest_without_parallel_wiring() {
     assert_eq!(lifecycle.start, Some("start"));
     assert_eq!(lifecycle.stop, Some("stop"));
 
-    let manifest = <Plugin as phenix_sdk::StaticPluginDefinition>::manifest();
+    let manifest = <Plugin as StaticPluginDefinition>::manifest();
     assert_eq!(manifest.id.as_str(), "fixture.attribute-gate");
     assert_eq!(manifest.version, 7);
     assert_eq!(manifest.services.len(), 2);
-    assert_eq!(manifest.maximum_authority, authority("plugin.run"));
+    assert_eq!(manifest.maximum_authority, plugin_authority());
     assert_eq!(
         manifest.resource_namespaces[0].as_str(),
         "fixture.attribute-gate.state"
     );
+}
+
+#[test]
+fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
+    let graph = phenix_sdk::StaticPluginGraph::compose::<Plugin>().unwrap();
+    let manifests = [
+        <sessions::Plugin as StaticPluginDefinition>::manifest(),
+        <Plugin as StaticPluginDefinition>::manifest(),
+    ];
+    let components = [
+        <sessions::Plugin as StaticPluginDefinition>::component_manifests().remove(0),
+        <Plugin as StaticPluginDefinition>::component_manifests().remove(0),
+    ];
+    let resolved = ResolvedHarness::resolve(
+        manifests,
+        components,
+        std::iter::empty(),
+        &runtime_authority(),
+    )
+    .unwrap();
+    let mut kernel = Kernel::new(resolved.kernel_config().clone());
+    graph.preload_embedded_factories(&mut kernel).unwrap();
+    graph
+        .preload_embedded_instance::<Plugin>(&mut kernel, plugin().__phenix_into_plugin_instance())
+        .unwrap();
+    kernel.activate_resolved_harness(&resolved).unwrap();
+    kernel.activate_all().unwrap();
+
+    let events = kernel.events();
+    let diagnostics = Arc::new(Mutex::new(Vec::<EventEnvelope>::new()));
+    let seen_diagnostics = Arc::clone(&diagnostics);
+    events
+        .install_subscriptions([EventSubscription {
+            spec: SubscriptionSpec {
+                id: SubscriptionId::parse("fixture.attribute-gate/diagnostics").unwrap(),
+                owner: PluginId::parse("fixture.attribute-gate.diagnostic-probe").unwrap(),
+                event_type: EventTypeId::parse("kernel.structural_value_mismatch").unwrap(),
+                event_version: 1,
+                dependencies: Vec::new(),
+                failure_policy: EventFailurePolicy::FailOperation,
+                required_authority: Authority::default(),
+                maximum_authority: Authority::default(),
+                kernel_policy_revision: 0,
+            },
+            handler: Arc::new(move |event: &EventEnvelope, _: &Authority| {
+                seen_diagnostics.lock().unwrap().push(event.clone());
+                Ok(())
+            }),
+        }])
+        .unwrap();
+
+    let request = Request {
+        prompt: "async-export".into(),
+    };
+    let input = serde_json::to_vec(&phenix_sdk::PhenixValue::from(&request)).unwrap();
+    let output = kernel
+        .invoke_component(
+            &phenix_sdk::ComponentId::parse("fixture.attribute-gate.api").unwrap(),
+            &ServiceId::parse("fixture.attribute-gate.models@1").unwrap(),
+            &input,
+            &authority("models.serve"),
+            &Plugin::plugin_id(),
+        )
+        .unwrap();
+    let output: phenix_sdk::PhenixValue = serde_json::from_slice(&output).unwrap();
+    let output = Response::try_from(&output).unwrap();
+    assert_eq!(output.value, "async-export");
+
+    let request = Request {
+        prompt: "async-layer".into(),
+    };
+    let input = serde_json::to_vec(&phenix_sdk::PhenixValue::from(&request)).unwrap();
+    let output = kernel
+        .invoke(
+            &ServiceId::parse("fixture.attribute-gate.internal@1").unwrap(),
+            &input,
+            &authority("models.layer"),
+            None,
+        )
+        .unwrap();
+    let output: phenix_sdk::PhenixValue = serde_json::from_slice(&output).unwrap();
+    let output = Response::try_from(&output).unwrap();
+    assert_eq!(output.value, "terminal:async-layer");
+
+    let response = Response {
+        value: "observed".into(),
+    };
+    let payload = serde_json::to_vec(&phenix_sdk::PhenixValue::from(&response)).unwrap();
+    let event = EventEnvelope {
+        event_type: EventTypeId::parse("fixture.attribute-gate.observed").unwrap(),
+        version: 1,
+        emitter: sessions::Plugin::plugin_id(),
+        causality_id: 41,
+        kernel_policy_revision: 0,
+        payload,
+    };
+    let report = events
+        .dispatch(&event, &authority("events.observe"))
+        .unwrap();
+    assert_eq!(report.delivered.len(), 1);
+    assert!(report.warnings.is_empty());
+
+    let mismatched = Request {
+        prompt: "wrong-shape".into(),
+    };
+    let mismatch_event = EventEnvelope {
+        causality_id: 42,
+        payload: serde_json::to_vec(&phenix_sdk::PhenixValue::from(&mismatched)).unwrap(),
+        ..event.clone()
+    };
+    let mismatch_report = events
+        .dispatch(&mismatch_event, &authority("events.observe"))
+        .unwrap();
+    assert_eq!(mismatch_report.delivered.len(), 1);
+    assert_eq!(mismatch_report.warnings.len(), 1);
+
+    let diagnostics = diagnostics.lock().unwrap();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].emitter, Plugin::plugin_id());
+    assert_eq!(diagnostics[0].causality_id, 42);
+    let diagnostic_payload: serde_json::Value =
+        serde_json::from_slice(&diagnostics[0].payload).unwrap();
+    assert_eq!(
+        diagnostic_payload["event"],
+        serde_json::json!("fixture.attribute-gate.observed")
+    );
+    assert_eq!(
+        diagnostic_payload["listener"],
+        serde_json::json!("observed")
+    );
+    assert_eq!(
+        diagnostic_payload["direction"],
+        serde_json::json!("listener")
+    );
+    drop(diagnostics);
+
+    let without_plugin = ResolvedHarness::resolve(
+        [<sessions::Plugin as StaticPluginDefinition>::manifest()],
+        [<sessions::Plugin as StaticPluginDefinition>::component_manifests().remove(0)],
+        std::iter::empty(),
+        &runtime_authority(),
+    )
+    .unwrap();
+    GraphReconciler::new(resolved)
+        .activate_candidate_on_kernel(&mut kernel, without_plugin)
+        .unwrap();
+    let report = events
+        .dispatch(&event, &authority("events.observe"))
+        .unwrap();
+    assert!(report.delivered.is_empty());
+    assert!(report.warnings.is_empty());
+}
+
+#[test]
+fn attribute_only_gate_has_no_parallel_static_factory_wiring() {
+    let source = include_str!("plugin_attribute_only_gate.rs");
+    let register_factory = ["register_embedded_", "factory"].concat();
+    let preload_factory = ["kernel.preload_embedded_", "factory"].concat();
+
+    assert!(!source.contains(&register_factory));
+    assert!(!source.contains(&preload_factory));
 }

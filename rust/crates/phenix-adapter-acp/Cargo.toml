@@ -12,6 +12,5 @@ path = "src/lib.rs"
 
 [dependencies]
 agent-client-protocol.workspace = true
-phenix-client = { path = "../phenix-client" }
+phenix-core = { path = "../phenix-core" }
 phenix-sdk = { path = "../phenix-sdk" }
-serde_json.workspace = true

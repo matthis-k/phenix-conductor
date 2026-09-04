@@ -8,6 +8,7 @@ publish = false
 role = "assembly"
 
 [dependencies]
+phenix-adapter-acp = { path = "../phenix-adapter-acp" }
 phenix-core = { path = "../phenix-core" }
 phenix-sdk = { path = "../phenix-sdk" }
 phenix-plugin-artifacts = { path = "../phenix-plugin-artifacts" }

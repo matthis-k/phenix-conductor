@@ -162,7 +162,14 @@ fn parse_migration(attribute: &Attribute) -> syn::Result<u32> {
             "migration requires exactly one from = <version>",
         ));
     }
-    integer_literal(from.value, "migration source must be an integer")
+    let from = integer_literal(from.value, "migration source must be an integer")?;
+    if from == 0 {
+        return Err(syn::Error::new_spanned(
+            attribute,
+            "migration source version must be positive",
+        ));
+    }
+    Ok(from)
 }
 
 fn validate_migration_signature(method: &syn::ImplItemFn) -> syn::Result<()> {
@@ -170,6 +177,12 @@ fn validate_migration_signature(method: &syn::ImplItemFn) -> syn::Result<()> {
         return Err(syn::Error::new_spanned(
             &method.sig,
             "resource migrations must be synchronous non-generic functions",
+        ));
+    }
+    if method.sig.unsafety.is_some() || method.sig.abi.is_some() || method.sig.variadic.is_some() {
+        return Err(syn::Error::new_spanned(
+            &method.sig,
+            "resource migrations must use the ordinary safe Rust ABI",
         ));
     }
     if method.sig.inputs.len() != 1 || matches!(method.sig.inputs.first(), Some(FnArg::Receiver(_)))
@@ -336,5 +349,43 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("synchronous non-generic"));
+    }
+
+    #[test]
+    fn resource_impl_rejects_zero_source_version() {
+        let error = expand(
+            quote!(schema = 2),
+            quote! {
+                impl Store {
+                    #[phenix(migrate(from = 0))]
+                    fn migrate(old: V0) -> Result<V2, MigrationError> {
+                        todo!()
+                    }
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("source version must be positive"));
+    }
+
+    #[test]
+    fn resource_impl_rejects_unsafe_migration() {
+        let error = expand(
+            quote!(schema = 2),
+            quote! {
+                impl Store {
+                    #[phenix(migrate(from = 1))]
+                    unsafe fn migrate(old: V1) -> Result<V2, MigrationError> {
+                        todo!()
+                    }
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("ordinary safe Rust ABI"));
     }
 }

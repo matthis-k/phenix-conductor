@@ -7,13 +7,22 @@ use syn::{
 };
 
 mod component_attr;
+mod component_runtime_attr;
+mod expose_attr;
 mod interface_attr;
 mod plugin_attr;
 mod resource_attr;
 
 #[proc_macro_attribute]
 pub fn component(args: TokenStream, input: TokenStream) -> TokenStream {
-    component_attr::expand(args.into(), input.into())
+    component_runtime_attr::expand(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_attribute]
+pub fn expose(args: TokenStream, input: TokenStream) -> TokenStream {
+    expose_attr::expand(args.into(), input.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

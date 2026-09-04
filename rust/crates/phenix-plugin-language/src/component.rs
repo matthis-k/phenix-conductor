@@ -27,6 +27,7 @@ pub fn language_component_id() -> ComponentId {
 #[must_use]
 pub fn language_component_manifest() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: language_component_id(),
         owner: PluginId::parse(LANGUAGE_PLUGIN).expect("static language plugin id is valid"),
         imports: Vec::new(),
@@ -59,6 +60,7 @@ mod tests {
 
     fn consumer_component() -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("fixture.language-consumer").unwrap(),
             owner: PluginId::parse("fixture.language-consumer").unwrap(),
             imports: vec![ComponentImport {

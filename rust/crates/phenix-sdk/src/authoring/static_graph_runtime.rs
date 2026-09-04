@@ -1,6 +1,10 @@
-use super::StaticPluginGraph;
+use super::{StaticPluginDefinition, StaticPluginGraph};
 
 impl StaticPluginGraph {
+    /// Preload every reusable zero-input embedded factory carried by this static graph.
+    ///
+    /// An embedded descriptor without a factory is not invalid. It represents state that must be
+    /// constructed explicitly and prepared with `preload_embedded_instance`.
     pub fn preload_embedded_factories(
         &self,
         kernel: &mut phenix_core::Kernel,
@@ -13,15 +17,37 @@ impl StaticPluginGraph {
                 (phenix_core::PluginExecution::Embedded, Some(factory)) => {
                     kernel.preload_embedded_factory(id.clone(), factory);
                 }
-                (phenix_core::PluginExecution::Embedded, None) => {
-                    return Err(phenix_core::KernelError::EmbeddedFactoryMissing(id.clone()));
-                }
-                (_, None) => {}
+                (phenix_core::PluginExecution::Embedded, None) | (_, None) => {}
                 (_, Some(_)) => {
                     return Err(phenix_core::KernelError::WrongExecutionKind(id.clone()));
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Prepare an already-constructed stateful plugin for normal kernel activation.
+    ///
+    /// Construction remains ordinary Rust. This method only performs the generic type-to-runtime
+    /// boundary and derives the plugin identity from the authored type.
+    #[doc(hidden)]
+    pub fn preload_embedded_instance<T: StaticPluginDefinition>(
+        &self,
+        kernel: &mut phenix_core::Kernel,
+        instance: Box<dyn phenix_core::PluginInstance>,
+    ) -> Result<(), phenix_core::KernelError> {
+        let authored = T::descriptor();
+        let id = authored.id.clone();
+        let descriptor = self
+            .descriptor(&id)
+            .ok_or_else(|| phenix_core::KernelError::UnknownPlugin(id.clone()))?;
+        if descriptor.definition != authored.definition {
+            return Err(phenix_core::KernelError::UnknownPlugin(id));
+        }
+        if !matches!(descriptor.execution, phenix_core::PluginExecution::Embedded) {
+            return Err(phenix_core::KernelError::WrongExecutionKind(id));
+        }
+        kernel.preload_embedded_instance(id, instance);
         Ok(())
     }
 }
@@ -30,8 +56,8 @@ impl StaticPluginGraph {
 mod tests {
     use super::*;
     use crate::{
-        Authority, PluginExecution, PluginId, StaticPluginComponents, StaticPluginDefinition,
-        StaticPluginDependency, StaticPluginDescriptor, StaticPluginResources,
+        Authority, PluginExecution, PluginId, StaticPluginComponents, StaticPluginDependency,
+        StaticPluginDescriptor, StaticPluginResources,
     };
 
     struct Instance;
@@ -48,7 +74,7 @@ mod tests {
 
     struct Leaf;
     struct Root;
-    struct MissingFactory;
+    struct ExplicitState;
 
     impl StaticPluginDefinition for Leaf {
         fn descriptor() -> StaticPluginDescriptor {
@@ -65,9 +91,9 @@ mod tests {
         }
     }
 
-    impl StaticPluginDefinition for MissingFactory {
+    impl StaticPluginDefinition for ExplicitState {
         fn descriptor() -> StaticPluginDescriptor {
-            let mut descriptor = descriptor("fixture.graph.missing-factory", Vec::new());
+            let mut descriptor = descriptor("fixture.graph.explicit-state", Vec::new());
             descriptor.embedded_factory = None;
             descriptor
         }
@@ -85,6 +111,12 @@ mod tests {
         }
     }
 
+    impl StaticPluginComponents for ExplicitState {
+        fn components() -> Vec<crate::StaticComponentDescriptor> {
+            Vec::new()
+        }
+    }
+
     impl StaticPluginResources for Leaf {
         fn resources() -> Vec<crate::StaticResourceDescriptor> {
             Vec::new()
@@ -92,6 +124,12 @@ mod tests {
     }
 
     impl StaticPluginResources for Root {
+        fn resources() -> Vec<crate::StaticResourceDescriptor> {
+            Vec::new()
+        }
+    }
+
+    impl StaticPluginResources for ExplicitState {
         fn resources() -> Vec<crate::StaticResourceDescriptor> {
             Vec::new()
         }
@@ -124,9 +162,9 @@ mod tests {
     }
 
     #[test]
-    fn embedded_graph_rejects_missing_generated_factory() {
-        let graph = StaticPluginGraph::compose::<MissingFactory>().unwrap();
-        let id = PluginId::parse("fixture.graph.missing-factory").unwrap();
+    fn embedded_graph_accepts_explicitly_constructed_state() {
+        let graph = StaticPluginGraph::compose::<ExplicitState>().unwrap();
+        let id = PluginId::parse("fixture.graph.explicit-state").unwrap();
         let mut kernel = phenix_core::Kernel::new(
             phenix_core::KernelConfig::new([phenix_core::PluginManifest {
                 id: id.clone(),
@@ -140,9 +178,15 @@ mod tests {
             .unwrap(),
         );
 
+        graph.preload_embedded_factories(&mut kernel).unwrap();
         assert_eq!(
-            graph.preload_embedded_factories(&mut kernel),
-            Err(phenix_core::KernelError::EmbeddedFactoryMissing(id))
+            kernel.activate_all(),
+            Err(phenix_core::KernelError::EmbeddedFactoryMissing(id.clone()))
         );
+
+        graph
+            .preload_embedded_instance::<ExplicitState>(&mut kernel, Box::new(Instance))
+            .unwrap();
+        kernel.activate_all().unwrap();
     }
 }

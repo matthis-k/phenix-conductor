@@ -32,6 +32,7 @@ pub fn model_routing_component_id() -> ComponentId {
 pub fn model_routing_component_manifest(maximum_authority: Authority) -> ComponentManifest {
     let authority = model_routing_manifest(maximum_authority).maximum_authority;
     ComponentManifest {
+        listeners: Vec::new(),
         id: model_routing_component_id(),
         owner: PluginId::parse(MODEL_ROUTING_PLUGIN)
             .expect("static model routing plugin id is valid"),
@@ -84,6 +85,7 @@ mod tests {
 
     fn consumer_component(authority: Authority) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("fixture.model-consumer"),
             owner: plugin("fixture.model-consumer"),
             imports: vec![ComponentImport {
@@ -116,6 +118,7 @@ mod tests {
 
     fn replacement_component() -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("fixture.model-replacement"),
             owner: plugin("fixture.model-replacement"),
             imports: Vec::new(),

@@ -1,10 +1,9 @@
 use phenix_core::{
-    skill_service, Authority, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, DurableSchema, InterfaceId, PluginContext, PluginExecution, PluginHost,
-    PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId,
-    ServiceRole, SkillCommand, SkillDefinition, SkillId, SkillResponse, TransactionOp,
-    SKILL_SERVICE,
+    Authority, CapabilityId, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
+    PluginContext, PluginInstance, PluginManifest, ResourceNamespace, SkillCommand,
+    SkillDefinition, SkillId, SkillResponse, TransactionOp, SKILL_SERVICE,
 };
+use phenix_sdk::{StaticPluginComponentDispatch, StaticPluginDefinition};
 
 pub const BASIC_SKILLS_PLUGIN: &str = "phenix.basic-skills";
 pub const BASIC_SKILLS_COMPONENT: &str = "phenix.basic-skills";
@@ -12,12 +11,6 @@ const BASIC_SKILLS_NAMESPACE: &str = "phenix.basic-skills.state";
 const INDEX_KEY: &str = "skills/@all";
 
 type BasicSkillsContext<'host, 'runtime> = PluginContext<'host, 'runtime, ()>;
-
-fn context<'host, 'runtime>(
-    host: &'host PluginHost<'runtime>,
-) -> BasicSkillsContext<'host, 'runtime> {
-    PluginContext::new(host, (), (), ())
-}
 
 pub struct BasicSkillsInterface;
 
@@ -27,68 +20,59 @@ impl ComponentInterface for BasicSkillsInterface {
     }
 }
 
+struct SkillStore;
+
+#[phenix_sdk::resource(schema = 1)]
+impl SkillStore {}
+
+#[phenix_sdk::component]
+struct Api;
+
+#[phenix_sdk::component]
+impl Api {
+    #[phenix(export("phenix.skills@1"), terminal, priority = 10)]
+    fn handle(
+        &mut self,
+        context: &phenix_sdk::PluginContext<'_, '_, ()>,
+        command: SkillCommand,
+    ) -> Result<SkillResponse, String> {
+        handle(context, command)
+    }
+}
+
+#[phenix_sdk::plugin(id = "phenix.basic-skills", authority = persistence_authority())]
+pub struct Plugin {
+    #[phenix(component, id = "phenix.basic-skills")]
+    api: Api,
+
+    #[phenix(resource, id = "phenix.basic-skills.state")]
+    _state: phenix_sdk::Durable<SkillStore>,
+}
+
 #[must_use]
 pub fn basic_skills_manifest() -> PluginManifest {
-    PluginManifest {
-        id: PluginId::parse(BASIC_SKILLS_PLUGIN).expect("static plugin id is valid"),
-        version: 1,
-        execution: PluginExecution::Embedded,
-        dependencies: Vec::new(),
-        services: vec![ServiceContribution {
-            role: ServiceRole::Terminal,
-            service: skill_service(),
-            priority: 10,
-            required_authority: Authority::default(),
-        }],
-        resource_namespaces: vec![namespace()],
-        maximum_authority: persistence_authority(),
-    }
+    Plugin::manifest()
 }
 
 #[must_use]
 pub fn basic_skills_component_manifest() -> ComponentManifest {
-    ComponentManifest {
-        id: ComponentId::parse(BASIC_SKILLS_COMPONENT).expect("static component id is valid"),
-        owner: basic_skills_manifest().id,
-        imports: Vec::new(),
-        exports: vec![ComponentExport {
-            interface: BasicSkillsInterface::interface_id(),
-            schema: BasicSkillsInterface::schema(),
-            priority: 10,
-            required_authority: Authority::default(),
-        }],
-        maximum_authority: persistence_authority(),
-    }
+    Plugin::component_manifests()
+        .into_iter()
+        .next()
+        .expect("basic skills plugin has one generated component")
 }
 
 #[must_use]
 pub fn basic_skills_factory() -> Box<dyn PluginInstance> {
-    Box::new(BasicSkills)
+    StaticPluginComponentDispatch::into_plugin_instance(Plugin {
+        api: Api,
+        _state: phenix_sdk::Durable::new(),
+    })
 }
 
-struct BasicSkills;
-
-impl PluginInstance for BasicSkills {
-    fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        context(host)
-            .kernel
-            .register_durable_schema(&DurableSchema::new(namespace(), 1))
-            .map_err(|error| error.to_string())
-    }
-
-    fn invoke(
-        &mut self,
-        service: &ServiceId,
-        input: &[u8],
-        host: &PluginHost<'_>,
-    ) -> Result<Vec<u8>, String> {
-        if service != &skill_service() {
-            return Err(format!("unsupported basic skill service: {service}"));
-        }
-        let command = serde_json::from_slice(input).map_err(|error| error.to_string())?;
-        let response = handle(&context(host), command)?;
-        serde_json::to_vec(&response).map_err(|error| error.to_string())
-    }
+#[must_use]
+pub fn basic_skills_component_id() -> ComponentId {
+    basic_skills_component_manifest().id
 }
 
 fn handle(
@@ -176,4 +160,26 @@ fn persistence_authority() -> Authority {
 
 fn capability(value: &str) -> CapabilityId {
     CapabilityId::parse(value).expect("static capability is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_authoring_preserves_stable_identity() {
+        let manifest = basic_skills_manifest();
+        assert_eq!(manifest.id.as_str(), BASIC_SKILLS_PLUGIN);
+        assert_eq!(manifest.services.len(), 1);
+        assert_eq!(manifest.services[0].service, phenix_core::skill_service());
+        assert_eq!(manifest.resource_namespaces, vec![namespace()]);
+
+        let component = basic_skills_component_manifest();
+        assert_eq!(component.id.as_str(), BASIC_SKILLS_COMPONENT);
+        assert_eq!(component.exports.len(), 1);
+        assert_eq!(
+            component.exports[0].interface,
+            BasicSkillsInterface::interface_id()
+        );
+    }
 }

@@ -1,11 +1,12 @@
 use crate::{
     Authority, CapabilityId, ComponentGraphError, ComponentId, ComponentInterface,
     ComponentInvocationError, DurableSchema, EventBus, EventDispatchReport, EventEnvelope,
-    EventError, EventTypeId, GraphGenerationId, KernelConfig, KernelError, KernelEvent,
-    KernelPolicyIdentity, LocalPersistence, NamespaceTransaction, PersistenceBackend,
-    PluginArtifact, PluginExecution, PluginId, PluginManifest, ResolvedComponentGraph,
-    ResolvedServiceChain, ResourceNamespace, SchemaMigration, ServiceId, ServiceRole,
-    SkillResourceMetadata, TaskRuntime, TaskScope, TransactionOp,
+    EventError, EventHandler, EventSubscription, EventTypeId, GraphGenerationId, KernelConfig,
+    KernelError, KernelEvent, KernelPolicyIdentity, LocalPersistence, NamespaceTransaction,
+    PersistenceBackend, PluginArtifact, PluginExecution, PluginId, PluginManifest,
+    ResolvedComponentGraph, ResolvedListener, ResolvedServiceChain, ResourceNamespace,
+    SchemaMigration, ServiceId, ServiceRole, SkillResourceMetadata, TaskRuntime, TaskScope,
+    TransactionOp,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -223,9 +224,50 @@ pub trait PluginInstance: Send {
         self.invoke(service, input, host).map(LayerResult::Handled)
     }
 
+    fn bind_listener(
+        &mut self,
+        listener: &ResolvedListener,
+        _generation: &GraphGenerationId,
+    ) -> Result<Arc<dyn EventHandler>, String> {
+        Err(format!(
+            "plugin does not implement listener {}/{}",
+            listener.component, listener.declaration.method
+        ))
+    }
+
     fn stop(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
     }
+}
+
+fn stage_listener_subscriptions(
+    graph: &ResolvedComponentGraph,
+    generation: &GraphGenerationId,
+    config: &KernelConfig,
+    instances: &BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
+) -> Result<Vec<EventSubscription>, KernelError> {
+    let mut subscriptions = Vec::new();
+    for listener in graph.listeners() {
+        let instance = instances
+            .get(&listener.owning_plugin)
+            .ok_or_else(|| KernelError::PluginNotActive(listener.owning_plugin.clone()))?;
+        let handler = instance
+            .lock()
+            .expect("plugin instance mutex poisoned during listener binding")
+            .bind_listener(listener, generation)
+            .map_err(|message| KernelError::ListenerBinding {
+                plugin: listener.owning_plugin.clone(),
+                component: listener.component.clone(),
+                method: listener.declaration.method.clone(),
+                message,
+            })?;
+        subscriptions.push(EventSubscription {
+            spec: listener.subscription_spec(config.policy_identity().get()),
+            handler,
+        });
+    }
+    EventBus::validate_subscriptions(subscriptions.iter().cloned())?;
+    Ok(subscriptions)
 }
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
@@ -250,6 +292,7 @@ pub struct Kernel {
     config: KernelConfig,
     states: BTreeMap<PluginId, PluginState>,
     embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,
+    prepared_embedded_instances: BTreeMap<PluginId, Box<dyn PluginInstance>>,
     instances: BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
     events: Arc<EventBus>,
     tasks: TaskRuntime,

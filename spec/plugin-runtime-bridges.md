@@ -1,6 +1,9 @@
 # Plugin runtimes, hot loading, and build requests
 
 status: partial
+coverage:
+  - rust/crates/phenix-core/src/plugin_management_regression.rs
+  - rust/crates/phenix-core/src/runtime_provider_regression.rs
 
 This builds on the plugin ownership rules from #445 and the stable kernel interfaces from #444.
 
@@ -218,11 +221,11 @@ Authorized callers may send typed management requests to the kernel through a st
 
 The public operations are desired-state requests, not direct lifecycle hooks.
 
-At minimum support the semantics of:
+Core exposes the implemented subset through `GraphReconciler::manage`, which resolves one candidate generation from the active desired state and commits it atomically through the existing generation machinery:
 
 ```rust
 enum PluginManagementRequest {
-    Load(PluginLoadRequest),
+    Load(Box<PluginLoadRequest>),
     Unload(PluginUnloadRequest),
     Reconcile(PluginSetRequest),
 }
@@ -234,12 +237,12 @@ Lifecycle methods such as `start` and `stop` are not public management operation
 
 ### Load request
 
-Conceptually:
+The load manifest uses the generic artifact slot to carry a ready artifact or build plan. Management normalizes it to the default concrete `PluginManifest<PluginArtifact>` before candidate resolution:
 
 ```rust
 struct PluginLoadRequest {
-    manifest: PluginManifest,
-    artifact: PluginArtifactInput,
+    manifest: PluginManifest<PluginArtifactInput>,
+    components: Vec<ComponentManifest>,
     expected_active_revision: Option<ArtifactRevision>,
 }
 ```
@@ -247,8 +250,6 @@ struct PluginLoadRequest {
 The optional expected revision provides compare-and-swap semantics for development tools and agents. A stale request must fail rather than replacing an unexpected newer artifact.
 
 ### Unload request
-
-Conceptually:
 
 ```rust
 struct PluginUnloadRequest {
@@ -261,19 +262,24 @@ Unload removes the plugin from the desired graph. It does not immediately destro
 
 ### Reconcile request
 
+```rust
+struct PluginSetRequest {
+    plugins: Vec<PluginManifest>,
+    components: Vec<ComponentManifest>,
+}
+```
+
 A reconcile request supplies the desired plugin set and lets the kernel compute additions, replacements, removals, and affected runtime dependents in one transaction.
 
 This is the canonical internal model. `load` and `unload` are convenience mutations of desired state.
 
 ## Artifact inputs
 
-A load request may reference either a ready artifact or a build plan that produces one.
-
-Conceptually:
+The implemented load request supports this split:
 
 ```rust
 enum PluginArtifactInput {
-    Ready(ArtifactRef),
+    Ready(PluginArtifact),
     Build(PluginBuildPlan),
 }
 ```
@@ -282,7 +288,7 @@ The runtime ID comes from the canonical manifest. Build machinery does not infer
 
 ## Build plans
 
-Build plans exist so compiled or bundled plugin languages fit the same load path.
+Build plans let compiled or bundled plugin languages enter the same load path.
 
 Examples include:
 
@@ -299,27 +305,29 @@ struct PluginBuildPlan {
     source: BuildSource,
     steps: Vec<BuildStep>,
     artifact_output: RelativePath,
+    configuration: Map<String, PhenixValue>,
+    requested_authority: Authority,
 }
 
 struct BuildStep {
-    program: String,
-    args: Vec<String>,
-    cwd: RelativePath,
+    executable: BuildExecutable,
+    argv: Vec<BuildArgument>,
+    working_directory: RelativePath,
     environment: BuildEnvironment,
 }
 ```
 
 Do not model a build step as one shell command string. Use executable plus arguments so quoting and shell injection are not implicit semantics.
 
-The exact build-plan schema may evolve, but it must support deterministic ordered steps and one declared final artifact output.
+Executables, arguments, source identity/revision, environment names and values, working directories, and the single artifact output are parsed into validated types. Working directories and output paths are relative, and plans contain at least one deterministic ordered step.
 
 ### Build execution boundary
 
-The kernel owns the build transaction, request authorization, output selection, provenance, and rollback behavior.
+Core injects a narrow `PluginBuildExecutor` into trusted management context. The executor contract requires isolated staging, explicit environment, ordered steps, and return of only the one declared output locator and its exact bytes. It returns bounded provenance and diagnostics on success or typed failure.
 
 The kernel must not gain ambient shell access to implement builds.
 
-Actual process execution runs through an explicit build executor or host process capability under kernel policy.
+Actual process execution is outside Core and runs through that explicit executor under host policy. Core does not use a workspace shell, task runtime, backend process configuration, or artifact plugin as a build executor.
 
 Build authority is separate from the authority later granted to the plugin artifact.
 
@@ -333,13 +341,13 @@ A build receives only explicitly granted capabilities such as:
 
 Secrets, arbitrary host filesystem access, and network access are not implicit.
 
-For agent-authored build requests, effective build authority must be bounded by both kernel build policy and the requesting agent's delegated authority.
+Effective build authority is the intersection of kernel build policy, requesting caller authority, and plan-requested authority. It is separate from guest/plugin authority and runtime-provider authority. The caller authority, policy, CAS, and executor are trusted out-of-band context and are never serialized in `PluginManagementRequest`.
 
 ## Build result and artifact identity
 
 A successful build produces a concrete artifact before runtime validation or graph activation.
 
-The kernel computes or records an immutable `ArtifactRevision` from the exact output artifact and relevant immutable metadata.
+Core computes `ArtifactRevision` from the exact output bytes. Its only accepted form is `sha256:<64 lowercase hexadecimal digits>`; parsing and deserialization reject every non-canonical value.
 
 Graph generations pin the exact artifact revision, not merely the plugin ID or package version.
 
@@ -357,36 +365,37 @@ generation 42
   artifact c770...
 ```
 
-Build logs and build-plan provenance should be attached to the candidate result so agents can diagnose failures.
+Bounded build provenance and diagnostics are returned in successful management results and retained in later candidate/runtime errors so callers can diagnose failures after build completion.
 
 ## Load and hot-replace transaction
 
-A load request follows this semantic sequence:
+The implemented load request follows this semantic sequence:
 
 ```text
 receive request
-  -> authorize plugin-management request
-  -> validate canonical manifest
-  -> execute optional build plan
-  -> identify immutable artifact revision
-  -> resolve runtime provider
-  -> runtime validates artifact
+  -> preflight live reconciler/kernel agreement
+  -> authorize through trusted caller/policy context
+  -> preflight content-addressed storage
+  -> verify a ready artifact or execute the typed build plan
+  -> hash and store the exact declared build output
+  -> normalize to a concrete PluginArtifact
+  -> resolve runtime provider and dependency order
+  -> reject cycles and unavailable runtimes
   -> resolve candidate component graph
-  -> validate contracts and authority
-  -> instantiate candidate plugin
-  -> prepare candidate
+  -> validate contracts, authority, and resources
+  -> instantiate and prepare candidate
   -> start candidate
   -> atomically commit graph generation
-  -> route new calls to new generation
-  -> quiesce retired instances
-  -> drain pinned old generation
   -> stop retired instances
-  -> release retired artifacts
 ```
+
+Core enforces the trusted policy and caller authority supplied out of band. Product policy chooses those values and supplies concrete CAS/executor implementations.
 
 No step before graph commit may make the candidate visible to ordinary component invocations.
 
-If build, runtime validation, graph resolution, prepare, or start fails, the active generation remains unchanged.
+If resolution, runtime-provider validation, graph compilation, prepare, or start fails, the active generation remains unchanged.
+
+Explicit quiesce and asynchronous drain phases are future work. The current subset stops retired instances synchronously after the new generation commits.
 
 ## Unload transaction
 
@@ -394,15 +403,11 @@ Unload follows the same reconciliation mechanism:
 
 ```text
 receive unload request
-  -> authorize
   -> resolve candidate graph without plugin
   -> reject if required imports become unsatisfied
+  -> reject if a retained guest's runtime provider is removed
   -> commit new generation
-  -> prevent new calls from entering retired plugin
-  -> quiesce old instance
-  -> drain old generation
-  -> stop instance
-  -> release artifact
+  -> stop retired instances
 ```
 
 Removing one runtime bridge also invalidates guest instances that depend on that runtime. The candidate graph must either rebind them to another compatible runtime provider or remove/reject them as required by desired state.
@@ -413,9 +418,7 @@ Hot replacement must not mutate the implementation under an active invocation.
 
 New invocations bind to the newly committed generation. Existing invocations remain pinned to the generation in which they started until they complete or are cancelled by explicit drain policy.
 
-This applies to component calls, tool calls, model calls, agent execution steps, background tasks, and any other runtime work that may retain plugin code or handles.
-
-The kernel owns generation retirement and decides when a retired plugin instance is safe to stop.
+Invocations record their starting generation in service provenance, and spawned tasks carry their starting generation in their cancellation token. The kernel owns generation retirement and stops a retired instance after the new generation commits; an explicit asynchronous drain registry is not yet implemented.
 
 ## Persistence
 
@@ -441,37 +444,46 @@ Schema migrations are coordinated by the kernel before the candidate generation 
 
 ## Initial implementation scope
 
-The first implementation supports only the built-in `embedded` runtime.
+The implemented subset covers kernel-owned desired-state plugin management through `GraphReconciler::manage`:
 
-The management API, lifecycle, artifact identity, graph-generation semantics, and runtime-provider boundary must nevertheless be runtime-neutral from the start.
+- typed `PluginManagementRequest` over load, unload, and desired-set reconcile;
+- `expected_active_revision` compare-and-swap on load and unload;
+- ready artifacts and validated structured build plans normalized before resolution;
+- management authorization and effective build authority attenuation through trusted context;
+- injected CAS and isolated build-executor contracts with bounded evidence;
+- core-computed immutable artifact revisions from exact output bytes;
+- runtime-provider resolution with cycle and unavailable-runtime rejection before commit;
+- atomic generation commit through the existing resolved-generation reconciliation path;
+- synchronous retirement of stopped instances after commit;
+- generation-pinned invocation provenance and task scopes.
 
-Initial embedded loading may only activate, replace, or unload implementations whose embedded factories are already available to the running process.
+Runtime providers are ordinary embedded plugins exporting the kernel runtime-provider service. No WASM, TypeScript, or process-backed bridge package is implemented.
+
+Initial embedded loading activates, replaces, or unloads implementations whose embedded factories are already available to the running process.
 
 Do not add native dynamic-library loading as an implicit part of `embedded`.
 
-Agent-authored arbitrary compiled code becomes live without restarting the kernel once a suitable future runtime bridge, such as WASM or a process-backed runtime, is installed.
-
-Build-plan support may be implemented before non-embedded runtimes. A successful build whose declared runtime is unavailable must produce a clear `RuntimeUnavailable` result and must not alter the active graph.
+Explicit quiesce/drain retirement, concrete production build executors, and non-embedded bridge packages remain future work. A successful build whose declared runtime is unavailable produces a direct `RuntimeUnavailable` result with build evidence and does not alter the active graph.
 
 ## Error model
 
 Plugin management failures must identify the failed phase and preserve the previous active generation.
 
-At minimum distinguish:
+The implemented subset distinguishes direct management phases for:
 
-- request authorization failure;
-- manifest validation failure;
+- authorization denial;
 - build failure;
-- artifact output missing or invalid;
+- missing declared output;
+- invalid or unavailable CAS artifact;
 - runtime unavailable;
-- runtime artifact validation failure;
-- graph resolution failure;
-- contract incompatibility;
-- authority incompatibility;
+- runtime-provider dependency cycle;
+- graph resolution failure, including unsatisfied required imports;
 - prepare failure;
 - start failure;
 - stale expected artifact revision;
-- drain or stop failure after commit.
+- unknown unload target.
+
+Build reports are also retained on later candidate resolution, runtime prepare, and activation failures.
 
 Post-commit retirement failures are operational errors. They do not roll the graph pointer back to a generation that has already been replaced.
 
@@ -489,10 +501,10 @@ Implementation must preserve these invariants:
 8. Load, unload, replace, and reconcile are kernel-domain operations.
 9. Public management requests express desired state rather than raw lifecycle transitions.
 10. Build steps may be included in load requests for compiled or bundled languages.
-11. Build execution is explicitly sandboxed/capability-bound and is not ambient kernel shell access.
-12. Build authority is distinct from plugin runtime authority.
+11. Build execution is explicitly isolated/capability-bound and is not ambient kernel shell access.
+12. Build authority is distinct from plugin and runtime-provider authority.
 13. Graph generations pin exact artifact revisions and runtime providers.
-14. Candidate build, validation, prepare, or start failure leaves the active generation unchanged.
+14. Candidate validation, prepare, or start failure leaves the active generation unchanged.
 15. Existing calls remain pinned to their old generation during replacement.
 16. Persistence belongs to plugin identity, not execution runtime or artifact revision.
 17. Every runtime dependency chain is acyclic and terminates at `embedded`.
@@ -500,21 +512,25 @@ Implementation must preserve these invariants:
 
 ## Validation
 
-Implementation is complete when tests prove:
+The implemented subset is covered by `rust/crates/phenix-core/src/plugin_build_loading_regression.rs`, `rust/crates/phenix-core/src/plugin_management_regression.rs`, and `rust/crates/phenix-core/src/runtime_provider_regression.rs`, which prove:
 
-- an embedded plugin can be loaded and unloaded through the kernel management interface;
-- replacing an active embedded plugin creates a new graph generation;
+- a runtime plugin can be loaded and unloaded through the kernel management interface;
+- replacing an active plugin with a new artifact creates a new graph generation;
 - stale expected-revision requests are rejected;
 - a failed candidate start preserves the prior generation;
 - an unload that would break a required import is rejected before commit;
-- old invocations remain pinned while new invocations use the replacement generation;
-- build requests use structured executable/argument steps rather than shell strings;
-- build authority is bounded independently from plugin authority;
-- a produced artifact gets an immutable revision;
-- an unavailable future runtime fails without mutating the graph;
+- an unavailable runtime fails without mutating the graph;
 - runtime-provider dependency cycles are rejected;
+- removing a runtime provider with dependents is rejected;
+- old invocations remain pinned while new invocations use the replacement generation;
 - runtime-bridge authority cannot leak to a guest plugin;
-- exact-head Source, Rust, Product, and Maintenance validation passes.
+- structured argv preserves shell metacharacters as literal arguments and cwd/environment are explicit;
+- build authority is the policy/caller/request intersection and remains separate from guest authority;
+- CAS preflight precedes build execution;
+- missing output and failed builds preserve the active generation;
+- exact output bytes deterministically produce an immutable revision;
+- unavailable runtimes and runtime rejection preserve build evidence without graph mutation;
+- ready and built artifacts enter the identical concrete downstream generation.
 
 ## Simplification audit
 

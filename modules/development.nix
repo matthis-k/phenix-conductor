@@ -58,10 +58,10 @@
           label = "phenix-backend-acp / tool_bridge";
         }
         {
-          id = "phenix-adapter-acp-client-contract-adapter";
+          id = "phenix-adapter-acp-runtime-plugin";
           package = "phenix-adapter-acp";
-          test = "client_contract_adapter";
-          label = "phenix-adapter-acp / client_contract_adapter";
+          test = "runtime_plugin";
+          label = "phenix-adapter-acp / runtime_plugin";
         }
         {
           id = "phenix-domain-context-serialization";
