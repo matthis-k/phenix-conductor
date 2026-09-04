@@ -1,7 +1,7 @@
 use crate::{
-    Authority, ComponentId, ComponentInterface, ComponentInvocationError, DurableSchema,
-    EventDispatchReport, EventError, EventTypeId, Exact, GraphGenerationId, InterfaceId,
-    KernelError, NamespaceTransaction, PhenixValue, PluginHost, PluginId, Project,
+    Authority, CallCancellationToken, ComponentId, ComponentInterface, ComponentInvocationError,
+    DurableSchema, EventDispatchReport, EventError, EventTypeId, Exact, GraphGenerationId,
+    InterfaceId, KernelError, NamespaceTransaction, PhenixValue, PluginHost, PluginId, Project,
     ResourceNamespace, SchemaMigration, ServiceId, TaskScope, TransactionOp, ValueError,
 };
 use std::marker::PhantomData;
@@ -38,6 +38,7 @@ impl<'host, 'runtime, Sdk, Settings, State> PluginContext<'host, 'runtime, Sdk, 
             call: CallContext {
                 authority: host.authority(),
                 graph_generation: host.graph_generation(),
+                cancellation: host.cancellation_token(),
             },
         }
     }
@@ -54,6 +55,7 @@ pub struct CurrentPlugin<'host, Settings, State> {
 pub struct CallContext<'host> {
     pub authority: &'host Authority,
     pub graph_generation: Option<&'host GraphGenerationId>,
+    pub cancellation: Option<&'host CallCancellationToken>,
 }
 
 /// Scoped access to generic kernel mechanisms.
