@@ -1,21 +1,36 @@
-use crate::{
-    Authority, ComponentGraphError, ComponentId, ComponentManifest, ConfigContribution,
-    InterfaceId, PluginManifest, ResolvedComponentGraph, ResolvedHarness, ResolvedHarnessError,
-};
+use crate::{ComponentId, InterfaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Why the kernel selected the primary provider in a resolved graph generation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderSelectionReason {
+    ExplicitBinding,
+    ProductPriority,
+    StableIdentity,
+}
+
+/// Why dispatch entered a graph-pinned fallback instead of the primary provider.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderFallbackReason {
+    PrimaryUnavailable,
+}
+
 /// Product-owned inputs that affect provider selection during candidate resolution.
 ///
-/// Plugin-authored `ComponentExport::priority` is capability metadata only on this
-/// path. Effective preference comes from this policy. An interface without an
-/// explicit policy uses equal effective priority and therefore resolves by stable
-/// component identity.
+/// Plugin-authored export priority remains implementation metadata. Effective
+/// provider preference comes from this policy. With no policy entry, eligible
+/// providers have equal preference and stable component identity breaks ties.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProviderCompositionPolicy {
     interfaces: BTreeMap<InterfaceId, InterfaceProviderPolicy>,
 }
 
+/// Generic policy for one interface. Interface fallback permission and product
+/// fallback enablement are separate gates so product policy cannot invent
+/// fallback semantics for a contract that does not allow them.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InterfaceProviderPolicy {
     #[serde(default)]
@@ -24,6 +39,10 @@ pub struct InterfaceProviderPolicy {
     priorities: BTreeMap<ComponentId, i32>,
     #[serde(default)]
     disabled: BTreeSet<ComponentId>,
+    #[serde(default)]
+    interface_allows_fallback: bool,
+    #[serde(default)]
+    fallback_enabled: bool,
 }
 
 impl ProviderCompositionPolicy {
@@ -63,324 +82,111 @@ impl ProviderCompositionPolicy {
         self
     }
 
-    fn apply(
+    /// Declare that the interface contract itself permits pre-dispatch fallback.
+    #[must_use]
+    pub fn with_interface_fallback(mut self, interface: InterfaceId) -> Self {
+        self.interfaces
+            .entry(interface)
+            .or_default()
+            .interface_allows_fallback = true;
+        self
+    }
+
+    /// Enable fallback in product composition policy. This has no effect unless
+    /// the interface contract also permits fallback.
+    #[must_use]
+    pub fn with_fallback_enabled(mut self, interface: InterfaceId) -> Self {
+        self.interfaces
+            .entry(interface)
+            .or_default()
+            .fallback_enabled = true;
+        self
+    }
+
+    pub(crate) fn explicit_binding(&self, interface: &InterfaceId) -> Option<&ComponentId> {
+        self.interfaces
+            .get(interface)
+            .and_then(|policy| policy.explicit.as_ref())
+    }
+
+    pub(crate) fn provider_enabled(
         &self,
-        manifests: impl IntoIterator<Item = ComponentManifest>,
-    ) -> Vec<ComponentManifest> {
-        manifests
-            .into_iter()
-            .map(|mut manifest| {
-                let provider = manifest.id.clone();
-                manifest.exports.retain_mut(|export| {
-                    let policy = self.interfaces.get(&export.interface);
-                    if policy.is_some_and(|policy| policy.disabled.contains(&provider)) {
-                        return false;
-                    }
-
-                    let configured = policy
-                        .and_then(|policy| policy.priorities.get(&provider))
-                        .copied()
-                        .unwrap_or_default();
-                    export.priority = if policy
-                        .and_then(|policy| policy.explicit.as_ref())
-                        .is_some_and(|explicit| explicit == &provider)
-                    {
-                        i32::MAX
-                    } else {
-                        configured.min(i32::MAX - 1)
-                    };
-                    true
-                });
-                manifest
-            })
-            .collect()
+        interface: &InterfaceId,
+        provider: &ComponentId,
+    ) -> bool {
+        !self
+            .interfaces
+            .get(interface)
+            .is_some_and(|policy| policy.disabled.contains(provider))
     }
-}
 
-impl ResolvedComponentGraph {
-    /// Resolve component imports with product-owned provider preference.
-    pub fn compile_with_provider_policy(
-        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
-        component_manifests: impl IntoIterator<Item = ComponentManifest>,
-        authority_ceiling: &Authority,
-        policy: &ProviderCompositionPolicy,
-    ) -> Result<Self, ComponentGraphError> {
-        Self::compile(
-            plugin_manifests,
-            policy.apply(component_manifests),
-            authority_ceiling,
-        )
+    pub(crate) fn effective_priority(
+        &self,
+        interface: &InterfaceId,
+        provider: &ComponentId,
+    ) -> i32 {
+        self.interfaces
+            .get(interface)
+            .and_then(|policy| policy.priorities.get(provider))
+            .copied()
+            .unwrap_or_default()
     }
-}
 
-impl ResolvedHarness {
-    /// Resolve a complete candidate generation with product-owned provider policy.
-    ///
-    /// The policy is included in generation identity even when two policies happen
-    /// to select the same provider. Reconciliation therefore never mutates provider
-    /// preference inside an active generation.
-    pub fn resolve_with_provider_policy(
-        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
-        component_manifests: impl IntoIterator<Item = ComponentManifest>,
-        contributions: impl IntoIterator<Item = ConfigContribution>,
-        authority_ceiling: &Authority,
-        policy: &ProviderCompositionPolicy,
-    ) -> Result<Self, ResolvedHarnessError> {
-        let mut resolved = Self::resolve(
-            plugin_manifests,
-            policy.apply(component_manifests),
-            contributions,
-            authority_ceiling,
-        )?;
-        resolved.incorporate_semantic_metadata(policy);
-        Ok(resolved)
+    pub(crate) fn has_priority(
+        &self,
+        interface: &InterfaceId,
+        provider: &ComponentId,
+    ) -> bool {
+        self.interfaces
+            .get(interface)
+            .is_some_and(|policy| policy.priorities.contains_key(provider))
+    }
+
+    pub(crate) fn fallback_enabled(&self, interface: &InterfaceId) -> bool {
+        self.interfaces.get(interface).is_some_and(|policy| {
+            policy.interface_allows_fallback && policy.fallback_enabled
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        CapabilityId, ComponentExport, ComponentImport, InterfaceSchema, PluginExecution, PluginId,
-    };
 
-    fn plugin(value: &str, authority: Authority) -> PluginManifest {
-        PluginManifest {
-            id: PluginId::parse(value).unwrap(),
-            version: 1,
-            execution: PluginExecution::Embedded,
-            dependencies: Vec::new(),
-            services: Vec::new(),
-            resource_namespaces: Vec::new(),
-            maximum_authority: authority,
-        }
+    fn interface() -> InterfaceId {
+        InterfaceId::parse("fixture.provider@1").unwrap()
     }
 
-    fn provider(
-        id: &str,
-        interface: &InterfaceId,
-        authored_priority: i32,
-        required_authority: Authority,
-        maximum_authority: Authority,
-    ) -> ComponentManifest {
-        ComponentManifest {
-            id: ComponentId::parse(id).unwrap(),
-            owner: PluginId::parse(format!("plugin-{id}")).unwrap(),
-            imports: Vec::new(),
-            exports: vec![ComponentExport {
-                interface: interface.clone(),
-                schema: InterfaceSchema::default(),
-                priority: authored_priority,
-                required_authority,
-            }],
-            listeners: Vec::new(),
-            maximum_authority,
-        }
-    }
-
-    fn consumer(interface: &InterfaceId, authority: Authority) -> ComponentManifest {
-        ComponentManifest {
-            id: ComponentId::parse("consumer").unwrap(),
-            owner: PluginId::parse("plugin-consumer").unwrap(),
-            imports: vec![ComponentImport {
-                interface: interface.clone(),
-                schema: InterfaceSchema::default(),
-                required: true,
-                authority: authority.clone(),
-            }],
-            exports: Vec::new(),
-            listeners: Vec::new(),
-            maximum_authority: authority,
-        }
-    }
-
-    fn selected(graph: &ResolvedComponentGraph, interface: &InterfaceId) -> ComponentId {
-        graph
-            .import_handle(&ComponentId::parse("consumer").unwrap(), interface)
-            .unwrap()
-            .unwrap()
-            .exporter()
-            .clone()
+    fn provider(value: &str) -> ComponentId {
+        ComponentId::parse(value).unwrap()
     }
 
     #[test]
-    fn product_policy_owns_effective_provider_priority() {
-        let interface = InterfaceId::parse("fixture.provider@1").unwrap();
-        let authority = Authority::default();
-        let components = [
-            provider(
-                "a-provider",
-                &interface,
-                -1000,
-                Authority::default(),
-                authority.clone(),
-            ),
-            provider(
-                "z-provider",
-                &interface,
-                1000,
-                Authority::default(),
-                authority.clone(),
-            ),
-            consumer(&interface, authority.clone()),
-        ];
-        let plugins = [
-            plugin("plugin-a-provider", authority.clone()),
-            plugin("plugin-z-provider", authority.clone()),
-            plugin("plugin-consumer", authority.clone()),
-        ];
-
-        let default = ResolvedComponentGraph::compile_with_provider_policy(
-            plugins.clone(),
-            components.clone(),
-            &authority,
-            &ProviderCompositionPolicy::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            selected(&default, &interface),
-            ComponentId::parse("a-provider").unwrap()
-        );
-
-        let policy = ProviderCompositionPolicy::new().with_priority(
-            interface.clone(),
-            ComponentId::parse("z-provider").unwrap(),
-            10,
-        );
-        let preferred = ResolvedComponentGraph::compile_with_provider_policy(
-            plugins, components, &authority, &policy,
-        )
-        .unwrap();
-        assert_eq!(
-            selected(&preferred, &interface),
-            ComponentId::parse("z-provider").unwrap()
-        );
+    fn fallback_requires_contract_and_product_policy() {
+        let interface = interface();
+        assert!(!ProviderCompositionPolicy::new()
+            .with_interface_fallback(interface.clone())
+            .fallback_enabled(&interface));
+        assert!(!ProviderCompositionPolicy::new()
+            .with_fallback_enabled(interface.clone())
+            .fallback_enabled(&interface));
+        assert!(ProviderCompositionPolicy::new()
+            .with_interface_fallback(interface.clone())
+            .with_fallback_enabled(interface.clone())
+            .fallback_enabled(&interface));
     }
 
     #[test]
-    fn explicit_binding_cannot_bypass_authority() {
-        let interface = InterfaceId::parse("fixture.provider@1").unwrap();
-        let read = CapabilityId::parse("fs.read").unwrap();
-        let network = CapabilityId::parse("network.read").unwrap();
-        let caller = Authority::new([read.clone()]);
-        let broad = Authority::new([read.clone(), network.clone()]);
-        let components = [
-            provider(
-                "a-authorized",
-                &interface,
-                0,
-                Authority::new([read]),
-                broad.clone(),
-            ),
-            provider(
-                "z-unauthorized",
-                &interface,
-                0,
-                Authority::new([network]),
-                broad.clone(),
-            ),
-            consumer(&interface, caller.clone()),
-        ];
-        let plugins = [
-            plugin("plugin-a-authorized", broad.clone()),
-            plugin("plugin-z-unauthorized", broad),
-            plugin("plugin-consumer", caller.clone()),
-        ];
-        let policy = ProviderCompositionPolicy::new().with_explicit_binding(
-            interface.clone(),
-            ComponentId::parse("z-unauthorized").unwrap(),
-        );
-
-        let graph = ResolvedComponentGraph::compile_with_provider_policy(
-            plugins, components, &caller, &policy,
-        )
-        .unwrap();
-        assert_eq!(
-            selected(&graph, &interface),
-            ComponentId::parse("a-authorized").unwrap()
-        );
-    }
-
-    #[test]
-    fn disabled_provider_is_removed_before_selection() {
-        let interface = InterfaceId::parse("fixture.provider@1").unwrap();
-        let components = [
-            provider(
-                "a-provider",
-                &interface,
-                0,
-                Authority::default(),
-                Authority::default(),
-            ),
-            provider(
-                "b-provider",
-                &interface,
-                0,
-                Authority::default(),
-                Authority::default(),
-            ),
-            consumer(&interface, Authority::default()),
-        ];
-        let plugins = [
-            plugin("plugin-a-provider", Authority::default()),
-            plugin("plugin-b-provider", Authority::default()),
-            plugin("plugin-consumer", Authority::default()),
-        ];
+    fn product_priority_and_disable_are_provider_specific() {
+        let interface = interface();
+        let preferred = provider("preferred");
+        let disabled = provider("disabled");
         let policy = ProviderCompositionPolicy::new()
-            .with_disabled_provider(interface.clone(), ComponentId::parse("a-provider").unwrap());
+            .with_priority(interface.clone(), preferred.clone(), 7)
+            .with_disabled_provider(interface.clone(), disabled.clone());
 
-        let graph = ResolvedComponentGraph::compile_with_provider_policy(
-            plugins,
-            components,
-            &Authority::default(),
-            &policy,
-        )
-        .unwrap();
-        assert_eq!(
-            selected(&graph, &interface),
-            ComponentId::parse("b-provider").unwrap()
-        );
-    }
-
-    #[test]
-    fn provider_policy_is_part_of_generation_identity() {
-        let interface = InterfaceId::parse("fixture.provider@1").unwrap();
-        let components = [
-            provider(
-                "provider",
-                &interface,
-                500,
-                Authority::default(),
-                Authority::default(),
-            ),
-            consumer(&interface, Authority::default()),
-        ];
-        let plugins = [
-            plugin("plugin-provider", Authority::default()),
-            plugin("plugin-consumer", Authority::default()),
-        ];
-        let first = ResolvedHarness::resolve_with_provider_policy(
-            plugins.clone(),
-            components.clone(),
-            [],
-            &Authority::default(),
-            &ProviderCompositionPolicy::default(),
-        )
-        .unwrap();
-        let second_policy = ProviderCompositionPolicy::new().with_priority(
-            interface,
-            ComponentId::parse("provider").unwrap(),
-            1,
-        );
-        let second = ResolvedHarness::resolve_with_provider_policy(
-            plugins,
-            components,
-            [],
-            &Authority::default(),
-            &second_policy,
-        )
-        .unwrap();
-
-        assert_ne!(first.generation(), second.generation());
+        assert_eq!(policy.effective_priority(&interface, &preferred), 7);
+        assert!(policy.has_priority(&interface, &preferred));
+        assert!(!policy.provider_enabled(&interface, &disabled));
     }
 }
