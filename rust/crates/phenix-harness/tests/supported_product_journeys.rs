@@ -69,14 +69,12 @@ fn invoke(harness: &mut PhenixHarness, service: &str, input: Value) -> Value {
         "phenix.models.routing@1" => {
             invoke_structural_json::<ModelCommand, ModelResponse>(harness, service, input)
         }
-        "phenix.jobs@1" => {
-            invoke_component_structural_json::<JobCommand, JobResponse>(
-                harness,
-                phenix_plugin_catalog::job_component_manifest(),
-                service,
-                input,
-            )
-        }
+        "phenix.jobs@1" => invoke_component_structural_json::<JobCommand, JobResponse>(
+            harness,
+            phenix_plugin_catalog::job_component_manifest(),
+            service,
+            input,
+        ),
         "phenix.frontend-services@1" => {
             invoke_structural_json::<FrontendCommand, FrontendResponse>(harness, service, input)
         }
