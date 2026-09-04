@@ -25,7 +25,7 @@ frontends / protocol adapters
   selected plugin providers
 ```
 
-`phenix-core` owns plugin identity and lifecycle, deterministic service resolution, authority attenuation, generic persistence, events, tasks, and embedded, external, and resource-only hosting. It does not own session, context, execution, planning, tool, model, frontend, or other first-party agent semantics.
+`phenix-core` owns plugin identity and lifecycle, deterministic service resolution, authority attenuation, generic persistence, events, tasks, the embedded runtime bootstrap, runtime-provider integration, and resource-only plugins. It does not own session, context, execution, planning, tool, model, frontend, or other first-party agent semantics.
 
 `phenix-conductor` owns the generic server process and client transport. It hosts only configured plugins. A zero-plugin conductor has no first-party fallback behavior.
 
@@ -54,7 +54,7 @@ The normal `phenix` package is the supported Harness composition. It is built th
 
 Nix exposes independently packaged first-party runtime plugins, including adapters, through `phenixPlugins.<system>.*`. `wrappers.phenix.wrap` and `lib.mkPhenix` assemble a conductor with an explicit plugin selection. Omitting a plugin removes its service unless another selected provider supplies the same contract.
 
-The resolved component graph is the canonical runtime composition for component imports and event listeners. A `ComponentExport` identifies the executable endpoint. It does not need a duplicate terminal `ServiceContribution`. Plugin service contributions remain available for ordinary service dispatch and explicit interposition layers. Embedded and external hosts execute the same graph-selected component identity. Development reconciliation replaces kernel configuration, component graph, listener bindings, resources, and generation as one resolved runtime topology.
+The resolved component graph is the canonical runtime composition for component imports and event listeners. A `ComponentExport` identifies the executable endpoint. It does not need a duplicate terminal `ServiceContribution`. Plugin service contributions remain available for ordinary service dispatch and explicit interposition layers. Embedded and bridged runtimes execute the same graph-selected component identity. Development reconciliation replaces kernel configuration, component graph, listener bindings, resources, and generation as one resolved runtime topology.
 
 `GraphReconciler::manage` is the sole desired-state plugin load, build, replace, unload, and reconcile path. Runtime load requests carry either a concrete content-addressed artifact or a typed build plan; trusted host policy supplies management authorization, CAS access, and an isolated build executor out of band. Core computes canonical `sha256:<64 lowercase hex>` artifact revisions from exact build output before runtime resolution, and only concrete artifacts can enter a resolved graph or `KernelConfig`.
 
@@ -97,7 +97,7 @@ Authentication and provider selection are plugin and Harness concerns. They must
 - Parse external data at boundaries and keep invalid runtime states difficult to represent internally.
 - Preserve typed failure modes across configuration, transport, protocol, plugin, and provider boundaries.
 - Effective authority is the intersection of caller authority, provider maximum authority, and invocation restrictions.
-- Apply the same authority attenuation to direct calls, plugin calls, retries, events, tasks, persistence, workspace operations, and external plugins.
+- Apply the same authority attenuation to direct calls, plugin calls, retries, events, tasks, persistence, workspace operations, and bridged plugin calls.
 - Resource-only plugins cannot execute code.
 - Zero-plugin mode has no hidden first-party fallbacks.
 - First-party plugins use the same contracts as alternate plugins.
