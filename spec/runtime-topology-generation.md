@@ -7,150 +7,150 @@ coverage:
 
 ## Purpose
 
-One resolved graph generation is the source of truth for executable runtime topology.
+One resolved Graph Generation is the source of truth for executable runtime topology.
 
-Plugins declare behavior and own state. They do not own routing. Components expose executable functions. Resolution turns those declarations into call nodes, service interposition, event entry points, resources, and lifecycle ownership. Loading or unloading a plugin produces a new graph generation and activates it atomically.
+Plugins declare behavior and own Plugin state. They do not own routing. Components expose executable functions. The kernel resolver turns those declarations into callable nodes, service interposition, Event entry points, Plugin Resources, and lifecycle ownership. Loading or unloading a Plugin produces a candidate Graph Generation and activates it atomically.
 
-This extends the plugin authoring, service layering, event, reconciliation, and plugin host contracts.
+This extends the Plugin authoring, Layering, Event, reconciliation, and `PluginHost` contracts.
 
 ## Model
 
-A plugin contributes:
+A Plugin contributes:
 
-- executable component functions;
-- service exports and terminal implementations;
-- layers around service calls;
-- listeners for completed events;
-- resources and metadata;
-- lifecycle and state ownership.
+- executable Component functions;
+- service Exports and Terminal Provider implementations;
+- Layers around service calls;
+- Listeners for completed Events;
+- Plugin Resources and metadata;
+- lifecycle and Plugin state ownership.
 
-The resolved generation owns how those contributions connect.
+The resolved Graph Generation owns how those contributions connect.
 
 ```text
-service call -> layer -> layer -> terminal function
+service call -> Layer -> Layer -> Terminal Provider function
 
-event -> listener function
-      -> listener function
+Event -> Listener function
+      -> Listener function
 ```
 
-Hooks are authoring syntax. An intercepting hook lowers to a layer. An observational hook lowers to a listener. There is no hook runtime.
+Hooks are authoring syntax. An intercepting Hook lowers to a Layer. An observational Hook lowers to a Listener. There is no Hook runtime.
 
-Listeners are event-triggered entry points. They are not service-chain edges and cannot affect the operation that emitted the event.
+Listeners are Event-triggered entry points. They are not service-chain edges and cannot affect the operation that emitted the Event.
 
-## Resolved Topology
+## Resolved topology
 
-A resolved generation contains enough information to activate the executable topology without asking plugin instances to discover or register routing semantics.
+A resolved Graph Generation contains enough information to activate the executable topology without asking Plugin instances to discover or register routing semantics.
 
 The resolved form owns:
 
-- graph generation identity;
-- component and function ownership;
-- resolved service chains and layer order;
-- terminal implementation selection;
-- listener identities, event contracts, dependency ordering, failure policies, and owner identity;
-- resource projections;
+- Graph Generation identity;
+- Component and function ownership;
+- resolved service chains and Effective Layer Order;
+- Terminal Provider selection;
+- Listener identities, Event contracts, dependency ordering, failure policies, and owning Plugin identity;
+- Plugin Resource projections;
 - lifecycle ownership and restart requirements.
 
-Runtime handler objects may remain erased implementation bindings, but their topology and ownership come from the resolved generation.
+Runtime handler objects may remain erased executable bindings, but their topology and ownership come from the resolved Graph Generation.
 
-## Plugin Instances
+## Plugin instances
 
-`PluginInstance` is an execution, lifecycle, and state container. It is not a routing abstraction.
+`PluginInstance` is an execution, lifecycle, and Plugin state container. It is not a routing abstraction.
 
-An instance may provide callable implementations and listener handlers for the nodes owned by its plugin. It must not mutate global routing, choose service chains, or create hidden subscriptions that are absent from the resolved generation.
+A Plugin instance may provide callable implementations and Listener handlers for the nodes owned by its Plugin. It must not mutate global routing, choose service chains, or create hidden subscriptions that are absent from the resolved Graph Generation.
 
-Factories answer only how to construct an implementation for a generation. Factory registration is not topology.
+Factories answer only how to construct a Plugin implementation for a Graph Generation. Factory registration is not topology.
 
 ## Activation
 
-Candidate resolution finishes before live mutation.
+Candidate Graph resolution finishes before live mutation.
 
 Activation follows this order:
 
-1. Resolve and validate the complete candidate generation.
-2. Compute the transition from the active generation.
-3. Stage new or restarted implementation instances and runtime bindings.
-4. Keep the active generation unchanged if staging fails.
-5. Install candidate config, component graph, service topology, listener topology, resources, and generation identity as one transition.
-6. Retire removed or replaced bindings and instances.
-7. Preserve unchanged instances when the transition permits it.
+1. Resolve and validate the complete candidate Graph Generation.
+2. Compute the transition from the active Graph Generation.
+3. Stage new or restarted Plugin instances and Plugin Runtime bindings.
+4. Keep the active Graph Generation unchanged if staging fails.
+5. Install resolved configuration, Component Graph, service topology, Listener topology, Plugin Resource projections, and Graph Generation identity as one transition.
+6. Retire removed or replaced executable bindings and Plugin instances.
+7. Preserve unchanged Plugin instances when the transition permits it.
 
-No caller may observe a mixture of old service topology and new listener topology, or the reverse.
+No caller may observe a mixture of old service topology and new Listener topology, or the reverse.
 
-## Load And Unload
+## Load and unload
 
-Loading a plugin means resolving a candidate generation that contains its contributions, then activating that generation.
+Loading a Plugin means resolving a candidate Graph Generation that contains its contributions, then activating that Graph Generation.
 
-Unloading a plugin means resolving a candidate generation without that plugin, then activating that generation.
+Unloading a Plugin means resolving a candidate Graph Generation without that Plugin, then activating that Graph Generation.
 
-Unload removes every executable binding owned only by the retired plugin, including service implementations, layers, listeners, and generation-local resources. No stale handler remains reachable after the new generation becomes active.
+Unload removes every executable binding owned only by the retired Plugin, including Terminal Provider implementations, Layers, Listeners, and generation-local Plugin Resource projections. No stale handler remains reachable after the new Graph Generation becomes active.
 
-Dependency closure and restart policy determine which other plugins restart. Unchanged compatible implementations remain active.
+Dependency closure and restart policy determine which other Plugins restart. Unchanged compatible Plugin instances remain active.
 
-## Listener Topology
+## Listener topology
 
 Listener declarations are declarative metadata before activation.
 
-A resolved listener entry contains:
+A resolved Listener entry contains:
 
 ```text
 subscription id
-owner plugin
-owner component/function
-source event type + version
+owning Plugin
+owning Component/function
+source Event type + version
 payload schema + projection
 dependency edges
 failure policy
 required and maximum authority
-graph generation attribution
-runtime handler binding
+Graph Generation attribution
+Runtime Provider or embedded handler binding
 ```
 
-The event bus executes the resolved entries. Plugin `start` and `stop` may manage plugin-local resources, but they are not the canonical source of listener registration or removal.
+The Event bus executes the resolved Listener entries. Plugin `start` and `stop` may manage Plugin-local resources, but they are not the canonical source of Listener registration or removal.
 
-Generated and manually constructed Core fixtures use the same event transport, authority attenuation, dependency ordering, recursion policy, and delivery failure policy.
+Generated and manually constructed Core fixtures use the same Event transport, Effective Authority attenuation, Listener dependency ordering, recursion policy, and Event Delivery failure policy.
 
-## Service Topology
+## Service topology
 
-Service chains are resolved before activation. Layers wrap the next resolved node through the canonical continuation mechanism. A plugin instance cannot insert an extra layer by mutating live routing during `start`.
+Service chains are resolved before activation. Layers wrap the next resolved node through the canonical Continuation mechanism. A Plugin instance cannot insert an extra Layer by mutating live routing during `start`.
 
-Adding, removing, or reordering a layer therefore requires a new resolved generation.
+Adding, removing, or reordering a Layer therefore requires a new Graph Generation.
 
 ## Reconciliation
 
-Live reconciliation compares complete generations, not independent mutable registries.
+Live reconciliation compares complete Graph Generations, not independent mutable registries.
 
 The transition plan accounts for changes to:
 
-- plugin manifests;
-- component and function ownership;
-- service chains and layer order;
-- listener entry points and listener dependency order;
-- resources and configuration;
-- runtime bindings and lifecycle policy.
+- Plugin manifests;
+- Component and function ownership;
+- service chains and Effective Layer Order;
+- Listener entry points and Listener dependency order;
+- Plugin Resources and resolved configuration;
+- Plugin Runtime bindings and lifecycle policy.
 
-A topology change that changes executable bindings changes the generation identity.
+A topology change that changes executable bindings changes Graph Generation identity.
 
 ## Inspection
 
-Inspection reports the active resolved generation and its executable topology. It is possible to determine which plugin owns a callable node, which layers precede it, which listeners consume an event, and which generation installed each binding without inspecting plugin-local mutable state.
+Inspection reports the active Graph Generation and its executable topology. It is possible to determine which Plugin owns a callable node, which Layers precede it, which Listeners consume an Event, and which Graph Generation installed each executable binding without inspecting Plugin-local mutable state.
 
 ## Invariants
 
-- One resolved generation is the source of truth for executable topology.
+- One resolved Graph Generation is the source of truth for executable topology.
 - Plugins provide behavior, state, lifecycle, and declarations. The kernel owns routing.
 - Components and functions are executable nodes.
-- Layers are service interposition in resolved call chains.
-- Listeners are event-triggered entry points.
-- Hooks lower to layers or listeners and have no separate runtime.
+- Layers are service interposition in resolved invocation chains.
+- Listeners are Event-triggered entry points.
+- Hooks lower to Layers or Listeners and have no separate runtime.
 - `PluginInstance` does not own global topology.
-- Factories construct implementations and do not register routing.
-- Load and unload activate complete candidate generations.
-- Generation replacement is atomic across service and listener topology.
-- Failed staging leaves the active generation unchanged.
-- Retired generations leave no reachable listener or service binding behind.
-- Unchanged compatible instances may survive a generation transition.
+- Factories construct Plugin implementations and do not register routing.
+- Load and unload activate complete candidate Graph Generations.
+- Graph Generation replacement is atomic across service and Listener topology.
+- Failed staging leaves the active Graph Generation unchanged.
+- Retired Graph Generations leave no reachable Listener or service binding behind.
+- Unchanged compatible Plugin instances may survive a Graph Generation transition.
 
 ## Validation
 
-Regression coverage proves plugin addition and removal, service and listener replacement, failed candidate rollback, retained instances, retired handlers, resource-only plugins, listener DAG rejection, and generation attribution. Static SDK coverage proves generated listener declarations and handlers use the same resolved activation path.
+Regression coverage proves Plugin addition and removal, service and Listener replacement, failed candidate rollback, retained Plugin instances, retired handlers, resource-only Plugins, Listener DAG rejection, and Graph Generation attribution. Static SDK coverage proves generated Listener declarations and handlers use the same resolved activation path.
