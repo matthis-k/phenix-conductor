@@ -1,16 +1,16 @@
 [package]
-name = "phenix-acp"
+name = "phenix-adapter-acp"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [package.metadata.phenix]
-role = "passive-library"
+role = "runtime-plugin"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
 agent-client-protocol.workspace = true
-phenix-client = { path = "../phenix-client" }
-serde_json.workspace = true
+phenix-core = { path = "../phenix-core" }
+phenix-sdk = { path = "../phenix-sdk" }

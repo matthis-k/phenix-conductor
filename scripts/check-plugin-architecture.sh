@@ -20,7 +20,7 @@ errors="$({
       | (
           [
             $packages[]
-            | select((.name == "phenix-plugin-cli") or (.name == "phenix-plugin-sdk"))
+            | select((.name == "phenix-plugin-cli") or (.name == "phenix-plugin-sdk") or (.name == "phenix-acp"))
             | "legacy runtime plugin package is forbidden: \(.name)"
           ]
           +
@@ -100,7 +100,7 @@ if [[ -n "$errors" ]]; then
 fi
 
 if [[ -z "${PHENIX_PLUGIN_ARCHITECTURE_FIXTURE_MODE:-}" ]]; then
-  legacy_dsl_matches="$(grep -RFn --include='*.rs' 'phenix_plugin!' "$repo_root"/rust/crates/phenix-plugin-*/src 2>/dev/null || true)"
+  legacy_dsl_matches="$(grep -RFn --include='*.rs' 'phenix_plugin!' "$repo_root"/rust/crates/phenix-{adapter,plugin}-*/src 2>/dev/null || true)"
   if [[ -n "$legacy_dsl_matches" ]]; then
     printf '%s\n' "legacy phenix_plugin! authoring is forbidden in first-party runtime plugins:" >&2
     printf '%s\n' "$legacy_dsl_matches" >&2
@@ -237,6 +237,23 @@ if [[ -z "${PHENIX_PLUGIN_ARCHITECTURE_FIXTURE_MODE:-}" ]]; then
   fi
 
   expected="legacy runtime plugin package is forbidden: phenix-plugin-cli"
+  if [[ "$fixture_errors" != *"$expected"* ]]; then
+    printf '%s\n' "plugin architecture fixture failed for the wrong reason" >&2
+    printf '%s\n' "$fixture_errors" >&2
+    exit 1
+  fi
+
+  fixture='{"packages":[{"name":"phenix-acp","metadata":{"phenix":{"role":"runtime-plugin"}},"dependencies":[]}]}'
+  if fixture_errors="$(
+    PHENIX_PLUGIN_ARCHITECTURE_METADATA_JSON="$fixture" \
+      PHENIX_PLUGIN_ARCHITECTURE_FIXTURE_MODE=1 \
+      bash "$repo_root/scripts/check-plugin-architecture.sh" 2>&1
+  )"; then
+    printf '%s\n' "plugin architecture fixture unexpectedly passed: legacy ACP adapter package" >&2
+    exit 1
+  fi
+
+  expected="legacy runtime plugin package is forbidden: phenix-acp"
   if [[ "$fixture_errors" != *"$expected"* ]]; then
     printf '%s\n' "plugin architecture fixture failed for the wrong reason" >&2
     printf '%s\n' "$fixture_errors" >&2

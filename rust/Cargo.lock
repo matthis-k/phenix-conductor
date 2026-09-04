@@ -1478,12 +1478,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
-name = "phenix-acp"
+name = "phenix-adapter-acp"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
- "phenix-client",
- "serde_json",
+ "phenix-core",
+ "phenix-sdk",
 ]
 
 [[package]]
@@ -1650,6 +1650,7 @@ dependencies = [
 name = "phenix-plugin-catalog"
 version = "0.1.0"
 dependencies = [
+ "phenix-adapter-acp",
  "phenix-core",
  "phenix-plugin-api",
  "phenix-plugin-artifacts",
