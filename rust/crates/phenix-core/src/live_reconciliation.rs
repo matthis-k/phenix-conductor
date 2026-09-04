@@ -213,6 +213,7 @@ mod tests {
             }],
             components: vec![ComponentRuntimeMetadata {
                 manifest: ComponentManifest {
+                    listeners: Vec::new(),
                     id: component,
                     owner: plugin,
                     imports: Vec::new(),

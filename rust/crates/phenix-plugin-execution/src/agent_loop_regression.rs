@@ -74,6 +74,7 @@ fn provider_manifest() -> PluginManifest {
 
 fn provider_component() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: provider_component_id(),
         owner: provider_id(),
         imports: Vec::new(),

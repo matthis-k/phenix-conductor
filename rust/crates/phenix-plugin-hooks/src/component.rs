@@ -29,6 +29,7 @@ pub fn hook_component_id() -> ComponentId {
 pub fn hook_component_manifest(maximum_authority: Authority) -> ComponentManifest {
     let authority = hook_manifest(maximum_authority).maximum_authority;
     ComponentManifest {
+        listeners: Vec::new(),
         id: hook_component_id(),
         owner: PluginId::parse(HOOK_PLUGIN).expect("static plugin id is valid"),
         imports: vec![

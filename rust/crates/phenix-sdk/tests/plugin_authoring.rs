@@ -587,12 +587,11 @@ fn typed_event_emission_isolates_listener_mismatch_and_emits_diagnostic() {
         .register_embedded_factory(manifest.id, || Box::new(event_emitter::Plugin))
         .unwrap();
 
+    kernel.activate_all().unwrap();
     let events = kernel.events();
     let mut subscriptions = phenix_plugin::event_subscriptions(&events, Authority::default());
     subscriptions.push(diagnostic_subscription());
     events.replace_subscriptions(subscriptions).unwrap();
-
-    kernel.activate_all().unwrap();
     let input = serde_json::to_vec(&PhenixValue::from(&PlanningRequest {
         goal: "emit".into(),
     }))

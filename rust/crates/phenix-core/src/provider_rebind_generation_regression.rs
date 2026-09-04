@@ -17,6 +17,7 @@ fn plugin(id: &str) -> PluginManifest {
 
 fn provider(id: &str, owner: &str, interface: &InterfaceId, priority: i32) -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse(id).unwrap(),
         owner: PluginId::parse(owner).unwrap(),
         imports: Vec::new(),
@@ -32,6 +33,7 @@ fn provider(id: &str, owner: &str, interface: &InterfaceId, priority: i32) -> Co
 
 fn consumer(interface: &InterfaceId) -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse("consumer").unwrap(),
         owner: PluginId::parse("consumer-package").unwrap(),
         imports: vec![ComponentImport {

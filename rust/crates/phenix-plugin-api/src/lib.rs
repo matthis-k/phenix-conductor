@@ -117,6 +117,7 @@ pub fn sdk_component_manifest(maximum_authority: Authority) -> ComponentManifest
             authority: maximum_authority.clone(),
         };
     ComponentManifest {
+        listeners: Vec::new(),
         id: sdk_component_id(),
         owner: PluginId::parse(SDK_PLUGIN).expect("static SDK plugin id is valid"),
         imports: vec![

@@ -1,6 +1,7 @@
 use phenix_core::{
-    EventEnvelope, EventFailurePolicy, EventSubscription, EventTypeId, Kernel, PluginId,
-    ResolvedHarness, ResolvedHarnessActivation, ServiceId, SubscriptionId, SubscriptionSpec,
+    EventEnvelope, EventFailurePolicy, EventSubscription, EventTypeId, GraphReconciler, Kernel,
+    PluginId, ResolvedHarness, ResolvedHarnessActivation, ServiceId, SubscriptionId,
+    SubscriptionSpec,
 };
 use phenix_sdk::{
     Authority, Call, CapabilityId, Emit, Required, StaticComponentBehavior,
@@ -318,6 +319,7 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
         .preload_embedded_instance::<Plugin>(&mut kernel, plugin().__phenix_into_plugin_instance())
         .unwrap();
     kernel.activate_resolved_harness(&resolved).unwrap();
+    kernel.activate_all().unwrap();
 
     let events = kernel.events();
     let diagnostics = Arc::new(Mutex::new(Vec::<EventEnvelope>::new()));
@@ -341,8 +343,6 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
             }),
         }])
         .unwrap();
-
-    kernel.activate_all().unwrap();
 
     let request = Request {
         prompt: "async-export".into(),
@@ -429,7 +429,16 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     );
     drop(diagnostics);
 
-    kernel.stop(&Plugin::plugin_id()).unwrap();
+    let without_plugin = ResolvedHarness::resolve(
+        [<sessions::Plugin as StaticPluginDefinition>::manifest()],
+        [<sessions::Plugin as StaticPluginDefinition>::component_manifests().remove(0)],
+        std::iter::empty(),
+        &runtime_authority(),
+    )
+    .unwrap();
+    GraphReconciler::new(resolved)
+        .activate_candidate_on_kernel(&mut kernel, without_plugin)
+        .unwrap();
     let report = events
         .dispatch(&event, &authority("events.observe"))
         .unwrap();

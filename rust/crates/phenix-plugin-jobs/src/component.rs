@@ -39,6 +39,7 @@ mod tests {
 
     fn consumer_component() -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("fixture.job-consumer").unwrap(),
             owner: PluginId::parse("fixture.job-consumer").unwrap(),
             imports: vec![ComponentImport {

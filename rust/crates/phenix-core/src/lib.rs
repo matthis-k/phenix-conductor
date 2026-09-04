@@ -57,6 +57,8 @@ mod runtime_component_parity_regression;
 #[cfg(test)]
 mod runtime_provider_regression;
 #[cfg(test)]
+mod runtime_topology_generation_regression;
+#[cfg(test)]
 mod service_layer_dispatch_regression;
 #[cfg(test)]
 mod third_party_component_regression;
@@ -74,7 +76,7 @@ pub use agent::{
 pub use authority::Authority;
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
-    ResolvedImportHandle,
+    ResolvedImportHandle, ResolvedListener,
 };
 pub use composition_metadata::{
     CompatibilityMetadata, ComponentHostKind, ComponentRuntimeMetadata, ComponentStateClass,
@@ -102,11 +104,11 @@ pub use identity::{
     RoutingProfileId, RuntimeId, SdkNamespace, SdkResourceId, ServiceId, SessionId, SkillId,
     SubscriptionId,
 };
-pub use inspection::ResolvedHarnessInspection;
+pub use inspection::{ResolvedHarnessInspection, ResolvedListenerInspection};
 pub use live_reconciliation::LiveReconciliationError;
 pub use manifest::{
-    ComponentExport, ComponentImport, ComponentManifest, PluginArtifact, PluginExecution,
-    PluginManifest, ServiceContribution, ServiceRole,
+    ComponentExport, ComponentImport, ComponentListener, ComponentManifest, ListenerProjection,
+    PluginArtifact, PluginExecution, PluginManifest, ServiceContribution, ServiceRole,
 };
 pub use metadata_input::{CompositionMetadataInput, MetadataResolutionError};
 pub use metadata_inspection::ResolvedCompositionMetadata;

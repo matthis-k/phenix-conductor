@@ -560,6 +560,7 @@ mod tests {
 
     fn provider(authority: Authority) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("provider"),
             owner: plugin("provider-owner"),
             imports: Vec::new(),
@@ -575,6 +576,7 @@ mod tests {
 
     fn consumer(authority: Authority) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component("consumer"),
             owner: plugin("consumer-owner"),
             imports: vec![ComponentImport {
@@ -872,6 +874,7 @@ mod tests {
         let baseline = ResolvedHarness::resolve(
             [owner("consumer-owner", Authority::default())],
             [ComponentManifest {
+                listeners: Vec::new(),
                 id: component("consumer"),
                 owner: plugin("consumer-owner"),
                 imports: Vec::new(),
@@ -887,6 +890,7 @@ mod tests {
         let changed = ResolvedHarness::resolve(
             [owner("consumer-owner", Authority::default())],
             [ComponentManifest {
+                listeners: Vec::new(),
                 id: component("consumer"),
                 owner: plugin("consumer-owner"),
                 imports: Vec::new(),
@@ -907,6 +911,7 @@ mod tests {
         let right_interface = interface("fixture.right@1");
         let components = [
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("left"),
                 owner: plugin("left-owner"),
                 imports: vec![ComponentImport {
@@ -924,6 +929,7 @@ mod tests {
                 maximum_authority: Authority::default(),
             },
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("right"),
                 owner: plugin("right-owner"),
                 imports: vec![ComponentImport {

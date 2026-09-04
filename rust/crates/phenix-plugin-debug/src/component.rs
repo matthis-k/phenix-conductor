@@ -74,6 +74,7 @@ fn optional_import<Request: HasPhenixSchema>(
 pub fn debug_component_manifest(maximum_authority: Authority) -> ComponentManifest {
     let authority = debug_manifest(maximum_authority).maximum_authority;
     ComponentManifest {
+        listeners: Vec::new(),
         id: debug_component_id(),
         owner: crate::Plugin::plugin_id(),
         imports: vec![

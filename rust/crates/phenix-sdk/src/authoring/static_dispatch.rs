@@ -1,9 +1,8 @@
-use super::{EventContext, StaticComponentListener, StaticPluginComponents, StaticPluginResources};
+use super::{EventContext, StaticPluginComponents, StaticPluginResources};
 use phenix_core::{
-    Authority, ComponentId, EventBus, EventEnvelope, EventFailurePolicy, EventHandler,
-    EventSubscription, EventTypeId, Exact, InterfaceId, LayerResult, PhenixValue, PluginContext,
-    PluginHost, PluginId, PluginInstance, Project, ServiceId, SubscriptionId, SubscriptionSpec,
-    ValueError,
+    Authority, ComponentId, EventBus, EventEnvelope, EventHandler, EventTypeId, Exact,
+    GraphGenerationId, InterfaceId, LayerResult, PhenixValue, PluginContext, PluginHost, PluginId,
+    PluginInstance, Project, ResolvedListener, ServiceId, ValueError,
 };
 use std::{
     error::Error,
@@ -274,14 +273,17 @@ pub trait StaticPluginComponentDispatch {
     }
 
     #[doc(hidden)]
-    fn listener_subscriptions(
+    fn listener_handler(
         _state: Weak<Mutex<Self>>,
-        _host: &PluginHost<'_>,
-    ) -> Vec<EventSubscription>
+        _owner: &PluginId,
+        _component: &ComponentId,
+        _method: &str,
+        _generation: &GraphGenerationId,
+    ) -> Option<Arc<dyn EventHandler>>
     where
         Self: Sized + Send + 'static,
     {
-        Vec::new()
+        None
     }
 
     /// Adapt an already-constructed stateful plugin value to the kernel's erased runtime ABI.
@@ -304,7 +306,6 @@ pub struct StaticPluginInstance<T> {
     start: Option<StaticPluginStart<T>>,
     stop: Option<StaticPluginStop<T>>,
     invoke: StaticPluginInvoke<T>,
-    listener_ids: Vec<SubscriptionId>,
 }
 
 impl<T> StaticPluginInstance<T>
@@ -318,7 +319,6 @@ where
             start: None,
             stop: None,
             invoke,
-            listener_ids: Vec::new(),
         }
     }
 }
@@ -424,45 +424,22 @@ impl<T> StaticPluginInstance<T> {
     }
 
     #[doc(hidden)]
-    pub fn listener_subscription<F>(
+    pub fn listener_handler<F>(
         owner: PluginId,
-        component: &ComponentId,
-        listener: &StaticComponentListener,
-        maximum_authority: Authority,
+        listener: &'static str,
         handler: F,
-    ) -> EventSubscription
+    ) -> Arc<dyn EventHandler>
     where
         F: Fn(&EventEnvelope, &Authority) -> Result<(), Box<dyn Error + Send + Sync>>
             + Send
             + Sync
             + 'static,
     {
-        let id = SubscriptionId::parse(format!(
-            "{}/listener/{}/{}",
-            owner.as_str(),
-            component.as_str(),
-            listener.method
-        ))
-        .expect("generated stateful listener subscription id is valid");
-        let diagnostic_owner = owner.clone();
-        EventSubscription {
-            spec: SubscriptionSpec {
-                id,
-                owner,
-                event_type: listener.event.clone(),
-                event_version: 1,
-                dependencies: Vec::new(),
-                failure_policy: EventFailurePolicy::Warn,
-                required_authority: listener.required_authority.clone(),
-                maximum_authority,
-                kernel_policy_revision: 0,
-            },
-            handler: Arc::new(StaticListenerEventHandler {
-                owner: diagnostic_owner,
-                listener: listener.method,
-                handler,
-            }),
-        }
+        Arc::new(StaticListenerEventHandler {
+            owner,
+            listener,
+            handler,
+        })
     }
 }
 
@@ -480,23 +457,13 @@ where
 {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
         register_resources::<T>(host)?;
-        let subscriptions = T::listener_subscriptions(Arc::downgrade(&self.plugin), host);
-        self.listener_ids = host
-            .install_event_subscriptions(subscriptions)
-            .map_err(|error| error.to_string())?;
-
-        let result = match self.start {
+        match self.start {
             Some(start) => match self.plugin.lock() {
                 Ok(mut plugin) => start(&mut plugin, host),
                 Err(_) => Err("static plugin state lock poisoned".to_owned()),
             },
             None => Ok(()),
-        };
-        if result.is_err() {
-            let listener_ids = std::mem::take(&mut self.listener_ids);
-            let _ = host.remove_event_subscriptions(listener_ids);
         }
-        result
     }
 
     fn invoke(
@@ -547,23 +514,33 @@ where
         T::dispatch_layer(&mut plugin, service, input, host)
     }
 
+    fn bind_listener(
+        &mut self,
+        listener: &ResolvedListener,
+        generation: &GraphGenerationId,
+    ) -> Result<Arc<dyn EventHandler>, String> {
+        T::listener_handler(
+            Arc::downgrade(&self.plugin),
+            &listener.owning_plugin,
+            &listener.component,
+            &listener.declaration.method,
+            generation,
+        )
+        .ok_or_else(|| {
+            format!(
+                "unsupported component listener: {}/{}",
+                listener.component, listener.declaration.method
+            )
+        })
+    }
+
     fn stop(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        let stop_result = match self.stop {
+        match self.stop {
             Some(stop) => match self.plugin.lock() {
                 Ok(mut plugin) => stop(&mut plugin, host),
                 Err(_) => Err("static plugin state lock poisoned".to_owned()),
             },
             None => Ok(()),
-        };
-        let listener_ids = std::mem::take(&mut self.listener_ids);
-        let remove_result = host
-            .remove_event_subscriptions(listener_ids)
-            .map_err(|error| error.to_string());
-        match (stop_result, remove_result) {
-            (Err(stop), Err(remove)) => Err(format!("{stop}; listener cleanup failed: {remove}")),
-            (Err(stop), Ok(())) => Err(stop),
-            (Ok(()), Err(remove)) => Err(remove),
-            (Ok(()), Ok(())) => Ok(()),
         }
     }
 }

@@ -96,6 +96,7 @@ fn consumer_manifest() -> PluginManifest {
 
 fn consumer_component() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: component("fixture.consumer"),
         owner: consumer_manifest().id,
         imports: vec![ComponentImport {
@@ -128,6 +129,7 @@ fn replacement_manifest() -> PluginManifest {
 
 fn replacement_component() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: component("fixture.replacement"),
         owner: replacement_manifest().id,
         imports: Vec::new(),
@@ -161,6 +163,7 @@ fn passive_component(
     authority: Authority,
 ) -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: component(id),
         owner: PluginId::parse(owner).unwrap(),
         imports,

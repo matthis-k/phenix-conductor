@@ -1,6 +1,6 @@
 use crate::{
-    Authority, ComponentId, InterfaceId, InterfaceSchema, PhenixValue, PluginId, ResourceNamespace,
-    RuntimeId, ServiceId,
+    Authority, ComponentId, EventFailurePolicy, EventTypeId, InterfaceId, InterfaceSchema,
+    PhenixSchema, PhenixValue, PluginId, ResourceNamespace, RuntimeId, ServiceId, SubscriptionId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -57,12 +57,47 @@ pub struct ComponentExport {
     pub required_authority: Authority,
 }
 
+/// Declarative listener entry owned by a component's resolved generation.
+///
+/// This is topology only: which event the component observes, which function
+/// handles it, the structural payload contract, and the authority required to
+/// deliver the event. The live handler binding is resolved from this entry
+/// during activation; it is not part of the declaration.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListenerProjection {
+    Project,
+    Exact,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ComponentListener {
+    pub id: SubscriptionId,
+    pub event: EventTypeId,
+    pub event_version: u32,
+    pub method: String,
+    #[serde(default = "any_schema")]
+    pub payload_schema: PhenixSchema,
+    pub projection: ListenerProjection,
+    #[serde(default)]
+    pub dependencies: Vec<SubscriptionId>,
+    pub failure_policy: EventFailurePolicy,
+    #[serde(default)]
+    pub required_authority: Authority,
+}
+
+fn any_schema() -> PhenixSchema {
+    PhenixSchema::Any
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ComponentManifest {
     pub id: ComponentId,
     pub owner: PluginId,
     pub imports: Vec<ComponentImport>,
     pub exports: Vec<ComponentExport>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub listeners: Vec<ComponentListener>,
     pub maximum_authority: Authority,
 }
 

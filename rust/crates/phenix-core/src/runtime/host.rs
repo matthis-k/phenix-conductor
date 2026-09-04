@@ -19,22 +19,6 @@ impl<'a> PluginHost<'a> {
         self.authority
     }
 
-    #[doc(hidden)]
-    pub fn install_event_subscriptions(
-        &self,
-        subscriptions: impl IntoIterator<Item = crate::EventSubscription>,
-    ) -> Result<Vec<crate::SubscriptionId>, EventError> {
-        self.events.install_subscriptions(subscriptions)
-    }
-
-    #[doc(hidden)]
-    pub fn remove_event_subscriptions(
-        &self,
-        subscriptions: impl IntoIterator<Item = crate::SubscriptionId>,
-    ) -> Result<(), EventError> {
-        self.events.remove_subscriptions(subscriptions)
-    }
-
     pub fn invoke_import<I: ComponentInterface>(
         &self,
         component: &ComponentId,

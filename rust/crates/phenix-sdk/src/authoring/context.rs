@@ -431,6 +431,7 @@ mod tests {
 
     fn echo_component_manifest() -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse(ECHO_COMPONENT).unwrap(),
             owner: PluginId::parse(ECHO_PLUGIN).unwrap(),
             imports: Vec::new(),
@@ -469,6 +470,7 @@ mod tests {
             authority: authority.clone(),
         };
         ComponentManifest {
+            listeners: Vec::new(),
             id: consumer_component_id(),
             owner: PluginId::parse(CONSUMER_PLUGIN).unwrap(),
             imports: vec![

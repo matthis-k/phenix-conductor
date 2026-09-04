@@ -1,4 +1,5 @@
 use crate::{Authority, EventTypeId, PluginId, SubscriptionId};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
@@ -26,7 +27,8 @@ pub struct EventEnvelope {
     pub payload: Vec<u8>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EventFailurePolicy {
     Ignore,
     Warn,
@@ -146,6 +148,13 @@ impl fmt::Debug for EventBus {
 }
 
 impl EventBus {
+    pub fn validate_subscriptions(
+        subscriptions: impl IntoIterator<Item = EventSubscription>,
+    ) -> Result<(), EventError> {
+        index_subscriptions(subscriptions)
+            .and_then(|subscriptions| validate_dependencies(&subscriptions))
+    }
+
     pub fn subscribe(&self) -> Receiver<KernelEvent> {
         let (sender, receiver) = mpsc::channel();
         self.kernel_subscribers
@@ -166,13 +175,7 @@ impl EventBus {
         &self,
         subscriptions: impl IntoIterator<Item = EventSubscription>,
     ) -> Result<(), EventError> {
-        let mut indexed = BTreeMap::new();
-        for subscription in subscriptions {
-            let id = subscription.spec.id.clone();
-            if indexed.insert(id.clone(), subscription).is_some() {
-                return Err(EventError::DuplicateSubscription(id));
-            }
-        }
+        let indexed = index_subscriptions(subscriptions)?;
         validate_dependencies(&indexed)?;
         *self
             .subscriptions
@@ -285,6 +288,19 @@ impl EventBus {
 
         Ok(report)
     }
+}
+
+fn index_subscriptions(
+    subscriptions: impl IntoIterator<Item = EventSubscription>,
+) -> Result<BTreeMap<SubscriptionId, EventSubscription>, EventError> {
+    let mut indexed = BTreeMap::new();
+    for subscription in subscriptions {
+        let id = subscription.spec.id.clone();
+        if indexed.insert(id.clone(), subscription).is_some() {
+            return Err(EventError::DuplicateSubscription(id));
+        }
+    }
+    Ok(indexed)
 }
 
 fn validate_dependencies(

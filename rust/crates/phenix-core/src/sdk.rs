@@ -153,6 +153,7 @@ mod tests {
 
     fn component(owner: &str, interface: &str) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse(format!("{owner}.component")).unwrap(),
             owner: PluginId::parse(owner).unwrap(),
             imports: Vec::new(),

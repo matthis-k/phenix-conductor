@@ -51,6 +51,7 @@ fn embed_manifest() -> PluginManifest {
 
 fn embed_component_manifest() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse(EMBED_PLUGIN).unwrap(),
         owner: PluginId::parse(EMBED_PLUGIN).unwrap(),
         imports: Vec::new(),

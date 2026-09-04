@@ -27,6 +27,7 @@ fn third_party_plugin_defines_a_typed_runtime_interface_without_core_registratio
     let harness_authority = Authority::new([use_review.clone(), unrelated]);
 
     let provider = ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse("acme.review-provider").unwrap(),
         owner: PluginId::parse("acme.review-plugin").unwrap(),
         imports: Vec::new(),
@@ -39,6 +40,7 @@ fn third_party_plugin_defines_a_typed_runtime_interface_without_core_registratio
         maximum_authority: Authority::new([use_review.clone()]),
     };
     let consumer = ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse("acme.compiler-agent").unwrap(),
         owner: PluginId::parse("acme.agent-plugin").unwrap(),
         imports: vec![ComponentImport {

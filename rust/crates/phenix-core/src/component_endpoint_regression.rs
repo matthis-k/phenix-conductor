@@ -61,6 +61,7 @@ fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
         [provider.clone(), consumer.clone()],
         [
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("provider-low"),
                 owner: provider.id.clone(),
                 imports: Vec::new(),
@@ -73,6 +74,7 @@ fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
                 maximum_authority: Authority::default(),
             },
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("provider-high"),
                 owner: provider.id.clone(),
                 imports: Vec::new(),
@@ -85,6 +87,7 @@ fn typed_import_dispatches_the_exact_resolved_component_endpoint() {
                 maximum_authority: Authority::default(),
             },
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("consumer"),
                 owner: consumer.id.clone(),
                 imports: vec![ComponentImport {

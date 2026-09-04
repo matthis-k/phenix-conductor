@@ -16,6 +16,7 @@ pub fn session_tree_component_id() -> ComponentId {
 pub fn session_tree_component_manifest() -> ComponentManifest {
     let authority = session_tree_manifest().maximum_authority;
     ComponentManifest {
+        listeners: Vec::new(),
         id: session_tree_component_id(),
         owner: PluginId::parse(SESSION_TREE_PLUGIN).expect("static plugin id is valid"),
         imports: vec![

@@ -43,6 +43,7 @@ pub fn cli_component_manifest(maximum_authority: Authority) -> ComponentManifest
         Authority::new([CapabilityId::parse(WORKSPACE_SHELL)
             .expect("static workspace shell capability is valid")]);
     ComponentManifest {
+        listeners: Vec::new(),
         id: cli_component_id(),
         owner: PluginId::parse(CLI_PLUGIN).expect("static CLI plugin id is valid"),
         imports: vec![ComponentImport {

@@ -170,6 +170,7 @@ impl ProviderDefinition {
             });
         }
         ComponentManifest {
+            listeners: Vec::new(),
             id: provider_component_id(&self.spec.id),
             owner: self.spec.id.clone(),
             imports: Vec::new(),
