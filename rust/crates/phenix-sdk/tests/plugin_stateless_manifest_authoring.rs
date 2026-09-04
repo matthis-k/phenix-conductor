@@ -87,13 +87,13 @@ fn stateless_plugin_runs_through_generated_factory_and_dispatch() {
     kernel.activate_resolved_harness(&resolved).unwrap();
     kernel.activate_all().unwrap();
 
-    for service in ["run", "projected", "exact"] {
+    for method in ["run", "projected", "exact"] {
         let input = serde_json::to_vec(&phenix_sdk::PhenixValue::from(&Request {
-            value: service.into(),
+            value: method.into(),
         }))
         .unwrap();
         let service = phenix_core::ServiceId::parse(format!(
-            "fixture.manifest.stateless.{service}@1"
+            "fixture.manifest.stateless.{method}@1"
         ))
         .unwrap();
         let output = kernel
@@ -101,6 +101,6 @@ fn stateless_plugin_runs_through_generated_factory_and_dispatch() {
             .unwrap();
         let value: phenix_sdk::PhenixValue = serde_json::from_slice(&output).unwrap();
         let response = Response::try_from(phenix_sdk::Project(&value)).unwrap();
-        assert_eq!(response.value, service.as_str().split('.').nth(3).unwrap().split('@').next().unwrap());
+        assert_eq!(response.value, method);
     }
 }
