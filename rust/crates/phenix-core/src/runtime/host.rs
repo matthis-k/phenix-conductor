@@ -36,13 +36,24 @@ impl<'a> PluginHost<'a> {
             .into());
         }
         let interface = I::interface_id();
-        let handle = self
+        let plan = self
             .component_graph
-            .import_handle(component, &interface)?
+            .provider_plan(component, &interface)?
             .ok_or_else(|| ComponentInvocationError::UnboundImport {
                 component: component.clone(),
                 interface: interface.clone(),
             })?;
+        let (handle, fallback_reason) = if self.provider_available(plan.primary()) {
+            (plan.primary(), None)
+        } else if let Some(fallback) = plan
+            .fallbacks()
+            .iter()
+            .find(|fallback| self.provider_available(fallback))
+        {
+            (fallback, Some(ProviderFallbackReason::PrimaryUnavailable))
+        } else {
+            return Err(KernelError::PluginNotActive(plan.primary().owning_plugin().clone()).into());
+        };
         let service = ServiceId::parse(interface.as_str().to_owned()).map_err(|message| {
             ComponentInvocationError::InvalidInterface {
                 interface: interface.clone(),
@@ -52,6 +63,13 @@ impl<'a> PluginHost<'a> {
         let input = serde_json::to_vec(request)
             .map_err(|error| ComponentInvocationError::Encode(error.to_string()))?;
         let delegated_authority = self.authority.attenuate(handle.effective_authority());
+        let provider_provenance = ComponentProviderProvenance::from_plan(
+            interface,
+            &plan,
+            handle,
+            fallback_reason,
+            delegated_authority.clone(),
+        );
         let output = invoke_component_service_with(
             InvocationContext {
                 graph_generation: self.graph_generation,
@@ -69,6 +87,7 @@ impl<'a> PluginHost<'a> {
             &input,
             &delegated_authority,
             handle.owning_plugin(),
+            Some(provider_provenance),
             ServiceDispatchGuards {
                 call_stack: &self.call_stack,
                 active_services: &self.active_services,
@@ -77,6 +96,11 @@ impl<'a> PluginHost<'a> {
         )?;
         serde_json::from_slice(&output)
             .map_err(|error| ComponentInvocationError::Decode(error.to_string()))
+    }
+
+    fn provider_available(&self, handle: &ResolvedImportHandle) -> bool {
+        self.states.get(handle.owning_plugin()).copied() == Some(PluginState::Active)
+            && self.instances.contains_key(handle.owning_plugin())
     }
 
     #[doc(hidden)]
@@ -259,7 +283,7 @@ impl<'a> PluginHost<'a> {
                 .components()
                 .filter(|component| &component.owning_plugin == self.plugin)
                 .flat_map(|component| component.imports.iter())
-                .filter_map(|import| import.binding.as_ref())
+                .flat_map(|import| import.binding.iter().chain(import.fallbacks.iter()))
                 .any(|binding| {
                     binding.owning_plugin() == &transaction.owner
                         && binding.effective_authority().permits(&write)
