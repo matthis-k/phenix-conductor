@@ -33,31 +33,31 @@ jobs:
             max-jobs = auto
 
       - name: "Nix formatting"
-        run: nix run .#phenix-maintenance-command-fa944a2937b3 -- check source nix-format
+        run: nix run --quiet .#phenix-maintenance-command-fa944a2937b3 -- check source nix-format
 
       - name: "Rust formatting"
-        run: nix run .#phenix-maintenance-command-31a6c0b16724 -- check source rust-format
+        run: nix run --quiet .#phenix-maintenance-command-31a6c0b16724 -- check source rust-format
 
       - name: "Statix"
-        run: nix run .#phenix-maintenance-command-4ff10aceddac -- check source statix
+        run: nix run --quiet .#phenix-maintenance-command-4ff10aceddac -- check source statix
 
       - name: "Actionlint"
-        run: nix run .#phenix-maintenance-command-e0c2105ec1ec -- check source actionlint
+        run: nix run --quiet .#phenix-maintenance-command-e0c2105ec1ec -- check source actionlint
 
       - name: "Plugin architecture"
-        run: nix run .#phenix-maintenance-command-da4d8b6b0d46 -- check source plugin-architecture
+        run: nix run --quiet .#phenix-maintenance-command-da4d8b6b0d46 -- check source plugin-architecture
 
       - name: "Structural boundaries"
-        run: nix run .#phenix-maintenance-command-d0a2e91a2adf -- check source structural-boundaries
+        run: nix run --quiet .#phenix-maintenance-command-d0a2e91a2adf -- check source structural-boundaries
 
       - name: "Test target classification"
-        run: nix run .#phenix-maintenance-command-fe564e52f93c -- check source test-targets
+        run: nix run --quiet .#phenix-maintenance-command-fe564e52f93c -- check source test-targets
 
       - name: "Generated workflow"
-        run: nix run .#phenix-maintenance-command-9383b20a4494 -- check source workflow-sync
+        run: nix run --quiet .#phenix-maintenance-command-9383b20a4494 -- check source workflow-sync
 
       - name: "Clippy"
-        run: nix run .#phenix-maintenance-command-ed54c0f878db -- check rust
+        run: nix run --quiet .#phenix-maintenance-command-ed54c0f878db -- check rust
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -85,40 +85,12 @@ jobs:
             accept-flake-config = true
             max-jobs = auto
 
-      - name: "Build"
+      - name: "CI"
         env:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance-command-0ea68adc9bb1 -- pipeline build
-
-      - name: "Test"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-          CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance-command-f6a36b822d72 -- pipeline test
-
-      - name: "Runtime"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-          CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance-command-e62d2a86929a -- pipeline runtime
-
-      - name: "Integration"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-          CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance-command-2f0774ead8a0 -- pipeline integration
-
-      - name: "Product"
-        env:
-          CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
-          CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
-          CARGO_TERM_QUIET: "true"
-        run: nix run .#phenix-maintenance-command-af723cd743c5 -- pipeline product
+        run: nix run --quiet .#phenix-maintenance-command-23bf0d244a4c -- pipeline
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
