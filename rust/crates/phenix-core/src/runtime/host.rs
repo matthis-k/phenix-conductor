@@ -19,6 +19,10 @@ impl<'a> PluginHost<'a> {
         self.authority
     }
 
+    pub fn cancellation_token(&self) -> Option<&CallCancellationToken> {
+        self.call_cancellation.as_ref()
+    }
+
     pub fn invoke_import<I: ComponentInterface>(
         &self,
         component: &ComponentId,
