@@ -18,6 +18,7 @@ mod frontend_metadata;
 mod identity;
 mod inspection;
 mod live_reconciliation;
+mod management;
 mod manifest;
 mod metadata_input;
 mod metadata_inspection;
@@ -50,6 +51,8 @@ mod metadata_semantic_identity_regression;
 #[cfg(test)]
 #[path = "../tests/persistence_backend_conformance.rs"]
 mod persistence_backend_conformance;
+#[cfg(test)]
+mod plugin_management_regression;
 #[cfg(test)]
 mod provider_rebind_generation_regression;
 #[cfg(test)]
@@ -106,6 +109,10 @@ pub use identity::{
 };
 pub use inspection::{ResolvedHarnessInspection, ResolvedListenerInspection};
 pub use live_reconciliation::LiveReconciliationError;
+pub use management::{
+    PluginLoadRequest, PluginManagementError, PluginManagementRequest, PluginSetRequest,
+    PluginUnloadRequest,
+};
 pub use manifest::{
     ComponentExport, ComponentImport, ComponentListener, ComponentManifest, ListenerProjection,
     PluginArtifact, PluginExecution, PluginManifest, ServiceContribution, ServiceRole,
