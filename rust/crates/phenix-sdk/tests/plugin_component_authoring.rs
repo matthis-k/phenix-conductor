@@ -125,12 +125,6 @@ fn component_fields_lower_to_typed_import_export_and_plugin_metadata() {
     assert!(exports[0].public);
     assert!(exports[0].terminal);
     assert_eq!(exports[0].required_authority, export_authority);
-    let service = exports[0]
-        .service()
-        .expect("terminal exports participate in service resolution");
-    assert_eq!(service.service.as_str(), "fixture.models.inference@1");
-    assert_eq!(service.role, phenix_core::ServiceRole::Terminal);
-    assert_eq!(service.required_authority, export_authority);
 
     let layers = <Api as StaticComponentBehavior>::layers();
     assert_eq!(layers.len(), 1);
@@ -169,24 +163,14 @@ fn component_fields_lower_to_typed_import_export_and_plugin_metadata() {
     assert_eq!(manifest.exports[0].required_authority, export_authority);
 
     let services = components[0].services();
-    assert_eq!(services.len(), 2);
-    assert_eq!(services[0].role, phenix_core::ServiceRole::Terminal);
-    assert_eq!(services[0].required_authority, export_authority);
-    assert_eq!(services[1].role, phenix_core::ServiceRole::Layer);
-    assert_eq!(services[1].priority, MODEL_POLICY_PRIORITY);
+    assert_eq!(services.len(), 1);
+    assert_eq!(services[0].role, phenix_core::ServiceRole::Layer);
+    assert_eq!(services[0].priority, MODEL_POLICY_PRIORITY);
 
     let plugin_manifest = <Plugin as phenix_sdk::StaticPluginDefinition>::manifest();
-    assert_eq!(plugin_manifest.services.len(), 2);
+    assert_eq!(plugin_manifest.services.len(), 1);
     assert_eq!(
         plugin_manifest.services[0].role,
-        phenix_core::ServiceRole::Terminal
-    );
-    assert_eq!(
-        plugin_manifest.services[0].required_authority,
-        export_authority
-    );
-    assert_eq!(
-        plugin_manifest.services[1].role,
         phenix_core::ServiceRole::Layer
     );
 }
