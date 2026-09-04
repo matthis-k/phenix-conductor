@@ -86,7 +86,7 @@ pub use artifact::{ArtifactRevision, ArtifactRevisionParseError};
 pub use authority::Authority;
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
-    ResolvedImportHandle, ResolvedListener,
+    ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan,
 };
 pub use composition_metadata::{
     CompatibilityMetadata, ComponentHostKind, ComponentRuntimeMetadata, ComponentStateClass,
@@ -148,7 +148,10 @@ pub use plugin_build_execution::{
 pub use plugin_context::{
     CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,
 };
-pub use provider_resolution::{InterfaceProviderPolicy, ProviderCompositionPolicy};
+pub use provider_resolution::{
+    InterfaceProviderPolicy, ProviderCompositionPolicy, ProviderFallbackReason,
+    ProviderSelectionReason,
+};
 pub use reconciliation::{
     BindingChange, ComponentChange, ComponentChangeKind, GraphDiff, GraphReconciler,
     ReconciliationAction, ReconciliationPreview, ReconciliationResult, ResourceChange,
