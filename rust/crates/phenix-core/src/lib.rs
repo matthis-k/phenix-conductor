@@ -68,6 +68,8 @@ mod provider_rebind_generation_regression;
 #[cfg(test)]
 mod runtime_component_parity_regression;
 #[cfg(test)]
+mod runtime_provider_host_regression;
+#[cfg(test)]
 mod runtime_provider_regression;
 #[cfg(test)]
 mod runtime_topology_generation_regression;
@@ -174,9 +176,7 @@ pub use runtime::{
     ServiceInvocationProvenance, ServiceParticipantOutcome, ServiceParticipantProvenance,
 };
 pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
-pub use tasks::{
-    CallCancellationToken, CancellationToken, LiveCallScope, TaskHandle, TaskRuntime, TaskScope,
-};
+pub use tasks::{CallCancellationToken, CancellationToken, TaskHandle, TaskRuntime, TaskScope};
 pub use typed_component::{
     ComponentInterface, ComponentInvocationError, InterfaceCompatibility, InterfaceSchema,
     InterfaceSchemaMismatch,
