@@ -38,7 +38,6 @@ impl<'host, 'runtime, Sdk, Settings, State> PluginContext<'host, 'runtime, Sdk, 
             call: CallContext {
                 authority: host.authority(),
                 graph_generation: host.graph_generation(),
-                cancellation: host.cancellation_token(),
             },
         }
     }
@@ -55,7 +54,6 @@ pub struct CurrentPlugin<'host, Settings, State> {
 pub struct CallContext<'host> {
     pub authority: &'host Authority,
     pub graph_generation: Option<&'host GraphGenerationId>,
-    pub cancellation: Option<&'host CallCancellationToken>,
 }
 
 /// Scoped access to generic kernel mechanisms.
@@ -69,6 +67,10 @@ pub struct KernelAccess<'host, 'runtime> {
 impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
     fn new(host: &'host PluginHost<'runtime>) -> Self {
         Self { host }
+    }
+
+    pub fn cancellation_token(&self) -> Option<&CallCancellationToken> {
+        self.host.cancellation_token()
     }
 
     #[doc(hidden)]
