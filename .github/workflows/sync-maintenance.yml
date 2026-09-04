@@ -30,7 +30,8 @@ jobs:
       - name: Apply deterministic maintenance fixes
         run: |
           set -euo pipefail
-          nix run --quiet .#phenix-maintenance-command-1c6e6c4c02e5 -- fix
+          printf '%s\n' '{"command":"fix","source":{"type":"maintenance-autofix"}}' |
+            nix run --quiet .#phenix-maintenance-command-1c6e6c4c02e5 -- invoke
           nix develop --command bash -lc 'cd rust && cargo metadata --format-version 1 >/dev/null'
           git diff --check
 
