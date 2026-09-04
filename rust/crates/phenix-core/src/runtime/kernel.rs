@@ -274,7 +274,9 @@ impl Kernel {
                 }
             };
             if let Some(mut instance) = instance {
-                let live_call = self.tasks.begin_call(plugin, self.graph_generation.as_ref());
+                let live_call = self
+                    .tasks
+                    .begin_call(plugin, self.graph_generation.as_ref());
                 let cancellation = live_call.cancellation_token().clone();
                 let host = PluginHost {
                     graph_generation: self.graph_generation.as_ref(),
