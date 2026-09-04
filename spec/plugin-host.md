@@ -1,6 +1,13 @@
 # Plugin host
 
-status: specification-only
+status: implemented
+coverage:
+  - rust/crates/phenix-core/src/runtime/tests.rs
+  - rust/crates/phenix-core/src/runtime_provider_host_regression.rs
+  - rust/crates/phenix-core/src/third_party_component_regression.rs
+  - rust/crates/phenix-core/src/host_authority_regression.rs
+  - rust/crates/phenix-core/src/runtime_component_parity_regression.rs
+  - rust/crates/phenix-core/src/tasks.rs
 
 ## Purpose
 
@@ -66,18 +73,15 @@ Rust dynamic libraries are not an implicit Execution Runtime.
 
 ## Lifecycle
 
-Executable Plugin instances move through kernel-owned lifecycle states such as:
+Executable Plugin instances move through kernel-owned lifecycle states:
 
 ```text
-starting
-ready
-degraded
-unavailable
-stopping
+registered
+active
 stopped
 ```
 
-Each active Plugin instance belongs to one Graph Generation and Artifact Revision. Runtime-local process handles belong to that generation and are never Durable State.
+Activation stages candidate instances and commits them as `active` with the resolved Graph Generation. Stop transitions a plugin to `stopped`. Each active Plugin instance belongs to one Graph Generation and Artifact Revision. Runtime-local process handles belong to that generation and are never Durable State.
 
 Resource-only Plugins have no executable lifecycle callbacks. Their declarations still participate in Graph construction and Plugin Resource activation.
 

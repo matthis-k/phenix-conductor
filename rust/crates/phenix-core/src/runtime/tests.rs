@@ -34,7 +34,7 @@ struct StartupTaskScopePlugin;
 impl PluginInstance for StartupTaskScopePlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
         assert!(host.task_scope().is_none());
-        assert!(host.cancellation_token().is_none());
+        assert!(host.cancellation_token().is_some());
         Ok(())
     }
 }

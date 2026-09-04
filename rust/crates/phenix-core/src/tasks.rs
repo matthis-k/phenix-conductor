@@ -49,6 +49,7 @@ pub(crate) struct LiveCallScope<'a> {
 }
 
 impl LiveCallScope<'_> {
+    #[cfg(test)]
     pub(crate) fn id(&self) -> u64 {
         self.id
     }
@@ -253,6 +254,7 @@ impl TaskRuntime {
             .count()
     }
 
+    #[cfg(test)]
     pub(crate) fn active_call_count(&self, plugin: &PluginId) -> usize {
         self.calls
             .lock()

@@ -20,8 +20,9 @@ impl StopView<'_> {
         let Some(manifest) = self.config.manifest(plugin) else {
             return;
         };
-        self.tasks.cancel_calls(plugin);
-        self.tasks.cancel_plugin(plugin);
+        self.tasks.cancel_calls(plugin, self.generation);
+        self.tasks.cancel_plugin_generation(plugin, self.generation);
+        let live_call = self.tasks.begin_call(plugin, self.generation);
         let host = PluginHost {
             graph_generation: self.generation,
             component_graph: self.graph,
@@ -30,7 +31,7 @@ impl StopView<'_> {
             instances: self.instances,
             plugin,
             authority: &manifest.maximum_authority,
-            call_cancellation: None,
+            call_cancellation: Some(live_call.cancellation_token().clone()),
             call_stack: BTreeSet::from([plugin.clone()]),
             events: self.events,
             tasks: self.tasks,
@@ -127,7 +128,9 @@ impl Kernel {
                                 next_instances.get(&binding.provider).cloned().ok_or_else(
                                     || KernelError::PluginNotActive(binding.provider.clone()),
                                 )?;
-                            let live_call = self.tasks.begin_call(&binding.provider);
+                            let live_call = self
+                                .tasks
+                                .begin_call(&binding.provider, Some(candidate.generation()));
                             let cancellation = live_call.cancellation_token().clone();
                             let host = PluginHost {
                                 graph_generation: Some(candidate.generation()),
@@ -209,6 +212,8 @@ impl Kernel {
                     }
                 };
                 if let Some(mut instance) = instance {
+                    let live_call = self.tasks.begin_call(plugin, Some(candidate.generation()));
+                    let cancellation = live_call.cancellation_token().clone();
                     let host = PluginHost {
                         graph_generation: Some(candidate.generation()),
                         component_graph: candidate.component_graph(),
@@ -217,7 +222,7 @@ impl Kernel {
                         instances: &next_instances,
                         plugin,
                         authority: &manifest.maximum_authority,
-                        call_cancellation: None,
+                        call_cancellation: Some(cancellation.clone()),
                         call_stack: BTreeSet::from([plugin.clone()]),
                         events: &self.events,
                         tasks: &self.tasks,
@@ -228,11 +233,16 @@ impl Kernel {
                     };
                     let started = catch_unwind(AssertUnwindSafe(|| instance.start(&host)));
                     let failure = match started {
+                        Ok(Ok(())) if cancellation.is_cancelled() => {
+                            Some("plugin start cancelled".into())
+                        }
                         Ok(Ok(())) => None,
                         Ok(Err(message)) => Some(message),
                         Err(_) => Some("plugin start panicked".into()),
                     };
                     if let Some(message) = failure {
+                        self.tasks
+                            .cancel_plugin_generation(plugin, Some(candidate.generation()));
                         cleanup_staged(
                             &staged,
                             StopView {
