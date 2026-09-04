@@ -226,9 +226,9 @@ terminal outcome when reached
 
 A delegating layer remains part of provenance even when it leaves the result unchanged.
 
-## External and bridged plugins
+## Embedded and bridged plugin runtimes
 
-Embedded and bridged plugins use the same layering semantics.
+Embedded plugins and plugins supplied through runtime-provider bridges use the same layering semantics.
 
 A runtime bridge represents continuation as an opaque invocation-scoped capability. The kernel validates invocation identity, interface, graph generation, chain position, and authority before advancing it.
 

@@ -23,7 +23,7 @@ statically linked PluginFactory
 
 The kernel crate does not depend on concrete plugin crates. Product assembly depends on the kernel and selected embedded plugin crates.
 
-First-party status and hosting mode are independent. A trusted custom distribution may embed an additional plugin. A first-party plugin may use external hosting when it needs independent distribution or OS isolation.
+First-party status and runtime choice are independent. A trusted custom distribution may embed an additional plugin. A first-party plugin may instead use a runtime-provider bridge when it needs independent distribution or enforceable OS isolation.
 
 ## Rust boundary
 
@@ -75,7 +75,7 @@ Live runtime activation happens only after the complete configuration revision v
 
 ## Calls
 
-Embedded invocation follows the same kernel path as external invocation:
+Embedded invocation follows the same kernel path as bridged invocation:
 
 ```text
 resolve provider
@@ -98,13 +98,13 @@ Embedded native code is trusted from an OS-isolation perspective.
 
 Kernel permission checks still define Phenix semantics and must run for host operations, provider resolution, durable namespaces, and canonical state mutation. They do not sandbox arbitrary native code in the same address space.
 
-A plugin that requires enforceable filesystem, network, secret, IPC, crash, or memory isolation uses the external process runtime.
+A plugin that requires enforceable filesystem, network, secret, IPC, crash, or memory isolation uses a suitable runtime-provider bridge, such as a process-backed bridge.
 
 ## No dynamic Rust ABI
 
 Phenix does not load Rust plugins through `.so`, `.dylib`, or `.dll` libraries using the Rust ABI.
 
-Embedded Rust plugins are linked at build time. Independently distributed executable plugins use the versioned process protocol.
+Embedded Rust plugins are linked at build time. Independently distributed executable plugins use a runtime-provider bridge with a versioned guest/runtime boundary.
 
 A stable C ABI or another in-process binary plugin ABI is out of scope until a concrete requirement justifies its ownership, unsafe boundary, versioning, and lifecycle cost.
 
@@ -125,7 +125,7 @@ Resource packages register through their manifest and configured store path. The
 - Embedded plugin code never receives mutable kernel internals.
 - Manifest inspection is side-effect free.
 - Rust dynamic libraries are not a supported plugin format.
-- Plugins needing enforceable isolation use the external process runtime.
+- Plugins needing enforceable isolation use a suitable runtime-provider bridge.
 
 ## Required regressions
 
@@ -141,4 +141,4 @@ Resource packages register through their manifest and configured store path. The
 
 ## PR boundary
 
-This slice defines the embedded factory catalog, activation semantics, direct adapter, and build-time dependency direction. External executable hosting belongs to `spec/plugin-external-runtime.md`; package and wrapper composition belong to `spec/plugin-nix-packaging.md`.
+This slice defines the embedded factory catalog, activation semantics, direct adapter, and build-time dependency direction. Other executable runtimes are supplied through the runtime-provider model in `spec/plugin-runtime-bridges.md`; package and wrapper composition belong to `spec/plugin-nix-packaging.md`.
