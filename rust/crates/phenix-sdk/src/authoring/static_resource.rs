@@ -99,9 +99,16 @@ impl StaticResourceDescriptor {
 pub trait StaticPluginResources {
     fn resources() -> Vec<StaticResourceDescriptor>;
 
+    fn durable_schemas() -> Vec<DurableSchema> {
+        Self::resources()
+            .into_iter()
+            .map(|resource| resource.schema)
+            .collect()
+    }
+
     fn register_resource_schemas(host: &PluginHost<'_>) -> Result<(), KernelError> {
-        for resource in Self::resources() {
-            host.register_durable_schema(&resource.schema)?;
+        for schema in Self::durable_schemas() {
+            host.register_durable_schema(&schema)?;
         }
         Ok(())
     }
@@ -116,6 +123,18 @@ mod tests {
     impl StaticResourceDefinition for Store {
         fn schema_version() -> u32 {
             3
+        }
+    }
+
+    struct Resources;
+
+    impl StaticPluginResources for Resources {
+        fn resources() -> Vec<StaticResourceDescriptor> {
+            vec![StaticResourceDescriptor::derived::<Durable<Store>>(
+                &PluginId::parse("fixture.resource-owner").unwrap(),
+                "plans",
+                [BackendFeature::Transactions],
+            )]
         }
     }
 
@@ -139,5 +158,17 @@ mod tests {
             .required_features
             .contains(&BackendFeature::Transactions));
         assert!(resource.resource_type.ends_with("::Store"));
+    }
+
+    #[test]
+    fn plugin_resource_declarations_expose_complete_schema_set() {
+        let schemas = Resources::durable_schemas();
+
+        assert_eq!(schemas.len(), 1);
+        assert_eq!(schemas[0].namespace.as_str(), "fixture.resource-owner.plans");
+        assert_eq!(schemas[0].version, 3);
+        assert!(schemas[0]
+            .required_features
+            .contains(&BackendFeature::Transactions));
     }
 }
