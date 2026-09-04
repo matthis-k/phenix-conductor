@@ -26,166 +26,19 @@
         timeoutMinutes = 60;
       };
 
-      integrationTargets = [
-        {
-          id = "backend-acp-persistent-continuity";
-          package = "phenix-backend-acp";
-          test = "persistent_continuity";
-          label = "phenix-backend-acp / persistent_continuity";
-        }
-        {
-          id = "backend-acp-tool-bridge";
-          package = "phenix-backend-acp";
-          test = "tool_bridge";
-          label = "phenix-backend-acp / tool_bridge";
-        }
-      ];
-
-      testTargets = [
-        {
-          id = "phenix-adapter-acp-runtime-plugin";
-          package = "phenix-adapter-acp";
-          test = "runtime_plugin";
-          label = "phenix-adapter-acp / runtime_plugin";
-        }
-        {
-          id = "phenix-domain-context-serialization";
-          package = "phenix-domain";
-          test = "context_serialization";
-          label = "phenix-domain / context_serialization";
-        }
-        {
-          id = "sdk-plugin-authoring";
-          package = "phenix-sdk";
-          test = "plugin_authoring";
-          label = "phenix-sdk / plugin_authoring";
-        }
-        {
-          id = "sdk-plugin-attribute-only-gate";
-          package = "phenix-sdk";
-          test = "plugin_attribute_only_gate";
-          label = "phenix-sdk / plugin_attribute_only_gate";
-        }
-        {
-          id = "sdk-plugin-component-authoring";
-          package = "phenix-sdk";
-          test = "plugin_component_authoring";
-          label = "phenix-sdk / plugin_component_authoring";
-        }
-        {
-          id = "sdk-plugin-config-authoring";
-          package = "phenix-sdk";
-          test = "plugin_config_authoring";
-          label = "phenix-sdk / plugin_config_authoring";
-        }
-        {
-          id = "sdk-plugin-dependency-authoring";
-          package = "phenix-sdk";
-          test = "plugin_dependency_authoring";
-          label = "phenix-sdk / plugin_dependency_authoring";
-        }
-        {
-          id = "sdk-plugin-import-authoring";
-          package = "phenix-sdk";
-          test = "plugin_import_authoring";
-          label = "phenix-sdk / plugin_import_authoring";
-        }
-        {
-          id = "sdk-plugin-layer-authority";
-          package = "phenix-sdk";
-          test = "plugin_layer_authority";
-          label = "phenix-sdk / plugin_layer_authority";
-        }
-        {
-          id = "sdk-plugin-lifecycle-authoring";
-          package = "phenix-sdk";
-          test = "plugin_lifecycle_authoring";
-          label = "phenix-sdk / plugin_lifecycle_authoring";
-        }
-        {
-          id = "sdk-plugin-manifest-authoring";
-          package = "phenix-sdk";
-          test = "plugin_manifest_authoring";
-          label = "phenix-sdk / plugin_manifest_authoring";
-        }
-        {
-          id = "sdk-plugin-public-projection";
-          package = "phenix-sdk";
-          test = "plugin_public_projection";
-          label = "phenix-sdk / plugin_public_projection";
-        }
-        {
-          id = "sdk-incompatible-schema";
-          package = "phenix-sdk";
-          test = "incompatible_schema";
-          label = "phenix-sdk / incompatible_schema";
-        }
-        {
-          id = "sdk-plugin-resource-authoring";
-          package = "phenix-sdk";
-          test = "plugin_resource_authoring";
-          label = "phenix-sdk / plugin_resource_authoring";
-        }
-        {
-          id = "sdk-plugin-stateless-manifest-authoring";
-          package = "phenix-sdk";
-          test = "plugin_stateless_manifest_authoring";
-          label = "phenix-sdk / plugin_stateless_manifest_authoring";
-        }
-        {
-          id = "harness-component-graph";
-          package = "phenix-harness";
-          test = "component_graph";
-          label = "phenix-harness / component_graph";
-        }
-        {
-          id = "harness-supported-product";
-          package = "phenix-harness";
-          test = "supported_product_journeys";
-          label = "harness / supported_product_journeys";
-        }
-      ];
-
-      runtimeTargets = [
-        {
-          id = "harness-process-roundtrip";
-          package = "phenix-harness";
-          test = "process_roundtrip";
-          label = "harness / process_roundtrip";
-        }
-      ];
-
-      cargoTestTargets = testTargets ++ runtimeTargets ++ integrationTargets;
-
-      mkCargoSuite = target: {
-        name = target.label;
-        runtimeInputs = pkgs: [
-          pkgs.cargo
-          pkgs.git
-          pkgs.rustc
-        ];
-        exec = ''
-          ${rustRoot}
-          cargo test --quiet --locked -p ${target.package} --test ${target.test}
-        '';
-      };
-
-      mkCargoSuites =
-        targets:
-        builtins.listToAttrs (
-          builtins.map (target: {
-            name = target.id;
-            value = mkCargoSuite target;
-          }) targets
-        );
-
-      mkProductSuite =
+      mkNixCheckSuite =
         {
           check,
           name,
+          needs ? [ ],
+          cache ? false,
         }:
         {
-          inherit name;
+          inherit
+            cache
+            name
+            needs
+            ;
           runtimeInputs = pkgs: [
             pkgs.git
             pkgs.nix
@@ -201,30 +54,45 @@
         ci = {
           name = "CI";
           timeoutMinutes = 120;
-          needs = [ "source" ];
           env = {
             CARGO_HOME = "\${{ runner.temp }}/phenix-cargo-home";
             CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
             CARGO_TERM_QUIET = "true";
           };
+          cache = {
+            paths = [
+              "\${{ runner.temp }}/phenix-cargo-home"
+              "\${{ runner.temp }}/phenix-cargo-target"
+            ];
+            key = "phenix-rust-\${{ runner.os }}-\${{ github.sha }}";
+            restoreKeys = [ "phenix-rust-\${{ runner.os }}-" ];
+          };
         };
 
-        build.rust-workspace = {
-          name = "Rust workspace";
-          runtimeInputs = pkgs: [
-            pkgs.cargo
-            pkgs.git
-            pkgs.rustc
-          ];
-          exec = ''
-            ${rustRoot}
-            cargo build --workspace --locked --quiet
-          '';
+        build = {
+          rust-workspace = {
+            name = "Rust workspace";
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.git
+              pkgs.rustc
+            ];
+            exec = ''
+              ${rustRoot}
+              cargo build --workspace --locked --quiet
+            '';
+          };
+
+          stitch-mcp = mkNixCheckSuite {
+            check = "stitch-mcp-package";
+            name = "Stitch MCP package";
+          };
         };
 
         test = {
           unit = {
             name = "Rust unit tests";
+            needs = [ "build.rust-workspace" ];
             runtimeInputs = pkgs: [
               pkgs.bash
               pkgs.bubblewrap
@@ -250,12 +118,13 @@
               fi
 
               timeout --signal=KILL 300 \
-                cargo test --quiet --workspace --lib --bins --locked -- --nocapture --test-threads=1
+                cargo test --quiet --workspace --lib --bins --locked
             '';
           };
 
           docs = {
             name = "Rust doc tests";
+            needs = [ "build.rust-workspace" ];
             runtimeInputs = pkgs: [
               pkgs.cargo
               pkgs.git
@@ -266,35 +135,102 @@
               cargo test --quiet --workspace --doc --locked
             '';
           };
-        }
-        // mkCargoSuites testTargets;
 
-        runtime = mkCargoSuites runtimeTargets;
-        integration = mkCargoSuites integrationTargets;
+          sdk = {
+            name = "SDK tests";
+            needs = [ "build.rust-workspace" ];
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.git
+              pkgs.rustc
+            ];
+            exec = ''
+              ${rustRoot}
+              cargo test --quiet --locked -p phenix-sdk --tests
+            '';
+          };
 
-        product = {
-          phenix = mkProductSuite {
-            check = "phenix-product-smoke";
-            name = "Phenix product smoke";
+          adapter-domain = {
+            name = "Adapter and domain tests";
+            needs = [ "build.rust-workspace" ];
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.git
+              pkgs.rustc
+            ];
+            exec = ''
+              ${rustRoot}
+              cargo test --quiet --locked \
+                -p phenix-adapter-acp \
+                -p phenix-domain \
+                --tests
+            '';
           };
-          plugin-packaging = mkProductSuite {
-            check = "phenix-plugin-packaging";
-            name = "Plugin packaging";
+
+          harness = {
+            name = "Harness code tests";
+            needs = [ "build.rust-workspace" ];
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.git
+              pkgs.rustc
+            ];
+            exec = ''
+              ${rustRoot}
+              cargo test --quiet --locked -p phenix-harness \
+                --test component_graph \
+                --test supported_product_journeys
+            '';
           };
-          stitch-runtime = mkProductSuite {
+        };
+
+        runtime = {
+          process-roundtrip = {
+            name = "Harness process roundtrip";
+            needs = [ "build.rust-workspace" ];
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.git
+              pkgs.rustc
+            ];
+            exec = ''
+              ${rustRoot}
+              cargo test --quiet --locked -p phenix-harness --test process_roundtrip
+            '';
+          };
+
+          stitch = mkNixCheckSuite {
             check = "stitch-runtime-smoke";
             name = "Stitch runtime smoke";
           };
-          stitch-mcp = mkProductSuite {
-            check = "stitch-mcp-package";
-            name = "Stitch MCP package";
+        };
+
+        integration = {
+          backend-acp = {
+            name = "ACP backend integration";
+            needs = [ "build.rust-workspace" ];
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.git
+              pkgs.rustc
+            ];
+            exec = ''
+              ${rustRoot}
+              cargo test --quiet --locked -p phenix-backend-acp --tests
+            '';
+          };
+
+          plugin-packaging = mkNixCheckSuite {
+            check = "phenix-plugin-packaging";
+            name = "Plugin packaging integration";
           };
         };
-      };
 
-      expectedCargoTargetLines = builtins.concatStringsSep "\n" (
-        builtins.map (target: "printf '%s\\t%s\\n' '${target.package}' '${target.test}'") cargoTestTargets
-      );
+        product.phenix = mkNixCheckSuite {
+          check = "phenix-product-smoke";
+          name = "Phenix supported product journey";
+        };
+      };
 
       maintenance = maintenanceLib.mkMaintenance {
         name = "maintenance";
@@ -329,7 +265,7 @@
             ];
             commands = {
               source = {
-                description = "Formatting, source analysis, test classification, and workflow consistency";
+                description = "Formatting, source analysis, and workflow consistency";
                 order = [
                   "nix-format"
                   "rust-format"
@@ -337,7 +273,6 @@
                   "actionlint"
                   "plugin-architecture"
                   "structural-boundaries"
-                  "test-targets"
                   "workflow-sync"
                 ];
                 commands = {
@@ -443,43 +378,6 @@
                     '';
                   };
 
-                  test-targets = {
-                    description = "Every Cargo integration target has an explicit semantic CI phase";
-                    ci = sourceCi // {
-                      stepName = "Test target classification";
-                    };
-                    runtimeInputs = pkgs: [
-                      pkgs.cargo
-                      pkgs.coreutils
-                      pkgs.diffutils
-                      pkgs.git
-                      pkgs.jq
-                    ];
-                    exec = ''
-                      ${rustRoot}
-                      expected="$(mktemp)"
-                      actual="$(mktemp)"
-                      trap 'rm -f "$expected" "$actual"' EXIT
-
-                      {
-                        ${expectedCargoTargetLines}
-                      } | sort > "$expected"
-
-                      cargo metadata --format-version 1 --no-deps |
-                        jq -r '
-                          .packages[]
-                          | . as $package
-                          | .targets[]
-                          | select(.kind == ["test"])
-                          | [$package.name, .name]
-                          | @tsv
-                        ' |
-                        sort > "$actual"
-
-                      diff -u "$expected" "$actual"
-                    '';
-                  };
-
                   workflow-sync = {
                     description = "Committed GitHub workflow matches the Nix CI declaration";
                     ci = sourceCi // {
@@ -506,8 +404,12 @@
 
               rust = {
                 description = "Rust static analysis with Clippy";
-                ci = sourceCi // {
+                ci = {
+                  enable = true;
+                  stage = "clippy";
+                  name = "Clippy";
                   stepName = "Clippy";
+                  timeoutMinutes = 60;
                 };
                 runtimeInputs = pkgs: [
                   pkgs.cargo
