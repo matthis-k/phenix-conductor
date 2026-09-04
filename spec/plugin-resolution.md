@@ -2,29 +2,29 @@
 
 status: specification-only
 
-Status: implementation contract.
-
 ## Purpose
 
-Resolve replaceable providers before activation and pin the result to one immutable graph generation.
+Resolve replaceable Providers before activation and pin the resulting Provider Plan to one immutable Graph Generation.
 
-Authority determines eligibility. Composition policy determines preference among eligible providers. Runtime dispatch follows the resolved plan and does not search the live plugin set again.
+Effective Authority determines Provider eligibility. Product composition policy determines preference among eligible Providers. Runtime dispatch follows the Resolved Provider Plan and does not search the live Plugin set again.
 
 This document extends `spec/plugin-authoring-macro.md` and `spec/plugin-contributions.md`.
 
 ## Terms
 
-**Provider candidate.** A plugin contribution that implements a compatible interface.
+**Provider Candidate.** A Plugin contribution that implements a compatible Interface.
 
-**Resolved provider.** The provider selected for an import in one graph generation.
+**Provider Binding.** The resolved association between one Interface Import and its selected Provider in one Graph Generation.
 
-**Fallback plan.** An optional ordered set of alternate providers resolved with the graph. Fallback is available only when the interface contract and composition policy explicitly allow it.
+**Resolved Provider Plan.** The Graph Generation-owned primary Provider Binding plus any explicitly allowed fallback Provider Bindings.
 
-**Availability.** Process-local runtime health for a provider instance. Availability can prevent dispatch to a resolved provider. It does not silently change the graph.
+**Fallback Plan.** An optional ordered set of alternate Provider Bindings resolved with the Graph Generation. Fallback exists only when the Interface contract and product composition policy explicitly allow it.
+
+**Provider Availability.** Runtime-local health for a Provider instance. Provider Availability can prevent dispatch to a resolved Provider. It does not silently change a Provider Binding or Graph Generation.
 
 ## Domain
 
-The kernel may define generic provider-resolution types such as:
+The kernel may define generic Provider-resolution types such as:
 
 ```text
 InterfaceId
@@ -36,83 +36,83 @@ ProviderAvailability
 ResolvedProviderPlan
 ```
 
-Interface identity is opaque to the kernel beyond version and structural compatibility. Session, model, tool, context, and other product meanings belong to neutral contracts and plugins.
+Interface identity is opaque to the kernel beyond version and structural compatibility. Session, model, tool, context, and other product meanings belong to neutral Interface contracts and Plugins.
 
-## Composition policy
+## Product composition policy
 
-Plugins advertise what they provide. They do not choose their own effective global priority or authority.
+Plugins advertise the Interfaces they provide. They do not choose their own effective global priority or authority.
 
-Composition policy may supply:
+Product composition policy may supply:
 
 - enabled or disabled state;
-- authority grant;
-- effective provider priority;
-- explicit provider binding;
-- optional fallback policy where the interface permits fallback;
-- opaque scope selectors where the interface requires scoping.
+- Plugin authority grant;
+- effective Provider priority;
+- explicit Provider binding policy;
+- optional fallback policy where the Interface permits fallback;
+- opaque scope selectors where the Interface requires scoping.
 
-These inputs are part of graph resolution and therefore part of graph identity.
+These policy inputs participate in Graph resolution and therefore in Graph Generation identity.
 
-A plugin may declare metadata that is intrinsic to its implementation. Composition policy decides the effective provider choice.
+A Plugin may declare metadata intrinsic to its implementation. Product composition policy determines the effective Provider choice.
 
 ## Effective authority
 
-A provider is eligible only when the operation fits all authority bounds:
+A Provider is eligible only when the operation fits all authority bounds:
 
 ```text
 caller authority
-  ∩ configured plugin grant
-  ∩ provider maximum authority
-  ∩ interface operation requirements
+  ∩ configured Plugin grant
+  ∩ Provider maximum authority
+  ∩ Interface operation requirements
 ```
 
-Priority, first-party status, package origin, bundling, or explicit binding never expands authority.
+Priority, first-party status, package origin, bundling, or explicit Provider binding policy never expands Effective Authority.
 
 ## Resolution
 
-During graph construction the kernel:
+During candidate Graph construction the kernel resolver:
 
-1. matches the required interface ID and compatible version;
+1. matches the required Interface ID and compatible version;
 2. checks structural request and response compatibility;
-3. removes disabled candidates;
-4. removes candidates that cannot receive the required authority;
+3. removes disabled Provider Candidates;
+4. removes Provider Candidates that cannot receive the required authority;
 5. applies declared scope requirements;
-6. applies an eligible explicit binding when configured;
-7. otherwise selects by effective composition priority;
-8. breaks equal priority by stable provider identity;
-9. resolves any explicitly allowed fallback plan using the same eligibility rules;
-10. records the complete result in the candidate graph generation.
+6. applies an eligible explicit Provider binding policy when configured;
+7. otherwise selects by effective product composition priority;
+8. breaks equal priority by stable Provider identity;
+9. resolves any explicitly allowed Fallback Plan using the same eligibility rules;
+10. records the complete Resolved Provider Plan in the candidate Graph Generation.
 
-The resolver never invokes provider code while choosing providers.
+The kernel resolver never invokes Provider code while resolving Provider Bindings.
 
 Registration order and activation order have no semantic effect.
 
 ## Dispatch
 
-Dispatch uses the provider plan pinned to the invocation's graph generation.
+Dispatch uses the Resolved Provider Plan pinned to the invocation's Graph Generation.
 
-The kernel does not perform an unbounded provider search at request time.
+The kernel does not perform an unbounded Provider search at request time.
 
-If the selected provider cannot accept the call, the result is normally an availability failure. A fallback may be used only when all of these are true:
+If the primary Provider cannot accept the call, the result is normally a Provider Availability failure. A fallback Provider Binding may be used only when all of these are true:
 
-- the interface contract explicitly permits pre-dispatch fallback;
-- composition policy enabled fallback;
-- the fallback provider was resolved and pinned in the same graph generation;
-- the fallback remains within the invocation's authority bound.
+- the Interface contract explicitly permits pre-dispatch fallback;
+- product composition policy enabled fallback;
+- the fallback Provider Binding was resolved and pinned in the same Graph Generation;
+- the fallback remains within the invocation's Effective Authority.
 
-The executed provider and fallback reason are recorded in provenance.
+The executed Provider and fallback reason are recorded in provenance.
 
 ## Failure after dispatch
 
-Once provider execution starts, provider failure is an execution failure. It does not mean "try another provider."
+Once Provider execution starts, Provider failure is an execution failure. It does not mean "try another Provider."
 
-A userspace interface may define explicit replay or retry semantics for safe idempotent operations. Such behavior is part of that interface or a layer implementing it. It is not generic provider search.
+A userspace Interface may define explicit replay or retry semantics for safe idempotent operations. Such behavior belongs to that Interface or a Layer implementing it. It is not generic Provider search.
 
-Mutating and ambiguity-sensitive operations default to no post-dispatch provider switch.
+Mutating and ambiguity-sensitive operations default to no post-dispatch Provider switch.
 
-## Availability
+## Provider availability
 
-Availability is process-local runtime state, for example:
+Provider Availability is runtime-local state, for example:
 
 ```text
 starting
@@ -122,58 +122,58 @@ unavailable
 stopped
 ```
 
-Availability does not change semantic provider binding inside an existing generation.
+Provider Availability does not change a semantic Provider Binding inside an existing Graph Generation.
 
-A durable provider change, policy change, authority change, or provider replacement creates a candidate graph generation. Successful reconciliation commits the new generation atomically.
+A durable Provider change, product composition policy change, authority change, or Provider replacement creates a candidate Graph Generation. Successful kernel reconciliation commits the new Graph Generation atomically.
 
 ## Provenance
 
 The kernel records at least:
 
-- graph generation;
-- interface ID and version;
-- resolved primary provider;
-- resolved fallback plan when present;
-- provider actually entered;
-- authority bound;
+- Graph Generation;
+- Interface ID and version;
+- resolved primary Provider Binding;
+- resolved Fallback Plan when present;
+- Provider actually entered;
+- Effective Authority bound;
 - selection or fallback reason;
-- provider artifact and runtime generation where relevant;
+- Plugin Artifact Revision and Plugin Runtime generation where relevant;
 - outcome.
 
 The owning userspace service decides how this provenance relates to its domain records.
 
 ## Scope
 
-The kernel supports opaque scope values where an interface needs them. It does not define workspace, session, execution, model, repository, or other product scope semantics.
+The kernel supports opaque scope values where an Interface needs them. It does not define workspace, session, execution, model, repository, or other product scope semantics.
 
-The interface contract owns scope meaning and validation. Scope does not grant authority or priority by itself.
+The Interface contract owns scope meaning and validation. Scope does not grant authority or Provider priority by itself.
 
 ## Invariants
 
-- Provider selection happens during graph resolution.
-- Provider plans are pinned to immutable graph generations.
-- Runtime dispatch does not search the live plugin set again.
-- Authority determines eligibility; composition policy determines preference.
-- First-party providers receive no implicit priority.
-- Explicit binding never bypasses compatibility or authority checks.
-- Registration order does not affect provider choice.
-- Provider resolution never executes provider code.
-- Availability does not silently mutate semantic binding.
-- Pre-dispatch fallback exists only when explicitly allowed and generation-pinned.
-- Post-dispatch failure never means generic provider fallback.
-- The resolver understands no product-domain semantics.
+- Provider Binding happens during Graph resolution.
+- Resolved Provider Plans are pinned to immutable Graph Generations.
+- Runtime dispatch does not search the live Plugin set again.
+- Effective Authority determines Provider eligibility; product composition policy determines preference.
+- First-party Providers receive no implicit priority.
+- Explicit Provider binding policy never bypasses Interface compatibility or authority checks.
+- Registration order does not affect Provider choice.
+- Provider resolution never executes Provider code.
+- Provider Availability does not silently mutate a Provider Binding.
+- Pre-dispatch fallback exists only when explicitly allowed and Graph Generation-pinned.
+- Post-dispatch failure never means generic Provider fallback.
+- The kernel resolver understands no product-domain semantics.
 
 ## Required regressions
 
-- a higher-priority unauthorized provider is excluded before selection;
-- explicit binding wins only when compatible and authorized;
-- equal-priority providers resolve by stable identity;
-- structural incompatibility excludes a candidate before activation;
-- a provider, policy, or authority change creates a different graph identity;
-- an unavailable primary provider fails when no fallback plan exists;
-- an explicitly configured fallback uses only a provider pinned in the same generation;
-- runtime availability cannot cause an undeclared provider to receive a call;
-- provider failure after dispatch does not select another provider;
-- alternate third-party providers use the same resolver as first-party providers;
-- provenance records the resolved plan and actual executed provider;
+- a higher-priority unauthorized Provider is excluded before selection;
+- explicit Provider binding policy wins only when compatible and authorized;
+- equal-priority Providers resolve by stable identity;
+- structural incompatibility excludes a Provider Candidate before activation;
+- a Provider, product composition policy, or authority change creates a different Graph Generation identity;
+- an unavailable primary Provider fails when no Fallback Plan exists;
+- an explicitly configured Fallback Plan uses only a Provider Binding pinned in the same Graph Generation;
+- runtime Provider Availability cannot cause an undeclared Provider to receive a call;
+- Provider failure after dispatch does not select another Provider;
+- alternate third-party Providers use the same kernel resolver as first-party Providers;
+- provenance records the Resolved Provider Plan and actual executed Provider;
 - the kernel resolver requires no session, execution, model, workspace, or repository-specific type.
