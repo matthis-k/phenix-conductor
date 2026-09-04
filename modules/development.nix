@@ -23,25 +23,7 @@
         enable = true;
         stage = "source";
         name = "Source";
-        timeoutMinutes = 20;
-      };
-      mkRustCi = stage: name: {
-        enable = true;
-        inherit stage name;
         timeoutMinutes = 60;
-        needs = [ "source" ];
-        env = {
-          CARGO_HOME = "\${{ runner.temp }}/phenix-cargo-home";
-          CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
-          CARGO_TERM_QUIET = "true";
-        };
-      };
-      productCi = {
-        enable = true;
-        stage = "product";
-        name = "Product";
-        timeoutMinutes = 60;
-        needs = [ "source" ];
       };
 
       integrationTargets = [
@@ -57,6 +39,9 @@
           test = "tool_bridge";
           label = "phenix-backend-acp / tool_bridge";
         }
+      ];
+
+      testTargets = [
         {
           id = "phenix-adapter-acp-runtime-plugin";
           package = "phenix-adapter-acp";
@@ -153,15 +138,15 @@
           test = "component_graph";
           label = "phenix-harness / component_graph";
         }
-      ];
-
-      systemTargets = [
         {
           id = "harness-supported-product";
           package = "phenix-harness";
           test = "supported_product_journeys";
           label = "harness / supported_product_journeys";
         }
+      ];
+
+      runtimeTargets = [
         {
           id = "harness-process-roundtrip";
           package = "phenix-harness";
@@ -170,105 +155,37 @@
         }
       ];
 
-      cargoTestTargets = integrationTargets ++ systemTargets;
+      cargoTestTargets = testTargets ++ runtimeTargets ++ integrationTargets;
 
-      mkCargoTestCommands =
+      mkCargoSuite = target: {
+        name = target.label;
+        runtimeInputs = pkgs: [
+          pkgs.cargo
+          pkgs.git
+          pkgs.rustc
+        ];
+        exec = ''
+          ${rustRoot}
+          cargo test --quiet --locked -p ${target.package} --test ${target.test}
+        '';
+      };
+
+      mkCargoSuites =
         targets:
         builtins.listToAttrs (
           builtins.map (target: {
             name = target.id;
-            value = {
-              description = target.label;
-              runtimeInputs = pkgs: [
-                pkgs.cargo
-                pkgs.git
-                pkgs.rustc
-              ];
-              exec = ''
-                ${rustRoot}
-                cargo test --locked -p ${target.package} --test ${target.test}
-              '';
-            };
+            value = mkCargoSuite target;
           }) targets
         );
 
-      mkRustCiRuns =
-        boundary: targets:
-        builtins.concatStringsSep "\n" (
-          builtins.map (target: ''
-            run_check '${boundary}: ${target.label}' "$0" test ${boundary} ${target.id}
-          '') targets
-        );
-
-      mkRustGroupCommand =
-        {
-          stage,
-          name,
-          boundary,
-          targets,
-        }:
-        {
-          description = "Run all ${boundary} Rust tests before reporting failures";
-          dependencies = builtins.map (target: [
-            "test"
-            boundary
-            target.id
-          ]) targets;
-          ci = (mkRustCi stage name) // {
-            stepName = name;
-          };
-          runtimeInputs = pkgs: [
-            pkgs.coreutils
-            pkgs.git
-          ];
-          exec = ''
-            ${repositoryRoot}
-            failures=()
-
-            run_check() {
-              local label="$1"
-              shift
-              local status
-
-              printf '::group::%s\n' "$label"
-              if "$@"; then
-                status=0
-              else
-                status=$?
-              fi
-              printf '::endgroup::\n'
-
-              if (( status != 0 )); then
-                printf '::error title=Rust CI failure::%s failed with exit code %s\n' "$label" "$status"
-                failures+=("$label (exit $status)")
-              fi
-            }
-
-            ${mkRustCiRuns boundary targets}
-
-            if (( ''${#failures[@]} > 0 )); then
-              printf '\nRust CI failures:\n' >&2
-              printf '  - %s\n' "''${failures[@]}" >&2
-              exit 1
-            fi
-          '';
-        };
-
-      expectedCargoTargetLines = builtins.concatStringsSep "\n" (
-        builtins.map (target: "printf '%s\\t%s\\n' '${target.package}' '${target.test}'") cargoTestTargets
-      );
-
-      mkProductCommand =
+      mkProductSuite =
         {
           check,
-          description,
-          stepName,
+          name,
         }:
         {
-          inherit description;
-          ci = productCi // {
-            inherit stepName;
-          };
+          inherit name;
           runtimeInputs = pkgs: [
             pkgs.git
             pkgs.nix
@@ -279,6 +196,105 @@
             nix build --no-link --print-build-logs ".#checks.$system.${check}"
           '';
         };
+
+      ciCommands = maintenanceLib.mkCi {
+        ci = {
+          name = "CI";
+          timeoutMinutes = 120;
+          needs = [ "source" ];
+          env = {
+            CARGO_HOME = "\${{ runner.temp }}/phenix-cargo-home";
+            CARGO_TARGET_DIR = "\${{ runner.temp }}/phenix-cargo-target";
+            CARGO_TERM_QUIET = "true";
+          };
+        };
+
+        build.rust-workspace = {
+          name = "Rust workspace";
+          runtimeInputs = pkgs: [
+            pkgs.cargo
+            pkgs.git
+            pkgs.rustc
+          ];
+          exec = ''
+            ${rustRoot}
+            cargo build --workspace --locked --quiet
+          '';
+        };
+
+        test = {
+          unit = {
+            name = "Rust unit tests";
+            runtimeInputs = pkgs: [
+              pkgs.bash
+              pkgs.bubblewrap
+              pkgs.cargo
+              pkgs.coreutils
+              pkgs.git
+              pkgs.iproute2
+              pkgs.ripgrep
+              pkgs.rsync
+              pkgs.rustc
+              pkgs.slirp4netns
+              pkgs.socat
+              pkgs.util-linux
+            ];
+            exec = ''
+              ${rustRoot}
+
+              if [ "''${GITHUB_ACTIONS:-}" = "true" ] \
+                && [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] \
+                && [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = "1" ]; then
+                /usr/bin/sudo -n /usr/sbin/sysctl \
+                  -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null
+              fi
+
+              timeout --signal=KILL 300 \
+                cargo test --quiet --workspace --lib --bins --locked -- --nocapture --test-threads=1
+            '';
+          };
+
+          docs = {
+            name = "Rust doc tests";
+            runtimeInputs = pkgs: [
+              pkgs.cargo
+              pkgs.git
+              pkgs.rustc
+            ];
+            exec = ''
+              ${rustRoot}
+              cargo test --quiet --workspace --doc --locked
+            '';
+          };
+        }
+        // mkCargoSuites testTargets;
+
+        runtime = mkCargoSuites runtimeTargets;
+        integration = mkCargoSuites integrationTargets;
+
+        product = {
+          phenix = mkProductSuite {
+            check = "phenix-product-smoke";
+            name = "Phenix product smoke";
+          };
+          plugin-packaging = mkProductSuite {
+            check = "phenix-plugin-packaging";
+            name = "Plugin packaging";
+          };
+          stitch-runtime = mkProductSuite {
+            check = "stitch-runtime-smoke";
+            name = "Stitch runtime smoke";
+          };
+          stitch-mcp = mkProductSuite {
+            check = "stitch-mcp-package";
+            name = "Stitch MCP package";
+          };
+        };
+      };
+
+      expectedCargoTargetLines = builtins.concatStringsSep "\n" (
+        builtins.map (target: "printf '%s\\t%s\\n' '${target.package}' '${target.test}'") cargoTestTargets
+      );
 
       maintenance = maintenanceLib.mkMaintenance {
         name = "maintenance";
@@ -292,16 +308,16 @@
           preCommit = [ "fix" ];
         };
 
-        commands = {
+        commands = ciCommands // {
           all = {
-            description = "Run the complete read-only validation graph";
+            description = "Run static validation and the complete semantic CI pipeline";
             dependencies = [
               [ "check" ]
-              [ "test" ]
+              [ "pipeline" ]
             ];
             exec = ''
               "$0" check
-              "$0" test
+              "$0" pipeline
             '';
           };
 
@@ -428,7 +444,7 @@
                   };
 
                   test-targets = {
-                    description = "Every Cargo integration target has an explicit test boundary";
+                    description = "Every Cargo integration target has an explicit semantic CI phase";
                     ci = sourceCi // {
                       stepName = "Test target classification";
                     };
@@ -490,6 +506,9 @@
 
               rust = {
                 description = "Rust static analysis with Clippy";
+                ci = sourceCi // {
+                  stepName = "Clippy";
+                };
                 runtimeInputs = pkgs: [
                   pkgs.cargo
                   pkgs.clippy
@@ -498,189 +517,8 @@
                 ];
                 exec = ''
                   ${rustRoot}
-                  cargo clippy --workspace --all-targets --locked -- -D warnings
+                  cargo clippy --quiet --workspace --all-targets --locked -- -D warnings
                 '';
-              };
-            };
-          };
-
-          rust-ci = {
-            description = "Run Rust CI by independent failure boundary";
-            order = [
-              "clippy"
-              "unit"
-              "doc"
-              "integration"
-              "system"
-            ];
-            commands = {
-              clippy = {
-                description = "Rust static analysis with Clippy";
-                ci = (mkRustCi "rust-clippy" "Rust / Clippy") // {
-                  stepName = "Clippy";
-                };
-                dependencies = [
-                  [
-                    "check"
-                    "rust"
-                  ]
-                ];
-                runtimeInputs = pkgs: [ pkgs.git ];
-                exec = ''
-                  ${repositoryRoot}
-                  "$0" check rust
-                '';
-              };
-
-              unit = {
-                description = "In-crate library and binary tests";
-                ci = (mkRustCi "rust-unit" "Rust / Unit") // {
-                  stepName = "Unit tests";
-                };
-                dependencies = [
-                  [
-                    "test"
-                    "unit"
-                  ]
-                ];
-                runtimeInputs = pkgs: [ pkgs.git ];
-                exec = ''
-                  ${repositoryRoot}
-                  "$0" test unit
-                '';
-              };
-
-              doc = {
-                description = "Rust documentation tests";
-                ci = (mkRustCi "rust-doc" "Rust / Docs") // {
-                  stepName = "Doc tests";
-                };
-                dependencies = [
-                  [
-                    "test"
-                    "doc"
-                  ]
-                ];
-                runtimeInputs = pkgs: [ pkgs.git ];
-                exec = ''
-                  ${repositoryRoot}
-                  "$0" test doc
-                '';
-              };
-
-              integration = mkRustGroupCommand {
-                stage = "rust-integration";
-                name = "Rust / Integration";
-                boundary = "integration";
-                targets = integrationTargets;
-              };
-
-              system = mkRustGroupCommand {
-                stage = "rust-system";
-                name = "Rust / System";
-                boundary = "system";
-                targets = systemTargets;
-              };
-            };
-          };
-
-          test = {
-            description = "Run tests by architectural boundary";
-            order = [
-              "unit"
-              "doc"
-              "integration"
-              "system"
-              "product"
-            ];
-            commands = {
-              unit = {
-                description = "In-crate library and binary tests";
-                runtimeInputs = pkgs: [
-                  pkgs.bash
-                  pkgs.bubblewrap
-                  pkgs.cargo
-                  pkgs.coreutils
-                  pkgs.git
-                  pkgs.iproute2
-                  pkgs.ripgrep
-                  pkgs.rsync
-                  pkgs.rustc
-                  pkgs.slirp4netns
-                  pkgs.socat
-                  pkgs.util-linux
-                ];
-                exec = ''
-                  ${rustRoot}
-
-                  # GitHub's Ubuntu 24.04 runner restricts unprivileged user namespaces
-                  # with AppArmor. Bubblewrap requires one when it is not running as root.
-                  if [ "''${GITHUB_ACTIONS:-}" = "true" ] \
-                    && [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] \
-                    && [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = "1" ]; then
-                    /usr/bin/sudo -n /usr/sbin/sysctl \
-                      -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null
-                  fi
-
-                  timeout --signal=KILL 300 cargo test --workspace --lib --bins --locked -- --nocapture --test-threads=1
-                '';
-              };
-
-              doc = {
-                description = "Rust documentation tests";
-                runtimeInputs = pkgs: [
-                  pkgs.cargo
-                  pkgs.git
-                  pkgs.rustc
-                ];
-                exec = ''
-                  ${rustRoot}
-                  cargo test --workspace --doc --locked
-                '';
-              };
-
-              integration = {
-                description = "Crate/API integration targets";
-                order = builtins.map (target: target.id) integrationTargets;
-                commands = mkCargoTestCommands integrationTargets;
-              };
-
-              system = {
-                description = "Black-box conductor/process/protocol targets";
-                order = builtins.map (target: target.id) systemTargets;
-                commands = mkCargoTestCommands systemTargets;
-              };
-
-              product = {
-                description = "Installed product behavior and package realization";
-                order = [
-                  "phenix"
-                  "plugin-packaging"
-                  "stitch-runtime"
-                  "stitch-mcp"
-                ];
-                commands = {
-                  phenix = mkProductCommand {
-                    check = "phenix-product-smoke";
-                    description = "Run the installed Phenix product smoke fixture";
-                    stepName = "Phenix product smoke";
-                  };
-                  plugin-packaging = mkProductCommand {
-                    check = "phenix-plugin-packaging";
-                    description = "Run composed plugin package smoke journeys";
-                    stepName = "Plugin packaging";
-                  };
-                  stitch-runtime = mkProductCommand {
-                    check = "stitch-runtime-smoke";
-                    description = "Installed Stitch runtime smoke";
-                    stepName = "Stitch runtime smoke";
-                  };
-                  stitch-mcp = mkProductCommand {
-                    check = "stitch-mcp-package";
-                    description = "Stitch MCP package build";
-                    stepName = "Stitch MCP package";
-                  };
-                };
               };
             };
           };
@@ -757,11 +595,11 @@
           echo "phenix dev shell"
           echo "  all:          maintenance all"
           echo "  static:       maintenance check"
+          echo "  build:        maintenance build"
           echo "  tests:        maintenance test"
-          echo "  unit:         maintenance test unit"
-          echo "  integration:  maintenance test integration"
-          echo "  system:       maintenance test system"
-          echo "  product:      maintenance test product"
+          echo "  runtime:      maintenance runtime"
+          echo "  integration:  maintenance integration"
+          echo "  product:      maintenance product"
           echo "  fixes:        maintenance fix"
         '';
       };
