@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(rename_all = "snake_case")]
 pub enum ProviderSelectionReason {
     ExplicitBinding,
-    ProductPriority,
+    Priority,
     StableIdentity,
 }
 
