@@ -165,7 +165,10 @@ mod tests {
         let schemas = Resources::durable_schemas();
 
         assert_eq!(schemas.len(), 1);
-        assert_eq!(schemas[0].namespace.as_str(), "fixture.resource-owner.plans");
+        assert_eq!(
+            schemas[0].namespace.as_str(),
+            "fixture.resource-owner.plans"
+        );
         assert_eq!(schemas[0].version, 3);
         assert!(schemas[0]
             .required_features
