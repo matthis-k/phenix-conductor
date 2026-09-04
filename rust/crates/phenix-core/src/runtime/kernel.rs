@@ -1,5 +1,8 @@
 use super::{
-    dispatch::{invoke_component_service_with, invoke_service_with, ServiceDispatchGuards},
+    dispatch::{
+        invoke_component_service_with, invoke_service_with, ComponentDispatchTarget,
+        ServiceDispatchGuards,
+    },
     *,
 };
 
@@ -333,10 +336,13 @@ impl Kernel {
                 provenance: &self.provenance,
             },
             service,
-            component,
+            ComponentDispatchTarget {
+                component,
+                binding,
+                provider_provenance: None,
+            },
             input,
             caller_authority,
-            binding,
             ServiceDispatchGuards {
                 call_stack: &BTreeSet::new(),
                 active_services: &BTreeSet::new(),

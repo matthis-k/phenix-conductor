@@ -29,27 +29,37 @@ fn prepare_active_chain(
     Ok(chain)
 }
 
+pub(super) struct ComponentDispatchTarget<'a> {
+    pub(super) component: &'a ComponentId,
+    pub(super) binding: &'a PluginId,
+    pub(super) provider_provenance: Option<ComponentProviderProvenance>,
+}
+
 pub(super) fn invoke_component_service_with(
     runtime: InvocationContext<'_>,
     service: &ServiceId,
-    terminal_component: &ComponentId,
+    target: ComponentDispatchTarget<'_>,
     input: &[u8],
     caller_authority: &Authority,
-    binding: &PluginId,
     guards: ServiceDispatchGuards<'_>,
 ) -> Result<Vec<u8>, KernelError> {
+    let ComponentDispatchTarget {
+        component,
+        binding,
+        provider_provenance,
+    } = target;
     if guards.active_services.contains(service) {
         return Err(KernelError::CausalServiceReentry(service.clone()));
     }
     let resolved = runtime
         .component_graph
-        .component(terminal_component)
-        .ok_or_else(|| ComponentGraphError::UnknownComponent(terminal_component.clone()))?;
+        .component(component)
+        .ok_or_else(|| ComponentGraphError::UnknownComponent(component.clone()))?;
     if &resolved.owning_plugin != binding {
         return Err(KernelError::HostOperationDenied {
             plugin: binding.clone(),
             operation: format!(
-                "resolved component {terminal_component} belongs to {}, not {binding}",
+                "resolved component {component} belongs to {}, not {binding}",
                 resolved.owning_plugin
             ),
         });
@@ -64,6 +74,7 @@ pub(super) fn invoke_component_service_with(
         &chain,
         caller_authority,
         runtime.graph_generation,
+        provider_provenance,
     )));
     let result = invoke_resolved_chain_with(
         runtime,
@@ -74,7 +85,7 @@ pub(super) fn invoke_component_service_with(
         ServiceDispatchGuards {
             call_stack: guards.call_stack,
             active_services: &next_services,
-            terminal_component: Some(terminal_component),
+            terminal_component: Some(component),
         },
         &trace,
     );
@@ -113,6 +124,7 @@ pub(super) fn invoke_service_with(
         &chain,
         caller_authority,
         runtime.graph_generation,
+        None,
     )));
     let result = invoke_resolved_chain_with(
         runtime,

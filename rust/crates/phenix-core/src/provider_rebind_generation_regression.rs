@@ -1,6 +1,6 @@
 use crate::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentManifest, InterfaceId,
-    PluginExecution, PluginId, PluginManifest, ResolvedHarness,
+    PluginExecution, PluginId, PluginManifest, ProviderCompositionPolicy, ResolvedHarness,
 };
 
 fn plugin(id: &str) -> PluginManifest {
@@ -51,25 +51,33 @@ fn consumer(interface: &InterfaceId) -> ComponentManifest {
 fn provider_rebinding_requires_a_new_resolved_generation() {
     let interface = InterfaceId::parse("fixture.provider@1").unwrap();
     let consumer = consumer(&interface);
-    let provider_a = provider("provider-a", "provider-a-package", &interface, 10);
-    let provider_b = provider("provider-b", "provider-b-package", &interface, 20);
+    let provider_a = provider("provider-a", "provider-a-package", &interface, 100);
+    let provider_b = provider("provider-b", "provider-b-package", &interface, 1);
+    let provider_b_id = ComponentId::parse("provider-b").unwrap();
+    let policy = ProviderCompositionPolicy::new().with_priority(
+        interface.clone(),
+        provider_b_id.clone(),
+        20,
+    );
     let plugins = [
         plugin("consumer-package"),
         plugin("provider-a-package"),
         plugin("provider-b-package"),
     ];
 
-    let active = ResolvedHarness::resolve(
+    let active = ResolvedHarness::resolve_with_provider_policy(
         plugins.clone(),
         [consumer.clone(), provider_a.clone()],
         [],
+        policy.clone(),
         &Authority::default(),
     )
     .unwrap();
-    let candidate = ResolvedHarness::resolve(
+    let candidate = ResolvedHarness::resolve_with_provider_policy(
         plugins,
         [consumer.clone(), provider_a, provider_b],
         [],
+        policy,
         &Authority::default(),
     )
     .unwrap();
@@ -89,10 +97,7 @@ fn provider_rebinding_requires_a_new_resolved_generation() {
         active_binding.exporter(),
         &ComponentId::parse("provider-a").unwrap()
     );
-    assert_eq!(
-        candidate_binding.exporter(),
-        &ComponentId::parse("provider-b").unwrap()
-    );
+    assert_eq!(candidate_binding.exporter(), &provider_b_id);
     assert_ne!(active.generation(), candidate.generation());
     assert_eq!(
         active

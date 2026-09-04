@@ -2,7 +2,7 @@ use crate::{
     Authority, ComponentExport, ComponentId, ComponentListener, ComponentManifest, EventBus,
     EventEnvelope, EventError, EventHandler, EventSubscription, InterfaceCompatibility,
     InterfaceId, InterfaceSchemaMismatch, PluginExecution, PluginId, PluginManifest,
-    SubscriptionSpec,
+    ProviderCompositionPolicy, ProviderSelectionReason, SubscriptionSpec,
 };
 use std::sync::Arc;
 use std::{
@@ -157,10 +157,45 @@ impl ResolvedImportHandle {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedProviderPlan {
+    primary: ResolvedImportHandle,
+    fallbacks: Vec<ResolvedImportHandle>,
+    selection_reason: ProviderSelectionReason,
+}
+
+impl ResolvedProviderPlan {
+    pub fn primary(&self) -> &ResolvedImportHandle {
+        &self.primary
+    }
+
+    pub fn fallbacks(&self) -> &[ResolvedImportHandle] {
+        &self.fallbacks
+    }
+
+    pub fn selection_reason(&self) -> ProviderSelectionReason {
+        self.selection_reason
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedImport {
     pub interface: InterfaceId,
     pub required: bool,
     pub binding: Option<ResolvedImportHandle>,
+    pub fallbacks: Vec<ResolvedImportHandle>,
+    pub selection_reason: Option<ProviderSelectionReason>,
+}
+
+impl ResolvedImport {
+    fn provider_plan(&self) -> Option<ResolvedProviderPlan> {
+        self.binding.as_ref().map(|primary| ResolvedProviderPlan {
+            primary: primary.clone(),
+            fallbacks: self.fallbacks.clone(),
+            selection_reason: self
+                .selection_reason
+                .expect("resolved provider binding has a selection reason"),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -202,6 +237,13 @@ pub struct ResolvedComponentGraph {
     listeners: Vec<ResolvedListener>,
 }
 
+struct EligibleProvider<'a> {
+    component: &'a ComponentManifest,
+    effective_authority: Authority,
+    priority: i32,
+    explicit: bool,
+}
+
 impl ResolvedComponentGraph {
     pub fn empty() -> Self {
         Self {
@@ -214,6 +256,36 @@ impl ResolvedComponentGraph {
         plugin_manifests: impl IntoIterator<Item = PluginManifest>,
         component_manifests: impl IntoIterator<Item = ComponentManifest>,
         harness_authority: &Authority,
+    ) -> Result<Self, ComponentGraphError> {
+        Self::compile_inner(
+            plugin_manifests,
+            component_manifests,
+            harness_authority,
+            None,
+        )
+    }
+
+    /// Resolve component imports with product-owned provider policy while using
+    /// the same structural, authority, and topology resolver as the baseline path.
+    pub fn compile_with_provider_policy(
+        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
+        component_manifests: impl IntoIterator<Item = ComponentManifest>,
+        harness_authority: &Authority,
+        policy: &ProviderCompositionPolicy,
+    ) -> Result<Self, ComponentGraphError> {
+        Self::compile_inner(
+            plugin_manifests,
+            component_manifests,
+            harness_authority,
+            Some(policy),
+        )
+    }
+
+    fn compile_inner(
+        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
+        component_manifests: impl IntoIterator<Item = ComponentManifest>,
+        harness_authority: &Authority,
+        provider_policy: Option<&ProviderCompositionPolicy>,
     ) -> Result<Self, ComponentGraphError> {
         let mut plugins = BTreeMap::new();
         for manifest in plugin_manifests {
@@ -255,12 +327,7 @@ impl ResolvedComponentGraph {
             }
         }
         for candidates in exporters.values_mut() {
-            candidates.sort_by(|(left, left_export), (right, right_export)| {
-                right_export
-                    .priority
-                    .cmp(&left_export.priority)
-                    .then_with(|| left.id.cmp(&right.id))
-            });
+            candidates.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
         }
 
         let mut resolved = BTreeMap::new();
@@ -272,10 +339,17 @@ impl ResolvedComponentGraph {
                 .attenuate(&manifest.maximum_authority);
             let mut imports = Vec::with_capacity(manifest.imports.len());
             for import in &manifest.imports {
-                let mut selected = None;
+                let explicit =
+                    provider_policy.and_then(|policy| policy.explicit_binding(&import.interface));
+                let mut eligible = Vec::new();
                 let mut incompatible = None;
                 if let Some(candidates) = exporters.get(&import.interface) {
                     for (candidate, export) in candidates {
+                        if provider_policy.is_some_and(|policy| {
+                            !policy.provider_enabled(&import.interface, &candidate.id)
+                        }) {
+                            continue;
+                        }
                         let exporter_owner = &plugins[&candidate.owner];
                         let effective_authority = component_authority
                             .attenuate(&import.authority)
@@ -286,8 +360,15 @@ impl ResolvedComponentGraph {
                         }
                         match import.schema.accepts_provider(&export.schema) {
                             InterfaceCompatibility::Exact | InterfaceCompatibility::Compatible => {
-                                selected = Some((*candidate, effective_authority));
-                                break;
+                                let priority = provider_policy.map_or(export.priority, |policy| {
+                                    policy.effective_priority(&import.interface, &candidate.id)
+                                });
+                                eligible.push(EligibleProvider {
+                                    component: candidate,
+                                    effective_authority,
+                                    priority,
+                                    explicit: explicit.is_some_and(|id| id == &candidate.id),
+                                });
                             }
                             InterfaceCompatibility::Incompatible(mismatch) => {
                                 incompatible
@@ -296,36 +377,82 @@ impl ResolvedComponentGraph {
                         }
                     }
                 }
-                let binding = if let Some((exporter, effective_authority)) = selected {
-                    let exporter_owner = &plugins[&exporter.owner];
-                    Some(ResolvedImportHandle {
-                        importer: manifest.id.clone(),
-                        interface: import.interface.clone(),
-                        exporter: exporter.id.clone(),
-                        owning_plugin: exporter.owner.clone(),
-                        execution: exporter_owner.execution.clone(),
-                        effective_authority,
+
+                eligible.sort_by(|left, right| {
+                    right
+                        .explicit
+                        .cmp(&left.explicit)
+                        .then_with(|| right.priority.cmp(&left.priority))
+                        .then_with(|| left.component.id.cmp(&right.component.id))
+                });
+
+                let selection_reason = eligible.first().map(|primary| {
+                    if primary.explicit {
+                        ProviderSelectionReason::ExplicitBinding
+                    } else {
+                        let priority_changed_order = eligible
+                            .get(1)
+                            .is_some_and(|next| next.priority != primary.priority);
+                        let policy_has_priority = provider_policy.is_some_and(|policy| {
+                            eligible.iter().any(|candidate| {
+                                policy.has_priority(&import.interface, &candidate.component.id)
+                            })
+                        });
+                        if priority_changed_order || policy_has_priority {
+                            ProviderSelectionReason::Priority
+                        } else {
+                            ProviderSelectionReason::StableIdentity
+                        }
+                    }
+                });
+
+                let mut handles = eligible
+                    .into_iter()
+                    .map(|candidate| {
+                        let exporter_owner = &plugins[&candidate.component.owner];
+                        ResolvedImportHandle {
+                            importer: manifest.id.clone(),
+                            interface: import.interface.clone(),
+                            exporter: candidate.component.id.clone(),
+                            owning_plugin: candidate.component.owner.clone(),
+                            execution: exporter_owner.execution.clone(),
+                            effective_authority: candidate.effective_authority,
+                        }
                     })
-                } else if import.required {
-                    if let Some((exporter, mismatch)) = incompatible {
-                        return Err(ComponentGraphError::IncompatibleRequiredImport {
+                    .collect::<Vec<_>>();
+
+                let binding = if handles.is_empty() {
+                    if import.required {
+                        if let Some((exporter, mismatch)) = incompatible {
+                            return Err(ComponentGraphError::IncompatibleRequiredImport {
+                                component: manifest.id.clone(),
+                                interface: import.interface.clone(),
+                                exporter,
+                                mismatch: Box::new(mismatch),
+                            });
+                        }
+                        return Err(ComponentGraphError::MissingRequiredImport {
                             component: manifest.id.clone(),
                             interface: import.interface.clone(),
-                            exporter,
-                            mismatch: Box::new(mismatch),
                         });
                     }
-                    return Err(ComponentGraphError::MissingRequiredImport {
-                        component: manifest.id.clone(),
-                        interface: import.interface.clone(),
-                    });
-                } else {
                     None
+                } else {
+                    Some(handles.remove(0))
+                };
+                let fallbacks = if provider_policy
+                    .is_some_and(|policy| policy.fallback_enabled(&import.interface))
+                {
+                    handles
+                } else {
+                    Vec::new()
                 };
                 imports.push(ResolvedImport {
                     interface: import.interface.clone(),
                     required: import.required,
                     binding,
+                    fallbacks,
+                    selection_reason,
                 });
             }
             resolved.insert(
@@ -375,24 +502,39 @@ impl ResolvedComponentGraph {
         self.listeners.iter()
     }
 
-    pub fn import_handle(
+    fn resolved_import(
         &self,
         component: &ComponentId,
         interface: &InterfaceId,
-    ) -> Result<Option<&ResolvedImportHandle>, ComponentGraphError> {
+    ) -> Result<&ResolvedImport, ComponentGraphError> {
         let resolved = self
             .components
             .get(component)
             .ok_or_else(|| ComponentGraphError::UnknownComponent(component.clone()))?;
-        let import = resolved
+        resolved
             .imports
             .iter()
             .find(|import| &import.interface == interface)
             .ok_or_else(|| ComponentGraphError::ImportNotDeclared {
                 component: component.clone(),
                 interface: interface.clone(),
-            })?;
-        Ok(import.binding.as_ref())
+            })
+    }
+
+    pub fn import_handle(
+        &self,
+        component: &ComponentId,
+        interface: &InterfaceId,
+    ) -> Result<Option<&ResolvedImportHandle>, ComponentGraphError> {
+        Ok(self.resolved_import(component, interface)?.binding.as_ref())
+    }
+
+    pub fn provider_plan(
+        &self,
+        component: &ComponentId,
+        interface: &InterfaceId,
+    ) -> Result<Option<ResolvedProviderPlan>, ComponentGraphError> {
+        Ok(self.resolved_import(component, interface)?.provider_plan())
     }
 }
 
@@ -422,6 +564,9 @@ fn validate_required_import_dag(
                 }
                 if let Some(binding) = &import.binding {
                     visit(binding.exporter(), components, visiting, visited)?;
+                }
+                for fallback in &import.fallbacks {
+                    visit(fallback.exporter(), components, visiting, visited)?;
                 }
             }
         }
@@ -582,6 +727,93 @@ mod tests {
         };
         assert_eq!(selected(&first), component("a-provider"));
         assert_eq!(selected(&first), selected(&second));
+    }
+
+    #[test]
+    fn product_policy_owns_effective_priority_and_fallback_plan() {
+        let authority = Authority::default();
+        let demo = interface("phenix.demo@1");
+        let components = [
+            exporter("a-provider", -100, authority.clone()),
+            exporter("z-provider", 100, authority.clone()),
+            importer(true, authority.clone()),
+        ];
+        let plugins = owners(authority.clone(), &["a-provider", "z-provider"]);
+
+        let default = ResolvedComponentGraph::compile_with_provider_policy(
+            plugins.clone(),
+            components.clone(),
+            &authority,
+            &ProviderCompositionPolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            default
+                .import_handle(&component("consumer"), &demo)
+                .unwrap()
+                .unwrap()
+                .exporter(),
+            &component("a-provider")
+        );
+        assert_eq!(
+            default
+                .provider_plan(&component("consumer"), &demo)
+                .unwrap()
+                .unwrap()
+                .selection_reason(),
+            ProviderSelectionReason::StableIdentity
+        );
+
+        let policy = ProviderCompositionPolicy::new()
+            .with_priority(demo.clone(), component("z-provider"), 10)
+            .with_interface_fallback(demo.clone())
+            .with_fallback_enabled(demo.clone());
+        let preferred = ResolvedComponentGraph::compile_with_provider_policy(
+            plugins, components, &authority, &policy,
+        )
+        .unwrap();
+        let plan = preferred
+            .provider_plan(&component("consumer"), &demo)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.primary().exporter(), &component("z-provider"));
+        assert_eq!(plan.fallbacks().len(), 1);
+        assert_eq!(plan.fallbacks()[0].exporter(), &component("a-provider"));
+        assert_eq!(plan.selection_reason(), ProviderSelectionReason::Priority);
+    }
+
+    #[test]
+    fn explicit_binding_only_wins_when_eligible() {
+        let read = capability("fs.read");
+        let network = capability("network.read");
+        let caller = Authority::new([read.clone()]);
+        let broad = Authority::new([read.clone(), network.clone()]);
+        let mut authorized = exporter("a-authorized", 0, broad.clone());
+        authorized.exports[0].required_authority = Authority::new([read]);
+        let mut unauthorized = exporter("z-unauthorized", 0, broad.clone());
+        unauthorized.exports[0].required_authority = Authority::new([network]);
+        let policy = ProviderCompositionPolicy::new()
+            .with_explicit_binding(interface("phenix.demo@1"), component("z-unauthorized"));
+        let graph = ResolvedComponentGraph::compile_with_provider_policy(
+            vec![
+                plugin_manifest("plugin-consumer", caller.clone()),
+                plugin_manifest("plugin-a-authorized", broad.clone()),
+                plugin_manifest("plugin-z-unauthorized", broad),
+            ],
+            [authorized, unauthorized, importer(true, caller.clone())],
+            &caller,
+            &policy,
+        )
+        .unwrap();
+
+        assert_eq!(
+            graph
+                .import_handle(&component("consumer"), &interface("phenix.demo@1"))
+                .unwrap()
+                .unwrap()
+                .exporter(),
+            &component("a-authorized")
+        );
     }
 
     #[test]

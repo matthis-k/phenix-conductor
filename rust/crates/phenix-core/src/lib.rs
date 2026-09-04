@@ -29,6 +29,7 @@ mod persistence_value;
 mod plugin_build;
 mod plugin_build_execution;
 mod plugin_context;
+mod provider_resolution;
 mod reconciliation;
 mod reconciliation_inspection;
 mod registry;
@@ -59,6 +60,10 @@ mod plugin_build_loading_regression;
 #[cfg(test)]
 mod plugin_management_regression;
 #[cfg(test)]
+mod provider_availability_regression;
+#[cfg(test)]
+mod provider_fallback_regression;
+#[cfg(test)]
 mod provider_rebind_generation_regression;
 #[cfg(test)]
 mod runtime_component_parity_regression;
@@ -85,7 +90,7 @@ pub use artifact::{ArtifactRevision, ArtifactRevisionParseError};
 pub use authority::Authority;
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
-    ResolvedImportHandle, ResolvedListener,
+    ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan,
 };
 pub use composition_metadata::{
     CompatibilityMetadata, ComponentHostKind, ComponentRuntimeMetadata, ComponentStateClass,
@@ -147,6 +152,10 @@ pub use plugin_build_execution::{
 pub use plugin_context::{
     CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,
 };
+pub use provider_resolution::{
+    InterfaceProviderPolicy, ProviderCompositionPolicy, ProviderFallbackReason,
+    ProviderSelectionReason,
+};
 pub use reconciliation::{
     BindingChange, ComponentChange, ComponentChangeKind, GraphDiff, GraphReconciler,
     ReconciliationAction, ReconciliationPreview, ReconciliationResult, ResourceChange,
@@ -160,9 +169,9 @@ pub use registry::{
 };
 pub use resolver::{GraphGenerationId, ResolvedHarness, ResolvedHarnessError};
 pub use runtime::{
-    Kernel, LayerResult, PluginHost, PluginInstance, PluginRuntimeProvider, PluginState,
-    RuntimePluginCandidate, ServiceInvocationProvenance, ServiceParticipantOutcome,
-    ServiceParticipantProvenance,
+    ComponentProviderProvenance, Kernel, LayerResult, PluginHost, PluginInstance,
+    PluginRuntimeProvider, PluginState, ProviderEndpointProvenance, RuntimePluginCandidate,
+    ServiceInvocationProvenance, ServiceParticipantOutcome, ServiceParticipantProvenance,
 };
 pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
 pub use tasks::{CancellationToken, TaskHandle, TaskRuntime, TaskScope};

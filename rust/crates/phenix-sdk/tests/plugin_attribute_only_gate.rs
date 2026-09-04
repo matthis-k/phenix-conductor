@@ -238,9 +238,8 @@ fn attribute_only_plugin_builds_graph_and_manifest_without_parallel_wiring() {
         authority("models.invoke")
     );
     let services = components[0].services();
-    assert_eq!(services.len(), 2);
-    assert_eq!(services[0].required_authority, authority("models.serve"));
-    assert_eq!(services[1].required_authority, authority("models.layer"));
+    assert_eq!(services.len(), 1);
+    assert_eq!(services[0].required_authority, authority("models.layer"));
 
     let behavior = <Api as StaticComponentBehavior>::exports();
     assert_eq!(behavior.len(), 2);
@@ -287,7 +286,11 @@ fn attribute_only_plugin_builds_graph_and_manifest_without_parallel_wiring() {
     let manifest = <Plugin as StaticPluginDefinition>::manifest();
     assert_eq!(manifest.id.as_str(), "fixture.attribute-gate");
     assert_eq!(manifest.version, 7);
-    assert_eq!(manifest.services.len(), 2);
+    assert_eq!(manifest.services.len(), 1);
+    assert_eq!(
+        manifest.services[0].required_authority,
+        authority("models.layer")
+    );
     assert_eq!(manifest.maximum_authority, plugin_authority());
     assert_eq!(
         manifest.resource_namespaces[0].as_str(),
@@ -302,8 +305,11 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
         <sessions::Plugin as StaticPluginDefinition>::manifest(),
         <Plugin as StaticPluginDefinition>::manifest(),
     ];
+    let sessions_component =
+        <sessions::Plugin as StaticPluginDefinition>::component_manifests().remove(0);
+    let sessions_component_id = sessions_component.id.clone();
     let components = [
-        <sessions::Plugin as StaticPluginDefinition>::component_manifests().remove(0),
+        sessions_component,
         <Plugin as StaticPluginDefinition>::component_manifests().remove(0),
     ];
     let resolved = ResolvedHarness::resolve(
@@ -366,11 +372,12 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     };
     let input = serde_json::to_vec(&phenix_sdk::PhenixValue::from(&request)).unwrap();
     let output = kernel
-        .invoke(
+        .invoke_component(
+            &sessions_component_id,
             &ServiceId::parse("fixture.attribute-gate.internal@1").unwrap(),
             &input,
             &authority("models.layer"),
-            None,
+            &Plugin::plugin_id(),
         )
         .unwrap();
     let output: phenix_sdk::PhenixValue = serde_json::from_slice(&output).unwrap();

@@ -208,8 +208,7 @@ mod tests {
     fn generated_authoring_preserves_stable_identity() {
         let manifest = basic_context_manifest();
         assert_eq!(manifest.id.as_str(), BASIC_CONTEXT_PLUGIN);
-        assert_eq!(manifest.services.len(), 1);
-        assert_eq!(manifest.services[0].service, phenix_core::context_service());
+        assert!(manifest.services.is_empty());
         assert_eq!(manifest.resource_namespaces, vec![namespace()]);
 
         let component = basic_context_component_manifest();

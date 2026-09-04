@@ -25,7 +25,7 @@ The Core representation may contain generic contributions such as:
 ```text
 Components
 Imports and Exports
-terminal Providers
+Interface Provider endpoints
 Layers
 Events and Listeners
 controllers
@@ -67,7 +67,9 @@ A Plugin may keep a private typed registry as implementation state. That registr
 
 ## Providers
 
-A Provider implements one or more versioned Interfaces.
+A Provider implements one or more versioned Interfaces. A Component Export is the Core representation of that executable Interface endpoint and is the only representation used for Interface Provider resolution.
+
+Generated Component Exports are not mirrored into terminal `ServiceContribution`s. Raw service contributions remain valid for explicitly authored raw service dispatch and Layer interposition, but they do not form a second Provider registry for Component Imports.
 
 Provider selection follows `spec/plugin-resolution.md`. The kernel resolver checks compatibility and authority, applies composition policy, and pins the resolved Provider plan to the Graph Generation.
 
@@ -123,6 +125,7 @@ Removing a Plugin does not silently delete its Plugin Resources. A compatible re
 
 - Authors declare semantics and behavior, not manual Core wiring.
 - Core contribution descriptors are generated or runtime-derived from one authoring source of truth.
+- Component Exports are the canonical Interface Provider endpoints and are not duplicated into a raw terminal service registry.
 - The kernel contribution model stays product-domain neutral.
 - Shared semantic contracts live in neutral passive owners, not default Provider crates.
 - Runtime Plugins own implementations and product behavior.
@@ -137,6 +140,7 @@ Removing a Plugin does not silently delete its Plugin Resources. A compatible re
 
 - a static Plugin author does not write a manual manifest, factory, registry, or dispatch table;
 - generated Core descriptors contain the declared Components, Interfaces, Plugin Resources, and Runtime Provider metadata;
+- generated Component Exports do not synthesize duplicate terminal service contributions;
 - a mock non-Phenix Interface composes without kernel code changes;
 - session, context, and model implementations consume neutral shared contracts rather than each other's implementation crates;
 - an alternate Provider replaces a first-party Provider through the same kernel resolver;
