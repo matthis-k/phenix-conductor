@@ -36,6 +36,7 @@ pub(super) fn invoke_component_service_with(
     input: &[u8],
     caller_authority: &Authority,
     binding: &PluginId,
+    component_provider: Option<ComponentProviderProvenance>,
     guards: ServiceDispatchGuards<'_>,
 ) -> Result<Vec<u8>, KernelError> {
     if guards.active_services.contains(service) {
@@ -64,6 +65,7 @@ pub(super) fn invoke_component_service_with(
         &chain,
         caller_authority,
         runtime.graph_generation,
+        component_provider,
     )));
     let result = invoke_resolved_chain_with(
         runtime,
@@ -113,6 +115,7 @@ pub(super) fn invoke_service_with(
         &chain,
         caller_authority,
         runtime.graph_generation,
+        None,
     )));
     let result = invoke_resolved_chain_with(
         runtime,
