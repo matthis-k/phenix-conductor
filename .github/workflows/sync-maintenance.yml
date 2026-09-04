@@ -36,7 +36,7 @@ jobs:
           system="$(nix eval --impure --raw --expr builtins.currentSystem)"
           nix eval --raw \
             ".#packages.$system.phenix-maintenance.phenixMaintenance.ci.github.workflow" \
-            > .github/workflows/ci.yml
+            > ci.generated.yml
           nix develop --command bash -lc 'cd rust && cargo metadata --format-version 1 >/dev/null'
           git diff --check
 
