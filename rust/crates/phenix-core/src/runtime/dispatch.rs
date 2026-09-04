@@ -1,4 +1,5 @@
 use super::*;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 fn prepare_active_chain(
     runtime: InvocationContext<'_>,
@@ -209,6 +210,8 @@ pub(super) fn invoke_resolved_chain_with(
         trace: Arc::clone(trace),
     });
     let continuation_used = continuation.as_ref().map(|state| Arc::clone(&state.used));
+    let live_call = runtime.tasks.begin_call(&provider.plugin);
+    let call_cancellation = live_call.cancellation_token().clone();
     let host = PluginHost {
         graph_generation: runtime.graph_generation,
         component_graph: runtime.component_graph,
@@ -217,6 +220,7 @@ pub(super) fn invoke_resolved_chain_with(
         instances: runtime.instances,
         plugin: &provider.plugin,
         authority: &effective_authority,
+        call_cancellation: Some(call_cancellation.clone()),
         call_stack: next_stack,
         events: runtime.events,
         tasks: runtime.tasks,
@@ -231,7 +235,35 @@ pub(super) fn invoke_resolved_chain_with(
         .ok_or_else(|| KernelError::WrongExecutionKind(provider.plugin.clone()))?;
     let mut instance = instance.lock().expect("plugin instance mutex poisoned");
     if is_layer {
-        match instance.invoke_layer(&chain.service, input, &host) {
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            instance.invoke_layer(&chain.service, input, &host)
+        }));
+        let result = match result {
+            Ok(result) => result,
+            Err(_) => {
+                trace
+                    .lock()
+                    .expect("service invocation trace mutex poisoned")
+                    .set_outcome(trace_index, ServiceParticipantOutcome::Failed);
+                return Err(KernelError::ServiceInvoke {
+                    plugin: provider.plugin.clone(),
+                    service: chain.service.clone(),
+                    message: "plugin invocation panicked".into(),
+                });
+            }
+        };
+        if call_cancellation.is_cancelled() {
+            trace
+                .lock()
+                .expect("service invocation trace mutex poisoned")
+                .set_outcome(trace_index, ServiceParticipantOutcome::Failed);
+            return Err(KernelError::ServiceInvoke {
+                plugin: provider.plugin.clone(),
+                service: chain.service.clone(),
+                message: "plugin invocation cancelled".into(),
+            });
+        }
+        match result {
             Ok(LayerResult::Handled(output)) => {
                 let delegated = continuation_used
                     .as_ref()
@@ -273,10 +305,35 @@ pub(super) fn invoke_resolved_chain_with(
             }
         }
     } else {
-        let result = match guards.terminal_component {
+        let result = catch_unwind(AssertUnwindSafe(|| match guards.terminal_component {
             Some(component) => instance.invoke_component(component, &chain.service, input, &host),
             None => instance.invoke(&chain.service, input, &host),
+        }));
+        let result = match result {
+            Ok(result) => result,
+            Err(_) => {
+                trace
+                    .lock()
+                    .expect("service invocation trace mutex poisoned")
+                    .set_outcome(trace_index, ServiceParticipantOutcome::Failed);
+                return Err(KernelError::ServiceInvoke {
+                    plugin: provider.plugin.clone(),
+                    service: chain.service.clone(),
+                    message: "plugin invocation panicked".into(),
+                });
+            }
         };
+        if call_cancellation.is_cancelled() {
+            trace
+                .lock()
+                .expect("service invocation trace mutex poisoned")
+                .set_outcome(trace_index, ServiceParticipantOutcome::Failed);
+            return Err(KernelError::ServiceInvoke {
+                plugin: provider.plugin.clone(),
+                service: chain.service.clone(),
+                message: "plugin invocation cancelled".into(),
+            });
+        }
         match result {
             Ok(output) => {
                 trace
