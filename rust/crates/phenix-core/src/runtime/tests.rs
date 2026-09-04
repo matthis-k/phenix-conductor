@@ -34,6 +34,7 @@ struct StartupTaskScopePlugin;
 impl PluginInstance for StartupTaskScopePlugin {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
         assert!(host.task_scope().is_none());
+        assert!(host.cancellation_token().is_none());
         Ok(())
     }
 }
@@ -54,7 +55,30 @@ impl PluginInstance for EchoPlugin {
         if host.authority().permits(&capability("fs.write")) {
             return Err("provider regained caller write authority".into());
         }
+        let cancellation = host
+            .cancellation_token()
+            .ok_or_else(|| "service invocation has no cancellation token".to_owned())?;
+        if cancellation.is_cancelled() {
+            return Err("fresh service invocation started cancelled".into());
+        }
         Ok(input.to_vec())
+    }
+}
+
+struct PanicPlugin;
+
+impl PluginInstance for PanicPlugin {
+    fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn invoke(
+        &mut self,
+        _service: &ServiceId,
+        _input: &[u8],
+        _host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        panic!("fixture plugin crash")
     }
 }
 
@@ -204,6 +228,46 @@ fn invocation_uses_caller_authority_attenuated_by_provider_grant() {
         )
         .unwrap();
     assert_eq!(output, b"hello");
+    assert_eq!(kernel.tasks().active_call_count(&plugin("echo")), 0);
+}
+
+#[test]
+fn plugin_panic_is_normalized_and_closes_live_call_scope() {
+    let provider = PluginManifest {
+        id: plugin("panic-provider"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: vec![ServiceContribution {
+            role: crate::ServiceRole::Terminal,
+            service: service("panic@1"),
+            priority: 1,
+            required_authority: Authority::default(),
+        }],
+        resource_namespaces: Vec::new(),
+        maximum_authority: Authority::default(),
+    };
+    let mut kernel = Kernel::new(KernelConfig::new([provider]).unwrap());
+    kernel
+        .register_embedded_factory(plugin("panic-provider"), || Box::new(PanicPlugin))
+        .unwrap();
+    kernel.activate_all().unwrap();
+
+    let error = kernel
+        .invoke(
+            &service("panic@1"),
+            b"boom",
+            &Authority::default(),
+            None,
+        )
+        .unwrap_err();
+
+    assert!(matches!(error, KernelError::ServiceInvoke { .. }));
+    assert!(error.to_string().contains("plugin invocation panicked"));
+    assert_eq!(
+        kernel.tasks().active_call_count(&plugin("panic-provider")),
+        0
+    );
 }
 
 #[test]
@@ -337,6 +401,7 @@ fn multi_namespace_transaction_requires_write_authority_on_foreign_typed_import(
         instances: &kernel.instances,
         plugin: &caller_plugin,
         authority: &authority,
+        call_cancellation: None,
         call_stack: BTreeSet::from([caller_plugin.clone()]),
         events: &kernel.events,
         tasks: &kernel.tasks,
@@ -392,6 +457,7 @@ fn persistence_host_rejects_unowned_namespace_before_backend_access() {
         instances: &kernel.instances,
         plugin: &owner_plugin,
         authority: &authority,
+        call_cancellation: None,
         call_stack: BTreeSet::from([owner_plugin.clone()]),
         events: &kernel.events,
         tasks: &kernel.tasks,
