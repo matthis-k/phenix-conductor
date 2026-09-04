@@ -779,8 +779,16 @@ mod tests {
             parent: None,
         }))
         .unwrap();
+        let planning = planning_component_manifest();
         let response = harness
-            .invoke(&planning_service(), &objective, &planning_authority(), None)
+            .kernel_mut()
+            .invoke_component(
+                &planning.id,
+                &planning_service(),
+                &objective,
+                &planning_authority(),
+                &planning.owner,
+            )
             .unwrap();
         let response: PhenixValue = serde_json::from_slice(&response).unwrap();
         assert!(matches!(

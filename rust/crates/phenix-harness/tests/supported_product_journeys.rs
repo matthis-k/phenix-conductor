@@ -5,13 +5,14 @@ use phenix_core::{
 };
 use phenix_harness::{default_suite_authority, HarnessBuilder, PhenixHarness};
 use phenix_plugin_catalog::{
-    artifact_component_manifest, model_inference_service, ArtifactCommand, ArtifactResponse,
-    CliProbeRequest, ContextCommand, ContextResponse, DebugCommand, DebugResponse,
-    ExecutionAuthority, ExecutionCommand, ExecutionResponse, FrontendCommand, FrontendResponse,
-    HookCommand, HookResponse, JobCommand, JobResponse, LanguageCommand, LanguageResponse,
-    ModelCommand, ModelInferenceRequest, ModelInferenceResponse, ModelResponse, ModelTarget,
-    PlanningCommand, PlanningResponse, RepositoryWorkSnapshot, RoutingProfile, SessionCommand,
-    SessionResponse, SessionTreeCommand, SessionTreeResponse, WorkspaceCommand, WorkspaceResponse,
+    artifact_component_manifest, model_inference_service, planning_component_manifest,
+    ArtifactCommand, ArtifactResponse, CliProbeRequest, ContextCommand, ContextResponse,
+    DebugCommand, DebugResponse, ExecutionAuthority, ExecutionCommand, ExecutionResponse,
+    FrontendCommand, FrontendResponse, HookCommand, HookResponse, JobCommand, JobResponse,
+    LanguageCommand, LanguageResponse, ModelCommand, ModelInferenceRequest, ModelInferenceResponse,
+    ModelResponse, ModelTarget, PlanningCommand, PlanningResponse, RepositoryWorkSnapshot,
+    RoutingProfile, SessionCommand, SessionResponse, SessionTreeCommand, SessionTreeResponse,
+    WorkspaceCommand, WorkspaceResponse,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
@@ -58,7 +59,12 @@ fn invoke(harness: &mut PhenixHarness, service: &str, input: Value) -> Value {
             invoke_structural_json::<LanguageCommand, LanguageResponse>(harness, service, input)
         }
         "phenix.planning@1" => {
-            invoke_structural_json::<PlanningCommand, PlanningResponse>(harness, service, input)
+            invoke_component_structural_json::<PlanningCommand, PlanningResponse>(
+                harness,
+                planning_component_manifest(),
+                service,
+                input,
+            )
         }
         "phenix.models.routing@1" => {
             invoke_structural_json::<ModelCommand, ModelResponse>(harness, service, input)
