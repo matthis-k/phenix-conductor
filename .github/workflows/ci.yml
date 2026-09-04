@@ -33,25 +33,25 @@ jobs:
             max-jobs = auto
 
       - name: "Nix formatting"
-        run: nix run --quiet .#phenix-maintenance-command-fa944a2937b3 -- check source nix-format
+        run: "printf '%s\\n' '{\"command\":\"check/source/nix-format\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-fa944a2937b3 -- invoke"
 
       - name: "Rust formatting"
-        run: nix run --quiet .#phenix-maintenance-command-31a6c0b16724 -- check source rust-format
+        run: "printf '%s\\n' '{\"command\":\"check/source/rust-format\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-31a6c0b16724 -- invoke"
 
       - name: "Statix"
-        run: nix run --quiet .#phenix-maintenance-command-4ff10aceddac -- check source statix
+        run: "printf '%s\\n' '{\"command\":\"check/source/statix\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-4ff10aceddac -- invoke"
 
       - name: "Actionlint"
-        run: nix run --quiet .#phenix-maintenance-command-e0c2105ec1ec -- check source actionlint
+        run: "printf '%s\\n' '{\"command\":\"check/source/actionlint\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-e0c2105ec1ec -- invoke"
 
       - name: "Plugin architecture"
-        run: nix run --quiet .#phenix-maintenance-command-da4d8b6b0d46 -- check source plugin-architecture
+        run: "printf '%s\\n' '{\"command\":\"check/source/plugin-architecture\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-da4d8b6b0d46 -- invoke"
 
       - name: "Structural boundaries"
-        run: nix run --quiet .#phenix-maintenance-command-d0a2e91a2adf -- check source structural-boundaries
+        run: "printf '%s\\n' '{\"command\":\"check/source/structural-boundaries\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-d0a2e91a2adf -- invoke"
 
       - name: "Generated workflow"
-        run: nix run --quiet .#phenix-maintenance-command-9383b20a4494 -- check source workflow-sync
+        run: "printf '%s\\n' '{\"command\":\"check/source/workflow-sync\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-9383b20a4494 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -78,7 +78,7 @@ jobs:
             max-jobs = auto
 
       - name: "Clippy"
-        run: nix run --quiet .#phenix-maintenance-command-ed54c0f878db -- check rust
+        run: "printf '%s\\n' '{\"command\":\"check/rust\",\"source\":{\"job\":\"clippy\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-ed54c0f878db -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -118,7 +118,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-9f427854ccf4 -- jobs build-rust-workspace
+        run: "printf '%s\\n' '{\"command\":\"jobs/build-rust-workspace\",\"source\":{\"job\":\"build-rust-workspace\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-9f427854ccf4 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -149,7 +149,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-4bc3015e6d16 -- jobs build-stitch-mcp
+        run: "printf '%s\\n' '{\"command\":\"jobs/build-stitch-mcp\",\"source\":{\"job\":\"build-stitch-mcp\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-4bc3015e6d16 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -191,7 +191,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-66085e40dda1 -- jobs integration-backend-acp
+        run: "printf '%s\\n' '{\"command\":\"jobs/integration-backend-acp\",\"source\":{\"job\":\"integration-backend-acp\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-66085e40dda1 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -222,7 +222,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-e0dcc81ccb75 -- jobs integration-plugin-packaging
+        run: "printf '%s\\n' '{\"command\":\"jobs/integration-plugin-packaging\",\"source\":{\"job\":\"integration-plugin-packaging\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-e0dcc81ccb75 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -253,7 +253,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-733891df94ef -- jobs product-phenix
+        run: "printf '%s\\n' '{\"command\":\"jobs/product-phenix\",\"source\":{\"job\":\"product-phenix\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-733891df94ef -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -295,7 +295,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-9fea1a4ca22d -- jobs runtime-process-roundtrip
+        run: "printf '%s\\n' '{\"command\":\"jobs/runtime-process-roundtrip\",\"source\":{\"job\":\"runtime-process-roundtrip\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-9fea1a4ca22d -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -326,7 +326,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-7656c9860f44 -- jobs runtime-stitch
+        run: "printf '%s\\n' '{\"command\":\"jobs/runtime-stitch\",\"source\":{\"job\":\"runtime-stitch\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-7656c9860f44 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -368,7 +368,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-7ab072e3fff1 -- jobs test-adapter-domain
+        run: "printf '%s\\n' '{\"command\":\"jobs/test-adapter-domain\",\"source\":{\"job\":\"test-adapter-domain\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-7ab072e3fff1 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -410,7 +410,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-e6addd50a09b -- jobs test-docs
+        run: "printf '%s\\n' '{\"command\":\"jobs/test-docs\",\"source\":{\"job\":\"test-docs\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-e6addd50a09b -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -452,7 +452,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-f766ec56e144 -- jobs test-harness
+        run: "printf '%s\\n' '{\"command\":\"jobs/test-harness\",\"source\":{\"job\":\"test-harness\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-f766ec56e144 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -494,7 +494,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-bc6ecb56c868 -- jobs test-sdk
+        run: "printf '%s\\n' '{\"command\":\"jobs/test-sdk\",\"source\":{\"job\":\"test-sdk\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-bc6ecb56c868 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
@@ -536,7 +536,7 @@ jobs:
           CARGO_HOME: "${{ runner.temp }}/phenix-cargo-home"
           CARGO_TARGET_DIR: "${{ runner.temp }}/phenix-cargo-target"
           CARGO_TERM_QUIET: "true"
-        run: nix run --quiet .#phenix-maintenance-command-b3d8df2854c7 -- jobs test-unit
+        run: "printf '%s\\n' '{\"command\":\"jobs/test-unit\",\"source\":{\"job\":\"test-unit\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-b3d8df2854c7 -- invoke"
 
       - name: Repository remains clean
         if: ${{ !cancelled() }}
