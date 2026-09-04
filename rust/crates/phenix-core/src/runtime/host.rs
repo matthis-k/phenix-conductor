@@ -1,7 +1,7 @@
 use super::{
     dispatch::{
         invoke_component_service_with, invoke_resolved_chain_with, invoke_service_with,
-        ServiceDispatchGuards,
+        ComponentDispatchTarget, ServiceDispatchGuards,
     },
     *,
 };
@@ -85,11 +85,13 @@ impl<'a> PluginHost<'a> {
                 provenance: self.provenance,
             },
             &service,
-            handle.exporter(),
+            ComponentDispatchTarget {
+                component: handle.exporter(),
+                binding: handle.owning_plugin(),
+                provider_provenance: Some(provider_provenance),
+            },
             &input,
             &delegated_authority,
-            handle.owning_plugin(),
-            Some(provider_provenance),
             ServiceDispatchGuards {
                 call_stack: &self.call_stack,
                 active_services: &self.active_services,
