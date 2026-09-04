@@ -739,8 +739,16 @@ mod tests {
             },
         }))
         .unwrap();
+        let artifact = artifact_component_manifest();
         let response = harness
-            .invoke(&artifact_service(), &store, &artifact_authority(), None)
+            .kernel_mut()
+            .invoke_component(
+                &artifact.id,
+                &artifact_service(),
+                &store,
+                &artifact_authority(),
+                &artifact.owner,
+            )
             .unwrap();
         let response: PhenixValue = serde_json::from_slice(&response).unwrap();
         assert!(matches!(
