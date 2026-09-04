@@ -187,7 +187,7 @@ fn unavailable_primary_does_not_search_unplanned_providers() {
 
     assert!(matches!(
         error,
-        KernelError::PluginInvocation { plugin, .. } if plugin == crate::PluginId::parse("consumer").unwrap()
+        KernelError::ServiceInvoke { plugin: failed_plugin, .. } if failed_plugin == plugin("consumer")
     ));
     assert_eq!(primary_calls.load(Ordering::Acquire), 0);
     assert_eq!(secondary_calls.load(Ordering::Acquire), 0);
