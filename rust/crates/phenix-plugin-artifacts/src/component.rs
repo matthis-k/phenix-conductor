@@ -47,6 +47,7 @@ mod tests {
             maximum_authority: phenix_core::Authority::default(),
         };
         let consumer = ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("fixture.artifact-consumer").unwrap(),
             owner: consumer_plugin.id.clone(),
             imports: vec![ComponentImport {

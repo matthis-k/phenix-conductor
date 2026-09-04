@@ -131,142 +131,106 @@ fn expand_struct(
             }
         }
     });
-    let root_listener_collector = root.then(|| {
+    let root_listener_binding = root.then(|| {
         quote! {
-            {
-                let component = Self::component_id();
-                for listener in <#root_ident as ::phenix_sdk::StaticComponentBehavior>::listeners() {
-                    let state = ::std::sync::Weak::clone(&state);
-                    let owner = owner.clone();
-                    let graph_generation = graph_generation.clone();
-                    let method = listener.method;
-                    subscriptions.push(
-                        ::phenix_sdk::StaticPluginInstance::<Self>::listener_subscription(
-                            owner,
-                            &component,
-                            &listener,
-                            maximum_authority.clone(),
-                            move |envelope, authority| {
-                                let Some(state) = state.upgrade() else {
-                                    return Err(
-                                        Box::new(::std::io::Error::other(format!(
-                                            "stateful listener {method} plugin state is unavailable"
-                                        )))
-                                            as Box<dyn ::std::error::Error + Send + Sync>,
-                                    );
-                                };
-                                let mut plugin = match state.try_lock() {
-                                    Ok(plugin) => plugin,
-                                    Err(::std::sync::TryLockError::WouldBlock) => {
-                                        return Err(
-                                            Box::new(::std::io::Error::other(format!(
-                                                "stateful listener {method} skipped because plugin state is busy"
-                                            )))
-                                                as Box<dyn ::std::error::Error + Send + Sync>,
-                                        );
-                                    }
-                                    Err(::std::sync::TryLockError::Poisoned(_)) => {
-                                        return Err(
-                                            Box::new(::std::io::Error::other(format!(
-                                                "stateful listener {method} state lock poisoned"
-                                            )))
-                                                as Box<dyn ::std::error::Error + Send + Sync>,
-                                        );
-                                    }
-                                };
-                                let context = ::phenix_sdk::EventContext::from_event(
-                                    authority,
-                                    graph_generation.as_ref(),
-                                );
-                                ::phenix_sdk::StaticComponentRuntimeDispatch::dispatch_listener_runtime(
-                                    &mut *plugin,
-                                    method,
-                                    &context,
-                                    &envelope.payload,
-                                )
-                                .unwrap_or_else(|| {
-                                    Err(
-                                        Box::new(::std::io::Error::other(format!(
-                                            "unsupported plugin listener: {method}"
-                                        )))
-                                            as Box<dyn ::std::error::Error + Send + Sync>,
-                                    )
-                                })
-                            },
-                        ),
-                    );
-                }
+            if component == &Self::component_id() {
+                let listener = <#root_ident as ::phenix_sdk::StaticComponentBehavior>::listeners()
+                    .into_iter()
+                    .find(|listener| listener.method == method)?;
+                let state = ::std::sync::Weak::clone(&state);
+                let owner = owner.clone();
+                let graph_generation = generation.clone();
+                let method = listener.method;
+                return Some(::phenix_sdk::StaticPluginInstance::<Self>::listener_handler(
+                    owner,
+                    method,
+                    move |envelope, authority| {
+                        let Some(state) = state.upgrade() else {
+                            return Err(Box::new(::std::io::Error::other(format!(
+                                "stateful listener {method} plugin state is unavailable"
+                            ))) as Box<dyn ::std::error::Error + Send + Sync>);
+                        };
+                        let mut plugin = match state.try_lock() {
+                            Ok(plugin) => plugin,
+                            Err(::std::sync::TryLockError::WouldBlock) => {
+                                return Err(Box::new(::std::io::Error::other(format!(
+                                    "stateful listener {method} skipped because plugin state is busy"
+                                ))) as Box<dyn ::std::error::Error + Send + Sync>);
+                            }
+                            Err(::std::sync::TryLockError::Poisoned(_)) => {
+                                return Err(Box::new(::std::io::Error::other(format!(
+                                    "stateful listener {method} state lock poisoned"
+                                ))) as Box<dyn ::std::error::Error + Send + Sync>);
+                            }
+                        };
+                        let context = ::phenix_sdk::EventContext::from_event(
+                            authority,
+                            Some(&graph_generation),
+                        );
+                        ::phenix_sdk::StaticComponentRuntimeDispatch::dispatch_listener_runtime(
+                            &mut *plugin,
+                            method,
+                            &context,
+                            &envelope.payload,
+                        )
+                        .unwrap_or_else(|| Err(Box::new(::std::io::Error::other(format!(
+                            "unsupported plugin listener: {method}"
+                        ))) as Box<dyn ::std::error::Error + Send + Sync>))
+                    },
+                ));
             }
         }
     });
-    let listener_collectors = components.iter().map(|component| {
+    let listener_bindings = components.iter().map(|component| {
         let field = &component.field;
         let ty = &component.ty;
         let id = component_id(component);
         quote! {
-            {
-                let component = #id;
-                for listener in <#ty as ::phenix_sdk::StaticComponentBehavior>::listeners() {
-                    let state = ::std::sync::Weak::clone(&state);
-                    let owner = owner.clone();
-                    let graph_generation = graph_generation.clone();
-                    let method = listener.method;
-                    subscriptions.push(
-                        ::phenix_sdk::StaticPluginInstance::<Self>::listener_subscription(
-                            owner,
-                            &component,
-                            &listener,
-                            maximum_authority.clone(),
-                            move |envelope, authority| {
-                                let Some(state) = state.upgrade() else {
-                                    return Err(
-                                        Box::new(::std::io::Error::other(format!(
-                                            "stateful listener {method} plugin state is unavailable"
-                                        )))
-                                            as Box<dyn ::std::error::Error + Send + Sync>,
-                                    );
-                                };
-                                let mut plugin = match state.try_lock() {
-                                    Ok(plugin) => plugin,
-                                    Err(::std::sync::TryLockError::WouldBlock) => {
-                                        return Err(
-                                            Box::new(::std::io::Error::other(format!(
-                                                "stateful listener {method} skipped because plugin state is busy"
-                                            )))
-                                                as Box<dyn ::std::error::Error + Send + Sync>,
-                                        );
-                                    }
-                                    Err(::std::sync::TryLockError::Poisoned(_)) => {
-                                        return Err(
-                                            Box::new(::std::io::Error::other(format!(
-                                                "stateful listener {method} state lock poisoned"
-                                            )))
-                                                as Box<dyn ::std::error::Error + Send + Sync>,
-                                        );
-                                    }
-                                };
-                                let context = ::phenix_sdk::EventContext::from_event(
-                                    authority,
-                                    graph_generation.as_ref(),
-                                );
-                                ::phenix_sdk::StaticComponentRuntimeDispatch::dispatch_listener_runtime(
-                                    &mut plugin.#field,
-                                    method,
-                                    &context,
-                                    &envelope.payload,
-                                )
-                                .unwrap_or_else(|| {
-                                    Err(
-                                        Box::new(::std::io::Error::other(format!(
-                                            "unsupported component listener: {method}"
-                                        )))
-                                            as Box<dyn ::std::error::Error + Send + Sync>,
-                                    )
-                                })
-                            },
-                        ),
-                    );
-                }
+            if component == &#id {
+                let listener = <#ty as ::phenix_sdk::StaticComponentBehavior>::listeners()
+                    .into_iter()
+                    .find(|listener| listener.method == method)?;
+                let state = ::std::sync::Weak::clone(&state);
+                let owner = owner.clone();
+                let graph_generation = generation.clone();
+                let method = listener.method;
+                return Some(::phenix_sdk::StaticPluginInstance::<Self>::listener_handler(
+                    owner,
+                    method,
+                    move |envelope, authority| {
+                        let Some(state) = state.upgrade() else {
+                            return Err(Box::new(::std::io::Error::other(format!(
+                                "stateful listener {method} plugin state is unavailable"
+                            ))) as Box<dyn ::std::error::Error + Send + Sync>);
+                        };
+                        let mut plugin = match state.try_lock() {
+                            Ok(plugin) => plugin,
+                            Err(::std::sync::TryLockError::WouldBlock) => {
+                                return Err(Box::new(::std::io::Error::other(format!(
+                                    "stateful listener {method} skipped because plugin state is busy"
+                                ))) as Box<dyn ::std::error::Error + Send + Sync>);
+                            }
+                            Err(::std::sync::TryLockError::Poisoned(_)) => {
+                                return Err(Box::new(::std::io::Error::other(format!(
+                                    "stateful listener {method} state lock poisoned"
+                                ))) as Box<dyn ::std::error::Error + Send + Sync>);
+                            }
+                        };
+                        let context = ::phenix_sdk::EventContext::from_event(
+                            authority,
+                            Some(&graph_generation),
+                        );
+                        ::phenix_sdk::StaticComponentRuntimeDispatch::dispatch_listener_runtime(
+                            &mut plugin.#field,
+                            method,
+                            &context,
+                            &envelope.payload,
+                        )
+                        .unwrap_or_else(|| Err(Box::new(::std::io::Error::other(format!(
+                            "unsupported component listener: {method}"
+                        ))) as Box<dyn ::std::error::Error + Send + Sync>))
+                    },
+                ));
             }
         }
     });
@@ -300,20 +264,19 @@ fn expand_struct(
                 Err(format!("unsupported static plugin layer: {service}"))
             }
 
-            fn listener_subscriptions(
+            fn listener_handler(
                 state: ::std::sync::Weak<::std::sync::Mutex<Self>>,
-                host: &::phenix_sdk::__phenix_plugin::PluginHost<'_>,
-            ) -> Vec<::phenix_sdk::__phenix_plugin::EventSubscription>
+                owner: &::phenix_sdk::__phenix_plugin::PluginId,
+                component: &::phenix_sdk::__phenix_plugin::ComponentId,
+                method: &str,
+                generation: &::phenix_sdk::__phenix_plugin::GraphGenerationId,
+            ) -> Option<::std::sync::Arc<dyn ::phenix_sdk::__phenix_plugin::EventHandler>>
             where
                 Self: Send + 'static,
             {
-                let owner = host.plugin().clone();
-                let maximum_authority = host.authority().clone();
-                let graph_generation = host.graph_generation().cloned();
-                let mut subscriptions = Vec::new();
-                #root_listener_collector
-                #(#listener_collectors)*
-                subscriptions
+                #root_listener_binding
+                #(#listener_bindings)*
+                None
             }
         }
     })

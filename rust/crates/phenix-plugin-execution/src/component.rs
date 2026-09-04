@@ -50,6 +50,7 @@ pub fn execution_component_manifest(maximum_authority: Authority) -> ComponentMa
     let model_authority = maximum_authority.clone();
     let authority = execution_manifest(maximum_authority).maximum_authority;
     ComponentManifest {
+        listeners: Vec::new(),
         id: execution_component_id(),
         owner: PluginId::parse(EXECUTION_PLUGIN).expect("static plugin id is valid"),
         imports: vec![ComponentImport {

@@ -51,6 +51,7 @@ fn rank_manifest() -> PluginManifest {
 
 fn rank_component_manifest() -> ComponentManifest {
     ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse(RANK_PLUGIN).unwrap(),
         owner: PluginId::parse(RANK_PLUGIN).unwrap(),
         imports: Vec::new(),

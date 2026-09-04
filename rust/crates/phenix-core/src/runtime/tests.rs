@@ -295,6 +295,7 @@ fn multi_namespace_transaction_requires_write_authority_on_foreign_typed_import(
         maximum_authority: Authority::new([write.clone()]),
     };
     let caller_component = ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse("caller.component").unwrap(),
         owner: caller.id.clone(),
         imports: vec![ComponentImport {
@@ -307,6 +308,7 @@ fn multi_namespace_transaction_requires_write_authority_on_foreign_typed_import(
         maximum_authority: caller.maximum_authority.clone(),
     };
     let owner_component = ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse("owner.component").unwrap(),
         owner: owner.id.clone(),
         imports: Vec::new(),

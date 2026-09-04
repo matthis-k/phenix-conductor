@@ -314,6 +314,7 @@ mod tests {
         authority: Authority,
     ) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: component(id),
             owner: plugin(owner),
             imports: Vec::new(),
@@ -349,6 +350,7 @@ mod tests {
         ];
         let components = vec![
             ComponentManifest {
+                listeners: Vec::new(),
                 id: component("consumer"),
                 owner: consumer.id,
                 imports: vec![ComponentImport {
@@ -417,6 +419,7 @@ mod tests {
             [consumer.clone(), owner.clone()],
             [
                 ComponentManifest {
+                    listeners: Vec::new(),
                     id: component("consumer"),
                     owner: consumer.id.clone(),
                     imports: vec![ComponentImport {

@@ -19,6 +19,7 @@ pub fn memory_component_id() -> ComponentId {
 pub fn memory_component_manifest() -> ComponentManifest {
     let authority = memory_manifest().maximum_authority;
     ComponentManifest {
+        listeners: Vec::new(),
         id: memory_component_id(),
         owner: PluginId::parse(MEMORY_PLUGIN).expect("static plugin id is valid"),
         imports: vec![
@@ -135,6 +136,7 @@ mod tests {
         consumer_plugin.resource_namespaces.clear();
 
         let alternate_component = ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("fixture.memory").unwrap(),
             owner: alternate_owner,
             imports: Vec::new(),
@@ -147,6 +149,7 @@ mod tests {
             maximum_authority: persistence_authority(),
         };
         let consumer_component = ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("fixture.consumer").unwrap(),
             owner: consumer_owner,
             imports: vec![ComponentImport {
@@ -159,6 +162,7 @@ mod tests {
             maximum_authority: persistence_authority(),
         };
         let first_party_component = ComponentManifest {
+            listeners: Vec::new(),
             id: memory_component_id(),
             owner: memory_manifest().id,
             imports: Vec::new(),

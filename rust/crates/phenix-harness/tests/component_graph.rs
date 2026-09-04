@@ -41,6 +41,7 @@ fn harness_fails_closed_before_execution_when_required_component_import_is_missi
     let mut builder = HarnessBuilder::new();
     builder.add_manifest(owner("consumer-owner", Authority::default()));
     builder.add_component(ComponentManifest {
+        listeners: Vec::new(),
         id: component("consumer"),
         owner: plugin("consumer-owner"),
         imports: vec![ComponentImport {
@@ -79,6 +80,7 @@ fn harness_exposes_the_resolved_component_binding_and_attenuated_authority() {
     ));
     builder.add_manifest(owner("provider-owner", Authority::new([read.clone()])));
     builder.add_component(ComponentManifest {
+        listeners: Vec::new(),
         id: component("provider"),
         owner: plugin("provider-owner"),
         imports: Vec::new(),
@@ -91,6 +93,7 @@ fn harness_exposes_the_resolved_component_binding_and_attenuated_authority() {
         maximum_authority: Authority::new([read.clone()]),
     });
     builder.add_component(ComponentManifest {
+        listeners: Vec::new(),
         id: component("consumer"),
         owner: plugin("consumer-owner"),
         imports: vec![ComponentImport {

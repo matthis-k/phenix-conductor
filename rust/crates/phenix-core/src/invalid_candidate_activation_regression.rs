@@ -26,6 +26,7 @@ fn invalid_candidate_resolution_leaves_active_generation_unchanged() {
     let active_graph: ResolvedComponentGraph = kernel.component_graph().clone();
 
     let invalid_component = ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse("fixture.consumer").unwrap(),
         owner: plugin.id.clone(),
         imports: vec![ComponentImport {
@@ -51,6 +52,7 @@ fn removing_a_required_live_provider_rejects_the_candidate_and_retains_the_activ
     let plugin = plugin();
     let interface = InterfaceId::parse("fixture.required@1").unwrap();
     let provider = ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse("fixture.provider").unwrap(),
         owner: plugin.id.clone(),
         imports: Vec::new(),
@@ -63,6 +65,7 @@ fn removing_a_required_live_provider_rejects_the_candidate_and_retains_the_activ
         maximum_authority: Authority::default(),
     };
     let consumer = ComponentManifest {
+        listeners: Vec::new(),
         id: ComponentId::parse("fixture.consumer").unwrap(),
         owner: plugin.id.clone(),
         imports: vec![ComponentImport {

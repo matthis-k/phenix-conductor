@@ -1,6 +1,6 @@
 use crate::{
     GraphGenerationId, Kernel, LayerPolicy, PluginId, PluginManifest, ResolvedComponentGraph,
-    ResolvedHarness, ServiceId, SkillResourceMetadata,
+    ResolvedHarness, ResolvedListenerInspection, ServiceId, SkillResourceMetadata,
 };
 use std::collections::BTreeSet;
 
@@ -144,6 +144,15 @@ impl ActiveResolvedGraph {
             component_graph: resolved.component_graph().clone(),
             resources: resolved.resources().to_vec(),
         }
+    }
+
+    pub fn listeners(&self) -> impl Iterator<Item = ResolvedListenerInspection<'_>> {
+        self.component_graph
+            .listeners()
+            .map(|listener| ResolvedListenerInspection {
+                generation: &self.generation,
+                listener,
+            })
     }
 }
 
@@ -337,6 +346,7 @@ mod tests {
         let replacement = ResolvedHarness::resolve(
             [plugin.clone()],
             [ComponentManifest {
+                listeners: Vec::new(),
                 id: ComponentId::parse("fixture.component").unwrap(),
                 owner: plugin.id.clone(),
                 imports: Vec::new(),

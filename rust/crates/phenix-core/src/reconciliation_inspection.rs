@@ -49,6 +49,7 @@ mod tests {
         let candidate = GraphReconciler::resolve_candidate(
             [],
             [ComponentManifest {
+                listeners: Vec::new(),
                 id: component.clone(),
                 owner: owner.clone(),
                 imports: Vec::new(),

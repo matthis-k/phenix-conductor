@@ -1,3 +1,4 @@
+pub use phenix_core::ListenerProjection;
 use phenix_core::{
     Authority, ComponentId, ComponentInterface, ComponentInvocationError, ComponentManifest,
     EventBus, EventDispatchReport, EventEnvelope, EventError, EventFailurePolicy,
@@ -17,9 +18,10 @@ use std::{
 pub mod __phenix_plugin {
     pub use phenix_core::{
         Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-        ComponentInvocationError, ComponentManifest, EventBus, EventSubscription, InterfaceId,
-        InterfaceSchema, PhenixValue, PluginContext, PluginExecution, PluginHost, PluginId,
-        PluginInstance, PluginManifest, ServiceContribution, ServiceId, ServiceRole,
+        ComponentInvocationError, ComponentManifest, EventBus, EventHandler, EventSubscription,
+        GraphGenerationId, InterfaceId, InterfaceSchema, PhenixValue, PluginContext,
+        PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ServiceContribution,
+        ServiceId, ServiceRole,
     };
 }
 
@@ -413,12 +415,6 @@ where
     kernel
         .encode_value(&response)
         .map_err(|error| error.to_string())
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ListenerProjection {
-    Project,
-    Exact,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1041,6 +1037,7 @@ macro_rules! phenix_plugin {
                 maximum_authority: $crate::__phenix_plugin::Authority,
             ) -> $crate::__phenix_plugin::ComponentManifest {
                 $crate::__phenix_plugin::ComponentManifest {
+                    listeners: Vec::new(),
                     id: component_id(),
                     owner: plugin_id(),
                     imports: vec![

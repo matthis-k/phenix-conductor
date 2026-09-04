@@ -342,6 +342,7 @@ mod tests {
         exports: Vec<ComponentExport>,
     ) -> ComponentManifest {
         ComponentManifest {
+            listeners: Vec::new(),
             id: ComponentId::parse("third-party-component").unwrap(),
             owner: PluginId::parse("third-party").unwrap(),
             imports,

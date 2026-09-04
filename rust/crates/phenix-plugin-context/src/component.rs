@@ -27,6 +27,7 @@ fn optional_import<I: ComponentInterface>(authority: &phenix_core::Authority) ->
 pub fn context_component_manifest() -> ComponentManifest {
     let authority = context_manifest().maximum_authority;
     ComponentManifest {
+        listeners: Vec::new(),
         id: context_component_id(),
         owner: PluginId::parse(CONTEXT_PLUGIN).expect("static plugin id is valid"),
         imports: vec![

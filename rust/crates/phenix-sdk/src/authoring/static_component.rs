@@ -3,9 +3,9 @@ use super::{
     StaticComponentImports,
 };
 use phenix_core::{
-    Authority, ComponentExport, ComponentId, ComponentImport, ComponentManifest, EventTypeId,
-    HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixSchema, PluginId, ServiceContribution,
-    ServiceId, ServiceRole,
+    Authority, ComponentExport, ComponentId, ComponentImport, ComponentListener, ComponentManifest,
+    EventFailurePolicy, EventTypeId, HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixSchema,
+    PluginId, ServiceContribution, ServiceId, ServiceRole, SubscriptionId,
 };
 
 pub trait InterfaceMarker {
@@ -282,6 +282,27 @@ impl StaticComponentDescriptor {
                     required_authority: export.required_authority.clone(),
                 })
                 .collect(),
+            listeners: self
+                .listeners
+                .iter()
+                .map(|listener| ComponentListener {
+                    id: SubscriptionId::parse(format!(
+                        "{}/listener/{}/{}",
+                        owner.as_str(),
+                        self.id.as_str(),
+                        listener.method
+                    ))
+                    .expect("generated stateful listener subscription id is valid"),
+                    event: listener.event.clone(),
+                    event_version: 1,
+                    method: listener.method.to_owned(),
+                    payload_schema: listener.payload_schema.clone(),
+                    projection: listener.projection,
+                    dependencies: Vec::new(),
+                    failure_policy: EventFailurePolicy::Warn,
+                    required_authority: listener.required_authority.clone(),
+                })
+                .collect(),
             maximum_authority: maximum_authority.clone(),
         }
     }
@@ -442,6 +463,16 @@ mod tests {
         assert_eq!(manifest.owner, owner);
         assert_eq!(manifest.imports.len(), 1);
         assert_eq!(manifest.exports.len(), 1);
+        assert_eq!(manifest.listeners.len(), 1);
+        assert_eq!(
+            manifest.listeners[0].id.as_str(),
+            "fixture.component-owner/listener/fixture.component-owner.api/completed"
+        );
+        assert_eq!(manifest.listeners[0].event_version, 1);
+        assert_eq!(
+            manifest.listeners[0].projection,
+            ListenerProjection::Project
+        );
         assert_eq!(component.imports().len(), 1);
         assert_eq!(component.imports()[0].field, "models");
         assert_eq!(component.hosts().len(), 1);
