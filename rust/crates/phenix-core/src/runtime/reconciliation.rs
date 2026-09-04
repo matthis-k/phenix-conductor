@@ -1,5 +1,6 @@
 use super::*;
 use crate::ResolvedHarness;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 #[derive(Clone, Copy)]
 pub(super) struct StopView<'a> {
@@ -19,6 +20,9 @@ impl StopView<'_> {
         let Some(manifest) = self.config.manifest(plugin) else {
             return;
         };
+        self.tasks.cancel_calls(plugin, self.generation);
+        self.tasks.cancel_plugin_generation(plugin, self.generation);
+        let live_call = self.tasks.begin_call(plugin, self.generation);
         let host = PluginHost {
             graph_generation: self.generation,
             component_graph: self.graph,
@@ -27,6 +31,7 @@ impl StopView<'_> {
             instances: self.instances,
             plugin,
             authority: &manifest.maximum_authority,
+            call_cancellation: Some(live_call.cancellation_token().clone()),
             call_stack: BTreeSet::from([plugin.clone()]),
             events: self.events,
             tasks: self.tasks,
@@ -35,10 +40,10 @@ impl StopView<'_> {
             continuation: None,
             active_services: BTreeSet::new(),
         };
-        let _ = instance
+        let mut instance = instance
             .lock()
-            .expect("plugin instance mutex poisoned during stop")
-            .stop(&host);
+            .expect("plugin instance mutex poisoned during stop");
+        let _ = catch_unwind(AssertUnwindSafe(|| instance.stop(&host)));
     }
 }
 
@@ -116,32 +121,73 @@ impl Kernel {
                                 .ok_or_else(|| {
                                     KernelError::RuntimeProviderUnavailable(runtime.clone())
                                 })?;
+                            let provider_manifest = candidate_config
+                                .manifest(&binding.provider)
+                                .expect("resolved runtime provider is configured");
                             let provider =
                                 next_instances.get(&binding.provider).cloned().ok_or_else(
                                     || KernelError::PluginNotActive(binding.provider.clone()),
                                 )?;
-                            {
-                                let mut provider =
-                                    provider.lock().expect("plugin instance mutex poisoned");
-                                let contract = provider.runtime_provider().ok_or_else(|| {
-                                    KernelError::RuntimeProviderContractUnavailable {
-                                        runtime: runtime.clone(),
-                                        provider: binding.provider.clone(),
-                                    }
-                                })?;
-                                contract
-                                    .prepare(RuntimePluginCandidate {
+                            let live_call = self
+                                .tasks
+                                .begin_call(&binding.provider, Some(candidate.generation()));
+                            let cancellation = live_call.cancellation_token().clone();
+                            let host = PluginHost {
+                                graph_generation: Some(candidate.generation()),
+                                component_graph: candidate.component_graph(),
+                                config: &candidate_config,
+                                states: &next_states,
+                                instances: &next_instances,
+                                plugin: &binding.provider,
+                                authority: &provider_manifest.maximum_authority,
+                                call_cancellation: Some(cancellation.clone()),
+                                call_stack: BTreeSet::from([binding.provider.clone()]),
+                                events: &self.events,
+                                tasks: &self.tasks,
+                                persistence: &self.persistence,
+                                provenance: &self.provenance,
+                                continuation: None,
+                                active_services: BTreeSet::new(),
+                            };
+                            let mut provider =
+                                provider.lock().expect("plugin instance mutex poisoned");
+                            let contract = provider.runtime_provider().ok_or_else(|| {
+                                KernelError::RuntimeProviderContractUnavailable {
+                                    runtime: runtime.clone(),
+                                    provider: binding.provider.clone(),
+                                }
+                            })?;
+                            let prepared = catch_unwind(AssertUnwindSafe(|| {
+                                contract.prepare_with_host(
+                                    RuntimePluginCandidate {
                                         manifest,
                                         artifact,
                                         guest_authority: &manifest.maximum_authority,
-                                    })
-                                    .map_err(|message| KernelError::RuntimePrepare {
-                                        plugin: plugin.clone(),
-                                        runtime: runtime.clone(),
-                                        message,
-                                    })
-                                    .map(Some)
+                                    },
+                                    &host,
+                                )
+                            }))
+                            .map_err(|_| {
+                                KernelError::RuntimePrepare {
+                                    plugin: plugin.clone(),
+                                    runtime: runtime.clone(),
+                                    message: "runtime provider panicked".into(),
+                                }
+                            })?;
+                            if cancellation.is_cancelled() {
+                                return Err(KernelError::RuntimePrepare {
+                                    plugin: plugin.clone(),
+                                    runtime: runtime.clone(),
+                                    message: "runtime provider preparation cancelled".into(),
+                                });
                             }
+                            prepared
+                                .map_err(|message| KernelError::RuntimePrepare {
+                                    plugin: plugin.clone(),
+                                    runtime: runtime.clone(),
+                                    message,
+                                })
+                                .map(Some)
                         }
                     }
                 })();
@@ -166,6 +212,8 @@ impl Kernel {
                     }
                 };
                 if let Some(mut instance) = instance {
+                    let live_call = self.tasks.begin_call(plugin, Some(candidate.generation()));
+                    let cancellation = live_call.cancellation_token().clone();
                     let host = PluginHost {
                         graph_generation: Some(candidate.generation()),
                         component_graph: candidate.component_graph(),
@@ -174,6 +222,7 @@ impl Kernel {
                         instances: &next_instances,
                         plugin,
                         authority: &manifest.maximum_authority,
+                        call_cancellation: Some(cancellation.clone()),
                         call_stack: BTreeSet::from([plugin.clone()]),
                         events: &self.events,
                         tasks: &self.tasks,
@@ -182,7 +231,18 @@ impl Kernel {
                         continuation: None,
                         active_services: BTreeSet::new(),
                     };
-                    if let Err(message) = instance.start(&host) {
+                    let started = catch_unwind(AssertUnwindSafe(|| instance.start(&host)));
+                    let failure = match started {
+                        Ok(Ok(())) if cancellation.is_cancelled() => {
+                            Some("plugin start cancelled".into())
+                        }
+                        Ok(Ok(())) => None,
+                        Ok(Err(message)) => Some(message),
+                        Err(_) => Some("plugin start panicked".into()),
+                    };
+                    if let Some(message) = failure {
+                        self.tasks
+                            .cancel_plugin_generation(plugin, Some(candidate.generation()));
                         cleanup_staged(
                             &staged,
                             StopView {

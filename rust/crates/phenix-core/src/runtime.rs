@@ -1,16 +1,17 @@
 use crate::{
-    ArtifactRevision, Authority, CapabilityId, ComponentGraphError, ComponentId,
-    ComponentInterface, ComponentInvocationError, DurableSchema, EventBus, EventDispatchReport,
-    EventEnvelope, EventError, EventHandler, EventSubscription, EventTypeId, GraphGenerationId,
-    InterfaceId, KernelConfig, KernelError, KernelEvent, KernelPolicyIdentity, LocalPersistence,
-    NamespaceTransaction, PersistenceBackend, PluginArtifact, PluginExecution, PluginId,
-    PluginManifest, ProviderFallbackReason, ProviderSelectionReason, ResolvedComponentGraph,
-    ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan, ResolvedServiceChain,
-    ResourceNamespace, RuntimeId, SchemaMigration, ServiceId, ServiceRole, SkillResourceMetadata,
-    TaskRuntime, TaskScope, TransactionOp,
+    ArtifactRevision, Authority, CallCancellationToken, CapabilityId, ComponentGraphError,
+    ComponentId, ComponentInterface, ComponentInvocationError, DurableSchema, EventBus,
+    EventDispatchReport, EventEnvelope, EventError, EventHandler, EventSubscription, EventTypeId,
+    GraphGenerationId, InterfaceId, KernelConfig, KernelError, KernelEvent, KernelPolicyIdentity,
+    LocalPersistence, NamespaceTransaction, PersistenceBackend, PluginArtifact, PluginExecution,
+    PluginId, PluginManifest, ProviderFallbackReason, ProviderSelectionReason,
+    ResolvedComponentGraph, ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan,
+    ResolvedServiceChain, ResourceNamespace, RuntimeId, SchemaMigration, ServiceId, ServiceRole,
+    SkillResourceMetadata, TaskRuntime, TaskScope, TransactionOp,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
+    panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -226,6 +227,7 @@ pub struct PluginHost<'a> {
     instances: &'a BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
     plugin: &'a PluginId,
     authority: &'a Authority,
+    call_cancellation: Option<CallCancellationToken>,
     call_stack: BTreeSet<PluginId>,
     events: &'a EventBus,
     tasks: &'a TaskRuntime,
@@ -253,6 +255,16 @@ pub trait PluginRuntimeProvider: Send {
         &mut self,
         candidate: RuntimePluginCandidate<'_>,
     ) -> Result<Box<dyn PluginInstance>, String>;
+
+    /// Canonical preparation entry point. Core supplies the runtime provider's own host separately
+    /// from the guest authority carried by `candidate`.
+    fn prepare_with_host(
+        &mut self,
+        candidate: RuntimePluginCandidate<'_>,
+        _host: &PluginHost<'_>,
+    ) -> Result<Box<dyn PluginInstance>, String> {
+        self.prepare(candidate)
+    }
 }
 
 pub trait PluginInstance: Send {
@@ -317,16 +329,24 @@ fn stage_listener_subscriptions(
         let instance = instances
             .get(&listener.owning_plugin)
             .ok_or_else(|| KernelError::PluginNotActive(listener.owning_plugin.clone()))?;
-        let handler = instance
+        let mut instance = instance
             .lock()
-            .expect("plugin instance mutex poisoned during listener binding")
-            .bind_listener(listener, generation)
-            .map_err(|message| KernelError::ListenerBinding {
-                plugin: listener.owning_plugin.clone(),
-                component: listener.component.clone(),
-                method: listener.declaration.method.clone(),
-                message,
-            })?;
+            .expect("plugin instance mutex poisoned during listener binding");
+        let handler = catch_unwind(AssertUnwindSafe(|| {
+            instance.bind_listener(listener, generation)
+        }))
+        .map_err(|_| KernelError::ListenerBinding {
+            plugin: listener.owning_plugin.clone(),
+            component: listener.component.clone(),
+            method: listener.declaration.method.clone(),
+            message: "plugin listener binding panicked".into(),
+        })?
+        .map_err(|message| KernelError::ListenerBinding {
+            plugin: listener.owning_plugin.clone(),
+            component: listener.component.clone(),
+            method: listener.declaration.method.clone(),
+            message,
+        })?;
         subscriptions.push(EventSubscription {
             spec: listener.subscription_spec(config.policy_identity().get()),
             handler,

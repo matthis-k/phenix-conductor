@@ -1,7 +1,7 @@
 use crate::{
-    Authority, ComponentId, ComponentInterface, ComponentInvocationError, DurableSchema,
-    EventDispatchReport, EventError, EventTypeId, Exact, GraphGenerationId, InterfaceId,
-    KernelError, NamespaceTransaction, PhenixValue, PluginHost, PluginId, Project,
+    Authority, CallCancellationToken, ComponentId, ComponentInterface, ComponentInvocationError,
+    DurableSchema, EventDispatchReport, EventError, EventTypeId, Exact, GraphGenerationId,
+    InterfaceId, KernelError, NamespaceTransaction, PhenixValue, PluginHost, PluginId, Project,
     ResourceNamespace, SchemaMigration, ServiceId, TaskScope, TransactionOp, ValueError,
 };
 use std::marker::PhantomData;
@@ -67,6 +67,10 @@ pub struct KernelAccess<'host, 'runtime> {
 impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
     fn new(host: &'host PluginHost<'runtime>) -> Self {
         Self { host }
+    }
+
+    pub fn cancellation_token(&self) -> Option<&CallCancellationToken> {
+        self.host.cancellation_token()
     }
 
     #[doc(hidden)]
