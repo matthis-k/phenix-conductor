@@ -19,17 +19,15 @@ Running `phenix` opens a line-oriented interactive conversation. Running `phenix
 
 The CLI owns terminal interaction and rendering only. Phenix remains authoritative for sessions, execution, routing, tools, authentication, permissions, and persistence.
 
-## Rename the existing command utility plugin
+## Command utility plugin
 
-The repository currently uses `phenix-plugin-cli` / `phenix.cli` for command discovery and probing. That runtime component is not the terminal application.
-
-Rename it to:
+Command discovery and probing already use the canonical runtime-plugin identity:
 
 - crate/package: `phenix-plugin-command-toolbelt`;
 - plugin id: `phenix.command-toolbelt`;
 - package-set entry: `phenixPlugins.${system}.command-toolbelt`.
 
-Update current consumers directly. Keep no prerelease compatibility alias.
+That runtime plugin is not the terminal Application. The removed `phenix-plugin-cli` / `phenix.cli` identities are legacy names only and have no current compatibility alias.
 
 ## Application architecture
 
@@ -47,7 +45,7 @@ phenix-adapter-acp
 Phenix runtime
 ```
 
-The CLI should use the same client SDK as other first-party applications and bindings where practical. It must not import conductor internals or use the internal `phenix-client` wire as its public application API.
+The CLI should use the same Client SDK as other first-party Applications and Bindings where practical. It must not import conductor internals or use the internal `phenix-client` wire as its public application API.
 
 Transport stays below the protocol. Stdio may be used when the CLI owns/spawns an adapter process. A persistent deployment may reuse `phenix-transport-socket` from #436. CLI behavior must not change with transport.
 
@@ -96,7 +94,7 @@ Do not add a CLI-specific protocol method for an operation already represented b
 
 ## State
 
-Keep only ephemeral application state such as the selected session, active request, and rendering state.
+Keep only ephemeral Application state such as the selected session, active request, and rendering state.
 
 Reconstruct durable state after reconnect. Do not persist a second transcript, session registry, model database, credential store, or execution journal.
 
@@ -104,18 +102,18 @@ Reconstruct durable state after reconnect. Do not persist a second transcript, s
 
 Use ACP authentication, permission, and elicitation flows where they represent the Phenix operation. Use Phenix ACP extensions only when standard ACP cannot preserve the semantics.
 
-Never grant runtime authority because the application is local.
+Never grant runtime authority because the Application is local.
 
 ## Packaging
 
-Expose `phenix-cli` as an ordinary application package, not through `phenixPlugins`.
+Expose `phenix-cli` as an ordinary Application package, not through `phenixPlugins`.
 
-The default Phenix product may include the application for convenience, but installing or omitting the CLI changes no runtime plugin graph.
+The default Phenix product may include the Application for convenience, but installing or omitting the CLI changes no runtime plugin graph.
 
 ## Regression coverage
 
 - `phenix-cli` builds and runs without a runtime plugin identity;
-- the command utility plugin is renamed to `phenix.command-toolbelt` without behavior loss;
+- command discovery remains under `phenix.command-toolbelt` without behavior loss;
 - the CLI can create a session and complete two sequential prompts;
 - one-shot mode returns the correct exit status;
 - list/resume use runtime-owned state;
@@ -124,15 +122,15 @@ The default Phenix product may include the application for convenience, but inst
 - reconnect restores durable state without a local transcript store;
 - stdout/stderr remain separated;
 - stdio and socket-backed deployments have equivalent application semantics;
-- no internal `phenix-client` envelope is required by the application API.
+- no internal `phenix-client` envelope is required by the Application API.
 
 ## Completion
 
-- [ ] `phenix-cli` is an application package, not a runtime plugin;
+- [ ] `phenix-cli` is an Application package, not a runtime plugin;
 - [ ] it owns the `phenix` terminal executable;
-- [ ] command discovery remains in `phenix.command-toolbelt`;
+- [x] command discovery uses `phenix.command-toolbelt`;
 - [ ] one-shot and line-oriented interactive modes work;
-- [ ] the application uses the shared client SDK and ACP boundary;
+- [ ] the Application uses the shared Client SDK and ACP boundary;
 - [ ] no duplicate durable state or runtime policy is introduced;
-- [ ] transport remains below protocol semantics;
+- [ ] Transport remains below protocol semantics;
 - [ ] exact-head Source, Rust, Product, and Maintenance validation passes.
