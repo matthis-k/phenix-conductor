@@ -29,6 +29,7 @@ mod persistence_value;
 mod plugin_build;
 mod plugin_build_execution;
 mod plugin_context;
+mod provider_resolution;
 mod reconciliation;
 mod reconciliation_inspection;
 mod registry;
@@ -147,6 +148,7 @@ pub use plugin_build_execution::{
 pub use plugin_context::{
     CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,
 };
+pub use provider_resolution::{InterfaceProviderPolicy, ProviderCompositionPolicy};
 pub use reconciliation::{
     BindingChange, ComponentChange, ComponentChangeKind, GraphDiff, GraphReconciler,
     ReconciliationAction, ReconciliationPreview, ReconciliationResult, ResourceChange,
