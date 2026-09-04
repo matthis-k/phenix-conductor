@@ -41,7 +41,7 @@ impl CallCancellationToken {
     }
 }
 
-pub struct LiveCallScope<'a> {
+pub(crate) struct LiveCallScope<'a> {
     runtime: &'a TaskRuntime,
     plugin: PluginId,
     id: u64,
@@ -49,11 +49,11 @@ pub struct LiveCallScope<'a> {
 }
 
 impl LiveCallScope<'_> {
-    pub fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> u64 {
         self.id
     }
 
-    pub fn cancellation_token(&self) -> &CallCancellationToken {
+    pub(crate) fn cancellation_token(&self) -> &CallCancellationToken {
         &self.cancellation
     }
 }
@@ -164,12 +164,14 @@ impl<'a> TaskScope<'a> {
 #[derive(Debug)]
 struct OwnedTask {
     id: u64,
+    graph_generation: GraphGenerationId,
     cancelled: Weak<AtomicBool>,
 }
 
 #[derive(Debug)]
 struct OwnedCall {
     id: u64,
+    graph_generation: Option<GraphGenerationId>,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -199,7 +201,11 @@ impl TaskRuntime {
         Arc::clone(&self.events)
     }
 
-    pub(crate) fn begin_call<'a>(&'a self, plugin: &PluginId) -> LiveCallScope<'a> {
+    pub(crate) fn begin_call<'a>(
+        &'a self,
+        plugin: &PluginId,
+        graph_generation: Option<&GraphGenerationId>,
+    ) -> LiveCallScope<'a> {
         let id = self.next_call_id.fetch_add(1, Ordering::Relaxed) + 1;
         let cancelled = Arc::new(AtomicBool::new(false));
         self.calls
@@ -209,6 +215,7 @@ impl TaskRuntime {
             .or_default()
             .push(OwnedCall {
                 id,
+                graph_generation: graph_generation.cloned(),
                 cancelled: Arc::clone(&cancelled),
             });
         LiveCallScope {
@@ -230,18 +237,23 @@ impl TaskRuntime {
         }
     }
 
-    pub fn cancel_calls(&self, plugin: &PluginId) -> usize {
+    pub(crate) fn cancel_calls(
+        &self,
+        plugin: &PluginId,
+        graph_generation: Option<&GraphGenerationId>,
+    ) -> usize {
         self.calls
             .lock()
             .expect("live call mutex poisoned")
             .get(plugin)
             .into_iter()
             .flatten()
+            .filter(|call| call.graph_generation.as_ref() == graph_generation)
             .filter(|call| !call.cancelled.swap(true, Ordering::AcqRel))
             .count()
     }
 
-    pub fn active_call_count(&self, plugin: &PluginId) -> usize {
+    pub(crate) fn active_call_count(&self, plugin: &PluginId) -> usize {
         self.calls
             .lock()
             .expect("live call mutex poisoned")
@@ -289,6 +301,7 @@ impl TaskRuntime {
             tasks.retain(|task| task.cancelled.strong_count() != 0);
             tasks.push(OwnedTask {
                 id,
+                graph_generation: graph_generation.clone(),
                 cancelled: Arc::downgrade(&cancelled),
             });
         }
@@ -320,6 +333,37 @@ impl TaskRuntime {
             .expect("task ownership mutex poisoned")
             .remove(plugin)
             .unwrap_or_default();
+        self.cancel_tasks(tasks)
+    }
+
+    pub(crate) fn cancel_plugin_generation(
+        &self,
+        plugin: &PluginId,
+        graph_generation: Option<&GraphGenerationId>,
+    ) -> usize {
+        let Some(graph_generation) = graph_generation else {
+            return 0;
+        };
+        let tasks = {
+            let mut owned = self.owned.lock().expect("task ownership mutex poisoned");
+            let Some(plugin_tasks) = owned.get_mut(plugin) else {
+                return 0;
+            };
+            let (matching, retained): (Vec<_>, Vec<_>) = std::mem::take(plugin_tasks)
+                .into_iter()
+                .filter(|task| task.cancelled.strong_count() != 0)
+                .partition(|task| &task.graph_generation == graph_generation);
+            *plugin_tasks = retained;
+            let remove_owner = plugin_tasks.is_empty();
+            if remove_owner {
+                owned.remove(plugin);
+            }
+            matching
+        };
+        self.cancel_tasks(tasks)
+    }
+
+    fn cancel_tasks(&self, tasks: Vec<OwnedTask>) -> usize {
         tasks
             .into_iter()
             .filter_map(|task| {
@@ -371,7 +415,7 @@ mod tests {
         let runtime = TaskRuntime::default();
         let owner = PluginId::parse("fixture.call-owner").unwrap();
         {
-            let call = runtime.begin_call(&owner);
+            let call = runtime.begin_call(&owner, None);
             assert_ne!(call.id(), 0);
             assert!(!call.cancellation_token().is_cancelled());
             assert_eq!(runtime.active_call_count(&owner), 1);
@@ -384,13 +428,28 @@ mod tests {
         let runtime = TaskRuntime::default();
         let owner = PluginId::parse("fixture.call-owner").unwrap();
         let other = PluginId::parse("fixture.other-owner").unwrap();
-        let owned = runtime.begin_call(&owner);
-        let unrelated = runtime.begin_call(&other);
+        let owned = runtime.begin_call(&owner, None);
+        let unrelated = runtime.begin_call(&other, None);
 
-        assert_eq!(runtime.cancel_calls(&owner), 1);
+        assert_eq!(runtime.cancel_calls(&owner, None), 1);
         assert!(owned.cancellation_token().is_cancelled());
         assert!(!unrelated.cancellation_token().is_cancelled());
-        assert_eq!(runtime.cancel_calls(&owner), 0);
+        assert_eq!(runtime.cancel_calls(&owner, None), 0);
+    }
+
+    #[test]
+    fn live_call_cancellation_is_generation_scoped() {
+        let runtime = TaskRuntime::default();
+        let owner = PluginId::parse("fixture.call-owner").unwrap();
+        let first_generation = generation();
+        let second_generation =
+            generation_with_authority(&Authority::new([capability("generation.second")]));
+        let first = runtime.begin_call(&owner, Some(&first_generation));
+        let second = runtime.begin_call(&owner, Some(&second_generation));
+
+        assert_eq!(runtime.cancel_calls(&owner, Some(&first_generation)), 1);
+        assert!(first.cancellation_token().is_cancelled());
+        assert!(!second.cancellation_token().is_cancelled());
     }
 
     #[test]
@@ -479,6 +538,41 @@ mod tests {
         assert_eq!(owned.join().unwrap(), generation);
         assert!(!unrelated.join().unwrap());
         assert_eq!(runtime.cancel_plugin(&owner), 0);
+    }
+
+    #[test]
+    fn plugin_task_cancellation_is_generation_scoped() {
+        let runtime = TaskRuntime::default();
+        let authority = Authority::default();
+        let first_generation = generation();
+        let second_generation =
+            generation_with_authority(&Authority::new([capability("generation.second")]));
+        let owner = PluginId::parse("fixture.controller-owner").unwrap();
+        let first_scope = TaskScope::new_owned(&runtime, &first_generation, &authority, &owner);
+        let second_scope = TaskScope::new_owned(&runtime, &second_generation, &authority, &owner);
+        let release_second = Arc::new(AtomicBool::new(false));
+        let release_second_worker = Arc::clone(&release_second);
+
+        let first = first_scope.spawn(&authority, |token| {
+            while !token.is_cancelled() {
+                thread::yield_now();
+            }
+            token.graph_generation().clone()
+        });
+        let second = second_scope.spawn(&authority, move |token| {
+            while !release_second_worker.load(Ordering::Acquire) {
+                thread::yield_now();
+            }
+            token.is_cancelled()
+        });
+
+        assert_eq!(
+            runtime.cancel_plugin_generation(&owner, Some(&first_generation)),
+            1
+        );
+        release_second.store(true, Ordering::Release);
+        assert_eq!(first.join().unwrap(), first_generation);
+        assert!(!second.join().unwrap());
     }
 
     #[test]
