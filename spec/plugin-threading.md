@@ -87,7 +87,7 @@ The normal Harness may run trusted embedded Rust plugins in the same process as 
 
 Kernel authority checks define supported Phenix host semantics, but they cannot provide OS isolation from arbitrary native code in the same process.
 
-Use a bridged or external runtime when enforceable isolation is required. Runtime bridges may use any private concurrency implementation as long as the canonical Plugin API remains executor-independent.
+Use a runtime-provider bridge when enforceable isolation is required. A process-backed bridge can provide an OS process boundary while preserving the canonical Plugin API. Runtime bridges may use any private concurrency implementation as long as executor-specific types do not cross that API.
 
 ## Dependency policy
 
@@ -118,5 +118,5 @@ A plugin may depend on an async runtime for its own implementation. That depende
 - a blocked worker does not prevent unrelated kernel transitions;
 - an embedded synchronous plugin and a plugin with private async internals expose the same logical interface;
 - a runtime bridge can translate an async guest without exposing async ABI types;
-- external transport works without an async host runtime;
+- a process-backed runtime bridge works without an async host runtime;
 - no Rust dynamic plugin loader or executor is required by the canonical plugin contract.
