@@ -240,6 +240,7 @@ impl Kernel {
                     instances: &next_instances,
                     plugin,
                     authority: &manifest.maximum_authority,
+                    call_cancellation: None,
                     call_stack: BTreeSet::from([plugin.clone()]),
                     events: &self.events,
                     tasks: &self.tasks,
@@ -384,6 +385,7 @@ impl Kernel {
             .config
             .manifest(plugin)
             .ok_or_else(|| KernelError::UnknownPlugin(plugin.clone()))?;
+        self.tasks.cancel_calls(plugin);
         self.tasks.cancel_plugin(plugin);
         if let Some(instance) = self.instances.get(plugin) {
             let host = PluginHost {
@@ -394,6 +396,7 @@ impl Kernel {
                 instances: &self.instances,
                 plugin,
                 authority: &manifest.maximum_authority,
+                call_cancellation: None,
                 call_stack: BTreeSet::from([plugin.clone()]),
                 events: &self.events,
                 tasks: &self.tasks,
