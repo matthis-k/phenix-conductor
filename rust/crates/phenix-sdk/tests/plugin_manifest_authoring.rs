@@ -69,7 +69,10 @@ fn plugin_manifest_is_derived_from_authored_relationships() {
     );
     assert!(manifest.services.is_empty());
     assert_eq!(components[0].exports.len(), 1);
-    assert_eq!(components[0].exports[0].interface.as_str(), "fixture.manifest.run@1");
+    assert_eq!(
+        components[0].exports[0].interface.as_str(),
+        "fixture.manifest.run@1"
+    );
     assert_eq!(components[0].exports[0].priority, 7);
     assert_eq!(manifest.resource_namespaces.len(), 1);
     assert_eq!(

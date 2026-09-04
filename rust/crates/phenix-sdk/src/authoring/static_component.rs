@@ -309,7 +309,10 @@ impl StaticComponentDescriptor {
 
     #[must_use]
     pub fn services(&self) -> Vec<ServiceContribution> {
-        self.layers.iter().map(StaticComponentLayer::service).collect()
+        self.layers
+            .iter()
+            .map(StaticComponentLayer::service)
+            .collect()
     }
 
     #[must_use]
