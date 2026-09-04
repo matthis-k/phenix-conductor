@@ -206,8 +206,10 @@ fn session_open_uses_scoped_options() {
         SdkSessionResponse::Opened { created: false, .. }
     ));
 
+    let options_component = options_component_manifest();
     kernel
-        .invoke(
+        .invoke_component(
+            &options_component.id,
             &options_service(),
             &abi(&OptionCommand::Set {
                 key: OptionKey::parse("session.reuse_existing").unwrap(),
@@ -215,7 +217,7 @@ fn session_open_uses_scoped_options() {
                 value: OptionValue::Bool(false),
             }),
             &authority,
-            None,
+            &options_component.owner,
         )
         .unwrap();
 
