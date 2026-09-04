@@ -30,6 +30,40 @@ impl CancellationToken {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CallCancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CallCancellationToken {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
+
+pub struct LiveCallScope<'a> {
+    runtime: &'a TaskRuntime,
+    plugin: PluginId,
+    id: u64,
+    cancellation: CallCancellationToken,
+}
+
+impl LiveCallScope<'_> {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn cancellation_token(&self) -> &CallCancellationToken {
+        &self.cancellation
+    }
+}
+
+impl Drop for LiveCallScope<'_> {
+    fn drop(&mut self) {
+        self.runtime.finish_call(&self.plugin, self.id);
+    }
+}
+
 pub struct TaskHandle<T> {
     id: u64,
     graph_generation: GraphGenerationId,
@@ -134,18 +168,28 @@ struct OwnedTask {
 }
 
 #[derive(Debug)]
+struct OwnedCall {
+    id: u64,
+    cancelled: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
 pub struct TaskRuntime {
     next_id: AtomicU64,
+    next_call_id: AtomicU64,
     events: Arc<EventBus>,
     owned: Mutex<BTreeMap<PluginId, Vec<OwnedTask>>>,
+    calls: Mutex<BTreeMap<PluginId, Vec<OwnedCall>>>,
 }
 
 impl Default for TaskRuntime {
     fn default() -> Self {
         Self {
             next_id: AtomicU64::new(0),
+            next_call_id: AtomicU64::new(0),
             events: Arc::new(EventBus::default()),
             owned: Mutex::new(BTreeMap::new()),
+            calls: Mutex::new(BTreeMap::new()),
         }
     }
 }
@@ -153,6 +197,56 @@ impl Default for TaskRuntime {
 impl TaskRuntime {
     pub fn events(&self) -> Arc<EventBus> {
         Arc::clone(&self.events)
+    }
+
+    pub(crate) fn begin_call<'a>(&'a self, plugin: &PluginId) -> LiveCallScope<'a> {
+        let id = self.next_call_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        self.calls
+            .lock()
+            .expect("live call mutex poisoned")
+            .entry(plugin.clone())
+            .or_default()
+            .push(OwnedCall {
+                id,
+                cancelled: Arc::clone(&cancelled),
+            });
+        LiveCallScope {
+            runtime: self,
+            plugin: plugin.clone(),
+            id,
+            cancellation: CallCancellationToken { cancelled },
+        }
+    }
+
+    fn finish_call(&self, plugin: &PluginId, id: u64) {
+        let mut calls = self.calls.lock().expect("live call mutex poisoned");
+        let Some(plugin_calls) = calls.get_mut(plugin) else {
+            return;
+        };
+        plugin_calls.retain(|call| call.id != id);
+        if plugin_calls.is_empty() {
+            calls.remove(plugin);
+        }
+    }
+
+    pub fn cancel_calls(&self, plugin: &PluginId) -> usize {
+        self.calls
+            .lock()
+            .expect("live call mutex poisoned")
+            .get(plugin)
+            .into_iter()
+            .flatten()
+            .filter(|call| !call.cancelled.swap(true, Ordering::AcqRel))
+            .count()
+    }
+
+    pub fn active_call_count(&self, plugin: &PluginId) -> usize {
+        self.calls
+            .lock()
+            .expect("live call mutex poisoned")
+            .get(plugin)
+            .map_or(0, Vec::len)
     }
 
     pub fn spawn<T, F>(
@@ -270,6 +364,33 @@ mod tests {
 
     fn generation() -> GraphGenerationId {
         generation_with_authority(&Authority::default())
+    }
+
+    #[test]
+    fn live_call_scope_closes_on_drop() {
+        let runtime = TaskRuntime::default();
+        let owner = PluginId::parse("fixture.call-owner").unwrap();
+        {
+            let call = runtime.begin_call(&owner);
+            assert_ne!(call.id(), 0);
+            assert!(!call.cancellation_token().is_cancelled());
+            assert_eq!(runtime.active_call_count(&owner), 1);
+        }
+        assert_eq!(runtime.active_call_count(&owner), 0);
+    }
+
+    #[test]
+    fn live_call_cancellation_is_owner_scoped() {
+        let runtime = TaskRuntime::default();
+        let owner = PluginId::parse("fixture.call-owner").unwrap();
+        let other = PluginId::parse("fixture.other-owner").unwrap();
+        let owned = runtime.begin_call(&owner);
+        let unrelated = runtime.begin_call(&other);
+
+        assert_eq!(runtime.cancel_calls(&owner), 1);
+        assert!(owned.cancellation_token().is_cancelled());
+        assert!(!unrelated.cancellation_token().is_cancelled());
+        assert_eq!(runtime.cancel_calls(&owner), 0);
     }
 
     #[test]
