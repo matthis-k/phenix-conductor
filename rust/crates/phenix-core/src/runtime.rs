@@ -11,6 +11,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
+    panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -328,16 +329,24 @@ fn stage_listener_subscriptions(
         let instance = instances
             .get(&listener.owning_plugin)
             .ok_or_else(|| KernelError::PluginNotActive(listener.owning_plugin.clone()))?;
-        let handler = instance
+        let mut instance = instance
             .lock()
-            .expect("plugin instance mutex poisoned during listener binding")
-            .bind_listener(listener, generation)
-            .map_err(|message| KernelError::ListenerBinding {
-                plugin: listener.owning_plugin.clone(),
-                component: listener.component.clone(),
-                method: listener.declaration.method.clone(),
-                message,
-            })?;
+            .expect("plugin instance mutex poisoned during listener binding");
+        let handler = catch_unwind(AssertUnwindSafe(|| {
+            instance.bind_listener(listener, generation)
+        }))
+        .map_err(|_| KernelError::ListenerBinding {
+            plugin: listener.owning_plugin.clone(),
+            component: listener.component.clone(),
+            method: listener.declaration.method.clone(),
+            message: "plugin listener binding panicked".into(),
+        })?
+        .map_err(|message| KernelError::ListenerBinding {
+            plugin: listener.owning_plugin.clone(),
+            component: listener.component.clone(),
+            method: listener.declaration.method.clone(),
+            message,
+        })?;
         subscriptions.push(EventSubscription {
             spec: listener.subscription_spec(config.policy_identity().get()),
             handler,
