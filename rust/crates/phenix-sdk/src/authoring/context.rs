@@ -232,7 +232,7 @@ impl<'host, 'runtime> Session<'host, 'runtime> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{sdk_component_manifest, sdk_factory, sdk_manifest};
+    use crate::{sdk_component_manifest, sdk_factory, sdk_manifest, StaticPluginResources};
     use phenix_core::{
         CapabilityId, ComponentExport, ComponentImport, ComponentManifest, InterfaceId, Kernel,
         KernelConfig, PluginExecution, PluginId, PluginInstance, PluginManifest, ResolvedHarness,
@@ -501,7 +501,11 @@ mod tests {
             echo.clone(),
             consumer.clone(),
         ];
-        let resolved = ResolvedHarness::resolve(
+        let durable_schemas =
+            <phenix_plugin_options_test::Plugin as StaticPluginResources>::durable_schema_registrations(
+                &options.id,
+            );
+        let resolved = ResolvedHarness::resolve_with_durable_schemas(
             manifests.clone(),
             [
                 session_component_manifest(),
@@ -510,6 +514,7 @@ mod tests {
                 echo_component_manifest(),
                 consumer_component_manifest(authority.clone()),
             ],
+            durable_schemas,
             [],
             &authority,
         )
