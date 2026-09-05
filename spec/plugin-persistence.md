@@ -1,12 +1,17 @@
 # Persistence backend and durable schemas
 
-status: implemented
+status: partial
 coverage:
   - rust/crates/phenix-core/src/persistence.rs
   - rust/crates/phenix-core/src/persistence_bootstrap.rs
   - rust/crates/phenix-core/src/persistence_provider.rs
   - rust/crates/phenix-core/src/runtime/persistence_bootstrap.rs
   - rust/crates/phenix-core/tests/persistence_backend_conformance.rs
+
+The resolved schema set is materialized during initial activation. Provider preparation
+receives the selected transition and active Store metadata. Composition-driven Provider
+selection, active Store Binding ownership, and transactional schema preparation during
+live reconciliation remain incomplete.
 
 ## Purpose
 

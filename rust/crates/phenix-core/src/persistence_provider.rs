@@ -13,12 +13,15 @@ use std::{
 ///
 /// Provider-native handles remain behind the returned `PersistenceBackend`.
 /// Resolution and feature negotiation happen before `prepare` is called.
+/// Preparation must execute the selected transition or return an error. Candidate
+/// writes must remain isolated from the active Store until activation succeeds.
 pub trait PersistenceProvider: Send {
     fn descriptor(&self) -> PersistenceProviderDescriptor;
 
     fn prepare(
         &mut self,
-        binding: &StoreBinding,
+        plan: &ResolvedPersistenceBootstrap,
+        active: Option<&ResolvedPersistenceBootstrap>,
     ) -> Result<Box<dyn PersistenceBackend>, PersistenceProviderError>;
 }
 
@@ -138,7 +141,7 @@ pub fn prepare_persistence_candidate(
 
     let mut backend =
         provider
-            .prepare(&plan.binding)
+            .prepare(&plan, active)
             .map_err(|error| PersistenceCandidateError::Provider {
                 provider: selected_id,
                 error,
@@ -209,149 +212,4 @@ fn schema_error(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{DurableSchema, NamespaceTransaction, ResourceNamespace};
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Default)]
-    struct Probe {
-        opened: bool,
-        registered: usize,
-    }
-
-    struct MockProvider {
-        descriptor: PersistenceProviderDescriptor,
-        probe: Arc<Mutex<Probe>>,
-    }
-
-    impl PersistenceProvider for MockProvider {
-        fn descriptor(&self) -> PersistenceProviderDescriptor {
-            self.descriptor.clone()
-        }
-
-        fn prepare(
-            &mut self,
-            _binding: &StoreBinding,
-        ) -> Result<Box<dyn PersistenceBackend>, PersistenceProviderError> {
-            self.probe.lock().unwrap().opened = true;
-            Ok(Box::new(MockBackend {
-                probe: Arc::clone(&self.probe),
-                features: self.descriptor.supported_features.clone(),
-            }))
-        }
-    }
-
-    struct MockBackend {
-        probe: Arc<Mutex<Probe>>,
-        features: BTreeSet<BackendFeature>,
-    }
-
-    impl PersistenceBackend for MockBackend {
-        fn supported_features(&self) -> BTreeSet<BackendFeature> {
-            self.features.clone()
-        }
-
-        fn register_schema(
-            &mut self,
-            _owner: &PluginId,
-            _schema: &DurableSchema,
-        ) -> Result<(), PersistenceError> {
-            self.probe.lock().unwrap().registered += 1;
-            Ok(())
-        }
-
-        fn read(
-            &self,
-            _caller: &PluginId,
-            _namespace: &ResourceNamespace,
-            _key: &str,
-        ) -> Result<Option<Vec<u8>>, PersistenceError> {
-            Ok(None)
-        }
-
-        fn transact_many(
-            &mut self,
-            _transactions: &[NamespaceTransaction],
-        ) -> Result<(), PersistenceError> {
-            Ok(())
-        }
-    }
-
-    fn plugin(value: &str) -> PluginId {
-        PluginId::parse(value).unwrap()
-    }
-
-    fn binding() -> StoreBinding {
-        StoreBinding::new(crate::StoreBindingId::parse("fixture").unwrap(), "mock-v1").unwrap()
-    }
-
-    fn schema(feature: BackendFeature) -> DurableSchemaRegistration {
-        DurableSchemaRegistration::new(
-            plugin("fixture.owner"),
-            DurableSchema::requiring(
-                ResourceNamespace::parse("fixture.owner.state").unwrap(),
-                1,
-                [feature],
-            ),
-        )
-    }
-
-    #[test]
-    fn unsupported_feature_rejects_candidate_before_provider_opens_store() {
-        let probe = Arc::new(Mutex::new(Probe::default()));
-        let mut provider = MockProvider {
-            descriptor: PersistenceProviderDescriptor::new(
-                plugin("fixture.provider"),
-                [BackendFeature::Transactions],
-                ["mock-v1".to_owned()],
-            ),
-            probe: Arc::clone(&probe),
-        };
-
-        assert!(matches!(
-            prepare_persistence_candidate(
-                &mut provider,
-                [],
-                &BTreeSet::new(),
-                binding(),
-                &[schema(BackendFeature::IndexedRange)],
-                None,
-                None,
-            ),
-            Err(PersistenceCandidateError::Bootstrap(
-                PersistenceBootstrapError::UnsupportedFeatures { .. }
-            ))
-        ));
-        assert!(!probe.lock().unwrap().opened);
-    }
-
-    #[test]
-    fn eligible_candidate_opens_store_then_materializes_complete_schema_plan() {
-        let probe = Arc::new(Mutex::new(Probe::default()));
-        let mut provider = MockProvider {
-            descriptor: PersistenceProviderDescriptor::new(
-                plugin("fixture.provider"),
-                [BackendFeature::Transactions],
-                ["mock-v1".to_owned()],
-            ),
-            probe: Arc::clone(&probe),
-        };
-
-        let prepared = prepare_persistence_candidate(
-            &mut provider,
-            [],
-            &BTreeSet::new(),
-            binding(),
-            &[schema(BackendFeature::Transactions)],
-            None,
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(prepared.plan().provider.plugin, plugin("fixture.provider"));
-        let probe = probe.lock().unwrap();
-        assert!(probe.opened);
-        assert_eq!(probe.registered, 1);
-    }
-}
+mod tests;
