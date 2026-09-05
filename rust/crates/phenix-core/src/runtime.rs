@@ -21,6 +21,7 @@ use std::{
 mod dispatch;
 mod host;
 mod kernel;
+mod persistence_bootstrap;
 mod reconciliation;
 #[cfg(test)]
 mod tests;
@@ -383,6 +384,7 @@ pub struct Kernel {
     events: Arc<EventBus>,
     tasks: TaskRuntime,
     persistence: Mutex<Box<dyn PersistenceBackend>>,
+    persistence_bootstrap: Option<crate::ResolvedPersistenceBootstrap>,
     provenance: Mutex<Vec<ServiceInvocationProvenance>>,
     runtime_active: bool,
 }

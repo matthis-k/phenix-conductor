@@ -2,7 +2,8 @@
 
 use phenix_core::{
     Authority, CapabilityId, ComponentId, ComponentInterface, ComponentManifest, InterfaceId,
-    PluginContext, PluginInstance, PluginManifest, ResourceNamespace, ServiceId, TransactionOp,
+    PluginContext, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceId,
+    TransactionOp,
 };
 use phenix_sdk::StaticPluginDefinition;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
@@ -497,6 +498,13 @@ pub fn options_factory() -> Box<dyn PluginInstance> {
         api: Api,
         _state: phenix_sdk::Durable::new(),
     })
+}
+
+#[must_use]
+pub fn options_durable_schema_registrations() -> Vec<phenix_core::DurableSchemaRegistration> {
+    <Plugin as phenix_sdk::StaticPluginResources>::durable_schema_registrations(
+        &PluginId::parse(OPTIONS_PLUGIN).expect("static options plugin id is valid"),
+    )
 }
 
 pub fn default_option_definitions() -> Vec<OptionDefinition> {

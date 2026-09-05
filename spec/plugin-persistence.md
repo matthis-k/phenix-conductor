@@ -1,6 +1,19 @@
 # Persistence backend and durable schemas
 
-status: specification-only
+status: partial
+coverage:
+  - rust/crates/phenix-core/src/persistence.rs
+  - rust/crates/phenix-core/src/persistence_bootstrap.rs
+  - rust/crates/phenix-core/src/persistence_provider.rs
+  - rust/crates/phenix-core/src/runtime/persistence_bootstrap.rs
+  - rust/crates/phenix-core/tests/persistence_backend_conformance.rs
+  - rust/crates/phenix-harness/src/persistence.rs
+
+The resolved schema set is materialized during initial activation. Harness construction
+can select a bootstrap Provider before Store opening. Core retains its prepared Store
+Binding, and Provider preparation receives transition and active Store metadata.
+Transactional schema preparation and Store Binding replacement during live
+reconciliation remain incomplete.
 
 ## Purpose
 

@@ -9,12 +9,10 @@ role = "assembly"
 
 [dependencies]
 phenix-core = { path = "../phenix-core" }
+phenix-sdk = { path = "../phenix-sdk" }
 phenix-plugin-basic-context = { path = "../phenix-plugin-basic-context" }
 phenix-plugin-basic-model = { path = "../phenix-plugin-basic-model" }
 phenix-plugin-basic-skills = { path = "../phenix-plugin-basic-skills" }
 phenix-plugin-basic-tools = { path = "../phenix-plugin-basic-tools" }
 serde.workspace = true
 serde_json.workspace = true
-
-[dev-dependencies]
-phenix-sdk = { path = "../phenix-sdk" }

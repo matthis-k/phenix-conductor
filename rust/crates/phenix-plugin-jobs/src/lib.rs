@@ -2,4 +2,6 @@
 mod component;
 mod implementation;
 pub use component::*;
-pub use implementation::{job_factory, job_manifest, job_service, Plugin};
+pub use implementation::{
+    job_durable_schema_registrations, job_factory, job_manifest, job_service, Plugin,
+};

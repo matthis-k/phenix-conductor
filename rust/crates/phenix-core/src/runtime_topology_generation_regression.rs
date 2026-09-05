@@ -57,7 +57,7 @@ fn listener_component(
             payload_schema: crate::PhenixSchema::Any,
             projection: ListenerProjection::Project,
             dependencies: Vec::new(),
-            failure_policy: EventFailurePolicy::FailOperation,
+            failure_policy: EventFailurePolicy::FailDelivery,
             required_authority: Authority::default(),
         }],
         maximum_authority: Authority::default(),

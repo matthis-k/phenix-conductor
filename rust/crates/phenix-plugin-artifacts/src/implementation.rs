@@ -185,6 +185,13 @@ pub fn artifact_factory() -> Box<dyn PluginInstance> {
 }
 
 #[must_use]
+pub fn artifact_durable_schema_registrations() -> Vec<phenix_core::DurableSchemaRegistration> {
+    <Plugin as phenix_sdk::StaticPluginResources>::durable_schema_registrations(
+        &artifact_manifest().id,
+    )
+}
+
+#[must_use]
 pub fn artifact_service() -> ServiceId {
     ServiceId::parse(ARTIFACT_SERVICE).expect("static service id is valid")
 }
@@ -561,9 +568,10 @@ mod tests {
     }
 
     fn resolved() -> ResolvedHarness {
-        ResolvedHarness::resolve(
+        ResolvedHarness::resolve_with_durable_schemas(
             [artifact_manifest()],
             [artifact_component_manifest()],
+            artifact_durable_schema_registrations(),
             [],
             &authority(),
         )

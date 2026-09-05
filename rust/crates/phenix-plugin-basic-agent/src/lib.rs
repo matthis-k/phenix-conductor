@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+use phenix_core::{DurableSchemaRegistration, PluginManifest};
+use phenix_sdk::StaticPluginResources;
+
 pub use phenix_plugin_basic_context::{
     basic_context_component_id, basic_context_component_manifest, basic_context_factory,
     basic_context_manifest, BasicContextInterface, BASIC_CONTEXT_COMPONENT, BASIC_CONTEXT_PLUGIN,
@@ -16,6 +19,23 @@ pub use phenix_plugin_basic_tools::{
     basic_tools_component_id, basic_tools_component_manifest, basic_tools_factory,
     basic_tools_manifest, BasicToolsInterface, BASIC_TOOLS_COMPONENT, BASIC_TOOLS_PLUGIN,
 };
+
+#[must_use]
+pub fn basic_durable_schema_registrations(
+    manifest: &PluginManifest,
+) -> Vec<DurableSchemaRegistration> {
+    let owner = &manifest.id;
+    if owner.as_str() == BASIC_CONTEXT_PLUGIN {
+        return <phenix_plugin_basic_context::Plugin as StaticPluginResources>::durable_schema_registrations(owner);
+    }
+    if owner.as_str() == BASIC_SKILLS_PLUGIN {
+        return <phenix_plugin_basic_skills::Plugin as StaticPluginResources>::durable_schema_registrations(owner);
+    }
+    if owner.as_str() == BASIC_TOOLS_PLUGIN {
+        return <phenix_plugin_basic_tools::Plugin as StaticPluginResources>::durable_schema_registrations(owner);
+    }
+    Vec::new()
+}
 
 #[cfg(test)]
 mod component_regression;
@@ -80,8 +100,18 @@ mod tests {
             basic_context_component_manifest(),
         ];
         let ceiling = authority();
-        let resolved =
-            ResolvedHarness::resolve(manifests.clone(), components, [], &ceiling).unwrap();
+        let durable_schemas = manifests
+            .iter()
+            .flat_map(basic_durable_schema_registrations)
+            .collect::<Vec<_>>();
+        let resolved = ResolvedHarness::resolve_with_durable_schemas(
+            manifests.clone(),
+            components,
+            durable_schemas,
+            [],
+            &ceiling,
+        )
+        .unwrap();
         let mut kernel = Kernel::with_persistence(
             KernelConfig::new(manifests.clone()).unwrap(),
             LocalPersistence::open(path).unwrap(),

@@ -1,13 +1,15 @@
-use crate::{Authority, EventTypeId, PluginId, SubscriptionId};
+use crate::{Authority, EventTypeId, GraphGenerationId, PluginId, SubscriptionId};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
     sync::{
+        atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
         Arc, Mutex,
     },
+    thread,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,7 +34,7 @@ pub struct EventEnvelope {
 pub enum EventFailurePolicy {
     Ignore,
     Warn,
-    FailOperation,
+    FailDelivery,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,6 +62,17 @@ pub trait EventHandler: Send + Sync {
     ) -> Result<(), String> {
         self.handle(event, authority)
     }
+
+    #[doc(hidden)]
+    fn handle_with_provenance(
+        &self,
+        bus: &EventBus,
+        event: &EventEnvelope,
+        authority: &Authority,
+        _graph_generation: Option<&GraphGenerationId>,
+    ) -> Result<(), String> {
+        self.handle_with_bus(bus, event, authority)
+    }
 }
 
 impl<F> EventHandler for F
@@ -81,6 +94,7 @@ pub struct EventSubscription {
 pub struct EventDispatchReport {
     pub delivered: Vec<SubscriptionId>,
     pub warnings: Vec<(SubscriptionId, String)>,
+    pub graph_generation: Option<GraphGenerationId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,6 +153,7 @@ pub struct EventBus {
     kernel_subscribers: Mutex<Vec<Sender<KernelEvent>>>,
     subscriptions: Mutex<BTreeMap<SubscriptionId, EventSubscription>>,
     active_causality: Mutex<BTreeMap<u64, BTreeSet<SubscriptionId>>>,
+    next_root_causality: AtomicU64,
 }
 
 impl fmt::Debug for EventBus {
@@ -228,65 +243,151 @@ impl EventBus {
         event: &EventEnvelope,
         emitter_authority: &Authority,
     ) -> Result<EventDispatchReport, EventError> {
+        self.dispatch_in_generation(event, emitter_authority, None)
+    }
+
+    pub fn dispatch_in_generation(
+        &self,
+        event: &EventEnvelope,
+        emitter_authority: &Authority,
+        graph_generation: Option<&GraphGenerationId>,
+    ) -> Result<EventDispatchReport, EventError> {
+        let normalized_event;
+        let event = if event.causality_id == 0 {
+            normalized_event = EventEnvelope {
+                causality_id: self.next_root_causality_id(),
+                ..event.clone()
+            };
+            &normalized_event
+        } else {
+            event
+        };
         let subscriptions = self
             .subscriptions
             .lock()
             .expect("event subscription lock poisoned")
             .clone();
-        let order = dependency_order(&subscriptions, &event.event_type, event.version)?;
-        let mut report = EventDispatchReport::default();
+        let levels = dependency_levels(&subscriptions, &event.event_type, event.version)?;
+        let mut report = EventDispatchReport {
+            graph_generation: graph_generation.cloned(),
+            ..EventDispatchReport::default()
+        };
 
-        for id in order {
-            let subscription = &subscriptions[&id];
-            if !emitter_authority.permits_all(&subscription.spec.required_authority) {
-                return Err(EventError::AuthorityDenied(id));
-            }
-            {
-                let mut active = self
-                    .active_causality
-                    .lock()
-                    .expect("event causality lock poisoned");
-                let active_for_cause = active.entry(event.causality_id).or_default();
-                if !active_for_cause.insert(id.clone()) {
-                    return Err(EventError::CausalReentry(id));
+        for level in levels {
+            for id in &level {
+                let subscription = &subscriptions[id];
+                if !emitter_authority.permits_all(&subscription.spec.required_authority) {
+                    return Err(EventError::AuthorityDenied(id.clone()));
                 }
             }
+            self.enter_causality(event.causality_id, &level)?;
 
-            let handler_authority =
-                emitter_authority.attenuate(&subscription.spec.maximum_authority);
-            let result = subscription
-                .handler
-                .handle_with_bus(self, event, &handler_authority);
-            let mut active = self
-                .active_causality
-                .lock()
-                .expect("event causality lock poisoned");
-            if let Some(active_for_cause) = active.get_mut(&event.causality_id) {
-                active_for_cause.remove(&id);
-                if active_for_cause.is_empty() {
-                    active.remove(&event.causality_id);
-                }
-            }
+            let results = thread::scope(|scope| {
+                let handles = level
+                    .iter()
+                    .map(|id| {
+                        let subscription = &subscriptions[id];
+                        let handler_authority =
+                            emitter_authority.attenuate(&subscription.spec.maximum_authority);
+                        scope.spawn(move || {
+                            subscription.handler.handle_with_provenance(
+                                self,
+                                event,
+                                &handler_authority,
+                                graph_generation,
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                handles
+                    .into_iter()
+                    .map(|handle| {
+                        handle
+                            .join()
+                            .expect("event listener panicked during delivery")
+                    })
+                    .collect::<Vec<_>>()
+            });
+            self.leave_causality(event.causality_id, &level);
 
-            match result {
-                Ok(()) => report.delivered.push(id),
-                Err(_) if subscription.spec.failure_policy == EventFailurePolicy::Ignore => {
-                    report.delivered.push(id);
-                }
-                Err(message) if subscription.spec.failure_policy == EventFailurePolicy::Warn => {
-                    report.delivered.push(id.clone());
-                    report.warnings.push((id, message));
-                }
-                Err(message) => {
-                    return Err(EventError::HandlerFailed {
-                        subscription: id,
-                        message,
-                    });
+            for (id, result) in level.into_iter().zip(results) {
+                let subscription = &subscriptions[&id];
+                match result {
+                    Ok(()) => report.delivered.push(id),
+                    Err(_) if subscription.spec.failure_policy == EventFailurePolicy::Ignore => {
+                        report.delivered.push(id);
+                    }
+                    Err(message)
+                        if subscription.spec.failure_policy == EventFailurePolicy::Warn =>
+                    {
+                        report.delivered.push(id.clone());
+                        report.warnings.push((id, message));
+                    }
+                    Err(message) => {
+                        return Err(EventError::HandlerFailed {
+                            subscription: id,
+                            message,
+                        });
+                    }
                 }
             }
         }
 
         Ok(report)
+    }
+
+    fn next_root_causality_id(&self) -> u64 {
+        loop {
+            let id = self
+                .next_root_causality
+                .fetch_add(1, Ordering::Relaxed)
+                .wrapping_add(1);
+            if id != 0 {
+                return id;
+            }
+        }
+    }
+
+    fn enter_causality(
+        &self,
+        causality_id: u64,
+        subscriptions: &[SubscriptionId],
+    ) -> Result<(), EventError> {
+        let mut active = self
+            .active_causality
+            .lock()
+            .expect("event causality lock poisoned");
+        let active_for_cause = active.entry(causality_id).or_default();
+        let mut inserted = Vec::new();
+        for id in subscriptions {
+            if !active_for_cause.insert(id.clone()) {
+                for inserted_id in inserted {
+                    active_for_cause.remove(&inserted_id);
+                }
+                if active_for_cause.is_empty() {
+                    active.remove(&causality_id);
+                }
+                return Err(EventError::CausalReentry(id.clone()));
+            }
+            inserted.push(id.clone());
+        }
+        Ok(())
+    }
+
+    fn leave_causality(&self, causality_id: u64, subscriptions: &[SubscriptionId]) {
+        let mut active = self
+            .active_causality
+            .lock()
+            .expect("event causality lock poisoned");
+        let Some(active_for_cause) = active.get_mut(&causality_id) else {
+            return;
+        };
+        for id in subscriptions {
+            active_for_cause.remove(id);
+        }
+        if active_for_cause.is_empty() {
+            active.remove(&causality_id);
+        }
     }
 }
 
@@ -340,61 +441,71 @@ fn validate_dependencies(
     Ok(())
 }
 
-fn dependency_order(
+fn dependency_levels(
     subscriptions: &BTreeMap<SubscriptionId, EventSubscription>,
     event_type: &EventTypeId,
     event_version: u32,
-) -> Result<Vec<SubscriptionId>, EventError> {
-    #[derive(Clone, Copy, Eq, PartialEq)]
-    enum Visit {
-        Visiting,
-        Done,
-    }
-
-    fn visit(
-        id: &SubscriptionId,
-        subscriptions: &BTreeMap<SubscriptionId, EventSubscription>,
-        selected: &BTreeSet<SubscriptionId>,
-        visits: &mut BTreeMap<SubscriptionId, Visit>,
-        order: &mut Vec<SubscriptionId>,
-    ) -> Result<(), EventError> {
-        match visits.get(id) {
-            Some(Visit::Done) => return Ok(()),
-            Some(Visit::Visiting) => return Err(EventError::DependencyCycle(id.clone())),
-            None => {}
-        }
-        visits.insert(id.clone(), Visit::Visiting);
-        for dependency in &subscriptions[id].spec.dependencies {
-            if selected.contains(dependency) {
-                visit(dependency, subscriptions, selected, visits, order)?;
-            }
-        }
-        visits.insert(id.clone(), Visit::Done);
-        order.push(id.clone());
-        Ok(())
-    }
-
-    let selected: BTreeSet<_> = subscriptions
+) -> Result<Vec<Vec<SubscriptionId>>, EventError> {
+    let mut remaining = subscriptions
         .values()
         .filter(|subscription| {
             &subscription.spec.event_type == event_type
                 && subscription.spec.event_version == event_version
         })
         .map(|subscription| subscription.spec.id.clone())
-        .collect();
-    let mut visits = BTreeMap::new();
-    let mut order = Vec::new();
-    for id in &selected {
-        visit(id, subscriptions, &selected, &mut visits, &mut order)?;
+        .collect::<BTreeSet<_>>();
+    let mut levels = Vec::new();
+
+    while !remaining.is_empty() {
+        let ready = remaining
+            .iter()
+            .filter(|id| {
+                subscriptions[*id]
+                    .spec
+                    .dependencies
+                    .iter()
+                    .all(|dependency| !remaining.contains(dependency))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let Some(first) = ready.first() else {
+            return Err(EventError::DependencyCycle(
+                remaining
+                    .iter()
+                    .next()
+                    .expect("remaining is not empty")
+                    .clone(),
+            ));
+        };
+        debug_assert!(remaining.contains(first));
+        for id in &ready {
+            remaining.remove(id);
+        }
+        levels.push(ready);
     }
-    Ok(order)
+
+    Ok(levels)
+}
+
+fn dependency_order(
+    subscriptions: &BTreeMap<SubscriptionId, EventSubscription>,
+    event_type: &EventTypeId,
+    event_version: u32,
+) -> Result<Vec<SubscriptionId>, EventError> {
+    Ok(dependency_levels(subscriptions, event_type, event_version)?
+        .into_iter()
+        .flatten()
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CapabilityId;
-    use std::sync::Mutex;
+    use crate::{CapabilityId, ResolvedHarness};
+    use std::{
+        sync::{Condvar, Mutex},
+        time::Duration,
+    };
 
     fn plugin(value: &str) -> PluginId {
         PluginId::parse(value).unwrap()
@@ -430,7 +541,7 @@ mod tests {
             event_type: event_type("demo.changed"),
             event_version: 1,
             dependencies: dependencies.iter().map(|id| subscription(id)).collect(),
-            failure_policy: EventFailurePolicy::FailOperation,
+            failure_policy: EventFailurePolicy::FailDelivery,
             required_authority: Authority::default(),
             maximum_authority: Authority::default(),
             kernel_policy_revision: 7,
@@ -451,6 +562,49 @@ mod tests {
         let event = KernelEvent::TaskCancelled(7);
         bus.publish(event.clone());
         assert_eq!(receiver.recv().unwrap(), event);
+    }
+
+    #[test]
+    fn fail_delivery_policy_uses_delivery_wire_name() {
+        assert_eq!(
+            serde_json::to_value(EventFailurePolicy::FailDelivery).unwrap(),
+            serde_json::Value::String("fail_delivery".into())
+        );
+    }
+
+    #[test]
+    fn root_causality_is_assigned_before_listener_delivery() {
+        let bus = EventBus::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_by_handler = Arc::clone(&seen);
+        bus.replace_subscriptions([EventSubscription {
+            spec: spec("listener", &[]),
+            handler: Arc::new(move |event: &EventEnvelope, _: &Authority| {
+                seen_by_handler.lock().unwrap().push(event.causality_id);
+                Ok(())
+            }),
+        }])
+        .unwrap();
+
+        bus.dispatch(&envelope(0), &Authority::default()).unwrap();
+        bus.dispatch(&envelope(0), &Authority::default()).unwrap();
+        let seen = seen.lock().unwrap();
+        assert_ne!(seen[0], 0);
+        assert_ne!(seen[1], 0);
+        assert_ne!(seen[0], seen[1]);
+    }
+
+    #[test]
+    fn dispatch_report_records_graph_generation() {
+        let generation = ResolvedHarness::resolve([], [], [], &Authority::default())
+            .unwrap()
+            .generation()
+            .clone();
+        let bus = EventBus::default();
+        let report = bus
+            .dispatch_in_generation(&envelope(1), &Authority::default(), Some(&generation))
+            .unwrap();
+        assert_eq!(report.graph_generation.as_ref(), Some(&generation));
     }
 
     #[test]
@@ -479,6 +633,62 @@ mod tests {
 
         let report = bus.dispatch(&envelope(1), &Authority::default()).unwrap();
         assert_eq!(&*seen.lock().unwrap(), &["first", "second"]);
+        assert_eq!(
+            report.delivered,
+            vec![subscription("first"), subscription("second")]
+        );
+    }
+
+    #[test]
+    fn independent_subscribers_run_concurrently() {
+        #[derive(Default)]
+        struct GateState {
+            started: usize,
+            release: bool,
+        }
+
+        let bus = Arc::new(EventBus::default());
+        let gate = Arc::new((Mutex::new(GateState::default()), Condvar::new()));
+        let make_handler = || {
+            let gate = Arc::clone(&gate);
+            Arc::new(move |_: &EventEnvelope, _: &Authority| {
+                let (state, changed) = &*gate;
+                let mut state = state.lock().unwrap();
+                state.started += 1;
+                changed.notify_all();
+                while !state.release {
+                    state = changed.wait(state).unwrap();
+                }
+                Ok(())
+            }) as Arc<dyn EventHandler>
+        };
+        bus.replace_subscriptions([
+            EventSubscription {
+                spec: spec("first", &[]),
+                handler: make_handler(),
+            },
+            EventSubscription {
+                spec: spec("second", &[]),
+                handler: make_handler(),
+            },
+        ])
+        .unwrap();
+
+        let dispatch_bus = Arc::clone(&bus);
+        let dispatch =
+            thread::spawn(move || dispatch_bus.dispatch(&envelope(3), &Authority::default()));
+        let (state, changed) = &*gate;
+        let state = state.lock().unwrap();
+        let (mut state, timeout) = changed
+            .wait_timeout_while(state, Duration::from_secs(1), |state| state.started < 2)
+            .unwrap();
+        let both_started = !timeout.timed_out() && state.started == 2;
+        state.release = true;
+        changed.notify_all();
+        drop(state);
+
+        let report = dispatch.join().unwrap().unwrap();
+        assert!(both_started, "independent listeners did not overlap");
         assert_eq!(
             report.delivered,
             vec![subscription("first"), subscription("second")]
@@ -600,7 +810,7 @@ mod tests {
         }])
         .unwrap();
 
-        bus.dispatch(&envelope(9), &Authority::default()).unwrap();
+        bus.dispatch(&envelope(0), &Authority::default()).unwrap();
     }
 
     #[test]

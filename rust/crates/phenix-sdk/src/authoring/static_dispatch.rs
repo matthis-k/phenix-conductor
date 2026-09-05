@@ -443,10 +443,6 @@ impl<T> StaticPluginInstance<T> {
     }
 }
 
-fn register_resources<T: StaticPluginResources>(host: &PluginHost<'_>) -> Result<(), String> {
-    T::register_resource_schemas(host).map_err(|error| error.to_string())
-}
-
 impl<T> PluginInstance for StaticPluginInstance<T>
 where
     T: StaticPluginComponents
@@ -456,7 +452,6 @@ where
         + 'static,
 {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        register_resources::<T>(host)?;
         match self.start {
             Some(start) => match self.plugin.lock() {
                 Ok(mut plugin) => start(&mut plugin, host),

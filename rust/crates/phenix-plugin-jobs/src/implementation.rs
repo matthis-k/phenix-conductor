@@ -59,6 +59,11 @@ pub fn job_factory() -> Box<dyn PluginInstance> {
 }
 
 #[must_use]
+pub fn job_durable_schema_registrations() -> Vec<phenix_core::DurableSchemaRegistration> {
+    <Plugin as phenix_sdk::StaticPluginResources>::durable_schema_registrations(&job_manifest().id)
+}
+
+#[must_use]
 pub fn job_service() -> ServiceId {
     ServiceId::parse(JOB_SERVICE).expect("static service id is valid")
 }
@@ -342,9 +347,10 @@ mod tests {
     fn kernel(path: &PathBuf) -> Kernel {
         let manifest = job_manifest();
         let plugin = manifest.id.clone();
-        let resolved = ResolvedHarness::resolve(
+        let resolved = ResolvedHarness::resolve_with_durable_schemas(
             [manifest],
             [job_component_manifest()],
+            job_durable_schema_registrations(),
             [],
             &job_manifest().maximum_authority,
         )

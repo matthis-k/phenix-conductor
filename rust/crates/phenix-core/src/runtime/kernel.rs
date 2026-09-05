@@ -19,6 +19,23 @@ impl Kernel {
         config: KernelConfig,
         persistence: impl PersistenceBackend + 'static,
     ) -> Self {
+        Self::with_boxed_persistence(config, Box::new(persistence), None)
+    }
+
+    /// Construct a kernel from the backend and Store Binding prepared together.
+    pub fn with_prepared_persistence(
+        config: KernelConfig,
+        prepared: crate::PreparedPersistence,
+    ) -> Self {
+        let (plan, backend) = prepared.into_parts();
+        Self::with_boxed_persistence(config, backend, Some(plan))
+    }
+
+    fn with_boxed_persistence(
+        config: KernelConfig,
+        persistence: Box<dyn PersistenceBackend>,
+        persistence_bootstrap: Option<crate::ResolvedPersistenceBootstrap>,
+    ) -> Self {
         let states = config
             .manifests()
             .map(|manifest| (manifest.id.clone(), PluginState::Registered))
@@ -34,7 +51,8 @@ impl Kernel {
             instances: BTreeMap::new(),
             events: Arc::new(EventBus::default()),
             tasks: TaskRuntime::default(),
-            persistence: Mutex::new(Box::new(persistence)),
+            persistence: Mutex::new(persistence),
+            persistence_bootstrap,
             provenance: Mutex::new(Vec::new()),
             runtime_active: false,
         }
@@ -46,6 +64,10 @@ impl Kernel {
 
     pub fn config(&self) -> &KernelConfig {
         &self.config
+    }
+
+    pub fn persistence_bootstrap(&self) -> Option<&crate::ResolvedPersistenceBootstrap> {
+        self.persistence_bootstrap.as_ref()
     }
 
     pub fn graph_generation(&self) -> Option<&GraphGenerationId> {
