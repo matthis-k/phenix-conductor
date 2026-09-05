@@ -1,14 +1,26 @@
 #![forbid(unsafe_code)]
 
-//! Transport-independent ACP adapter boundary.
+//! Transport-independent ACP translation over the fixed Phenix application interface.
 //!
-//! Standard ACP dispatch is not implemented yet. This crate currently owns the
-//! ACP wire dependency and a stateless runtime plugin identity only.
+//! This crate owns ACP protocol semantics. Runtime state and transport lifecycle stay outside it.
+
+mod callbacks;
+mod dispatch;
+mod elicitation;
+mod extension_callbacks;
+mod extension_dispatch;
+mod extensions;
+mod updates;
 
 use phenix_core::{PluginInstance, PluginManifest};
 use phenix_sdk::StaticPluginDefinition;
 
 pub use agent_client_protocol as wire;
+pub use callbacks::*;
+pub use dispatch::*;
+pub use elicitation::*;
+pub use extensions::*;
+pub use updates::*;
 
 pub const ACP_ADAPTER_PLUGIN: &str = "phenix.adapter.acp";
 
