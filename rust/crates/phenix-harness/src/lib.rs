@@ -1,8 +1,8 @@
 use phenix_core::{
-    Authority, CapabilityId, ComponentManifest, ConfigContribution, GraphGenerationId, Kernel,
-    KernelError, LayerPolicy, PersistenceBackend, PluginExecution, PluginId, PluginInstance,
-    PluginManifest, ResolvedHarness, ResolvedHarnessActivation, ResolvedHarnessActivationError,
-    ResolvedHarnessError, ServiceId,
+    Authority, CapabilityId, ComponentManifest, ConfigContribution, DurableSchemaRegistration,
+    GraphGenerationId, Kernel, KernelError, LayerPolicy, PersistenceBackend, PluginExecution,
+    PluginId, PluginInstance, PluginManifest, ResolvedHarness, ResolvedHarnessActivation,
+    ResolvedHarnessActivationError, ResolvedHarnessError, ServiceId,
 };
 use phenix_plugin_catalog::{
     adapter_acp_factory, adapter_acp_manifest, artifact_component_manifest, artifact_factory,
@@ -13,12 +13,13 @@ use phenix_plugin_catalog::{
     basic_tools_manifest, cli_component_manifest, cli_factory, cli_manifest,
     context_component_manifest, context_factory, context_manifest, debug_component_manifest,
     debug_factory, debug_manifest, execution_component_manifest, execution_factory,
-    execution_manifest, frontend_component_manifest, frontend_factory, frontend_manifest,
-    hook_component_manifest, hook_factory, hook_manifest, job_component_manifest, job_factory,
-    job_manifest, language_component_manifest, language_factory, language_manifest,
-    memory_component_manifest, memory_factory, memory_manifest, model_routing_component_manifest,
-    model_routing_factory, model_routing_manifest, options_component_manifest, options_factory,
-    options_manifest, planning_component_manifest, planning_factory, planning_manifest,
+    execution_manifest, first_party_durable_schema_registrations, frontend_component_manifest,
+    frontend_factory, frontend_manifest, hook_component_manifest, hook_factory, hook_manifest,
+    job_component_manifest, job_factory, job_manifest, language_component_manifest,
+    language_factory, language_manifest, memory_component_manifest, memory_factory,
+    memory_manifest, model_routing_component_manifest, model_routing_factory,
+    model_routing_manifest, options_component_manifest, options_factory, options_manifest,
+    planning_component_manifest, planning_factory, planning_manifest,
     repository_worker_component_manifest, repository_worker_factory, repository_worker_manifest,
     sdk_component_manifest, sdk_factory, sdk_manifest, session_component_manifest, session_factory,
     session_manifest, session_tree_component_manifest, session_tree_factory, session_tree_manifest,
@@ -95,6 +96,7 @@ pub fn default_suite_authority() -> Authority {
 #[derive(Default)]
 pub struct HarnessBuilder {
     manifests: Vec<PluginManifest>,
+    durable_schemas: Vec<DurableSchemaRegistration>,
     embedded_factories: BTreeMap<PluginId, EmbeddedFactory>,
     layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
     components: Vec<ComponentManifest>,
@@ -310,6 +312,10 @@ impl HarnessBuilder {
         self.manifests.push(manifest);
     }
 
+    pub fn add_durable_schema(&mut self, registration: DurableSchemaRegistration) {
+        self.durable_schemas.push(registration);
+    }
+
     pub fn add_component(&mut self, manifest: ComponentManifest) {
         self.components.push(manifest);
     }
@@ -338,15 +344,18 @@ impl HarnessBuilder {
             return Err(KernelError::WrongExecutionKind(manifest.id));
         }
         let id = manifest.id.clone();
+        self.durable_schemas
+            .extend(first_party_durable_schema_registrations(&manifest));
         self.manifests.push(manifest);
         self.embedded_factories.insert(id, Arc::new(factory));
         Ok(())
     }
 
     pub fn build(self) -> Result<PhenixHarness, HarnessBuildError> {
-        let resolved = ResolvedHarness::resolve_with_layer_policies(
+        let resolved = ResolvedHarness::resolve_with_durable_schemas_and_layer_policies(
             self.manifests.clone(),
             self.components,
+            self.durable_schemas,
             self.contributions,
             self.layer_policies,
             &self.component_authority,
@@ -363,9 +372,10 @@ impl HarnessBuilder {
         self,
         persistence: impl PersistenceBackend + 'static,
     ) -> Result<PhenixHarness, HarnessBuildError> {
-        let resolved = ResolvedHarness::resolve_with_layer_policies(
+        let resolved = ResolvedHarness::resolve_with_durable_schemas_and_layer_policies(
             self.manifests.clone(),
             self.components,
+            self.durable_schemas,
             self.contributions,
             self.layer_policies,
             &self.component_authority,
