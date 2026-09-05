@@ -177,3 +177,26 @@ This contract is complete when:
 - tool and callable structural schemas use canonical Phenix schema vocabulary;
 - deterministic source checks and behavioral regressions prevent recurrence;
 - exact-head Source, Rust, Product, and Maintenance validation is green.
+
+## Structural domain failures and runtime failures
+
+Proposed follow-up; implementation and regressions are pending. The baseline status above does not certify this boundary.
+
+PluginInstance invocation returns Result<Vec<u8>, String>, and generated handlers call error.to_string(). Domain variants and details disappear before SDK consumers or protocol adapters can classify them.
+
+1. Define one canonical invocation outcome with success and declared domain-error payloads represented by PhenixValue. Keep a separate typed runtime failure enum for resolution, authority, conversion, cancellation, host, bridge, and execution failures. Core owns runtime classifications; plugins own domain error contracts.
+
+2. Add error schema metadata to interface descriptors with the same directional compatibility rules used for responses. Infallible operations use an uninhabited error schema. Generated Result<Response, DomainError> handlers encode the error contract rather than Display text.
+
+3. Typed consumers receive a generic CallError<DomainError> preserving the domain value or runtime classification. Dynamic callers receive the same structural outcome. Consumer-owned projected error views remain supported; unmatched variants yield a typed conversion failure rather than guessed classification.
+
+4. Migrate embedded dispatch, layers, runtime bridges, first-party implementations, and internal wire decoding together. Remove string-only invocation errors and to_string at semantic boundaries; render human messages only at diagnostics and external protocol presentation.
+
+5. Map declared application failures explicitly in the application bridge. ACP, generated Rust clients, and later Lua bindings retain machine-readable classification through their supported error data. Retry behavior belongs to caller policy and declared contracts, not message matching.
+
+Acceptance requires:
+
+- Distinct domain errors with identical Display text stay distinguishable and preserve structured fields.
+- Domain errors survive a layer, nested import, and runtime bridge without importing provider implementation types.
+- Incompatible error schemas reject before execution; infallible and projected consumers behave deterministically.
+- Cancellation, denied authority, malformed payload, bridge disconnect, and domain conflict remain distinct through application and ACP mappings.
