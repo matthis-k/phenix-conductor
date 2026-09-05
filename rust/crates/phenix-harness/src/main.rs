@@ -140,12 +140,18 @@ fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<Cli, String> {
                 let plugin = args
                     .next()
                     .ok_or_else(|| "--enable-plugin requires a plugin id".to_owned())?;
+                if plugin.is_empty() {
+                    return Err("--enable-plugin requires a plugin id".into());
+                }
                 cli.enable_plugins.insert(plugin);
             }
             "--disable-plugin" => {
                 let plugin = args
                     .next()
                     .ok_or_else(|| "--disable-plugin requires a plugin id".to_owned())?;
+                if plugin.is_empty() {
+                    return Err("--disable-plugin requires a plugin id".into());
+                }
                 cli.disable_plugins.insert(plugin);
             }
             _ if argument.starts_with("--enable-plugin=") => {
@@ -418,6 +424,12 @@ mod tests {
         .unwrap();
         let enabled = resolve_first_party_plugins(&cli, None).unwrap().unwrap();
         assert!(!enabled.contains(&adapter));
+    }
+
+    #[test]
+    fn empty_plugin_id_is_rejected() {
+        assert!(parse_cli(["--enable-plugin".into(), String::new()]).is_err());
+        assert!(parse_cli(["--disable-plugin=".into()]).is_err());
     }
 
     #[test]
