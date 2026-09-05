@@ -1,12 +1,14 @@
 use super::*;
-use crate::{BackendFeature, DurableSchemaRegistration, PersistenceError};
+use crate::{
+    persistence_provider::prepare_durable_schema_set, DurableSchemaRegistration,
+    PersistenceCandidateError, PersistenceError,
+};
 
 impl Kernel {
     /// Prepare the complete durable schema set for a resolved composition.
     ///
-    /// Core validates namespace ownership and negotiates every statically known
-    /// backend feature before mutating the store. Existing older schemas are
-    /// migrated through the registration's explicit migration chain.
+    /// Core validates namespace ownership before the provider-neutral schema
+    /// materialization path negotiates features and mutates the Store.
     pub fn prepare_durable_schemas(
         &mut self,
         registrations: &[DurableSchemaRegistration],
@@ -46,53 +48,16 @@ impl Kernel {
             .persistence
             .lock()
             .expect("persistence backend mutex poisoned");
-        let supported = persistence.supported_features();
-        for registration in registrations {
-            for feature in &registration.schema.required_features {
-                if !supported.contains(feature) {
-                    return Err(persistence_error(
-                        &registration.owner,
-                        PersistenceError::UnsupportedFeature {
-                            namespace: registration.schema.namespace.clone(),
-                            feature: *feature,
-                        },
-                    ));
+        prepare_durable_schema_set(persistence.as_mut(), registrations).map_err(|error| {
+            match error {
+                PersistenceCandidateError::Schema { plugin, error } => {
+                    persistence_error(&plugin, error)
+                }
+                PersistenceCandidateError::Bootstrap(_) | PersistenceCandidateError::Provider { .. } => {
+                    unreachable!("schema materialization does not resolve or open Providers")
                 }
             }
-            if !registration.migrations.is_empty()
-                && !supported.contains(&BackendFeature::Migrations)
-            {
-                return Err(persistence_error(
-                    &registration.owner,
-                    PersistenceError::UnsupportedFeature {
-                        namespace: registration.schema.namespace.clone(),
-                        feature: BackendFeature::Migrations,
-                    },
-                ));
-            }
-        }
-
-        for registration in registrations {
-            match persistence.register_schema(&registration.owner, &registration.schema) {
-                Ok(()) => {}
-                Err(PersistenceError::IncompatibleSchema {
-                    stored, requested, ..
-                }) if stored < requested => {
-                    persistence
-                        .migrate_schema(
-                            &registration.owner,
-                            &registration.schema,
-                            &registration.migrations,
-                        )
-                        .map_err(|error| persistence_error(&registration.owner, error))?;
-                    persistence
-                        .register_schema(&registration.owner, &registration.schema)
-                        .map_err(|error| persistence_error(&registration.owner, error))?;
-                }
-                Err(error) => return Err(persistence_error(&registration.owner, error)),
-            }
-        }
-        Ok(())
+        })
     }
 }
 
@@ -106,7 +71,7 @@ fn persistence_error(plugin: &PluginId, error: PersistenceError) -> KernelError 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DurableSchema, NamespaceTransaction, ResourceNamespace, TransactionOp};
+    use crate::{BackendFeature, DurableSchema, NamespaceTransaction, ResourceNamespace, TransactionOp};
     use std::{
         collections::{BTreeMap, BTreeSet},
         sync::{Arc, Mutex},
