@@ -390,13 +390,13 @@ mod tests {
     fn cli_plugin_flags_are_parsed_without_reaching_plugins() {
         let cli = parse_cli([
             "--enable-plugin".into(),
-            "fixture.adapter".into(),
+            "phenix.adapter.acp".into(),
             "--disable-plugin=phenix.debug".into(),
         ])
         .unwrap();
         assert_eq!(
             cli.enable_plugins,
-            BTreeSet::from(["fixture.adapter".to_owned()])
+            BTreeSet::from(["phenix.adapter.acp".to_owned()])
         );
         assert_eq!(
             cli.disable_plugins,
