@@ -207,14 +207,10 @@ impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
         namespace: &ResourceNamespace,
         operations: &[TransactionOp],
     ) -> Result<PreparedMutationHandle, KernelError> {
-        self.host
-            .prepare_durable_transaction(namespace, operations)
+        self.host.prepare_durable_transaction(namespace, operations)
     }
 
-    pub fn transact_prepared(
-        &self,
-        handles: &[PreparedMutationHandle],
-    ) -> Result<(), KernelError> {
+    pub fn transact_prepared(&self, handles: &[PreparedMutationHandle]) -> Result<(), KernelError> {
         self.host.transact_prepared(handles)
     }
 }

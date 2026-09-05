@@ -79,8 +79,9 @@ impl ValueCodec for PreparedMutationHandle {
 
     fn from_value(value: &PhenixValue) -> Result<Self, ValueError> {
         match value {
-            PhenixValue::String(value) => Self::parse(value.clone())
-                .map_err(|error| ValueError::InvalidValue(error.into())),
+            PhenixValue::String(value) => {
+                Self::parse(value.clone()).map_err(|error| ValueError::InvalidValue(error.into()))
+            }
             _ => Err(ValueError::TypeMismatch {
                 expected: TypeKind::String,
                 actual: value.kind(),

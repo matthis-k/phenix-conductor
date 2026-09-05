@@ -219,7 +219,8 @@ impl Kernel {
                 if let Some(mut instance) = instance {
                     let live_call = self.tasks.begin_call(plugin, Some(candidate.generation()));
                     let cancellation = live_call.cancellation_token().clone();
-                    let prepared_mutations = PreparedMutationScope::new(Some(candidate.generation()));
+                    let prepared_mutations =
+                        PreparedMutationScope::new(Some(candidate.generation()));
                     let host = PluginHost {
                         graph_generation: Some(candidate.generation()),
                         component_graph: candidate.component_graph(),
