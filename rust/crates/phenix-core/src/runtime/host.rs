@@ -205,7 +205,8 @@ impl<'a> PluginHost<'a> {
             kernel_policy_revision,
             payload,
         };
-        self.events.dispatch(&event, self.authority)
+        self.events
+            .dispatch_in_generation(&event, self.authority, self.graph_generation)
     }
 
     pub fn register_durable_schema(&self, schema: &DurableSchema) -> Result<(), KernelError> {

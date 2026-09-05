@@ -1,6 +1,15 @@
 # Conductor lifecycle hooks
 
-status: implemented
+status: partial
+coverage:
+  - rust/crates/phenix-plugin-hooks/src/implementation.rs
+  - rust/crates/phenix-plugin-hooks/src/ownership_regression.rs
+
+## Current state
+
+`phenix-plugin-hooks` implements immutable configuration revisions, explicit trigger dispatch, dependency ordering, causal re-entry protection, failure policy, context/callable actions, and ordinary Plugin ownership.
+
+Automatic wiring from the named conductor lifecycle boundaries into Event/Listener or Layer execution is not implemented yet. The lifecycle events below remain contract targets until those boundaries lower into the canonical mechanisms.
 
 ## Contract
 
