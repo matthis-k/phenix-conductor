@@ -14,6 +14,8 @@ The package is `phenix-acp-stdio`. It will own the `phenix-acp` executable.
 
 It is not a new protocol, runtime plugin, Client SDK, or application UI. It is a concrete composition of the ACP adapter with stdio transport and a configured Phenix runtime boundary.
 
+This is the first editor-viability gate. Once this package and the ACP adapter are complete, `phenix-nvim` can migrate to ACP without waiting for a generated Lua binding.
+
 ## Architecture
 
 ```text
@@ -29,6 +31,7 @@ phenix-acp
         v
 phenix-adapter-acp
         |
+        | application-interface contract
         v
 configured Phenix runtime
 ```
@@ -64,6 +67,8 @@ Expose the same standard ACP methods and negotiated `_phenix/...` extensions def
 
 The stdio package adds no stdio-specific ACP methods or metadata.
 
+Extension schemas remain owned by the fixed application interface through the ACP adapter. The stdio package does not copy them.
+
 ## Application integration
 
 This is the preferred simple process integration for editors that already support spawning ACP agents.
@@ -75,6 +80,8 @@ For example, `phenix-nvim` may either:
 
 Both paths must expose equivalent ACP and Phenix-extension semantics.
 
+The direct stdio path is the required first migration because it removes the old internal-wire dependency without making language-binding generation a prerequisite for editor use.
+
 ## Packaging
 
 Expose an independently buildable `phenix-acp-stdio` package containing `bin/phenix-acp`.
@@ -83,11 +90,14 @@ Do not require the socket transport package for the basic stdio build.
 
 Do not add a runtime plugin identity for the stdio executable. Runtime adapter identity remains `phenix.adapter.acp` from #437.
 
+The configured product package should expose or compose `phenix-acp` in a form that downstream Nix consumers such as `phenix-nvim` can pin without rebuilding protocol logic in the editor repository.
+
 ## Regression coverage
 
 - spawning `phenix-acp` completes ACP `initialize` over stdin/stdout;
 - session creation, prompt streaming, cancellation, list, and resume behave the same as the shared ACP adapter contract;
-- negotiated Phenix extensions match `phenix-adapter-acp`;
+- negotiated Phenix extensions match `phenix-adapter-acp` and the fixed application descriptor;
+- an editor-like subprocess client can initialize, create or resume a session, prompt, consume ordered updates, and cancel without using `phenix-client`;
 - logs never appear on stdout;
 - EOF exits cleanly;
 - malformed ACP input does not corrupt durable Phenix state;
@@ -104,5 +114,6 @@ Do not add a runtime plugin identity for the stdio executable. Runtime adapter i
 - [ ] stdout is protocol-only and stderr is diagnostic-only;
 - [ ] no duplicate durable or domain state is introduced;
 - [ ] stdio requires no socket dependency;
-- [ ] standard ACP and Phenix extension behavior matches #437;
-- [ ] exact-head Source, Rust, Product, and Maintenance validation passes.
+- [ ] an editor-like process journey uses only ACP and the public application contract;
+- [ ] standard ACP and Phenix extension behavior matches #437 and `application-interface.md`;
+- [ ] exact-head Source, Rust, Product, Docs, and Maintenance validation passes.
