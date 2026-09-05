@@ -139,11 +139,13 @@ mod tests {
             let mut state = self.state.lock().unwrap();
             state.registrations.push(schema.namespace.clone());
             match state.schemas.get(&schema.namespace).copied() {
-                Some(stored) if stored != schema.version => Err(PersistenceError::IncompatibleSchema {
-                    namespace: schema.namespace.clone(),
-                    stored,
-                    requested: schema.version,
-                }),
+                Some(stored) if stored != schema.version => {
+                    Err(PersistenceError::IncompatibleSchema {
+                        namespace: schema.namespace.clone(),
+                        stored,
+                        requested: schema.version,
+                    })
+                }
                 Some(_) => Ok(()),
                 None => {
                     state.schemas.insert(schema.namespace.clone(), schema.version);
@@ -163,10 +165,9 @@ mod tests {
             let mut version = stored;
             while version < schema.version {
                 let next = version + 1;
-                if !migrations
-                    .iter()
-                    .any(|migration| migration.from_version == version && migration.to_version == next)
-                {
+                if !migrations.iter().any(|migration| {
+                    migration.from_version == version && migration.to_version == next
+                }) {
                     return Err(PersistenceError::MissingMigration {
                         namespace: schema.namespace.clone(),
                         from_version: version,
