@@ -1,5 +1,5 @@
 use phenix_core::{
-    BackendFeature, DurableSchema, KernelError, PluginHost, PluginId, ResourceNamespace,
+    BackendFeature, DurableSchema, DurableSchemaRegistration, PluginId, ResourceNamespace,
 };
 use std::marker::PhantomData;
 
@@ -106,11 +106,11 @@ pub trait StaticPluginResources {
             .collect()
     }
 
-    fn register_resource_schemas(host: &PluginHost<'_>) -> Result<(), KernelError> {
-        for schema in Self::durable_schemas() {
-            host.register_durable_schema(&schema)?;
-        }
-        Ok(())
+    fn durable_schema_registrations(owner: &PluginId) -> Vec<DurableSchemaRegistration> {
+        Self::durable_schemas()
+            .into_iter()
+            .map(|schema| DurableSchemaRegistration::new(owner.clone(), schema))
+            .collect()
     }
 }
 
@@ -162,7 +162,9 @@ mod tests {
 
     #[test]
     fn plugin_resource_declarations_expose_complete_schema_set() {
+        let owner = PluginId::parse("fixture.resource-owner").unwrap();
         let schemas = Resources::durable_schemas();
+        let registrations = Resources::durable_schema_registrations(&owner);
 
         assert_eq!(schemas.len(), 1);
         assert_eq!(
@@ -173,5 +175,7 @@ mod tests {
         assert!(schemas[0]
             .required_features
             .contains(&BackendFeature::Transactions));
+        assert_eq!(registrations[0].owner, owner);
+        assert_eq!(registrations[0].schema, schemas[0]);
     }
 }
