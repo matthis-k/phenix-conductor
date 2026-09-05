@@ -21,6 +21,7 @@ use std::{
 mod dispatch;
 mod host;
 mod kernel;
+mod persistence_bootstrap;
 mod reconciliation;
 #[cfg(test)]
 mod tests;
