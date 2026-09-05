@@ -384,6 +384,7 @@ pub struct Kernel {
     events: Arc<EventBus>,
     tasks: TaskRuntime,
     persistence: Mutex<Box<dyn PersistenceBackend>>,
+    persistence_bootstrap: Option<crate::ResolvedPersistenceBootstrap>,
     provenance: Mutex<Vec<ServiceInvocationProvenance>>,
     runtime_active: bool,
 }

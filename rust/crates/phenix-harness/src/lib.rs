@@ -33,6 +33,7 @@ use std::{
 };
 
 mod basic_suite;
+mod persistence;
 
 type EmbeddedFactory = Arc<dyn Fn() -> Box<dyn PluginInstance> + Send + Sync>;
 
@@ -41,6 +42,7 @@ pub enum HarnessBuildError {
     Kernel(KernelError),
     Resolution(ResolvedHarnessError),
     Activation(ResolvedHarnessActivationError),
+    Persistence(phenix_core::PersistenceCandidateError),
 }
 
 impl Display for HarnessBuildError {
@@ -49,6 +51,7 @@ impl Display for HarnessBuildError {
             Self::Kernel(error) => Display::fmt(error, f),
             Self::Resolution(error) => Display::fmt(error, f),
             Self::Activation(error) => write!(f, "resolved Harness activation failed: {error:?}"),
+            Self::Persistence(error) => Display::fmt(error, f),
         }
     }
 }
@@ -59,6 +62,7 @@ impl Error for HarnessBuildError {
             Self::Kernel(error) => Some(error),
             Self::Resolution(error) => Some(error),
             Self::Activation(_) => None,
+            Self::Persistence(error) => Some(error),
         }
     }
 }
@@ -78,6 +82,12 @@ impl From<ResolvedHarnessError> for HarnessBuildError {
 impl From<ResolvedHarnessActivationError> for HarnessBuildError {
     fn from(error: ResolvedHarnessActivationError) -> Self {
         Self::Activation(error)
+    }
+}
+
+impl From<phenix_core::PersistenceCandidateError> for HarnessBuildError {
+    fn from(error: phenix_core::PersistenceCandidateError) -> Self {
+        Self::Persistence(error)
     }
 }
 
@@ -352,25 +362,24 @@ impl HarnessBuilder {
     }
 
     pub fn build(self) -> Result<PhenixHarness, HarnessBuildError> {
-        let resolved = ResolvedHarness::resolve_with_durable_schemas_and_layer_policies(
-            self.manifests.clone(),
-            self.components,
-            self.durable_schemas,
-            self.contributions,
-            self.layer_policies,
-            &self.component_authority,
-        )?;
-        let mut kernel = Kernel::new(resolved.kernel_config().clone());
-        kernel.activate_resolved_harness(&resolved)?;
-        for (plugin, factory) in self.embedded_factories {
-            kernel.register_embedded_factory(plugin, move || factory())?;
-        }
-        Ok(PhenixHarness { kernel, resolved })
+        self.build_using(|resolved| Ok(Kernel::new(resolved.kernel_config().clone())))
     }
 
     pub fn build_with_persistence(
         self,
         persistence: impl PersistenceBackend + 'static,
+    ) -> Result<PhenixHarness, HarnessBuildError> {
+        self.build_using(|resolved| {
+            Ok(Kernel::with_persistence(
+                resolved.kernel_config().clone(),
+                persistence,
+            ))
+        })
+    }
+
+    fn build_using(
+        self,
+        create_kernel: impl FnOnce(&ResolvedHarness) -> Result<Kernel, HarnessBuildError>,
     ) -> Result<PhenixHarness, HarnessBuildError> {
         let resolved = ResolvedHarness::resolve_with_durable_schemas_and_layer_policies(
             self.manifests.clone(),
@@ -380,7 +389,7 @@ impl HarnessBuilder {
             self.layer_policies,
             &self.component_authority,
         )?;
-        let mut kernel = Kernel::with_persistence(resolved.kernel_config().clone(), persistence);
+        let mut kernel = create_kernel(&resolved)?;
         kernel.activate_resolved_harness(&resolved)?;
         for (plugin, factory) in self.embedded_factories {
             kernel.register_embedded_factory(plugin, move || factory())?;

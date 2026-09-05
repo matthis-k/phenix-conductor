@@ -7,11 +7,13 @@ coverage:
   - rust/crates/phenix-core/src/persistence_provider.rs
   - rust/crates/phenix-core/src/runtime/persistence_bootstrap.rs
   - rust/crates/phenix-core/tests/persistence_backend_conformance.rs
+  - rust/crates/phenix-harness/src/persistence.rs
 
-The resolved schema set is materialized during initial activation. Provider preparation
-receives the selected transition and active Store metadata. Composition-driven Provider
-selection, active Store Binding ownership, and transactional schema preparation during
-live reconciliation remain incomplete.
+The resolved schema set is materialized during initial activation. Harness construction
+can select a bootstrap Provider before Store opening. Core retains its prepared Store
+Binding, and Provider preparation receives transition and active Store metadata.
+Transactional schema preparation and Store Binding replacement during live
+reconciliation remain incomplete.
 
 ## Purpose
 
