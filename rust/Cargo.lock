@@ -1482,8 +1482,11 @@ name = "phenix-adapter-acp"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "phenix-application-interface",
  "phenix-core",
  "phenix-sdk",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

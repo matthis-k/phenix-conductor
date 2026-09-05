@@ -6,7 +6,7 @@ coverage:
   - modules/package-sets.nix
   - modules/plugin-packaging.nix
 
-Canonical application-integration terminology is defined by #442. The current implementation establishes the adapter boundary and runtime identity only; standard ACP dispatch is not implemented.
+`phenix-adapter-acp` now dispatches ACP over the fixed application interface. Standard ACP owns protocol-native behavior. Descriptor-backed `_phenix/...` extensions carry Phenix semantics that ACP cannot represent without loss.
 
 ## Goal
 
@@ -26,122 +26,137 @@ Application
         v
 phenix-adapter-acp
         |
-        | canonical internal Phenix calls/events
+        | canonical application operations/events
         v
 Phenix runtime
 ```
 
-Applications must not need the internal `phenix-client` protocol.
+Applications do not need the internal `phenix-client` protocol.
+
+## Application contract
+
+`application-interface.md` owns the protocol-neutral operation, event, callback, capability, type, and error contract.
+
+The adapter consumes that passive contract. It does not scan runtime Plugin implementations to discover application semantics. It does not import the internal `phenix-client` wire.
+
+Standard ACP method names and protocol rules remain ACP-owned. The adapter contains semantic conversions where ACP and Phenix differ.
+
+Phenix-only `_phenix/...` methods, events, and callbacks project stable ids and structural schemas from the fixed application descriptor. The adapter does not keep a second handwritten extension schema set.
 
 ## Packaging
 
-The current package uses the adapter role:
+The package uses the adapter role:
 
 - crate/package: `phenix-adapter-acp`;
 - runtime id: `phenix.adapter.acp`;
 - package-set entry: `phenixPlugins.${system}.adapter-acp`;
 - the old `phenixClients.${system}.acp` / `mkPhenixClient` public category is removed;
-- keep adapter selection, omission, replacement, authority, and configuration on the ordinary plugin path.
+- adapter selection, omission, replacement, authority, and configuration stay on the ordinary plugin path.
 
-The adapter package does not own the stdio executable. #443 defines `phenix-acp-stdio`, which composes this adapter with stdin/stdout and owns `bin/phenix-acp`.
+The adapter package does not own a process or stdio lifecycle. PR #489 composes this adapter into `phenix-acp-stdio` and owns `bin/phenix-acp`.
 
-Adapter is a runtime role. Plugin remains the generic packaging/lifecycle mechanism.
+## Standard ACP mapping
 
-## Standard ACP first
+The pinned ACP v1 baseline maps directly to typed application operations where semantics match:
 
-Implement the pinned ACP version faithfully before adding Phenix extensions.
-
-This dispatch is not implemented yet. The partial adapter only re-exports the pinned `agent-client-protocol` crate as `wire` and declares a stateless embedded plugin. It advertises no services or ACP capabilities.
-
-Baseline includes the standard methods that map to canonical Phenix behavior, including:
-
-- initialization and capability negotiation;
-- authentication where ACP semantics match;
-- session creation, listing, resume/load, close, and prompt;
+- initialize and capability advertisement;
+- session create, list, resume, load, close, and prompt;
 - cancellation;
-- session updates;
-- tool-call and progress updates;
-- permissions and client-provided capabilities;
-- configuration/mode options where semantics match.
+- text and resource-link prompt content;
+- ordered text and tool-call updates;
+- permission callbacks;
+- primitive form elicitation;
+- model selection through ACP model config;
+- routing selection through an ACP config option.
 
-Advertise only implemented capabilities. ACP protocol-version handling stays inside the adapter.
+Text and resource links are ACP v1 baseline prompt content, so no optional prompt content capability is advertised.
+
+Authentication stays on the descriptor-backed Phenix extension path. The current application authentication result can return an external URI plus instructions, while ACP v1 `authenticate` has no response field for that result. The application authentication method declaration also does not identify an ACP auth flow type. Mapping it to standard ACP would lose contract information.
+
+Workspace inputs that the application contract cannot represent are rejected before runtime dispatch. This includes extra working directories and MCP server provisioning.
 
 ## Mapping rules
 
 - ACP session identity maps to canonical Phenix `SessionId`.
 - Session creation creates exactly one canonical Phenix session.
 - Prompting enters the canonical Phenix execution path rather than invoking a model directly.
-- Cancellation targets the matching canonical execution.
-- Session list/resume reconstruct from runtime-owned state.
-- Adapter disconnect never implies deletion of durable Phenix state.
-- Workspace or filesystem inputs narrow authority through existing canonical types; unsupported security-relevant input fails explicitly.
-- Client callbacks use the canonical frontend-service and authority path.
+- Cancellation targets the canonical session execution path.
+- Session list, resume, and load reconstruct runtime-owned state.
+- Load requests resume from sequence zero so the caller can replay the durable history.
+- Adapter drop or transport disconnect does not imply session close or deletion.
+- Unsupported security-sensitive workspace input fails before runtime dispatch.
+- Adapter translation resolves application operations through `ApplicationClient<T>`.
+- `ApplicationClient<T>` remains responsible for negotiated application capability checks.
 
 ## Phenix ACP extensions
 
-Use versioned, capability-negotiated ACP extensions for Phenix concepts that ACP does not represent.
+Use versioned `_phenix/...` extensions when standard ACP would lose Phenix semantics.
 
-Prefer standard ACP fields, methods, updates, config options, and `_meta` when they preserve the semantics. Add an extension only when the concept would otherwise be lost or distorted.
+The extension catalog is projected from the fixed application descriptor after application capability negotiation. It contains method, event, callback, capability, input, and output metadata from that descriptor.
 
-Expected extension families include:
+Advertised extension operations are executable. The adapter decodes their structural input into the typed application operation, dispatches through `ApplicationClient<T>`, and encodes the typed result back to ACP extension framing.
 
+Descriptor-backed extension callbacks use the same rule. The adapter resolves the callback from the request type, checks its negotiated capability, validates request and response values against descriptor schemas, and returns the resolved callback id for response correlation. Permission remains on standard ACP. Rich elicitation and client callables can use the extension callback path.
+
+Current extension families include:
+
+- authentication discovery and selection;
 - skill discovery and activation;
-- orchestration/callable discovery and invocation;
-- session tree or lineage data;
-- routing-profile metadata that cannot map cleanly to ACP config options;
+- callable discovery and invocation;
+- session lineage;
 - execution-tree inspection;
-- graph generation and invocation provenance;
-- structured Phenix diagnostics.
+- invocation provenance;
+- structured diagnostics;
+- Phenix updates that have no lossless standard ACP form.
 
-Use a Phenix-owned namespace such as `_phenix/...`; never use application-specific names such as `_nvim/...`.
-
-Extensions expose Phenix semantics, not internal transport envelopes. The obsolete `_phenix/client/envelope` path and its public encode/decode API have been removed; standard ACP dispatch must not recreate them.
+Extension names use the Phenix namespace. The obsolete `_phenix/client/envelope` path is not part of the adapter API.
 
 ## Streaming
 
-Translate canonical Phenix events into standard ACP updates where possible. Preserve ordering and stable identities needed for correlation.
+Canonical Phenix events map to standard ACP updates where ACP preserves their meaning.
 
-The adapter must not synthesize state absent from Phenix or persist a second transcript to make ACP easier.
+Text updates preserve session sequence and execution correlation metadata. Tool calls and tool results use standard ACP tool-call updates. Progress, execution-state changes, non-text messages, diagnostics, rename, and close events fall back to descriptor-owned extension notifications when needed.
+
+The adapter does not synthesize a second transcript or persist projection state.
 
 ## Transport independence
 
 ACP semantics are transport-independent.
 
-- #443 provides the standard spawnable stdio composition;
+- PR #489 provides the spawnable stdio composition;
 - stdio requires no socket library;
-- socket-backed deployment may reuse `phenix-transport-socket` from #436;
-- future transports can carry the same ACP protocol;
-- transport choice must not change sessions, capabilities, extensions, authority, or event semantics.
+- socket-backed deployment may reuse `phenix-transport-socket`;
+- future transports can carry the same ACP mapping;
+- transport choice does not change application sessions, capabilities, extensions, authority, or event semantics.
 
 ## Regression coverage
 
-Current coverage proves:
+Current adapter coverage proves:
 
-- `phenix.adapter.acp` is selectable and omittable through ordinary plugin composition;
-- its generated manifest and factory use embedded execution;
-- it contributes no fabricated services, exported interfaces, resources, dependencies, or authority;
-- its Nix package composes alone as exactly `phenix.adapter.acp` with no services.
+- initialize projects standard capabilities and descriptor-owned extensions;
+- session create, list, resume, load, close, prompt, and cancel use typed application operations;
+- model and routing state round-trip through ACP config options;
+- unsupported extra workspace and MCP inputs fail before runtime dispatch;
+- standard text and tool updates preserve sequence and execution identity;
+- non-standard updates fall back to descriptor-owned extensions;
+- permission and primitive elicitation callbacks map through standard ACP;
+- extension operation dispatch preserves typed input, output, and application capability checks;
+- extension callback framing derives identity and schemas from the descriptor;
+- callback responses with the wrong structural shape are rejected;
+- adapter drop does not close the durable session;
+- `_phenix/client/envelope` cannot reappear through extension metadata.
 
-Future dispatch coverage must prove:
-
-- ACP `initialize` advertises only real capabilities and negotiated Phenix extensions;
-- standard session create/list/resume/prompt/cancel operations map to canonical Phenix state;
-- standard ACP operations do not require an internal envelope extension;
-- Phenix-only concepts use namespaced negotiated extensions;
-- an application can use skills, orchestration, session lineage, and routing metadata without importing `phenix-client`;
-- frontend callbacks preserve canonical authority checks;
-- adapter disconnect does not delete durable sessions;
-- stdio and other transports expose equivalent ACP semantics;
-- transport/process concerns stay outside the adapter translation layer.
+Process and transport equivalence are covered by the stdio composition PR rather than this translation package.
 
 ## Completion
 
 - [x] `phenix-adapter-acp` is the ordinary first-party ACP adapter plugin;
-- [ ] standard ACP covers every concept it represents cleanly;
-- [ ] Phenix-only concepts use versioned capability-negotiated ACP extensions;
-- [ ] applications do not require the internal `phenix-client` protocol;
-- [x] the partial adapter introduces no parallel session, transcript, routing, authority, credential, execution, or persistence state;
+- [x] the adapter consumes the protocol-neutral application interface contract;
+- [x] standard ACP is used for application concepts it represents without loss;
+- [x] Phenix-only concepts use versioned capability-gated ACP extensions sourced from the application descriptor;
+- [x] applications do not require the internal `phenix-client` protocol;
+- [x] the adapter introduces no parallel session, transcript, routing, authority, credential, execution, or persistence state;
 - [x] the adapter package owns no transport lifecycle;
-- [x] stdio process ownership lives in #443 rather than this adapter package;
+- [x] stdio process ownership lives in PR #489 rather than this adapter package;
 - [x] obsolete `phenixClients.acp` packaging is removed;
-- [ ] exact-head Source, Rust, Product, and Maintenance validation passes.
+- [ ] exact-head Source, Rust, Product, Docs, and Maintenance validation passes.
