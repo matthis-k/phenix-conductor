@@ -1,6 +1,6 @@
 use crate::{
     Authority, Exact, GraphGenerationId, NamespaceTransaction, PhenixValue, PluginId, Project,
-    ResourceNamespace, StoreBindingId, TransactionOp, Type, TypeKind, ValueCodec, ValueError,
+    ResourceNamespace, TransactionOp, Type, TypeKind, ValueCodec, ValueError,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
@@ -15,7 +15,7 @@ const HANDLE_HEX_LENGTH: usize = 64;
 /// Opaque capability for one owner-prepared durable mutation.
 ///
 /// The identifier is intentionally insufficient on its own. Core resolves it only in the
-/// transaction scope that created it and consumes it on the first commit attempt.
+/// invocation scope that created it and consumes it on the first commit attempt.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct PreparedMutationHandle(String);
@@ -119,28 +119,19 @@ pub(crate) struct PreparedMutation {
 
 pub(crate) struct PreparedMutationScope {
     generation: Option<GraphGenerationId>,
-    store_binding: Option<StoreBindingId>,
     prepared: Mutex<BTreeMap<PreparedMutationHandle, PreparedMutation>>,
 }
 
 impl PreparedMutationScope {
-    pub(crate) fn new(
-        generation: Option<&GraphGenerationId>,
-        store_binding: Option<&StoreBindingId>,
-    ) -> Self {
+    pub(crate) fn new(generation: Option<&GraphGenerationId>) -> Self {
         Self {
             generation: generation.cloned(),
-            store_binding: store_binding.cloned(),
             prepared: Mutex::new(BTreeMap::new()),
         }
     }
 
     pub(crate) fn generation(&self) -> Option<&GraphGenerationId> {
         self.generation.as_ref()
-    }
-
-    pub(crate) fn store_binding(&self) -> Option<&StoreBindingId> {
-        self.store_binding.as_ref()
     }
 
     pub(crate) fn prepare(
