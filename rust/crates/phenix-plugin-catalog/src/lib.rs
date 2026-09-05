@@ -21,12 +21,12 @@ pub use phenix_plugin_artifacts::{
 };
 pub use phenix_plugin_basic_agent::{
     basic_context_component_manifest, basic_context_factory, basic_context_manifest,
-    basic_model_component_manifest, basic_model_factory, basic_model_manifest,
-    basic_skills_component_manifest, basic_skills_factory, basic_skills_manifest,
-    basic_tools_component_manifest, basic_tools_factory, basic_tools_manifest,
-    BasicContextInterface, BasicSkillsInterface, BasicToolsInterface, BASIC_CONTEXT_COMPONENT,
-    BASIC_CONTEXT_PLUGIN, BASIC_MODEL_COMPONENT, BASIC_MODEL_PLUGIN, BASIC_SKILLS_COMPONENT,
-    BASIC_SKILLS_PLUGIN, BASIC_TOOLS_COMPONENT, BASIC_TOOLS_PLUGIN,
+    basic_durable_schema_registrations, basic_model_component_manifest, basic_model_factory,
+    basic_model_manifest, basic_skills_component_manifest, basic_skills_factory,
+    basic_skills_manifest, basic_tools_component_manifest, basic_tools_factory,
+    basic_tools_manifest, BasicContextInterface, BasicSkillsInterface, BasicToolsInterface,
+    BASIC_CONTEXT_COMPONENT, BASIC_CONTEXT_PLUGIN, BASIC_MODEL_COMPONENT, BASIC_MODEL_PLUGIN,
+    BASIC_SKILLS_COMPONENT, BASIC_SKILLS_PLUGIN, BASIC_TOOLS_COMPONENT, BASIC_TOOLS_PLUGIN,
 };
 pub use phenix_plugin_command_toolbelt::{
     cli_auth_state_service, cli_component_id, cli_component_manifest, cli_discover_service,
@@ -154,14 +154,9 @@ pub fn first_party_durable_schema_registrations(
     if owner == &planning_manifest().id {
         return registrations::<phenix_plugin_planning::Plugin>(owner);
     }
-    if owner == &basic_context_manifest().id {
-        return registrations::<phenix_plugin_basic_context::Plugin>(owner);
-    }
-    if owner == &basic_skills_manifest().id {
-        return registrations::<phenix_plugin_basic_skills::Plugin>(owner);
-    }
-    if owner == &basic_tools_manifest().id {
-        return registrations::<phenix_plugin_basic_tools::Plugin>(owner);
+    let basic = basic_durable_schema_registrations(manifest);
+    if !basic.is_empty() {
+        return basic;
     }
     Vec::new()
 }
