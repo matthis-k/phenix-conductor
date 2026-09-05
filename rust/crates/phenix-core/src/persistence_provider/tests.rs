@@ -6,7 +6,10 @@ use std::sync::{Arc, Mutex};
 struct Probe {
     opened: bool,
     registered: usize,
-    preparation: Option<(ResolvedPersistenceBootstrap, Option<ResolvedPersistenceBootstrap>)>,
+    preparation: Option<(
+        ResolvedPersistenceBootstrap,
+        Option<ResolvedPersistenceBootstrap>,
+    )>,
 }
 
 struct MockProvider {
@@ -30,7 +33,9 @@ impl PersistenceProvider for MockProvider {
             | Some(PersistenceProviderTransition::ExportImport { operation })
                 if operation != "fixture.copy" =>
             {
-                return Err(PersistenceProviderError::new("unknown transition operation"));
+                return Err(PersistenceProviderError::new(
+                    "unknown transition operation",
+                ));
             }
             _ => {}
         }
