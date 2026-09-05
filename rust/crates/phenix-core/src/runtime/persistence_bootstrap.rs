@@ -48,14 +48,14 @@ impl Kernel {
             .persistence
             .lock()
             .expect("persistence backend mutex poisoned");
-        prepare_durable_schema_set(persistence.as_mut(), registrations).map_err(|error| {
-            match error {
-                PersistenceCandidateError::Schema { plugin, error } => {
-                    persistence_error(&plugin, error)
-                }
-                PersistenceCandidateError::Bootstrap(_) | PersistenceCandidateError::Provider { .. } => {
-                    unreachable!("schema materialization does not resolve or open Providers")
-                }
+        prepare_durable_schema_set(persistence.as_mut(), registrations).map_err(|error| match error
+        {
+            PersistenceCandidateError::Schema { plugin, error } => {
+                persistence_error(&plugin, error)
+            }
+            PersistenceCandidateError::Bootstrap(_)
+            | PersistenceCandidateError::Provider { .. } => {
+                unreachable!("schema materialization does not resolve or open Providers")
             }
         })
     }
@@ -71,7 +71,9 @@ fn persistence_error(plugin: &PluginId, error: PersistenceError) -> KernelError 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BackendFeature, DurableSchema, NamespaceTransaction, ResourceNamespace, TransactionOp};
+    use crate::{
+        BackendFeature, DurableSchema, NamespaceTransaction, ResourceNamespace, TransactionOp,
+    };
     use std::{
         collections::{BTreeMap, BTreeSet},
         sync::{Arc, Mutex},

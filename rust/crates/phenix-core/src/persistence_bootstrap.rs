@@ -345,22 +345,15 @@ fn validate_bootstrap_dependencies(
                     ));
                 }
                 PersistenceBootstrapDependency::Plugin(dependency) => {
-                    if !pre_store_plugins.contains(dependency) && !providers.contains_key(dependency)
+                    if !pre_store_plugins.contains(dependency)
+                        && !providers.contains_key(dependency)
                     {
-                        return Err(
-                            PersistenceBootstrapError::BootstrapDependencyUnavailable {
-                                provider: plugin.clone(),
-                                dependency: dependency.clone(),
-                            },
-                        );
+                        return Err(PersistenceBootstrapError::BootstrapDependencyUnavailable {
+                            provider: plugin.clone(),
+                            dependency: dependency.clone(),
+                        });
                     }
-                    visit(
-                        dependency,
-                        providers,
-                        pre_store_plugins,
-                        visiting,
-                        complete,
-                    )?;
+                    visit(dependency, providers, pre_store_plugins, visiting, complete)?;
                 }
             }
         }
@@ -394,11 +387,13 @@ fn validate_transition(
     let provider_changed = active.provider.plugin != candidate_provider.plugin;
     let format_changed = active.binding.storage_format != candidate_binding.storage_format;
     if provider_changed && transition.is_none() {
-        return Err(PersistenceBootstrapError::ProviderChangeRequiresTransition {
-            binding: candidate_binding.id.clone(),
-            active_provider: active.provider.plugin.clone(),
-            candidate_provider: candidate_provider.plugin.clone(),
-        });
+        return Err(
+            PersistenceBootstrapError::ProviderChangeRequiresTransition {
+                binding: candidate_binding.id.clone(),
+                active_provider: active.provider.plugin.clone(),
+                candidate_provider: candidate_provider.plugin.clone(),
+            },
+        );
     }
     if format_changed && transition.is_none() {
         return Err(
@@ -409,8 +404,10 @@ fn validate_transition(
             },
         );
     }
-    if matches!(transition, Some(PersistenceProviderTransition::CompatibleFormat))
-        && active.binding.storage_format != candidate_binding.storage_format
+    if matches!(
+        transition,
+        Some(PersistenceProviderTransition::CompatibleFormat)
+    ) && active.binding.storage_format != candidate_binding.storage_format
     {
         return Err(PersistenceBootstrapError::CompatibleFormatMismatch {
             active_format: active.binding.storage_format.clone(),
@@ -447,7 +444,11 @@ mod tests {
         StoreBinding::new(StoreBindingId::parse(id).unwrap(), format).unwrap()
     }
 
-    fn provider(id: &str, features: &[BackendFeature], formats: &[&str]) -> PersistenceProviderDescriptor {
+    fn provider(
+        id: &str,
+        features: &[BackendFeature],
+        formats: &[&str],
+    ) -> PersistenceProviderDescriptor {
         PersistenceProviderDescriptor::new(
             plugin(id),
             features.iter().copied(),

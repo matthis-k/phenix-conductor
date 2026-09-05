@@ -62,7 +62,10 @@ impl Display for PersistenceCandidateError {
         match self {
             Self::Bootstrap(error) => Display::fmt(error, f),
             Self::Provider { provider, error } => {
-                write!(f, "Persistence Provider {provider} preparation failed: {error}")
+                write!(
+                    f,
+                    "Persistence Provider {provider} preparation failed: {error}"
+                )
             }
             Self::Schema { plugin, error } => {
                 write!(f, "durable schema preparation for {plugin} failed: {error}")
@@ -133,12 +136,13 @@ pub fn prepare_persistence_candidate(
         transition,
     )?;
 
-    let mut backend = provider
-        .prepare(&plan.binding)
-        .map_err(|error| PersistenceCandidateError::Provider {
-            provider: selected_id,
-            error,
-        })?;
+    let mut backend =
+        provider
+            .prepare(&plan.binding)
+            .map_err(|error| PersistenceCandidateError::Provider {
+                provider: selected_id,
+                error,
+            })?;
     prepare_durable_schema_set(backend.as_mut(), schemas)?;
     Ok(PreparedPersistence { plan, backend })
 }
@@ -279,11 +283,7 @@ mod tests {
     }
 
     fn binding() -> StoreBinding {
-        StoreBinding::new(
-            crate::StoreBindingId::parse("fixture").unwrap(),
-            "mock-v1",
-        )
-        .unwrap()
+        StoreBinding::new(crate::StoreBindingId::parse("fixture").unwrap(), "mock-v1").unwrap()
     }
 
     fn schema(feature: BackendFeature) -> DurableSchemaRegistration {
