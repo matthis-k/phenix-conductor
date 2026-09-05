@@ -495,7 +495,8 @@ impl ResolvedHarness {
         for (service, layers) in &self.layer_policies {
             kernel_config = kernel_config.with_layer_policy(service.clone(), layers.clone())?;
         }
-        let durable_schemas = resolve_durable_schemas(self.durable_schemas.clone(), &kernel_config)?;
+        let durable_schemas =
+            resolve_durable_schemas(self.durable_schemas.clone(), &kernel_config)?;
         let component_graph = ResolvedComponentGraph::compile_with_provider_policy(
             plugins.clone(),
             components.clone(),
@@ -1063,11 +1064,7 @@ mod tests {
             [],
             [DurableSchemaRegistration::new(
                 owner_id,
-                DurableSchema::requiring(
-                    namespace.clone(),
-                    2,
-                    [BackendFeature::Transactions],
-                ),
+                DurableSchema::requiring(namespace.clone(), 2, [BackendFeature::Transactions]),
             )],
             [],
             &Authority::default(),
