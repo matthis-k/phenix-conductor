@@ -23,18 +23,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum LaunchMode {
-    #[default]
-    ServiceJsonl,
-    StdioAcp,
-}
-
 #[derive(Debug, Default, Eq, PartialEq)]
 struct Cli {
     help: bool,
     list_services: bool,
-    launch_mode: LaunchMode,
     enable_plugins: BTreeSet<String>,
     disable_plugins: BTreeSet<String>,
 }
@@ -119,14 +111,6 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    if cli.launch_mode == LaunchMode::StdioAcp {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "ACP stdio dispatch is not implemented yet; the ACP adapter is selected and ready for the adapter transport implementation",
-        )
-        .into());
-    }
-
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut stdout = io::BufWriter::new(stdout.lock());
@@ -141,7 +125,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn print_help() {
     println!(
-        "phenix-harness [OPTIONS]\n\nWithout a launch-mode option, reads JSONL service requests from stdin and writes JSONL responses.\n\nOptions:\n  --list-services       List active plugins and services as JSON\n  --enable-plugin ID    Enable a bundled plugin for this process\n  --disable-plugin ID   Disable a bundled plugin for this process\n  --stdio-acp           Select ACP stdio mode and require the bundled ACP adapter\n  -h, --help            Print help"
+        "phenix-harness [OPTIONS]\n\nWithout arguments, reads JSONL service requests from stdin and writes JSONL responses.\n\nOptions:\n  --list-services       List active plugins and services as JSON\n  --enable-plugin ID    Enable a bundled plugin for this process\n  --disable-plugin ID   Disable a bundled plugin for this process\n  -h, --help            Print help"
     );
 }
 
@@ -152,7 +136,6 @@ fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<Cli, String> {
         match argument.as_str() {
             "--help" | "-h" => cli.help = true,
             "--list-services" => cli.list_services = true,
-            "--stdio-acp" => cli.launch_mode = LaunchMode::StdioAcp,
             "--enable-plugin" => {
                 let plugin = args
                     .next()
@@ -233,8 +216,7 @@ fn resolve_first_party_plugins(
 ) -> Result<Option<BTreeSet<String>>, String> {
     let selection_requested = configured.is_some()
         || !cli.enable_plugins.is_empty()
-        || !cli.disable_plugins.is_empty()
-        || cli.launch_mode != LaunchMode::ServiceJsonl;
+        || !cli.disable_plugins.is_empty();
     if !selection_requested {
         return Ok(None);
     }
@@ -260,16 +242,6 @@ fn resolve_first_party_plugins(
     enabled.extend(cli.enable_plugins.iter().cloned());
     for plugin in &cli.disable_plugins {
         enabled.remove(plugin);
-    }
-
-    let acp_adapter = adapter_acp_manifest().id.as_str().to_owned();
-    if cli.launch_mode == LaunchMode::StdioAcp {
-        if cli.disable_plugins.contains(&acp_adapter) {
-            return Err(format!(
-                "--stdio-acp requires {acp_adapter}, but it is explicitly disabled"
-            ));
-        }
-        enabled.insert(acp_adapter);
     }
 
     let unknown = enabled
@@ -427,25 +399,25 @@ mod tests {
     }
 
     #[test]
-    fn stdio_acp_requires_the_packaged_adapter() {
-        let cli = parse_cli(["--stdio-acp".into()]).unwrap();
-        let enabled = resolve_first_party_plugins(&cli, None).unwrap().unwrap();
+    fn explicit_enable_selects_packaged_adapter() {
         let adapter = adapter_acp_manifest().id.as_str().to_owned();
+        let cli = parse_cli(["--enable-plugin".into(), adapter.clone()]).unwrap();
+        let enabled = resolve_first_party_plugins(&cli, None).unwrap().unwrap();
         assert!(enabled.contains(&adapter));
     }
 
     #[test]
-    fn explicit_disable_blocks_launch_requirement() {
+    fn explicit_disable_wins_over_explicit_enable() {
         let adapter = adapter_acp_manifest().id.as_str().to_owned();
         let cli = parse_cli([
-            "--stdio-acp".into(),
+            "--enable-plugin".into(),
+            adapter.clone(),
             "--disable-plugin".into(),
             adapter.clone(),
         ])
         .unwrap();
-        let error = resolve_first_party_plugins(&cli, None).unwrap_err();
-        assert!(error.contains(&adapter));
-        assert!(error.contains("explicitly disabled"));
+        let enabled = resolve_first_party_plugins(&cli, None).unwrap().unwrap();
+        assert!(!enabled.contains(&adapter));
     }
 
     #[test]
