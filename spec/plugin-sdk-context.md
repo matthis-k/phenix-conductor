@@ -38,7 +38,7 @@ The fields have distinct roles:
 
 The context does not create another owner for plugin state. The dynamic `PluginInstance` owns live state and constructs a fresh context for each host-backed callback.
 
-The Core `stop` callback has no host, so it cannot construct a runtime context. Stop logic works directly with instance-owned data.
+The Core `stop` callback receives a scoped host. Stop logic uses instance-owned data and only the host operations valid during shutdown.
 
 ## ABI adapter
 
@@ -157,3 +157,26 @@ A plugin may have multiple components. Component callbacks bind SDK clients to t
 - Generic kernel mechanisms are available through `ctx.kernel`.
 - Call authority and graph generation are available through `ctx.call`.
 - Recursive SDK calls cannot expand effective authority.
+
+## Executable listener context
+
+Proposed follow-up; implementation and regressions are pending. The baseline status above does not certify this boundary.
+
+Generated listeners accept EventContext, which contains only authority and generation metadata. They cannot use ordinary imported interfaces, plugin persistence, or task scopes through that context.
+
+1. Construct a fresh listener PluginHost when an admitted delivery executes. Bind it to the resolved listener component, owning plugin, pinned generation, cancellation scope, and the intersection of emitter authority, listener policy, and owner/component maxima.
+
+2. Reuse PluginContext for listener kernel access, generated typed imports, plugin state/resource handles, and call metadata. Keep EventContext as event metadata inside that context, including emitter, event identity, and causality; metadata alone grants no execution authority.
+
+3. Generate listener signatures and imported SDK clients from the same contracts used by callable handlers. All service calls, persistence operations, and spawned tasks pass through existing host checks. Do not add a second listener-specific service API or expose a mutable Kernel.
+
+4. Keep host/client borrows inside the delivery lifetime. Spawned work uses owned attenuated task data and correlated completion through the supported task/controller boundary. Reconstruct context at dispatch time and reject stale generation work; never retain a borrowed host in a listener closure.
+
+5. Migrate existing listener examples and hooks to the scoped context, including one listener that writes its own resource and calls another plugin. Replace metadata-only executable listener plumbing.
+
+Acceptance requires:
+
+- A generated listener calls a declared typed import and writes its own durable resource.
+- Undeclared imports, foreign namespace writes, and authority expansion are rejected through ordinary host checks.
+- Listener calls and tasks retain causal provenance, generation, cancellation, and owner identity.
+- Replacement cancels queued/in-flight listener work and prevents retained context from calling a new generation.
