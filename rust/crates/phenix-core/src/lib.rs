@@ -143,7 +143,11 @@ pub use persistence::{
     BackendFeature, DurableSchema, LocalPersistence, NamespaceTransaction, PersistenceBackend,
     PersistenceError, SchemaMigration, TransactionOp,
 };
-pub use persistence_bootstrap::DurableSchemaRegistration;
+pub use persistence_bootstrap::{
+    resolve_persistence_bootstrap, DurableSchemaRegistration, PersistenceBootstrapDependency,
+    PersistenceBootstrapError, PersistenceProviderDescriptor, PersistenceProviderTransition,
+    ResolvedPersistenceBootstrap, StoreBinding, StoreBindingId, StoreBindingIdParseError,
+};
 pub use plugin_build::{
     BuildArgument, BuildArtifactOutput, BuildEnvironment, BuildEnvironmentName, BuildExecutable,
     BuildSourceIdentity, BuildSourceRevision, BuildWorkingDirectory, PluginArtifactInput,
