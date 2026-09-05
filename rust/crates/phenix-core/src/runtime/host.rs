@@ -86,6 +86,7 @@ impl<'a> PluginHost<'a> {
                 events: self.events,
                 tasks: self.tasks,
                 persistence: self.persistence,
+                prepared_mutations: self.prepared_mutations,
                 provenance: self.provenance,
             },
             &service,
@@ -130,6 +131,7 @@ impl<'a> PluginHost<'a> {
                 events: self.events,
                 tasks: self.tasks,
                 persistence: self.persistence,
+                prepared_mutations: self.prepared_mutations,
                 provenance: self.provenance,
             },
             service,
@@ -165,6 +167,7 @@ impl<'a> PluginHost<'a> {
                 events: self.events,
                 tasks: self.tasks,
                 persistence: self.persistence,
+                prepared_mutations: self.prepared_mutations,
                 provenance: self.provenance,
             },
             &continuation.chain,
@@ -251,6 +254,7 @@ impl<'a> PluginHost<'a> {
         operations: &[TransactionOp],
     ) -> Result<(), KernelError> {
         self.require_persistence_operation(PERSISTENCE_WRITE, namespace)?;
+        self.require_not_cancelled("durable transaction")?;
         self.persistence
             .lock()
             .expect("kernel persistence mutex poisoned")
@@ -258,21 +262,63 @@ impl<'a> PluginHost<'a> {
             .map_err(|error| self.persistence_error(error.to_string()))
     }
 
-    pub fn transact_durable_many(
+    pub fn prepare_durable_transaction(
         &self,
-        transactions: &[NamespaceTransaction],
+        namespace: &ResourceNamespace,
+        operations: &[TransactionOp],
+    ) -> Result<crate::PreparedMutationHandle, KernelError> {
+        self.require_persistence_operation(PERSISTENCE_WRITE, namespace)?;
+        self.require_active_plugin(self.plugin)?;
+        self.require_not_cancelled("prepare durable transaction")?;
+        self.require_prepared_scope_generation()?;
+        self.prepared_mutations
+            .prepare(self.plugin, namespace, operations, self.authority)
+            .map_err(|message| self.persistence_error(message))
+    }
+
+    pub fn transact_prepared(
+        &self,
+        handles: &[crate::PreparedMutationHandle],
     ) -> Result<(), KernelError> {
         self.require_capability(PERSISTENCE_WRITE)?;
-        if !transactions
+        self.require_not_cancelled("commit prepared durable transactions")?;
+        self.require_prepared_scope_generation()?;
+        if handles.is_empty() {
+            return Err(KernelError::HostOperationDenied {
+                plugin: self.plugin.clone(),
+                operation: "commit prepared durable transactions without participants".into(),
+            });
+        }
+
+        let participants = self.prepared_mutations.consume(handles).map_err(|_| {
+            KernelError::HostOperationDenied {
+                plugin: self.plugin.clone(),
+                operation: "prepared mutation is unavailable in this invocation scope".into(),
+            }
+        })?;
+        if !participants
             .iter()
-            .any(|transaction| &transaction.owner == self.plugin)
+            .any(|participant| &participant.transaction.owner == self.plugin)
         {
             return Err(KernelError::HostOperationDenied {
                 plugin: self.plugin.clone(),
-                operation: "multi-namespace transaction requires a caller-owned participant".into(),
+                operation: "prepared commit requires a caller-owned participant".into(),
             });
         }
-        for transaction in transactions {
+
+        let write = CapabilityId::parse(PERSISTENCE_WRITE)
+            .expect("kernel persistence write capability is valid");
+        for participant in &participants {
+            let transaction = &participant.transaction;
+            if !participant.authority.permits(&write) {
+                return Err(KernelError::HostOperationDenied {
+                    plugin: self.plugin.clone(),
+                    operation: format!(
+                        "prepared mutation from {} lacks attenuated persistence write authority",
+                        transaction.owner
+                    ),
+                });
+            }
             if self.config.resource_owner(&transaction.namespace) != Some(&transaction.owner) {
                 return Err(KernelError::HostOperationDenied {
                     plugin: self.plugin.clone(),
@@ -285,8 +331,7 @@ impl<'a> PluginHost<'a> {
             if &transaction.owner == self.plugin {
                 continue;
             }
-            let write = CapabilityId::parse(PERSISTENCE_WRITE)
-                .expect("kernel persistence write capability is valid");
+            self.require_active_plugin(&transaction.owner)?;
             let authorized_import = self
                 .component_graph
                 .components()
@@ -307,11 +352,51 @@ impl<'a> PluginHost<'a> {
                 });
             }
         }
+
+        let transactions: Vec<_> = participants
+            .into_iter()
+            .map(|participant| participant.transaction)
+            .collect();
         self.persistence
             .lock()
             .expect("kernel persistence mutex poisoned")
-            .transact_many(transactions)
+            .transact_many(&transactions)
             .map_err(|error| self.persistence_error(error.to_string()))
+    }
+
+    fn require_prepared_scope_generation(&self) -> Result<(), KernelError> {
+        if self.prepared_mutations.generation() == self.graph_generation {
+            return Ok(());
+        }
+        self.prepared_mutations.clear();
+        Err(KernelError::HostOperationDenied {
+            plugin: self.plugin.clone(),
+            operation: "prepared mutation scope belongs to another graph generation".into(),
+        })
+    }
+
+    fn require_not_cancelled(&self, operation: &str) -> Result<(), KernelError> {
+        if !self
+            .call_cancellation
+            .as_ref()
+            .is_some_and(CallCancellationToken::is_cancelled)
+        {
+            return Ok(());
+        }
+        self.prepared_mutations.clear();
+        Err(KernelError::HostOperationDenied {
+            plugin: self.plugin.clone(),
+            operation: format!("{operation} after call cancellation"),
+        })
+    }
+
+    fn require_active_plugin(&self, plugin: &PluginId) -> Result<(), KernelError> {
+        if self.states.get(plugin).copied() == Some(PluginState::Active)
+            && self.instances.contains_key(plugin)
+        {
+            return Ok(());
+        }
+        Err(KernelError::PluginNotActive(plugin.clone()))
     }
 
     fn require_persistence_operation(
