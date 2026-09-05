@@ -1,7 +1,7 @@
 use crate::{
     Authority, CallCancellationToken, ComponentId, ComponentInterface, ComponentInvocationError,
     DurableSchema, EventDispatchReport, EventError, EventTypeId, Exact, GraphGenerationId,
-    InterfaceId, KernelError, NamespaceTransaction, PhenixValue, PluginHost, PluginId, Project,
+    InterfaceId, KernelError, PhenixValue, PluginHost, PluginId, PreparedMutationHandle, Project,
     ResourceNamespace, SchemaMigration, ServiceId, TaskScope, TransactionOp, ValueError,
 };
 use std::marker::PhantomData;
@@ -202,11 +202,20 @@ impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
         self.host.transact_durable(namespace, operations)
     }
 
-    pub fn transact_durable_many(
+    pub fn prepare_durable_transaction(
         &self,
-        transactions: &[NamespaceTransaction],
+        namespace: &ResourceNamespace,
+        operations: &[TransactionOp],
+    ) -> Result<PreparedMutationHandle, KernelError> {
+        self.host
+            .prepare_durable_transaction(namespace, operations)
+    }
+
+    pub fn transact_prepared(
+        &self,
+        handles: &[PreparedMutationHandle],
     ) -> Result<(), KernelError> {
-        self.host.transact_durable_many(transactions)
+        self.host.transact_prepared(handles)
     }
 }
 
