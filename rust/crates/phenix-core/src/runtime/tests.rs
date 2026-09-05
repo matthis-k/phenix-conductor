@@ -519,9 +519,8 @@ fn prepared_mutation_cannot_be_transferred_to_another_authorized_importer() {
         &authority,
     )
     .unwrap();
-    let mut kernel = Kernel::new(
-        KernelConfig::new([first.clone(), second.clone(), owner.clone()]).unwrap(),
-    );
+    let mut kernel =
+        Kernel::new(KernelConfig::new([first.clone(), second.clone(), owner.clone()]).unwrap());
     for plugin in [&first.id, &second.id, &owner.id] {
         kernel
             .register_embedded_factory((*plugin).clone(), || Box::new(NoopPlugin))
@@ -569,9 +568,7 @@ fn prepared_mutation_cannot_be_transferred_to_another_authorized_importer() {
         .transact_prepared(&[owner_mutation, second_mutation])
         .unwrap_err();
     assert!(matches!(denied, KernelError::HostOperationDenied { .. }));
-    assert!(denied
-        .to_string()
-        .contains("issued to another coordinator"));
+    assert!(denied.to_string().contains("issued to another coordinator"));
 }
 
 #[test]
