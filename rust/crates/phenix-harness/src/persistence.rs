@@ -1,7 +1,5 @@
 use crate::{HarnessBuildError, HarnessBuilder, PhenixHarness};
-use phenix_core::{
-    prepare_persistence_candidate, Kernel, PersistenceProvider, StoreBinding,
-};
+use phenix_core::{prepare_persistence_candidate, Kernel, PersistenceProvider, StoreBinding};
 use std::collections::BTreeSet;
 
 impl HarnessBuilder {
@@ -93,9 +91,8 @@ mod tests {
         let mut manifest = PluginManifest::resource_only(owner.clone());
         manifest.execution = PluginExecution::Embedded;
         manifest.resource_namespaces.push(namespace());
-        manifest.maximum_authority = Authority::new([
-            CapabilityId::parse("kernel.persistence.read").unwrap(),
-        ]);
+        manifest.maximum_authority =
+            Authority::new([CapabilityId::parse("kernel.persistence.read").unwrap()]);
         let mut builder = HarnessBuilder::new();
         let plugin_calls = Arc::clone(&calls);
         builder
@@ -133,7 +130,10 @@ mod tests {
         assert_eq!(plan.binding, binding);
         assert_eq!(provider.calls.lock().unwrap().as_slice(), &["open"]);
         harness.activate().unwrap();
-        assert_eq!(provider.calls.lock().unwrap().as_slice(), &["open", "start"]);
+        assert_eq!(
+            provider.calls.lock().unwrap().as_slice(),
+            &["open", "start"]
+        );
     }
 
     #[test]
@@ -143,9 +143,11 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(HarnessBuildError::Persistence(PersistenceCandidateError::Bootstrap(
-                PersistenceBootstrapError::UnsupportedFeatures { .. }
-            )))
+            Err(HarnessBuildError::Persistence(
+                PersistenceCandidateError::Bootstrap(
+                    PersistenceBootstrapError::UnsupportedFeatures { .. }
+                )
+            ))
         ));
         assert!(provider.calls.lock().unwrap().is_empty());
     }
@@ -159,9 +161,11 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(HarnessBuildError::Persistence(PersistenceCandidateError::Bootstrap(
-                PersistenceBootstrapError::TargetStoreBootstrapCycle(_)
-            )))
+            Err(HarnessBuildError::Persistence(
+                PersistenceCandidateError::Bootstrap(
+                    PersistenceBootstrapError::TargetStoreBootstrapCycle(_)
+                )
+            ))
         ));
         assert!(provider.calls.lock().unwrap().is_empty());
     }
