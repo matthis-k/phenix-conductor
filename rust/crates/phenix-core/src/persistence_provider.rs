@@ -98,8 +98,12 @@ impl PreparedPersistence {
         &self.plan
     }
 
-    pub(crate) fn into_backend(self) -> Box<dyn PersistenceBackend> {
-        self.backend
+    /// Consume the prepared candidate as one atomic plan/backend pair.
+    ///
+    /// The backend is already opened and schema-prepared for exactly this plan.
+    #[must_use]
+    pub fn into_parts(self) -> (ResolvedPersistenceBootstrap, Box<dyn PersistenceBackend>) {
+        (self.plan, self.backend)
     }
 }
 
