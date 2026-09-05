@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+use phenix_core::{DurableSchemaRegistration, PluginId, PluginManifest};
+use phenix_sdk::StaticPluginResources;
+
 pub use phenix_adapter_acp::{adapter_acp_factory, adapter_acp_manifest, ACP_ADAPTER_PLUGIN};
 pub use phenix_core::{ContextResourceId, ContextRevisionId, SessionId};
 pub use phenix_plugin_api::{
@@ -131,3 +134,38 @@ pub use phenix_sdk::{
     WorkerTaskRecord, WorkerTaskState, CONTEXT_SERVICE, EXECUTION_SERVICE, JOB_SERVICE,
     PLANNING_SERVICE,
 };
+
+/// Project generated durable resource metadata for a first-party plugin into the
+/// composition plan. Plugins without generated durable resources yield no entries.
+#[must_use]
+pub fn first_party_durable_schema_registrations(
+    manifest: &PluginManifest,
+) -> Vec<DurableSchemaRegistration> {
+    let owner = &manifest.id;
+    if owner == &artifact_manifest().id {
+        return registrations::<phenix_plugin_artifacts::Plugin>(owner);
+    }
+    if owner == &job_manifest().id {
+        return registrations::<phenix_plugin_jobs::Plugin>(owner);
+    }
+    if owner == &options_manifest().id {
+        return registrations::<phenix_plugin_options::Plugin>(owner);
+    }
+    if owner == &planning_manifest().id {
+        return registrations::<phenix_plugin_planning::Plugin>(owner);
+    }
+    if owner == &basic_context_manifest().id {
+        return registrations::<phenix_plugin_basic_context::Plugin>(owner);
+    }
+    if owner == &basic_skills_manifest().id {
+        return registrations::<phenix_plugin_basic_skills::Plugin>(owner);
+    }
+    if owner == &basic_tools_manifest().id {
+        return registrations::<phenix_plugin_basic_tools::Plugin>(owner);
+    }
+    Vec::new()
+}
+
+fn registrations<T: StaticPluginResources>(owner: &PluginId) -> Vec<DurableSchemaRegistration> {
+    T::durable_schema_registrations(owner)
+}
