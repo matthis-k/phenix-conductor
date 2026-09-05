@@ -38,6 +38,18 @@ The current leaf commands and CI layout come from `modules/development.nix`. Use
 
 ## Test ownership
 
+The application descriptor snapshot comes from typed declarations in `phenix-application-interface`. Regenerate it with:
+
+```sh
+cargo run --manifest-path rust/Cargo.toml --locked -p phenix-application-interface \
+  --bin phenix-application-descriptor > share/phenix/interfaces/phenix.application@1.json
+cargo run --manifest-path rust/Cargo.toml --locked -p phenix-application-interface \
+  --bin phenix-application-descriptor -- --rust share/phenix/interfaces/phenix.application@1.json \
+  > rust/crates/phenix-application-interface/fixtures/application.rs
+```
+
+Source validation checks the descriptor. The crate's unit suite compiles the generated Rust fixture, compares every generated type schema, and exercises typed requests against replaceable application transports.
+
 Each behavior has one canonical test layer. Prove it at the highest practical deterministic boundary.
 
 ### Unit and documentation

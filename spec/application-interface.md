@@ -1,6 +1,11 @@
 # Application interface
 
-status: specification-only
+status: partial
+coverage:
+  - rust/crates/phenix-application-interface/src/tests.rs
+  - modules/development.nix
+
+The passive contract, versioned snapshot, capability checks, and first Rust generation target are implemented. ACP dispatch and production Rust/Lua clients remain in the dependent PRs. The Rust emitter supports every schema used by the fixed descriptor; it rejects unsupported schema kinds explicitly.
 
 ## Purpose
 
@@ -157,11 +162,11 @@ Add coverage proving:
 
 ## Completion
 
-- [ ] `phenix-application-interface` is an independently buildable passive package;
-- [ ] one deterministic versioned descriptor owns application operation and event schemas;
-- [ ] the descriptor uses `PhenixSchema` rather than a parallel schema system;
+- [x] `phenix-application-interface` is an independently buildable passive package;
+- [x] one deterministic versioned descriptor owns application operation and event schemas;
+- [x] the descriptor uses `PhenixSchema` rather than a parallel schema system;
 - [ ] ACP maps to this contract without exposing the internal conductor wire;
-- [ ] Rust client types and operation wrappers can be generated from the descriptor;
-- [ ] language generators can consume the same descriptor without runtime implementation dependencies;
-- [ ] the initial descriptor covers the application behavior required by `phenix-nvim`;
+- [x] Rust client types and operation wrappers can be generated from the descriptor;
+- [x] language generators can consume the same descriptor without runtime implementation dependencies;
+- [x] the initial descriptor covers the application behavior required by `phenix-nvim`;
 - [ ] exact-head Source, Rust, Product, Docs, and Maintenance validation passes.

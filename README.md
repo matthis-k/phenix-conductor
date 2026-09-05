@@ -35,12 +35,15 @@ First-party `phenix-plugin-*` and `phenix-adapter-*` crates own independently se
 
 `phenix-client` owns the internal conductor client/server wire; it is not a public Client SDK. `phenix-adapter-acp` is the transport-independent ACP runtime plugin. Its package and runtime identity exist, while standard ACP dispatch remains unimplemented.
 
+`phenix-application-interface` owns the fixed, versioned application descriptor. Typed Rust declarations derive its `PhenixSchema` payloads. The descriptor covers editor operations, updates, callbacks, capability dependencies, and errors. It contains no runtime service topology or authority policy. The first Rust emitter consumes the serialized descriptor and produces a compiled regression client. ACP transport and production client integration remain follow-up work.
+
 ### Rust boundaries
 
 | Crate or package | Responsibility |
 | --- | --- |
 | `phenix-core` | Generic plugin host, trust boundaries, persistence enforcement, events, tasks |
 | `phenix-client` | Internal conductor client/server wire |
+| `phenix-application-interface` | Passive application contracts, descriptor emission, and Rust generation |
 | `phenix-conductor` | Generic configured server and transport |
 | `phenix-plugin-*` | Independently owned first-party services |
 | `phenix-adapter-acp` | Stateless ACP adapter runtime plugin |
@@ -74,6 +77,7 @@ The flake exposes:
 
 - `packages.<system>.phenix-core`;
 - `packages.<system>.phenix-client`;
+- `packages.<system>.phenix-application-interface`, including `bin/phenix-application-descriptor` and `share/phenix/interfaces/phenix.application@1.json`;
 - `packages.<system>.phenix-conductor`;
 - `packages.<system>.phenix-harness`;
 - `packages.<system>.phenix`;

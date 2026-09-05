@@ -1487,6 +1487,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-application-interface"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "phenix-core",
+ "phenix-sdk-macros",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "phenix-backend"
 version = "0.1.0"
 dependencies = [

@@ -273,6 +273,7 @@
                   "actionlint"
                   "plugin-architecture"
                   "structural-boundaries"
+                  "application-interface"
                   "workflow-sync"
                 ];
                 commands = {
@@ -375,6 +376,25 @@
                     exec = ''
                       ${repositoryRoot}
                       bash scripts/check-structural-boundaries.sh
+                    '';
+                  };
+
+                  application-interface = {
+                    description = "Fixed application descriptor snapshot";
+                    ci = sourceCi // {
+                      stepName = "Application interface";
+                    };
+                    runtimeInputs = pkgs: [
+                      pkgs.cargo
+                      pkgs.git
+                      pkgs.rustc
+                      pkgs.stdenv.cc
+                    ];
+                    exec = ''
+                      ${rustRoot}
+                      cargo run --quiet --locked -p phenix-application-interface \
+                        --bin phenix-application-descriptor -- \
+                        --check ../share/phenix/interfaces/phenix.application@1.json
                     '';
                   };
 

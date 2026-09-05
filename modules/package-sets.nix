@@ -173,6 +173,15 @@ in
       packages = {
         phenix-core = mkRustPackage pkgs "phenix-core";
         phenix-client = mkRustPackage pkgs "phenix-client";
+        phenix-application-interface =
+          (mkBinaryPackage pkgs "phenix-application-interface" "phenix-application-descriptor").overrideAttrs
+            (_: {
+              postInstall = ''
+                mkdir -p "$out/share/phenix/interfaces"
+                "$out/bin/phenix-application-descriptor" \
+                  > "$out/share/phenix/interfaces/phenix.application@1.json"
+              '';
+            });
         phenix-conductor = mkBinaryPackage pkgs "phenix-conductor" "phenix-conductor";
       };
 

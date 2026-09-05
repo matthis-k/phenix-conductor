@@ -2,6 +2,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
+use syn::ext::IdentExt;
 use syn::{
     parse_macro_input, parse_quote, Data, DeriveInput, Fields, Generics, Ident, LitStr, Type,
 };
@@ -244,7 +245,7 @@ fn project_named_struct(
     constructor: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     let decode_fields = fields.iter().map(|(field, ty)| {
-        let key = field.to_string();
+        let key = field.unraw().to_string();
         quote! {
             #field: <#ty as ::phenix_core::ValueCodec>::project_from_value(value.get(#key)?)?
         }
@@ -266,7 +267,7 @@ fn derive_project_enum(variants: &[&syn::Variant]) -> syn::Result<proc_macro2::T
 
     for variant in variants {
         let variant_ident = &variant.ident;
-        let tag = variant_ident.to_string();
+        let tag = variant_ident.unraw().to_string();
         match &variant.fields {
             Fields::Unit => {
                 decode_arms.push(quote! {
@@ -296,7 +297,7 @@ fn derive_project_enum(variants: &[&syn::Variant]) -> syn::Result<proc_macro2::T
                     })
                     .collect::<Vec<_>>();
                 let decode_fields = fields.iter().map(|(field, ty)| {
-                    let name = field.to_string();
+                    let name = field.unraw().to_string();
                     quote! {
                         #field: <#ty as ::phenix_core::ValueCodec>::project_from_value(payload.get(#name)?)?
                     }
@@ -384,7 +385,7 @@ fn named_struct(
     proc_macro2::TokenStream,
 ) {
     let type_fields = fields.iter().map(|(field, ty)| {
-        let key = field.to_string();
+        let key = field.unraw().to_string();
         quote! {
             fields.insert(
                 ::phenix_core::Key::parse(#key).expect("Rust field name is a valid structural key"),
@@ -393,7 +394,7 @@ fn named_struct(
         }
     });
     let value_fields = fields.iter().map(|(field, _)| {
-        let key = field.to_string();
+        let key = field.unraw().to_string();
         quote! {
             fields.insert(
                 ::phenix_core::Key::parse(#key).expect("Rust field name is a valid structural key"),
@@ -402,7 +403,7 @@ fn named_struct(
         }
     });
     let decode_fields = fields.iter().map(|(field, ty)| {
-        let key = field.to_string();
+        let key = field.unraw().to_string();
         quote! {
             #field: <#ty as ::phenix_core::ValueCodec>::from_value(value.get(#key)?)?
         }
@@ -438,7 +439,7 @@ fn derive_enum(
 
     for variant in variants {
         let variant_ident = &variant.ident;
-        let tag = variant_ident.to_string();
+        let tag = variant_ident.unraw().to_string();
         let key = quote!(::phenix_core::Key::parse(#tag).expect("Rust variant name is a valid structural key"));
 
         match &variant.fields {
@@ -486,7 +487,7 @@ fn derive_enum(
                     })
                     .collect::<Vec<_>>();
                 let type_fields = fields.iter().map(|(field, ty)| {
-                    let name = field.to_string();
+                    let name = field.unraw().to_string();
                     quote! {
                         (
                             ::phenix_core::Key::parse(#name).expect("Rust field name is a valid structural key"),
@@ -496,7 +497,7 @@ fn derive_enum(
                 });
                 let pattern_fields = fields.iter().map(|(field, _)| field);
                 let value_fields = fields.iter().map(|(field, _)| {
-                    let name = field.to_string();
+                    let name = field.unraw().to_string();
                     quote! {
                         (
                             ::phenix_core::Key::parse(#name).expect("Rust field name is a valid structural key"),
@@ -505,7 +506,7 @@ fn derive_enum(
                     }
                 });
                 let decode_fields = fields.iter().map(|(field, ty)| {
-                    let name = field.to_string();
+                    let name = field.unraw().to_string();
                     quote! {
                         #field: <#ty as ::phenix_core::ValueCodec>::from_value(payload.get(#name)?)?
                     }
