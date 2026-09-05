@@ -2,11 +2,13 @@
 
 status: specification-only
 
-Implementation builds on the application-side ACP client SDK from #440.
+Implementation builds on the fixed application interface from `application-interface.md` and the application-side ACP client SDK from #440.
 
 ## Goal
 
 Provide an importable Lua **Binding** over `phenix-client-acp` so Lua applications can use Phenix without implementing ACP or importing conductor/runtime internals.
+
+Generate the stable Lua application API from the same fixed descriptor used by the Rust client. Keep only Lua ABI, host integration, lifetime, and value-conversion behavior handwritten.
 
 The first-party Rust crate/package is `phenix-binding-lua`.
 
@@ -24,6 +26,7 @@ The primary consumer is `phenix-nvim`, but the binding must not depend on Neovim
 Lua application
   phenix-nvim / another Lua host
         |
+        | generated application API
         v
 phenix-binding-lua
         |
@@ -39,6 +42,36 @@ Phenix runtime
 ```
 
 The binding wraps the Client SDK. It does not reimplement ACP framing, request correlation, capability negotiation, extension schemas, session reconstruction, or transport logic.
+
+## Generation
+
+The fixed application descriptor owns operation, event, callback, capability, type, and application error identities.
+
+A reusable binding generator reads that descriptor and emits the Lua-facing repetitive code. The Lua target is the first language-binding target, not a one-off generator.
+
+Generate at least:
+
+- Lua-facing operation methods;
+- structured request and result conversion tables;
+- event and callback tags and payload conversion;
+- capability ids and feature checks;
+- stable application error kinds;
+- interface id and version metadata;
+- Phenix extension helpers whose ids and schemas come from the descriptor.
+
+Handwritten Lua binding code owns:
+
+- LuaJIT/Lua ABI integration;
+- async runtime ownership below the Lua host;
+- safe dispatch into Lua;
+- userdata and handle lifetime;
+- bounded event queues;
+- Lua value conversion failures;
+- transport constructor selection delegated to `phenix-client-acp`.
+
+Generated code must be deterministic. The generator must not inspect runtime Plugin implementation crates or copy definitions from the ACP adapter.
+
+A future Python, JavaScript, or other emitter should reuse the same descriptor reader and language-neutral generation model.
 
 ## Runtime compatibility
 
@@ -78,6 +111,8 @@ Expected objects include:
 - typed capability/extension descriptors;
 - typed Phenix extension helpers for skills, orchestration/callables, lineage, routing metadata, execution inspection, provenance, and diagnostics when negotiated.
 
+The generated API should follow descriptor names and compatibility rules. Lua-specific ergonomic aliases may exist only when they do not create a second semantic operation identity.
+
 Lua tables may represent structured values at the language boundary, but conversion rules must be deterministic and reject incompatible shapes rather than silently coercing them.
 
 ## Async and host integration
@@ -106,7 +141,9 @@ Lua userdata/objects are handles over application-side SDK state.
 
 ## Errors
 
-Translate SDK errors into stable Lua-visible error values with at least:
+Descriptor-owned application errors keep stable generated Lua kinds.
+
+Translate SDK-specific transport and protocol errors into Lua-visible error values with at least:
 
 - kind;
 - message;
@@ -123,7 +160,7 @@ Expose negotiated ACP and Phenix extension capabilities directly so Lua applicat
 
 A Lua application must be able to use standard ACP operations and supported Phenix extensions without constructing raw `_phenix/...` JSON-RPC requests.
 
-Keep one implementation of each extension schema in `phenix-client-acp`; the Lua binding only converts between Rust SDK values and Lua values.
+Keep one definition of each application operation and extension schema in the fixed descriptor. `phenix-client-acp` implements ACP behavior; the Lua binding converts generated application values to and from the Rust SDK.
 
 ## Transport
 
@@ -143,8 +180,12 @@ local phenix = require("phenix")
 
 The Neovim repository should not vendor generated Rust/Lua binding artifacts or duplicate ACP protocol code.
 
+The direct ACP stdio migration may land before this binding. Switching `phenix-nvim` from handwritten ACP transport to this binding must not change application semantics.
+
 ## Regression coverage
 
+- regenerating the Lua API from the same application descriptor produces identical source;
+- generated Lua operations, capabilities, events, callbacks, errors, and extension helpers match the descriptor ids and version;
 - the built native module loads through `require("phenix")` under the supported LuaJIT/Lua ABI;
 - loading the module performs no connection or runtime mutation;
 - a Lua client can initialize, create/list/resume a session, prompt, receive ordered updates, and cancel;
@@ -158,11 +199,14 @@ The Neovim repository should not vendor generated Rust/Lua binding artifacts or 
 
 ## Completion
 
+- [ ] a reusable binding generator consumes the fixed application descriptor;
+- [ ] Lua is implemented as the first generator target rather than a one-off API definition;
 - [ ] `phenix-binding-lua` builds an importable native Lua module named `phenix`;
 - [ ] it depends on `phenix-client-acp` rather than reimplementing ACP;
+- [ ] generated Lua operations, events, callbacks, capabilities, types, and application errors agree with the fixed descriptor;
 - [ ] LuaJIT/Neovim loading is supported;
 - [ ] the API is asynchronous and host-neutral;
 - [ ] standard ACP and Phenix extensions are exposed as Lua-native operations;
 - [ ] transport stays below the Client SDK;
 - [ ] durable runtime state remains Phenix-owned;
-- [ ] exact-head Source, Rust, Product, and Maintenance validation passes.
+- [ ] exact-head Source, Rust, Product, Docs, and Maintenance validation passes.
