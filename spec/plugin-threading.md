@@ -129,3 +129,26 @@ The repository verifies that:
 - a blocked `PluginHost` task does not prevent an unrelated kernel transition;
 - Rust authoring may adapt private async handlers behind the synchronous Plugin API;
 - the Provider SDK may use a private Tokio runtime without exposing it through Plugin contracts.
+
+## Component invocation and state ownership
+
+Proposed follow-up; implementation and regressions are pending. The baseline status above does not certify this boundary.
+
+Component resolution accepts acyclic imports between components owned by one plugin, but dispatch rejects the repeated PluginId. The generated adapter also holds a whole-plugin mutable lock across outbound calls.
+
+1. Keep PluginId as the authority, lifecycle, resource-ownership, and replacement boundary. Track causal invocation entries by generation, component, operation, and layer participant. Permit distinct endpoints in the same plugin; reject actual endpoint recursion before acquiring handler state. Layer delegation remains the existing checked continuation.
+
+2. Use shared-receiver invocation endpoints and immutable dispatch tables. Generated plugin objects expose callable behavior through shared receivers; mutable domain state uses explicit, narrowly scoped state or resource handles. Initialization and stop obtain exclusive access only after work has quiesced.
+
+3. Migrate generated handlers and first-party implementations off the implicit whole-root Mutex. Root structs and nested fields remain the authoring model; direct mutable root borrowing is reserved for local/lifecycle code. Emit a precise macro diagnostic for an exported mutable receiver that requires the removed whole-root lock.
+
+4. An outbound interface call uses canonical resolution, layers, authority attenuation, generation pinning, cancellation, and provenance regardless of packaging. Plugin code releases private mutable state guards before outbound calls; the SDK must not retain a generated lock across them.
+
+5. Keep the synchronous executor-independent ABI. Document that generated async handlers synchronously await completion; show long I/O on the existing task boundary with a correlated completion. Do not introduce hidden per-call threads or require an async executor.
+
+Acceptance requires:
+
+- A -> B through typed imports succeeds when both components share one plugin, including a root-to-child call.
+- A -> B -> C may revisit a plugin at a different endpoint; A -> B -> A rejects true recursion without hanging.
+- Same-plugin calls retain required layers, authority attenuation, cancellation, and generation provenance.
+- Compile diagnostics and migrated examples make state ownership explicit; a blocked task does not stall unrelated kernel work.
