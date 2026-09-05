@@ -1,10 +1,10 @@
 use crate::{
-    ArtifactRevision, Authority, CallCancellationToken, CapabilityId, ComponentGraphError,
-    ComponentId, ComponentInterface, ComponentInvocationError, DurableSchema, EventBus,
-    EventDispatchReport, EventEnvelope, EventError, EventHandler, EventSubscription, EventTypeId,
-    GraphGenerationId, InterfaceId, KernelConfig, KernelError, KernelEvent, KernelPolicyIdentity,
-    LocalPersistence, NamespaceTransaction, PersistenceBackend, PluginArtifact, PluginExecution,
-    PluginId, PluginManifest, ProviderFallbackReason, ProviderSelectionReason,
+    prepared_mutation::PreparedMutationScope, ArtifactRevision, Authority, CallCancellationToken,
+    CapabilityId, ComponentGraphError, ComponentId, ComponentInterface, ComponentInvocationError,
+    DurableSchema, EventBus, EventDispatchReport, EventEnvelope, EventError, EventHandler,
+    EventSubscription, EventTypeId, GraphGenerationId, InterfaceId, KernelConfig, KernelError,
+    KernelEvent, KernelPolicyIdentity, LocalPersistence, PersistenceBackend, PluginArtifact,
+    PluginExecution, PluginId, PluginManifest, ProviderFallbackReason, ProviderSelectionReason,
     ResolvedComponentGraph, ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan,
     ResolvedServiceChain, ResourceNamespace, RuntimeId, SchemaMigration, ServiceId, ServiceRole,
     SkillResourceMetadata, TaskRuntime, TaskScope, TransactionOp,
@@ -233,6 +233,7 @@ pub struct PluginHost<'a> {
     events: &'a EventBus,
     tasks: &'a TaskRuntime,
     persistence: &'a Mutex<Box<dyn PersistenceBackend>>,
+    prepared_mutations: &'a PreparedMutationScope,
     provenance: &'a Mutex<Vec<ServiceInvocationProvenance>>,
     continuation: Option<ContinuationState>,
     active_services: BTreeSet<ServiceId>,
@@ -369,6 +370,7 @@ struct InvocationContext<'a> {
     events: &'a EventBus,
     tasks: &'a TaskRuntime,
     persistence: &'a Mutex<Box<dyn PersistenceBackend>>,
+    prepared_mutations: &'a PreparedMutationScope,
     provenance: &'a Mutex<Vec<ServiceInvocationProvenance>>,
 }
 

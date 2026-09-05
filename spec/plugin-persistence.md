@@ -5,6 +5,11 @@ coverage:
   - rust/crates/phenix-core/tests/persistence_backend_conformance.rs
   - rust/crates/phenix-core/src/persistence_bootstrap.rs
   - rust/crates/phenix-core/src/runtime/persistence_bootstrap.rs
+  - rust/crates/phenix-core/src/prepared_mutation.rs
+  - rust/crates/phenix-core/src/runtime/host.rs
+  - rust/crates/phenix-core/src/runtime/tests.rs
+  - rust/crates/phenix-plugin-sessions/src/implementation.rs
+  - rust/crates/phenix-plugin-session-tree/src/implementation.rs
   - rust/crates/phenix-harness/src/persistence.rs
   - rust/crates/phenix-sdk/tests/plugin_attribute_only_gate.rs
 
@@ -57,7 +62,7 @@ Plugins own:
 
 The persistence mechanism does not define sessions, artifacts, context, workers, memory, models, or other product records.
 
-## Plugin Resources
+## Plugin resources
 
 Static Rust authors declare Plugin Resources through the authoring surface. Generated metadata supplies stable resource identity, ownership, schema version, migrations, and required generic backend features.
 
@@ -143,3 +148,26 @@ A backend does not declare product semantics valid.
 - Namespace ownership is enforced by the persistence boundary.
 - Persistence Provider authority does not imply product-domain authority.
 - Live Provider replacement is not silently inferred from provider priority or graph reconciliation.
+
+## Owner-prepared cross-plugin commits
+
+The owner-prepared commit protocol is part of the implemented persistence contract.
+
+The old host path accepted caller-created foreign `NamespaceTransaction` operations when any qualifying import existed. The provider did not need to approve those writes, so an importer could bypass its domain invariants.
+
+1. Core owns a transaction scope and immutable prepared-mutation registry. Only the active namespace owner may prepare operations through its scoped host. Core derives owner, Store Binding, generation, scope, and attenuated commit authority instead of accepting caller claims.
+
+2. Preparation returns an opaque scope-local handle. The coordinator receives the handle and domain result, never an editable foreign operation list. Embedded handles use private constructors. Bridged handles resolve in the same host-owned scoped registry and are checked against the requesting scope and participant. Knowing a handle identifier grants no authority.
+
+3. The coordinator commits owner-prepared participants together with its own prepared mutations. Core validates scope, owner, Store, generation, authority, cancellation, and outstanding status before invoking the backend once. Assertions run in that atomic transaction. Each commit attempt consumes its handles. Failure requires fresh preparation.
+
+4. Scope exit, cancellation, provider replacement, and commit release prepared state. Single-owner writes keep the existing owner-only path. Backend raw transaction operations remain internal to trusted persistence infrastructure. Imports alone never authorize foreign writes.
+
+5. Session creation plus lineage creation use this protocol. Domain validation and assertion construction stay in the sessions and session-tree Plugins. The Plugin-facing raw foreign `NamespaceTransaction` commit path no longer exists.
+
+Acceptance requires:
+
+- A qualifying importer cannot fabricate, modify, reuse, or transfer another owner's mutation handle.
+- Core rejects wrong scope, generation, Store, owner, attenuated authority, cancelled scope, and replaced Provider before writes.
+- Session and lineage creation commit atomically. Failed assertions roll back every participant.
+- Embedded and bridged callers enforce the same scope checks. Abandoned preparations release storage.

@@ -39,6 +39,14 @@ impl PluginInstance for StartupTaskScopePlugin {
     }
 }
 
+struct NoopPlugin;
+
+impl PluginInstance for NoopPlugin {
+    fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 struct EchoPlugin;
 
 impl PluginInstance for EchoPlugin {
@@ -330,7 +338,7 @@ fn persistence_host_rechecks_effective_authority_on_every_call() {
 }
 
 #[test]
-fn multi_namespace_transaction_requires_write_authority_on_foreign_typed_import() {
+fn prepared_transaction_requires_write_authority_on_foreign_typed_import() {
     let write = capability(PERSISTENCE_WRITE);
     let caller_namespace = ResourceNamespace::parse("caller.state").unwrap();
     let owner_namespace = ResourceNamespace::parse("owner.state").unwrap();
@@ -385,9 +393,34 @@ fn multi_namespace_transaction_requires_write_authority_on_foreign_typed_import(
         &Authority::new([write.clone()]),
     )
     .unwrap();
-    let kernel = Kernel::new(KernelConfig::new([caller.clone(), owner.clone()]).unwrap());
+    let mut kernel = Kernel::new(KernelConfig::new([caller.clone(), owner.clone()]).unwrap());
+    kernel
+        .register_embedded_factory(caller.id.clone(), || Box::new(NoopPlugin))
+        .unwrap();
+    kernel
+        .register_embedded_factory(owner.id.clone(), || Box::new(NoopPlugin))
+        .unwrap();
+    kernel.activate_all().unwrap();
+
     let caller_plugin = caller.id;
     let authority = Authority::new([write]);
+    let prepared_mutations = PreparedMutationScope::new(kernel.graph_generation());
+    let caller_mutation = prepared_mutations
+        .prepare(&caller_plugin, &caller_namespace, &[], &authority)
+        .unwrap();
+    let owner_mutation = prepared_mutations
+        .with_coordinator(&caller_plugin, || {
+            prepared_mutations.prepare(
+                &owner.id,
+                &owner_namespace,
+                &[TransactionOp::Put {
+                    key: "forbidden".into(),
+                    value: b"write".to_vec(),
+                }],
+                &authority,
+            )
+        })
+        .unwrap();
     let host = PluginHost {
         graph_generation: kernel.graph_generation(),
         component_graph: &graph,
@@ -401,31 +434,141 @@ fn multi_namespace_transaction_requires_write_authority_on_foreign_typed_import(
         events: &kernel.events,
         tasks: &kernel.tasks,
         persistence: &kernel.persistence,
+        prepared_mutations: &prepared_mutations,
         provenance: &kernel.provenance,
         continuation: None,
         active_services: BTreeSet::new(),
     };
     let denied = host
-        .transact_durable_many(&[
-            NamespaceTransaction {
-                owner: caller_plugin.clone(),
-                namespace: caller_namespace,
-                operations: Vec::new(),
-            },
-            NamespaceTransaction {
-                owner: owner.id,
-                namespace: owner_namespace,
-                operations: vec![TransactionOp::Put {
-                    key: "forbidden".into(),
-                    value: b"write".to_vec(),
-                }],
-            },
-        ])
+        .transact_prepared(&[caller_mutation, owner_mutation])
         .unwrap_err();
     assert!(matches!(denied, KernelError::HostOperationDenied { .. }));
     assert!(denied
         .to_string()
         .contains("without authorized typed import"));
+}
+
+#[test]
+fn prepared_mutation_cannot_be_transferred_to_another_authorized_importer() {
+    let write = capability(PERSISTENCE_WRITE);
+    let authority = Authority::new([write.clone()]);
+    let owner_namespace = ResourceNamespace::parse("owner.state").unwrap();
+    let first_namespace = ResourceNamespace::parse("first.state").unwrap();
+    let second_namespace = ResourceNamespace::parse("second.state").unwrap();
+    let interface = InterfaceId::parse("fixture.owner.transfer@1").unwrap();
+    let first = PluginManifest {
+        id: plugin("first"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: vec![first_namespace],
+        maximum_authority: authority.clone(),
+    };
+    let second = PluginManifest {
+        id: plugin("second"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: vec![second_namespace.clone()],
+        maximum_authority: authority.clone(),
+    };
+    let owner = PluginManifest {
+        id: plugin("owner"),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: Vec::new(),
+        resource_namespaces: vec![owner_namespace.clone()],
+        maximum_authority: authority.clone(),
+    };
+    let importing_component = |id: &str, owner: &PluginManifest| ComponentManifest {
+        listeners: Vec::new(),
+        id: ComponentId::parse(id).unwrap(),
+        owner: owner.id.clone(),
+        imports: vec![ComponentImport {
+            interface: interface.clone(),
+            schema: Default::default(),
+            required: true,
+            authority: authority.clone(),
+        }],
+        exports: Vec::new(),
+        maximum_authority: authority.clone(),
+    };
+    let owner_component = ComponentManifest {
+        listeners: Vec::new(),
+        id: ComponentId::parse("owner.component").unwrap(),
+        owner: owner.id.clone(),
+        imports: Vec::new(),
+        exports: vec![ComponentExport {
+            interface: interface.clone(),
+            schema: Default::default(),
+            priority: 1,
+            required_authority: Authority::default(),
+        }],
+        maximum_authority: authority.clone(),
+    };
+    let graph = ResolvedComponentGraph::compile(
+        [first.clone(), second.clone(), owner.clone()],
+        [
+            importing_component("first.component", &first),
+            importing_component("second.component", &second),
+            owner_component,
+        ],
+        &authority,
+    )
+    .unwrap();
+    let mut kernel =
+        Kernel::new(KernelConfig::new([first.clone(), second.clone(), owner.clone()]).unwrap());
+    for plugin in [&first.id, &second.id, &owner.id] {
+        kernel
+            .register_embedded_factory((*plugin).clone(), || Box::new(NoopPlugin))
+            .unwrap();
+    }
+    kernel.activate_all().unwrap();
+
+    let prepared_mutations = PreparedMutationScope::new(kernel.graph_generation());
+    let owner_mutation = prepared_mutations
+        .with_coordinator(&first.id, || {
+            prepared_mutations.prepare(
+                &owner.id,
+                &owner_namespace,
+                &[TransactionOp::Put {
+                    key: "value".into(),
+                    value: b"prepared".to_vec(),
+                }],
+                &authority,
+            )
+        })
+        .unwrap();
+    let second_mutation = prepared_mutations
+        .prepare(&second.id, &second_namespace, &[], &authority)
+        .unwrap();
+    let host = PluginHost {
+        graph_generation: kernel.graph_generation(),
+        component_graph: &graph,
+        config: kernel.config(),
+        states: &kernel.states,
+        instances: &kernel.instances,
+        plugin: &second.id,
+        authority: &authority,
+        call_cancellation: None,
+        call_stack: BTreeSet::from([second.id.clone()]),
+        events: &kernel.events,
+        tasks: &kernel.tasks,
+        persistence: &kernel.persistence,
+        prepared_mutations: &prepared_mutations,
+        provenance: &kernel.provenance,
+        continuation: None,
+        active_services: BTreeSet::new(),
+    };
+
+    let denied = host
+        .transact_prepared(&[owner_mutation, second_mutation])
+        .unwrap_err();
+    assert!(matches!(denied, KernelError::HostOperationDenied { .. }));
+    assert!(denied.to_string().contains("issued to another coordinator"));
 }
 
 #[test]
@@ -444,6 +587,7 @@ fn persistence_host_rejects_unowned_namespace_before_backend_access() {
     let kernel = Kernel::new(KernelConfig::new([owner]).unwrap());
     let authority = Authority::new([capability(PERSISTENCE_SCHEMA)]);
     let owner_plugin = plugin("owner");
+    let prepared_mutations = PreparedMutationScope::new(kernel.graph_generation());
     let host = PluginHost {
         graph_generation: kernel.graph_generation(),
         component_graph: kernel.component_graph(),
@@ -457,6 +601,7 @@ fn persistence_host_rejects_unowned_namespace_before_backend_access() {
         events: &kernel.events,
         tasks: &kernel.tasks,
         persistence: &kernel.persistence,
+        prepared_mutations: &prepared_mutations,
         provenance: &kernel.provenance,
         continuation: None,
         active_services: BTreeSet::new(),
