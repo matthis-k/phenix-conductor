@@ -1,6 +1,12 @@
 # Persistence backend and durable schemas
 
-status: specification-only
+status: implemented
+coverage:
+  - rust/crates/phenix-core/src/persistence.rs
+  - rust/crates/phenix-core/src/persistence_bootstrap.rs
+  - rust/crates/phenix-core/src/persistence_provider.rs
+  - rust/crates/phenix-core/src/runtime/persistence_bootstrap.rs
+  - rust/crates/phenix-core/tests/persistence_backend_conformance.rs
 
 ## Purpose
 

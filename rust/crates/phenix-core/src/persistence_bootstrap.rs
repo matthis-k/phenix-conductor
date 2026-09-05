@@ -573,7 +573,7 @@ mod tests {
 
         let resolved = resolve_persistence_bootstrap(
             &candidate.plugin,
-            [candidate],
+            [candidate.clone()],
             &BTreeSet::new(),
             binding("primary", "shared-v1"),
             &[],

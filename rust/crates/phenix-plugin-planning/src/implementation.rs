@@ -67,6 +67,13 @@ pub fn planning_factory() -> Box<dyn PluginInstance> {
 }
 
 #[must_use]
+pub fn planning_durable_schema_registrations() -> Vec<phenix_core::DurableSchemaRegistration> {
+    <Plugin as phenix_sdk::StaticPluginResources>::durable_schema_registrations(
+        &planning_manifest().id,
+    )
+}
+
+#[must_use]
 pub fn planning_service() -> ServiceId {
     ServiceId::parse(PLANNING_SERVICE).expect("static service id is valid")
 }
@@ -527,9 +534,10 @@ mod tests {
     fn kernel_with(path: &PathBuf) -> Kernel {
         let manifest = planning_manifest();
         let plugin = manifest.id.clone();
-        let resolved = ResolvedHarness::resolve(
+        let resolved = ResolvedHarness::resolve_with_durable_schemas(
             [manifest],
             [planning_component_manifest()],
+            planning_durable_schema_registrations(),
             [],
             &planning_manifest().maximum_authority,
         )

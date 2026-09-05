@@ -5,7 +5,8 @@ use phenix_plugin_execution::{
     execution_component_manifest, execution_factory, execution_manifest,
 };
 use phenix_plugin_options::{
-    options_component_manifest, options_factory, options_manifest, options_service,
+    options_component_manifest, options_durable_schema_registrations, options_factory,
+    options_manifest, options_service,
 };
 use phenix_plugin_sessions::{session_component_manifest, session_factory, session_manifest};
 use phenix_sdk::OptionScope;
@@ -158,13 +159,14 @@ fn session_open_uses_scoped_options() {
         options_manifest.clone(),
         sdk_manifest.clone(),
     ];
-    let resolved = ResolvedHarness::resolve(
+    let resolved = ResolvedHarness::resolve_with_durable_schemas(
         manifests.clone(),
         [
             session_component_manifest(),
             options_component_manifest(),
             sdk_component_manifest(authority.clone()),
         ],
+        options_durable_schema_registrations(),
         [],
         &authority,
     )
