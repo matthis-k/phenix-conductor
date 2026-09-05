@@ -198,6 +198,32 @@ pub struct ResolvedHarness {
     provider_policy: ProviderCompositionPolicy,
 }
 
+struct ResolutionInputs {
+    durable_schemas: Vec<DurableSchemaRegistration>,
+    resources: Vec<SkillResourceMetadata>,
+    contributions: Vec<ConfigContribution>,
+    layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+    provider_policy: ProviderCompositionPolicy,
+}
+
+impl ResolutionInputs {
+    fn new(
+        durable_schemas: impl IntoIterator<Item = DurableSchemaRegistration>,
+        resources: impl IntoIterator<Item = SkillResourceMetadata>,
+        contributions: impl IntoIterator<Item = ConfigContribution>,
+        layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+        provider_policy: ProviderCompositionPolicy,
+    ) -> Self {
+        Self {
+            durable_schemas: durable_schemas.into_iter().collect(),
+            resources: resources.into_iter().collect(),
+            contributions: contributions.into_iter().collect(),
+            layer_policies,
+            provider_policy,
+        }
+    }
+}
+
 impl ResolvedHarness {
     pub fn resolve(
         plugin_manifests: impl IntoIterator<Item = PluginManifest>,
@@ -205,14 +231,16 @@ impl ResolvedHarness {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            [],
-            [],
-            contributions,
-            BTreeMap::new(),
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                [],
+                [],
+                contributions,
+                BTreeMap::new(),
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
@@ -224,14 +252,16 @@ impl ResolvedHarness {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            durable_schemas,
-            [],
-            contributions,
-            BTreeMap::new(),
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                durable_schemas,
+                [],
+                contributions,
+                BTreeMap::new(),
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
@@ -243,14 +273,10 @@ impl ResolvedHarness {
         provider_policy: ProviderCompositionPolicy,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            [],
-            [],
-            contributions,
-            BTreeMap::new(),
-            provider_policy,
+            ResolutionInputs::new([], [], contributions, BTreeMap::new(), provider_policy),
             authority_ceiling,
         )
     }
@@ -262,14 +288,16 @@ impl ResolvedHarness {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            [],
-            resources,
-            contributions,
-            BTreeMap::new(),
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                [],
+                resources,
+                contributions,
+                BTreeMap::new(),
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
@@ -281,14 +309,16 @@ impl ResolvedHarness {
         layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            [],
-            [],
-            contributions,
-            layer_policies,
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                [],
+                [],
+                contributions,
+                layer_policies,
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
@@ -301,14 +331,16 @@ impl ResolvedHarness {
         layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            durable_schemas,
-            [],
-            contributions,
-            layer_policies,
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                durable_schemas,
+                [],
+                contributions,
+                layer_policies,
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
@@ -321,35 +353,33 @@ impl ResolvedHarness {
         layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            [],
-            resources,
-            contributions,
-            layer_policies,
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                [],
+                resources,
+                contributions,
+                layer_policies,
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
 
-    fn resolve_with_resources_layer_policies_and_provider_policy(
+    fn resolve_with_inputs(
         plugin_manifests: impl IntoIterator<Item = PluginManifest>,
         component_manifests: impl IntoIterator<Item = ComponentManifest>,
-        durable_schemas: impl IntoIterator<Item = DurableSchemaRegistration>,
-        resources: impl IntoIterator<Item = SkillResourceMetadata>,
-        contributions: impl IntoIterator<Item = ConfigContribution>,
-        mut layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
-        provider_policy: ProviderCompositionPolicy,
+        mut inputs: ResolutionInputs,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
         let mut plugins: Vec<_> = plugin_manifests.into_iter().collect();
         plugins.sort_by(|left, right| left.id.cmp(&right.id));
         let mut components: Vec<_> = component_manifests.into_iter().collect();
         components.sort_by(|left, right| left.id.cmp(&right.id));
-        let resources = resolve_resources(resources, &components, authority_ceiling)?;
-        validate_layer_policies(&plugins, &layer_policies, authority_ceiling)?;
-        for layers in layer_policies.values_mut() {
+        let resources = resolve_resources(inputs.resources, &components, authority_ceiling)?;
+        validate_layer_policies(&plugins, &inputs.layer_policies, authority_ceiling)?;
+        for layers in inputs.layer_policies.values_mut() {
             layers.sort_by(|left, right| {
                 right
                     .priority
@@ -358,28 +388,29 @@ impl ResolvedHarness {
             });
         }
         let configuration =
-            ResolvedConfigContributions::try_resolve(contributions, authority_ceiling)?;
+            ResolvedConfigContributions::try_resolve(inputs.contributions, authority_ceiling)?;
         let mut kernel_config = KernelConfig::new(plugins.clone())?;
-        for (service, layers) in &layer_policies {
+        for (service, layers) in &inputs.layer_policies {
             kernel_config = kernel_config.with_layer_policy(service.clone(), layers.clone())?;
         }
-        let durable_schemas = resolve_durable_schemas(durable_schemas, &kernel_config)?;
+        let durable_schemas = resolve_durable_schemas(inputs.durable_schemas, &kernel_config)?;
         let component_graph = ResolvedComponentGraph::compile_with_provider_policy(
             plugins.clone(),
             components.clone(),
             authority_ceiling,
-            &provider_policy,
+            &inputs.provider_policy,
         )?;
-        let generation = generation_identity(
-            &plugins,
-            &components,
-            &durable_schemas,
-            &resources,
-            &configuration,
-            &layer_policies,
-            &provider_policy,
+        let generation = SemanticGeneration {
+            plugins: &plugins,
+            components: &components,
+            durable_schemas: durable_schema_payload(&durable_schemas),
+            resources: &resources,
+            configuration: configuration.semantic_payload(),
+            layer_policies: layer_policy_payload(&inputs.layer_policies),
+            provider_policy: &inputs.provider_policy,
             authority_ceiling,
-        );
+        }
+        .identity();
 
         Ok(Self {
             generation,
@@ -390,8 +421,8 @@ impl ResolvedHarness {
             configuration,
             kernel_config,
             component_graph,
-            layer_policies,
-            provider_policy,
+            layer_policies: inputs.layer_policies,
+            provider_policy: inputs.provider_policy,
         })
     }
 
@@ -503,16 +534,17 @@ impl ResolvedHarness {
             authority_ceiling,
             &self.provider_policy,
         )?;
-        let generation = generation_identity(
-            &plugins,
-            &components,
-            &durable_schemas,
-            &self.resources,
-            &self.configuration,
-            &self.layer_policies,
-            &self.provider_policy,
+        let generation = SemanticGeneration {
+            plugins: &plugins,
+            components: &components,
+            durable_schemas: durable_schema_payload(&durable_schemas),
+            resources: &self.resources,
+            configuration: self.configuration.semantic_payload(),
+            layer_policies: layer_policy_payload(&self.layer_policies),
+            provider_policy: &self.provider_policy,
             authority_ceiling,
-        );
+        }
+        .identity();
         Ok(Self {
             generation,
             plugins,
@@ -538,6 +570,19 @@ struct SemanticGeneration<'a> {
     layer_policies: serde_json::Value,
     provider_policy: &'a ProviderCompositionPolicy,
     authority_ceiling: &'a Authority,
+}
+
+impl SemanticGeneration<'_> {
+    fn identity(&self) -> GraphGenerationId {
+        let encoded = serde_json::to_vec(self).expect("resolved generation metadata serializes");
+        let digest = Sha256::digest(encoded);
+        let mut identity = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            use std::fmt::Write as _;
+            write!(&mut identity, "{byte:02x}").expect("writing to String cannot fail");
+        }
+        GraphGenerationId(identity)
+    }
 }
 
 fn resolve_durable_schemas(
@@ -734,36 +779,6 @@ fn validate_layer_policies(
         }
     }
     Ok(())
-}
-
-fn generation_identity(
-    plugins: &[PluginManifest],
-    components: &[ComponentManifest],
-    durable_schemas: &[DurableSchemaRegistration],
-    resources: &[SkillResourceMetadata],
-    configuration: &ResolvedConfigContributions,
-    layer_policies: &BTreeMap<ServiceId, Vec<LayerPolicy>>,
-    provider_policy: &ProviderCompositionPolicy,
-    authority_ceiling: &Authority,
-) -> GraphGenerationId {
-    let payload = SemanticGeneration {
-        plugins,
-        components,
-        durable_schemas: durable_schema_payload(durable_schemas),
-        resources,
-        configuration: configuration.semantic_payload(),
-        layer_policies: layer_policy_payload(layer_policies),
-        provider_policy,
-        authority_ceiling,
-    };
-    let encoded = serde_json::to_vec(&payload).expect("resolved generation metadata serializes");
-    let digest = Sha256::digest(encoded);
-    let mut identity = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write as _;
-        write!(&mut identity, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    GraphGenerationId(identity)
 }
 
 #[cfg(test)]
