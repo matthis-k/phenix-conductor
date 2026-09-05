@@ -404,6 +404,32 @@ mod tests {
     }
 
     #[test]
+    fn no_selection_preserves_default_suite() {
+        assert_eq!(
+            resolve_first_party_plugins(&Cli::default(), None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn configured_plugins_are_the_base_for_cli_overrides() {
+        let configured = basic_model_manifest().id.as_str().to_owned();
+        let added = adapter_acp_manifest().id.as_str().to_owned();
+        let cli = parse_cli([
+            "--enable-plugin".into(),
+            added.clone(),
+            "--disable-plugin".into(),
+            configured.clone(),
+        ])
+        .unwrap();
+        let enabled = resolve_first_party_plugins(&cli, Some(&configured))
+            .unwrap()
+            .unwrap();
+        assert!(!enabled.contains(&configured));
+        assert!(enabled.contains(&added));
+    }
+
+    #[test]
     fn explicit_enable_selects_packaged_plugin() {
         let plugin = adapter_acp_manifest().id.as_str().to_owned();
         let cli = parse_cli(["--enable-plugin".into(), plugin.clone()]).unwrap();
