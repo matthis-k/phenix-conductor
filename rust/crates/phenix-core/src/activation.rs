@@ -1,6 +1,7 @@
 use crate::{
-    GraphGenerationId, Kernel, LayerPolicy, PluginId, PluginManifest, ResolvedComponentGraph,
-    ResolvedHarness, ResolvedListenerInspection, ServiceId, SkillResourceMetadata,
+    GraphGenerationId, Kernel, KernelError, LayerPolicy, PluginId, PluginManifest,
+    ResolvedComponentGraph, ResolvedHarness, ResolvedListenerInspection, ServiceId,
+    SkillResourceMetadata,
 };
 use std::collections::BTreeSet;
 
@@ -36,6 +37,7 @@ pub enum ResolvedHarnessActivationError {
         active: GraphGenerationId,
         requested: GraphGenerationId,
     },
+    DurableSchemaPreparation(KernelError),
 }
 
 pub(crate) fn validate_resolved_harness_configuration(
@@ -121,6 +123,8 @@ impl ResolvedHarnessActivation for Kernel {
             }
         }
 
+        self.prepare_durable_schemas(resolved.durable_schemas())
+            .map_err(ResolvedHarnessActivationError::DurableSchemaPreparation)?;
         self.install_resolved_graph(
             resolved.generation().clone(),
             resolved.component_graph().clone(),
