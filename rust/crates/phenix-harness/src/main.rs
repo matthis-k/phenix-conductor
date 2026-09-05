@@ -437,8 +437,12 @@ mod tests {
     #[test]
     fn explicit_disable_blocks_launch_requirement() {
         let adapter = adapter_acp_manifest().id.as_str().to_owned();
-        let cli = parse_cli(["--stdio-acp".into(), "--disable-plugin".into(), adapter.clone()])
-            .unwrap();
+        let cli = parse_cli([
+            "--stdio-acp".into(),
+            "--disable-plugin".into(),
+            adapter.clone(),
+        ])
+        .unwrap();
         let error = resolve_first_party_plugins(&cli, None).unwrap_err();
         assert!(error.contains(&adapter));
         assert!(error.contains("explicitly disabled"));
