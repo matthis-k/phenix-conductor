@@ -1,6 +1,8 @@
 # ACP stdio application
 
-status: specification-only
+status: partial
+
+The crate provides an ACP server over stdio and a bounded channel transport for a configured application runtime. It does not yet provide `bin/phenix-acp`, package that binary, or connect the channel to a configured Phenix runtime. It is therefore not spawnable and cannot yet serve an editor.
 
 Canonical application-integration terminology is defined by #442. ACP adapter semantics are defined by #437.
 
@@ -8,9 +10,7 @@ Canonical application-integration terminology is defined by #442. ACP adapter se
 
 Provide a spawnable ACP stdio entrypoint for applications that want to launch Phenix as an ACP agent process.
 
-The package is `phenix-acp-stdio`. It owns the `phenix-acp` executable.
-
-Neither that package nor binary exists in the current tree; this document specifies future work only.
+The package is `phenix-acp-stdio`. It will own the `phenix-acp` executable.
 
 It is not a new protocol, runtime plugin, Client SDK, or application UI. It is a concrete composition of the ACP adapter with stdio transport and a configured Phenix runtime boundary.
 
@@ -48,9 +48,11 @@ The executable reuses `phenix-adapter-acp`. It must not implement a second ACP t
 
 Stdio framing follows the pinned ACP specification. Do not introduce Phenix-specific framing around ACP messages.
 
-## Runtime ownership
+## Runtime boundary
 
-The stdio executable may construct or launch the configured Phenix product needed to serve the ACP connection, but it owns no parallel session, transcript, routing, authentication, permission, tool, execution, or persistence state.
+The stdio executable must construct or connect to the configured Phenix product through an `ApplicationTransport`. The channel transport in this crate is only the hand-off point. A runtime bridge must receive each invocation, dispatch the matching typed application operation, and return its typed result.
+
+The executable owns no parallel session, transcript, routing, authentication, permission, tool, execution, or persistence state.
 
 All durable semantics remain in Phenix. The stdio process keeps only connection and protocol state.
 
@@ -95,9 +97,10 @@ Do not add a runtime plugin identity for the stdio executable. Runtime adapter i
 
 ## Completion
 
-- [ ] `phenix-acp-stdio` is independently buildable;
+- [x] `phenix-acp-stdio` is independently buildable;
+- [ ] a runtime bridge dispatches typed application operations to configured Phenix services;
 - [ ] `phenix-acp` is the stdio executable entrypoint;
-- [ ] ACP translation is reused from `phenix-adapter-acp`;
+- [x] ACP translation is reused from `phenix-adapter-acp`;
 - [ ] stdout is protocol-only and stderr is diagnostic-only;
 - [ ] no duplicate durable or domain state is introduced;
 - [ ] stdio requires no socket dependency;
