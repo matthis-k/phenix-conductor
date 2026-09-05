@@ -390,13 +390,13 @@ mod tests {
     fn cli_plugin_flags_are_parsed_without_reaching_plugins() {
         let cli = parse_cli([
             "--enable-plugin".into(),
-            "phenix.adapter.acp".into(),
+            "fixture.adapter".into(),
             "--disable-plugin=phenix.debug".into(),
         ])
         .unwrap();
         assert_eq!(
             cli.enable_plugins,
-            BTreeSet::from(["phenix.adapter.acp".to_owned()])
+            BTreeSet::from(["fixture.adapter".to_owned()])
         );
         assert_eq!(
             cli.disable_plugins,
@@ -405,25 +405,25 @@ mod tests {
     }
 
     #[test]
-    fn explicit_enable_selects_packaged_adapter() {
-        let adapter = adapter_acp_manifest().id.as_str().to_owned();
-        let cli = parse_cli(["--enable-plugin".into(), adapter.clone()]).unwrap();
+    fn explicit_enable_selects_packaged_plugin() {
+        let plugin = adapter_acp_manifest().id.as_str().to_owned();
+        let cli = parse_cli(["--enable-plugin".into(), plugin.clone()]).unwrap();
         let enabled = resolve_first_party_plugins(&cli, None).unwrap().unwrap();
-        assert!(enabled.contains(&adapter));
+        assert!(enabled.contains(&plugin));
     }
 
     #[test]
     fn explicit_disable_wins_over_explicit_enable() {
-        let adapter = adapter_acp_manifest().id.as_str().to_owned();
+        let plugin = adapter_acp_manifest().id.as_str().to_owned();
         let cli = parse_cli([
             "--enable-plugin".into(),
-            adapter.clone(),
+            plugin.clone(),
             "--disable-plugin".into(),
-            adapter.clone(),
+            plugin.clone(),
         ])
         .unwrap();
         let enabled = resolve_first_party_plugins(&cli, None).unwrap().unwrap();
-        assert!(!enabled.contains(&adapter));
+        assert!(!enabled.contains(&plugin));
     }
 
     #[test]
