@@ -76,9 +76,7 @@ impl Kernel {
             match persistence.register_schema(&registration.owner, &registration.schema) {
                 Ok(()) => {}
                 Err(PersistenceError::IncompatibleSchema {
-                    stored,
-                    requested,
-                    ..
+                    stored, requested, ..
                 }) if stored < requested => {
                     persistence
                         .migrate_schema(
@@ -148,7 +146,9 @@ mod tests {
                 }
                 Some(_) => Ok(()),
                 None => {
-                    state.schemas.insert(schema.namespace.clone(), schema.version);
+                    state
+                        .schemas
+                        .insert(schema.namespace.clone(), schema.version);
                     Ok(())
                 }
             }
@@ -176,7 +176,9 @@ mod tests {
                 }
                 version = next;
             }
-            state.schemas.insert(schema.namespace.clone(), schema.version);
+            state
+                .schemas
+                .insert(schema.namespace.clone(), schema.version);
             state.migrations.push(schema.namespace.clone());
             Ok(())
         }
@@ -230,17 +232,10 @@ mod tests {
         .unwrap();
         let mut kernel = Kernel::with_persistence(config, backend);
         let registrations = vec![
-            DurableSchemaRegistration::new(
-                first_owner,
-                DurableSchema::new(first_namespace, 1),
-            ),
+            DurableSchemaRegistration::new(first_owner, DurableSchema::new(first_namespace, 1)),
             DurableSchemaRegistration::new(
                 second_owner,
-                DurableSchema::requiring(
-                    second_namespace,
-                    1,
-                    [BackendFeature::IndexedRange],
-                ),
+                DurableSchema::requiring(second_namespace, 1, [BackendFeature::IndexedRange]),
             ),
         ];
 
@@ -265,15 +260,13 @@ mod tests {
         };
         let config = KernelConfig::new([manifest(&owner, &namespace)]).unwrap();
         let mut kernel = Kernel::with_persistence(config, backend);
-        let registration = DurableSchemaRegistration::new(
-            owner,
-            DurableSchema::new(namespace.clone(), 2),
-        )
-        .with_migrations(vec![SchemaMigration {
-            from_version: 1,
-            to_version: 2,
-            operations: Vec::<TransactionOp>::new(),
-        }]);
+        let registration =
+            DurableSchemaRegistration::new(owner, DurableSchema::new(namespace.clone(), 2))
+                .with_migrations(vec![SchemaMigration {
+                    from_version: 1,
+                    to_version: 2,
+                    operations: Vec::<TransactionOp>::new(),
+                }]);
 
         kernel.prepare_durable_schemas(&[registration]).unwrap();
 
