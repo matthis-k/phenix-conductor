@@ -1,238 +1,102 @@
 # Stable runtime and host interfaces
 
-status: specification-only
+status: implemented
+coverage:
+  - rust/crates/phenix-core/src/plugin_context.rs
+  - rust/crates/phenix-sdk/src/authoring/context.rs
+  - rust/crates/phenix-core/src/provider_fallback_regression.rs
+  - rust/crates/phenix-core/src/host_authority_regression.rs
 
-## Goal
+## Purpose
 
-Give Core and Plugin code a small fixed typed API for common runtime behavior while keeping replaceable behavior implemented by ordinary Components and Plugins.
+Give Plugin code stable typed access to resolved runtime behavior while keeping replaceable implementations owned by ordinary Components and Plugins.
 
-Core may own stable Interface contracts and ergonomic typed Interface Handles. Core does not thereby own the selected Provider implementation. Provider selection follows `spec/plugin-resolution.md`.
+Core and passive SDK crates may own Interface vocabulary and typed handles. They do not thereby own the selected Provider implementation. Provider selection follows `plugin-resolution.md`.
 
-```text
-Plugin code
-    |
-    | typed Interface Handle
-    v
-stable Interface
-    |
-    | Provider Binding
-    v
-Provider Component
-```
+## Plugin context
 
-For example:
-
-```rust
-ctx.context.compact(request).await?
-```
-
-is an ergonomic call through the resolved `phenix.context.compact@1` Interface. It is not a hard-coded compaction implementation and it is not a live service lookup by string.
-
-## Vocabulary
-
-Use these terms consistently:
-
-- **Runtime Interface**: stable typed callable Interface used by Plugin Runtime code.
-- **Domain Interface**: Runtime Interface for product behavior Phenix performs.
-- **Host Interface**: Runtime Interface for controlled interaction with the environment outside the Resolved Graph.
-- **Provider Binding**: Graph Generation-pinned association between an Interface Import and selected Provider, as defined by `spec/plugin-resolution.md`.
-- **Interface Handle**: typed reference to one resolved Provider Binding.
-- **Provider**: Component that Exports an Interface implementation.
-- **Layer**: ordered interposition around a resolved Terminal Provider.
-- **Host Capability**: authority-bearing kernel/environment handle supplied through `PluginHost`, as defined by `spec/plugin-host.md`.
-
-A Host Interface and a Host Capability are not synonyms. A Host Interface is an ordinary resolved Interface contract. Its Provider may internally use one or more Host Capabilities to perform authorized environment operations.
-
-Do not call these executable contracts `options`. Options are configuration values.
-
-## Core boundary
-
-Core may define broadly useful Interface types and typed accessors when they provide stable vocabulary across many Components.
-
-Examples of Domain Interfaces may include:
+The canonical runtime view is `PluginContext`:
 
 ```text
-phenix.context.compact@1
-phenix.models.infer@1
-phenix.tools.execute@1
-phenix.skills.resolve@1
-phenix.sessions.create@1
-phenix.sessions.persist@1
-phenix.orchestration.invoke@1
+PluginContext
+  kernel   generic kernel mechanisms
+  sdk      typed resolved Interface clients
+  plugin   current Plugin identity, settings, and state
+  call     current authority and Graph Generation
 ```
 
-Examples of Host Interfaces may include:
+Plugin business logic should depend on this scoped view rather than mutable kernel internals.
 
-```text
-phenix.host.filesystem@1
-phenix.host.process@1
-phenix.host.network@1
-phenix.host.clock@1
-phenix.host.credentials@1
-phenix.host.frontend@1
-phenix.host.terminal@1
-```
+## Kernel access
 
-This list does not require every Interface immediately. Add a Core-owned Interface only when multiple runtime Components need the same stable semantic boundary.
+`KernelAccess` exposes generic kernel-owned mechanisms that are not replaceable product Providers, including:
 
-Core must not grow a default Provider implementation merely because it owns the Interface type.
+- cancellation token access;
+- Layer continuation;
+- task scopes;
+- Event dispatch;
+- structural request decoding and response encoding;
+- Plugin-owned durable persistence operations.
 
-## Typed runtime context
+These operations remain authority- and generation-scoped through the underlying `PluginHost`.
 
-Normal embedded Rust Plugin code uses typed Interface Handles exposed through `PluginContext` or the equivalent resolved Plugin Runtime context.
+## Interface clients
 
-Desired shape:
+`SdkClient<I>` is a typed consumer-side handle for one imported `ComponentInterface`.
 
-```rust
-ctx.context.compact(request).await?;
-ctx.models.infer(request).await?;
-ctx.host.filesystem.read(path).await?;
-ctx.host.process.spawn(command).await?;
-ctx.host.network.request(request).await?;
-```
+The client invokes through the caller Component's resolved Import. It does not perform live provider discovery and it does not hold a provider implementation pointer.
 
-The exact Rust layout may differ, but these invariants are required:
+Typed calls lower requests to `PhenixValue`, use the kernel-mediated Import binding, and parse the response into the consumer's local type.
 
-- callers do not resolve Providers by string at invocation time;
-- required Provider Bindings are validated before activation;
-- typed request/response contracts use `PhenixValue` and `PhenixSchema` at structural Plugin API boundaries;
-- normal embedded calls remain statically typed;
-- an Interface Handle cannot grant more Effective Authority than the resolved Provider Binding permits;
-- no hidden Provider fallback occurs after invocation failure.
+`SdkContract` lets passive SDK vocabulary name an Interface without depending on a provider implementation crate.
 
-Generic structural dispatch remains explicit ABI, inspection, Adapter, or Runtime Provider plumbing. It is not the normal Rust authoring API.
+`SdkObject` combines stable provider-owned object identity with an `SdkClient`; provider state remains owned by the provider Plugin.
 
-## Domain interfaces
+## Default SDK
 
-Domain Interfaces answer:
+The Rust SDK builds `PhenixSdk` from typed `SdkClient` values for common contracts such as sessions, models, tools, skills, context, options, and configuration.
 
-> How does Phenix perform this product behavior?
+Plugins may request additional SDK contracts through the same `SdkContract` and `SdkClient` mechanism.
 
-`phenix.context.compact@1` is the motivating example.
+An ergonomic expression such as a session or context SDK call is therefore a typed call through a resolved Component Import, not a hard-coded default implementation.
 
-The neutral contract owner defines request, response, error, and typed Interface Handle vocabulary. A selected Plugin Provider implements the behavior.
+## Domain Interfaces
 
-Possible Providers may implement deterministic truncation, summarization, semantic compaction, model-assisted compaction, or a custom third-party policy.
+A Domain Interface is an ordinary resolved Interface used for replaceable Phenix behavior.
 
-Callers do not depend on Provider identity. Product Composition Policy may replace the Provider declaratively. Replacement creates a new Graph Generation rather than mutating an invocation in flight.
+Domain Interface identity and structural schema are stable vocabulary. The active Provider is selected by the Graph Generation.
 
-## Host interfaces
+Default implementations remain ordinary Providers and can be replaced without changing consumer source when the replacement satisfies the same contract and policy.
 
-Host Interfaces answer:
+## Host Interfaces and Host Capabilities
 
-> Through which resolved Interface may a Plugin request this environment-facing behavior?
+A Host Interface is a resolved Interface whose implementation provides controlled interaction with the environment.
 
-Plugin code should prefer Host Interface Handles over ambient operating-system access after bootstrap when the architecture supplies that Interface.
+A Host Capability is different: it is an authority-bearing kernel or environment handle exposed through `PluginHost` for privileged operations that cannot be modeled as an ordinary provider lookup.
 
-Examples include filesystem, process, network, clock, credential, frontend, and terminal Interfaces.
+A Provider of a Host Interface may internally require Host Capabilities, but exporting an Interface never grants those capabilities automatically.
 
-A Host Interface Provider may be local, sandboxed, delegated through an Adapter, virtualized for tests, or a deny Provider.
+## Structural boundary
 
-A Host Interface must not silently turn an unavailable Provider Binding into ambient OS access.
+Typed Interface clients use `PhenixValue` and `PhenixSchema` at the dynamic boundary. Provider and consumer Rust types may differ.
 
-The Provider behind a Host Interface may itself require Host Capabilities from `PluginHost`. Those Host Capabilities remain separately authority-bounded; resolving a Host Interface does not create ambient authority.
+Structural mismatch is reported through the canonical kernel diagnostic path. See `typed-structural-boundaries.md`.
 
-## Authority
+## Generation and authority
 
-Host Interface Handles are authority-sensitive references to resolved Provider Bindings. Host Capabilities are authority-bearing kernel/environment handles. Neither expands authority.
+Interface clients are scoped to the calling Plugin Host and caller Component. Their provider binding is therefore the binding resolved for the current Graph Generation.
 
-A Provider may request authority in metadata, but the kernel resolver computes the Effective Authority from Product Composition Policy, caller authority, Provider limits, and Interface requirements.
+Calls inherit effective authority from the current host and cannot expand it.
 
-Authority cannot expand through delegation, Layer interposition, retry, reconnect, Provider replacement, or conversion between an Interface Handle and a Host Capability.
+Provider fallback, when explicitly enabled, uses the generation-pinned Provider Plan rather than mutating the Interface client.
 
-Security-sensitive environment operations fail explicitly when no compatible authorized Provider Binding and required Host Capability path exist.
+## Invariants
 
-## Resolution
-
-Runtime Interfaces use the existing Component Graph and kernel resolver. This specification does not define a second resolver.
-
-A Component declares Interface Imports. Provider Components declare compatible Exports. The kernel resolver selects and validates Providers while constructing the candidate Graph Generation.
-
-Required unresolved Imports fail before activation. Optional Imports are explicitly optional. Equivalent Provider Candidates resolve deterministically according to `spec/plugin-resolution.md`.
-
-Provider failure after dispatch is an execution failure. It does not trigger live Provider search. Changing a Provider requires a new valid Graph Generation.
-
-## Interface cardinality
-
-Do not force every extension mechanism through one invocation model.
-
-- **Single Provider Binding:** ordinary replaceable behavior such as context compaction or clock access.
-- **Provider Binding plus Layers:** ordered interposition around one Terminal Provider.
-- **Events and Listeners:** fan-out observation and reactions, not Provider selection.
-- **Controllers:** background convergence, not fake synchronous Interfaces.
-- **Plugin Resources:** Durable State, not callable Interfaces.
-
-## No service locator
-
-This architecture must not introduce a generic live service locator.
-
-Bad:
-
-```rust
-ctx.call("phenix.context.compact", value).await?
-```
-
-Normal embedded code should use a typed Interface Handle:
-
-```rust
-ctx.context.compact(request).await?
-```
-
-A generic dynamic Interface lookup may exist only at explicit ABI, inspection, configuration, Adapter, or Runtime Provider boundaries where static Rust types cannot cross directly.
-
-## Defaults
-
-A default Harness may select ordinary first-party Providers for common Domain and Host Interfaces.
-
-Defaults remain explicit Product Composition Policy. Omitting or replacing a default Provider must not reveal a hidden Core implementation.
-
-For a required Interface, omission without a replacement is a resolver error. For an optional Interface, the typed API represents absence explicitly.
-
-## Adapters
-
-Protocol Adapters may provide or consume Host Interfaces without becoming privileged runtime paths. Application integration terminology belongs to `spec/application-integration-terminology.md`.
-
-For example, `phenix-adapter-acp` may translate Application-side ACP callback capabilities into an ordinary `phenix.host.frontend@1` Provider. Plugin Runtime code still invokes the Host Interface rather than ACP-specific functions.
-
-Another Adapter can support the same Plugin Runtime when it supplies a compatible Host Interface Provider.
-
-## Testing
-
-Host Interfaces are preferred seams for deterministic tests of environment interaction.
-
-Tests may bind in-memory or fake Providers for filesystem, process, network, clock, credentials, terminal, or frontend behavior without giving the tested Component ambient authority.
-
-A fake Provider must satisfy the same Interface and Effective Authority semantics as a production Provider.
-
-## Required regressions
-
-Implementation must prove:
-
-- a call such as context compaction dispatches through a pre-resolved typed Interface Handle;
-- interchangeable Providers can be selected declaratively without caller changes;
-- missing required Providers fail Graph resolution before activation;
-- invocation failure does not trigger Provider fallback;
-- Host Interfaces can be supplied by replaceable Providers;
-- denied Host Capability authority cannot be recovered through an ambient path;
-- Interface Handles preserve Effective Authority attenuation;
-- Layers wrap one preselected Terminal Provider in deterministic order;
-- Events remain fan-out rather than callable Provider Interfaces;
-- fake Providers can replace environment access without changing Component code;
-- embedded Rust callers do not need string-based service lookup;
-- Runtime Providers can use the same Interface semantics through structural dispatch;
-- changing a Provider produces a new Graph Generation and does not mutate pinned invocations.
-
-## Completion
-
-- [ ] Core defines a small stable typed Runtime Interface mechanism;
-- [ ] Domain Interfaces and Host Interfaces are distinct roles over the same Provider Binding machinery;
-- [ ] `PluginContext` exposes ergonomic typed Interface Handles;
-- [ ] Host Interface and Host Capability remain explicitly distinct concepts;
-- [ ] `phenix.context.compact@1` is replaceable rather than hard-coded behavior;
-- [ ] environment interaction can be routed through typed Host Interfaces and authority-bounded Host Capabilities;
-- [ ] required Provider Bindings are resolved before activation;
-- [ ] no hidden fallback Provider exists;
-- [ ] no generic service locator becomes the normal embedded authoring API;
-- [ ] Layers, Events, controllers, and Plugin Resources remain separate mechanisms;
-- [ ] default implementations remain ordinary selectable first-party Providers;
-- [ ] exact-head Source, Rust, Product, and Maintenance validation passes.
+- Typed runtime access does not hard-code provider implementations.
+- `PluginContext` separates kernel mechanisms, SDK contracts, Plugin state, and call state.
+- `SdkClient` invokes declared resolved Imports rather than searching live Plugins.
+- Passive SDK crates may own stable Interface vocabulary without becoming runtime Plugins.
+- Domain Interfaces and Host Interfaces use the same provider-resolution machinery.
+- Host Interfaces and Host Capabilities remain distinct concepts.
+- Provider replacement does not require consumer source changes.
+- Interface calls remain authority- and Graph Generation-scoped.
