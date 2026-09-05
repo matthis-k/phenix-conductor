@@ -220,9 +220,8 @@ fn resolve_first_party_plugins(
     cli: &Cli,
     configured: Option<&str>,
 ) -> Result<Option<BTreeSet<String>>, String> {
-    let selection_requested = configured.is_some()
-        || !cli.enable_plugins.is_empty()
-        || !cli.disable_plugins.is_empty();
+    let selection_requested =
+        configured.is_some() || !cli.enable_plugins.is_empty() || !cli.disable_plugins.is_empty();
     if !selection_requested {
         return Ok(None);
     }
