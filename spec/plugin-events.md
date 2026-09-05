@@ -1,6 +1,14 @@
 # Plugin event transport and subscriptions
 
-status: specification-only
+status: implemented
+coverage:
+  - rust/crates/phenix-core/src/events.rs
+  - rust/crates/phenix-core/tests/event_delivery_contract.rs
+  - rust/crates/phenix-core/tests/event_generation_provenance.rs
+  - rust/crates/phenix-core/src/runtime_topology_generation_regression.rs
+  - rust/crates/phenix-core/src/service_layer_dispatch_regression.rs
+  - rust/crates/phenix-sdk/tests/plugin_attribute_only_gate.rs
+  - rust/crates/phenix-plugin-hooks/src/ownership_regression.rs
 
 ## Purpose
 
@@ -22,7 +30,7 @@ There is no pre-commit Event veto mode. A boundary that can still deny or transf
 
 ## Event model
 
-The kernel owns generic Event transport and envelope metadata:
+The kernel owns generic Event transport and delivery provenance:
 
 ```text
 EventTypeId
@@ -32,6 +40,8 @@ CausalityId
 GraphGeneration
 payload: PhenixValue
 ```
+
+Graph Generation is pinned by the active Plugin Host during delivery and exposed to generated listener context and the dispatch report. Direct EventBus calls outside a resolved Plugin Host have no Graph Generation.
 
 The owning Event contract defines payload meaning.
 

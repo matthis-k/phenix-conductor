@@ -338,7 +338,7 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
                 event_type: EventTypeId::parse("kernel.structural_value_mismatch").unwrap(),
                 event_version: 1,
                 dependencies: Vec::new(),
-                failure_policy: EventFailurePolicy::FailOperation,
+                failure_policy: EventFailurePolicy::FailDelivery,
                 required_authority: Authority::default(),
                 maximum_authority: Authority::default(),
                 kernel_policy_revision: 0,
