@@ -26,6 +26,7 @@ mod metadata_inspection;
 mod metadata_reconciliation;
 mod persistence;
 mod persistence_bootstrap;
+mod persistence_provider;
 mod persistence_value;
 mod plugin_build;
 mod plugin_build_execution;
@@ -147,6 +148,10 @@ pub use persistence_bootstrap::{
     resolve_persistence_bootstrap, DurableSchemaRegistration, PersistenceBootstrapDependency,
     PersistenceBootstrapError, PersistenceProviderDescriptor, PersistenceProviderTransition,
     ResolvedPersistenceBootstrap, StoreBinding, StoreBindingId, StoreBindingIdParseError,
+};
+pub use persistence_provider::{
+    prepare_persistence_candidate, PersistenceCandidateError, PersistenceProvider,
+    PersistenceProviderError, PreparedPersistence,
 };
 pub use plugin_build::{
     BuildArgument, BuildArtifactOutput, BuildEnvironment, BuildEnvironmentName, BuildExecutable,
