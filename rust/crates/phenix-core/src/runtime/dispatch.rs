@@ -227,6 +227,7 @@ pub(super) fn invoke_resolved_chain_with(
         events: runtime.events,
         tasks: runtime.tasks,
         persistence: runtime.persistence,
+        prepared_mutations: runtime.prepared_mutations,
         provenance: runtime.provenance,
         continuation,
         active_services: guards.active_services.clone(),

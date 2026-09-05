@@ -143,3 +143,26 @@ A backend does not declare product semantics valid.
 - Namespace ownership is enforced by the persistence boundary.
 - Persistence Provider authority does not imply product-domain authority.
 - Live Provider replacement is not silently inferred from provider priority or graph reconciliation.
+
+## Owner-prepared cross-plugin commits
+
+Proposed follow-up; implementation and regressions are pending. The baseline status above does not certify this boundary.
+
+The host accepts caller-created foreign NamespaceTransaction operations when any qualifying import exists. The provider need not have approved those writes, so an importer can bypass its domain invariants.
+
+1. Core owns a transaction scope and immutable prepared-mutation registry. Only the active namespace owner may prepare operations through its scoped host; Core derives owner, store binding, generation, scope, and attenuated commit authority rather than accepting caller claims.
+
+2. Preparation returns an opaque scope-local handle. The coordinator receives the handle and domain result, never an editable foreign operation list. Embedded handles use private constructors; bridged handles resolve in the same host-owned scoped registry and are checked against the requesting scope and participant. Knowing a handle identifier grants no authority.
+
+3. The coordinator commits owner-prepared participants together with its own prepared mutations. Core validates scope, owner, store, generation, authority, cancellation, and outstanding status before invoking the backend once. Assertions are checked in that atomic transaction. Each commit attempt consumes its handles; failure requires fresh preparation.
+
+4. Scope exit, cancellation, provider replacement, and commit release prepared state. Single-owner writes keep the existing owner-only path. Backend raw transaction operations remain internal to trusted persistence infrastructure; imports alone never authorize foreign writes.
+
+5. Migrate session creation plus lineage creation to this protocol. Domain validation and assertion construction stay in the sessions and session-tree plugins. Remove the plugin-facing raw foreign NamespaceTransaction commit path.
+
+Acceptance requires:
+
+- A qualifying importer cannot fabricate, modify, reuse, or transfer another owner's mutation handle.
+- Reject wrong scope, generation, store, owner, attenuated authority, cancelled scope, and replaced provider before writes.
+- Session and lineage creation commit atomically; failed assertions roll back every participant.
+- Embedded and bridged callers enforce the same scope checks; abandoned preparations release storage.
