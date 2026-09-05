@@ -7,6 +7,7 @@ use std::{
     collections::BTreeMap,
     fmt::{self, Display, Formatter},
     sync::Mutex,
+    thread::{self, ThreadId},
 };
 
 const HANDLE_PREFIX: &str = "pm:";
@@ -116,11 +117,33 @@ impl<'value> TryFrom<Project<&'value PhenixValue>> for PreparedMutationHandle {
 pub(crate) struct PreparedMutation {
     pub(crate) transaction: NamespaceTransaction,
     pub(crate) authority: Authority,
+    pub(crate) coordinator: PluginId,
 }
 
 pub(crate) struct PreparedMutationScope {
     generation: Option<GraphGenerationId>,
     prepared: Mutex<BTreeMap<PreparedMutationHandle, PreparedMutation>>,
+    coordinators: Mutex<Vec<(ThreadId, PluginId)>>,
+}
+
+struct PreparedMutationCoordinatorGuard<'a> {
+    scope: &'a PreparedMutationScope,
+    thread: ThreadId,
+}
+
+impl Drop for PreparedMutationCoordinatorGuard<'_> {
+    fn drop(&mut self) {
+        let mut coordinators = self
+            .scope
+            .coordinators
+            .lock()
+            .expect("prepared mutation coordinator mutex poisoned");
+        let position = coordinators
+            .iter()
+            .rposition(|(thread, _)| thread == &self.thread)
+            .expect("prepared mutation coordinator frame is missing");
+        coordinators.remove(position);
+    }
 }
 
 impl PreparedMutationScope {
@@ -128,11 +151,41 @@ impl PreparedMutationScope {
         Self {
             generation: generation.cloned(),
             prepared: Mutex::new(BTreeMap::new()),
+            coordinators: Mutex::new(Vec::new()),
         }
     }
 
     pub(crate) fn generation(&self) -> Option<&GraphGenerationId> {
         self.generation.as_ref()
+    }
+
+    pub(crate) fn with_coordinator<T>(
+        &self,
+        coordinator: &PluginId,
+        operation: impl FnOnce() -> T,
+    ) -> T {
+        let thread = thread::current().id();
+        self.coordinators
+            .lock()
+            .expect("prepared mutation coordinator mutex poisoned")
+            .push((thread.clone(), coordinator.clone()));
+        let _guard = PreparedMutationCoordinatorGuard {
+            scope: self,
+            thread,
+        };
+        operation()
+    }
+
+    fn coordinator(&self, owner: &PluginId) -> PluginId {
+        let thread = thread::current().id();
+        self.coordinators
+            .lock()
+            .expect("prepared mutation coordinator mutex poisoned")
+            .iter()
+            .rev()
+            .find(|(candidate, _)| candidate == &thread)
+            .map(|(_, coordinator)| coordinator.clone())
+            .unwrap_or_else(|| owner.clone())
     }
 
     pub(crate) fn prepare(
@@ -142,6 +195,7 @@ impl PreparedMutationScope {
         operations: &[TransactionOp],
         authority: &Authority,
     ) -> Result<PreparedMutationHandle, String> {
+        let coordinator = self.coordinator(owner);
         let mut prepared = self
             .prepared
             .lock()
@@ -160,6 +214,7 @@ impl PreparedMutationScope {
                         operations: operations.to_vec(),
                     },
                     authority: authority.clone(),
+                    coordinator: coordinator.clone(),
                 },
             );
             return Ok(handle);

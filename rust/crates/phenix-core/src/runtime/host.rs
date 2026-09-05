@@ -76,33 +76,35 @@ impl<'a> PluginHost<'a> {
             fallback_reason,
             delegated_authority.clone(),
         );
-        let output = invoke_component_service_with(
-            InvocationContext {
-                graph_generation: self.graph_generation,
-                component_graph: self.component_graph,
-                config: self.config,
-                states: self.states,
-                instances: self.instances,
-                events: self.events,
-                tasks: self.tasks,
-                persistence: self.persistence,
-                prepared_mutations: self.prepared_mutations,
-                provenance: self.provenance,
-            },
-            &service,
-            ComponentDispatchTarget {
-                component: handle.exporter(),
-                binding: handle.owning_plugin(),
-                provider_provenance: Some(provider_provenance),
-            },
-            &input,
-            &delegated_authority,
-            ServiceDispatchGuards {
-                call_stack: &self.call_stack,
-                active_services: &self.active_services,
-                terminal_component: Some(handle.exporter()),
-            },
-        )?;
+        let output = self.prepared_mutations.with_coordinator(self.plugin, || {
+            invoke_component_service_with(
+                InvocationContext {
+                    graph_generation: self.graph_generation,
+                    component_graph: self.component_graph,
+                    config: self.config,
+                    states: self.states,
+                    instances: self.instances,
+                    events: self.events,
+                    tasks: self.tasks,
+                    persistence: self.persistence,
+                    prepared_mutations: self.prepared_mutations,
+                    provenance: self.provenance,
+                },
+                &service,
+                ComponentDispatchTarget {
+                    component: handle.exporter(),
+                    binding: handle.owning_plugin(),
+                    provider_provenance: Some(provider_provenance),
+                },
+                &input,
+                &delegated_authority,
+                ServiceDispatchGuards {
+                    call_stack: &self.call_stack,
+                    active_services: &self.active_services,
+                    terminal_component: Some(handle.exporter()),
+                },
+            )
+        })?;
         serde_json::from_slice(&output)
             .map_err(|error| ComponentInvocationError::Decode(error.to_string()))
     }
@@ -121,26 +123,28 @@ impl<'a> PluginHost<'a> {
         binding: Option<&PluginId>,
     ) -> Result<Vec<u8>, KernelError> {
         let delegated_authority = self.authority.attenuate(requested_authority);
-        invoke_service_with(
-            InvocationContext {
-                graph_generation: self.graph_generation,
-                component_graph: self.component_graph,
-                config: self.config,
-                states: self.states,
-                instances: self.instances,
-                events: self.events,
-                tasks: self.tasks,
-                persistence: self.persistence,
-                prepared_mutations: self.prepared_mutations,
-                provenance: self.provenance,
-            },
-            service,
-            input,
-            &delegated_authority,
-            binding,
-            &self.call_stack,
-            &self.active_services,
-        )
+        self.prepared_mutations.with_coordinator(self.plugin, || {
+            invoke_service_with(
+                InvocationContext {
+                    graph_generation: self.graph_generation,
+                    component_graph: self.component_graph,
+                    config: self.config,
+                    states: self.states,
+                    instances: self.instances,
+                    events: self.events,
+                    tasks: self.tasks,
+                    persistence: self.persistence,
+                    prepared_mutations: self.prepared_mutations,
+                    provenance: self.provenance,
+                },
+                service,
+                input,
+                &delegated_authority,
+                binding,
+                &self.call_stack,
+                &self.active_services,
+            )
+        })
     }
 
     pub fn continue_service(
@@ -296,6 +300,15 @@ impl<'a> PluginHost<'a> {
                 operation: "prepared mutation is unavailable in this invocation scope".into(),
             }
         })?;
+        if participants
+            .iter()
+            .any(|participant| &participant.coordinator != self.plugin)
+        {
+            return Err(KernelError::HostOperationDenied {
+                plugin: self.plugin.clone(),
+                operation: "prepared mutation was issued to another coordinator".into(),
+            });
+        }
         if !participants
             .iter()
             .any(|participant| &participant.transaction.owner == self.plugin)
