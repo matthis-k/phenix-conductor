@@ -50,6 +50,9 @@ jobs:
       - name: "Structural boundaries"
         run: "printf '%s\\n' '{\"command\":\"check/source/structural-boundaries\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-d0a2e91a2adf -- invoke"
 
+      - name: "Application interface"
+        run: "printf '%s\\n' '{\"command\":\"check/source/application-interface\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-f3ad72aaaaee -- invoke"
+
       - name: "Generated workflow"
         run: "printf '%s\\n' '{\"command\":\"check/source/workflow-sync\",\"source\":{\"job\":\"source\",\"type\":\"github-actions\"}}' | nix run --quiet .#phenix-maintenance-command-9383b20a4494 -- invoke"
 

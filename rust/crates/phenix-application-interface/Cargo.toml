@@ -1,0 +1,18 @@
+[package]
+name = "phenix-application-interface"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[package.metadata.phenix]
+role = "passive-library"
+
+[dependencies]
+phenix-core = { path = "../phenix-core" }
+phenix-sdk-macros = { path = "../phenix-sdk-macros" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+
