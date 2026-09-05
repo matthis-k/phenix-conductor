@@ -1,6 +1,6 @@
 pub use phenix_core::SessionId;
 use phenix_core::{
-    Bytes, CallableId, ComponentInterface, InterfaceId, NamespaceTransaction, PhenixValue,
+    Bytes, CallableId, ComponentInterface, InterfaceId, PhenixValue, PreparedMutationHandle,
     ServiceId, Type, ValueCodec, ValueError,
 };
 use serde::{Deserialize, Serialize};
@@ -173,7 +173,7 @@ pub enum SessionMutationCommand {
 pub enum SessionMutationResponse {
     PreparedCreate {
         session: SessionRecord,
-        transaction: NamespaceTransaction,
+        mutation: PreparedMutationHandle,
     },
 }
 

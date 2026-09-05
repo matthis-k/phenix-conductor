@@ -31,6 +31,7 @@ mod persistence_value;
 mod plugin_build;
 mod plugin_build_execution;
 mod plugin_context;
+mod prepared_mutation;
 mod provider_resolution;
 mod reconciliation;
 mod reconciliation_inspection;
@@ -165,6 +166,7 @@ pub use plugin_build_execution::{
 pub use plugin_context::{
     CallContext, CurrentPlugin, KernelAccess, PluginContext, SdkClient, SdkContract, SdkObject,
 };
+pub use prepared_mutation::PreparedMutationHandle;
 pub use provider_resolution::{
     InterfaceProviderPolicy, ProviderCompositionPolicy, ProviderFallbackReason,
     ProviderSelectionReason,

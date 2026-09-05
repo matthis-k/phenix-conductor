@@ -1,7 +1,7 @@
 use crate::session_tree_component_id;
 use phenix_core::{
-    Authority, CapabilityId, ComponentInterface, DurableSchema, LayerResult, NamespaceTransaction,
-    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
+    Authority, CapabilityId, ComponentInterface, DurableSchema, LayerResult, PluginContext,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, PreparedMutationHandle,
     ResourceNamespace, SdkClient, ServiceContribution, ServiceId, SessionId, TransactionOp,
 };
 use phenix_sdk::{
@@ -118,7 +118,7 @@ enum SessionMutationRequest {
 enum SessionMutationResult {
     PreparedCreate {
         session: SessionRecord,
-        transaction: NamespaceTransaction,
+        mutation: PreparedMutationHandle,
     },
 }
 
@@ -242,7 +242,7 @@ fn create_child(
         .map_err(|error| error.to_string())?;
     let SessionMutationResult::PreparedCreate {
         session,
-        transaction: session_transaction,
+        mutation: session_mutation,
     } = prepared;
 
     let lineage = SessionLineage {
@@ -255,32 +255,32 @@ fn create_child(
     children.push(session_id.clone());
     children.sort();
     children.dedup();
-    let tree_transaction = NamespaceTransaction {
-        owner: PluginId::parse(SESSION_TREE_PLUGIN).expect("static plugin id is valid"),
-        namespace: session_tree_namespace(),
-        operations: vec![
-            TransactionOp::AssertValue {
-                key: lineage_key(&session_id),
-                expected: None,
-            },
-            TransactionOp::AssertValue {
-                key: children_key.clone(),
-                expected: old_children,
-            },
-            TransactionOp::Put {
-                key: lineage_key(&session_id),
-                value: serde_json::to_vec(&lineage).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: children_key,
-                value: serde_json::to_vec(&children).map_err(|error| error.to_string())?,
-            },
-        ],
-    };
+    let tree_operations = vec![
+        TransactionOp::AssertValue {
+            key: lineage_key(&session_id),
+            expected: None,
+        },
+        TransactionOp::AssertValue {
+            key: children_key.clone(),
+            expected: old_children,
+        },
+        TransactionOp::Put {
+            key: lineage_key(&session_id),
+            value: serde_json::to_vec(&lineage).map_err(|error| error.to_string())?,
+        },
+        TransactionOp::Put {
+            key: children_key,
+            value: serde_json::to_vec(&children).map_err(|error| error.to_string())?,
+        },
+    ];
+    let tree_mutation = context
+        .kernel
+        .prepare_durable_transaction(&session_tree_namespace(), &tree_operations)
+        .map_err(|error| error.to_string())?;
 
     context
         .kernel
-        .transact_durable_many(&[session_transaction, tree_transaction])
+        .transact_prepared(&[session_mutation, tree_mutation])
         .map_err(|error| error.to_string())?;
     Ok(SessionTreeResponse::ChildCreated { session, lineage })
 }

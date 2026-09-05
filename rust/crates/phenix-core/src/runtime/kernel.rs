@@ -219,6 +219,8 @@ impl Kernel {
                             .tasks
                             .begin_call(&binding.provider, self.graph_generation.as_ref());
                         let cancellation = live_call.cancellation_token().clone();
+                        let prepared_mutations =
+                            PreparedMutationScope::new(self.graph_generation.as_ref());
                         let host = PluginHost {
                             graph_generation: self.graph_generation.as_ref(),
                             component_graph: &self.component_graph,
@@ -232,6 +234,7 @@ impl Kernel {
                             events: &self.events,
                             tasks: &self.tasks,
                             persistence: &self.persistence,
+                            prepared_mutations: &prepared_mutations,
                             provenance: &self.provenance,
                             continuation: None,
                             active_services: BTreeSet::new(),
@@ -259,6 +262,7 @@ impl Kernel {
                             message: "runtime provider panicked".into(),
                         })?;
                         if cancellation.is_cancelled() {
+                            prepared_mutations.clear();
                             return Err(KernelError::RuntimePrepare {
                                 plugin: plugin.clone(),
                                 runtime: runtime.clone(),
@@ -300,6 +304,7 @@ impl Kernel {
                     .tasks
                     .begin_call(plugin, self.graph_generation.as_ref());
                 let cancellation = live_call.cancellation_token().clone();
+                let prepared_mutations = PreparedMutationScope::new(self.graph_generation.as_ref());
                 let host = PluginHost {
                     graph_generation: self.graph_generation.as_ref(),
                     component_graph: &self.component_graph,
@@ -313,6 +318,7 @@ impl Kernel {
                     events: &self.events,
                     tasks: &self.tasks,
                     persistence: &self.persistence,
+                    prepared_mutations: &prepared_mutations,
                     provenance: &self.provenance,
                     continuation: None,
                     active_services: BTreeSet::new(),
@@ -320,6 +326,7 @@ impl Kernel {
                 let started = catch_unwind(AssertUnwindSafe(|| instance.start(&host)));
                 let failure = match started {
                     Ok(Ok(())) if cancellation.is_cancelled() => {
+                        prepared_mutations.clear();
                         Some("plugin start cancelled".into())
                     }
                     Ok(Ok(())) => None,
@@ -403,6 +410,7 @@ impl Kernel {
         caller_authority: &Authority,
         binding: &PluginId,
     ) -> Result<Vec<u8>, KernelError> {
+        let prepared_mutations = PreparedMutationScope::new(self.graph_generation.as_ref());
         invoke_component_service_with(
             InvocationContext {
                 graph_generation: self.graph_generation.as_ref(),
@@ -413,6 +421,7 @@ impl Kernel {
                 events: &self.events,
                 tasks: &self.tasks,
                 persistence: &self.persistence,
+                prepared_mutations: &prepared_mutations,
                 provenance: &self.provenance,
             },
             service,
@@ -438,6 +447,7 @@ impl Kernel {
         caller_authority: &Authority,
         binding: Option<&PluginId>,
     ) -> Result<Vec<u8>, KernelError> {
+        let prepared_mutations = PreparedMutationScope::new(self.graph_generation.as_ref());
         invoke_service_with(
             InvocationContext {
                 graph_generation: self.graph_generation.as_ref(),
@@ -448,6 +458,7 @@ impl Kernel {
                 events: &self.events,
                 tasks: &self.tasks,
                 persistence: &self.persistence,
+                prepared_mutations: &prepared_mutations,
                 provenance: &self.provenance,
             },
             service,
@@ -470,6 +481,7 @@ impl Kernel {
         if let Some(instance) = self.instances.get(plugin) {
             let live_call = self.tasks.begin_call(plugin, generation);
             let cancellation = live_call.cancellation_token().clone();
+            let prepared_mutations = PreparedMutationScope::new(generation);
             let host = PluginHost {
                 graph_generation: generation,
                 component_graph: &self.component_graph,
@@ -483,6 +495,7 @@ impl Kernel {
                 events: &self.events,
                 tasks: &self.tasks,
                 persistence: &self.persistence,
+                prepared_mutations: &prepared_mutations,
                 provenance: &self.provenance,
                 continuation: None,
                 active_services: BTreeSet::new(),
@@ -491,6 +504,7 @@ impl Kernel {
             let stopped = catch_unwind(AssertUnwindSafe(|| instance.stop(&host)));
             match stopped {
                 Ok(Ok(())) if cancellation.is_cancelled() => {
+                    prepared_mutations.clear();
                     return Err(KernelError::PluginStop {
                         plugin: plugin.clone(),
                         message: "plugin stop cancelled".into(),

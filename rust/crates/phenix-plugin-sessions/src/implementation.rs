@@ -4,9 +4,9 @@ use crate::{
 };
 use phenix_core::{
     Authority, Bytes, CapabilityId, ComponentExport, ComponentId, ComponentInterface,
-    ComponentManifest, DurableSchema, NamespaceTransaction, PluginContext, PluginExecution,
-    PluginHost, PluginId, PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution,
-    ServiceId, SessionId, TransactionOp,
+    ComponentManifest, DurableSchema, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, ResourceNamespace, ServiceContribution, ServiceId, SessionId,
+    TransactionOp,
 };
 use phenix_sdk::{
     session_mutation_service, SessionHistoryDraft, SessionHistoryEntry, SessionMutationCommand,
@@ -186,17 +186,18 @@ fn handle_mutation(
     command: SessionMutationCommand,
 ) -> Result<SessionMutationResponse, String> {
     let SessionMutationCommand::PrepareCreate { id } = command;
-    let (session, transaction) = prepare_create(context, id)?;
-    Ok(SessionMutationResponse::PreparedCreate {
-        session,
-        transaction,
-    })
+    let (session, operations) = prepare_create(context, id)?;
+    let mutation = context
+        .kernel
+        .prepare_durable_transaction(&session_namespace(), &operations)
+        .map_err(|error| error.to_string())?;
+    Ok(SessionMutationResponse::PreparedCreate { session, mutation })
 }
 
 fn prepare_create(
     context: &SessionContext<'_, '_>,
     id: SessionId,
-) -> Result<(SessionRecord, NamespaceTransaction), String> {
+) -> Result<(SessionRecord, Vec<TransactionOp>), String> {
     if read_session(context, &id)?.is_some() {
         return Err(format!("session already exists: {id}"));
     }
@@ -208,39 +209,35 @@ fn prepare_create(
     sessions.push(session.id.clone());
     sessions.sort();
     sessions.dedup();
-    let transaction = NamespaceTransaction {
-        owner: PluginId::parse(SESSION_PLUGIN).expect("static plugin id is valid"),
-        namespace: session_namespace(),
-        operations: vec![
-            TransactionOp::AssertValue {
-                key: session_key.clone(),
-                expected: None,
-            },
-            TransactionOp::AssertValue {
-                key: ALL_SESSIONS_KEY.into(),
-                expected: old_sessions,
-            },
-            TransactionOp::Put {
-                key: session_key,
-                value: serde_json::to_vec(&session).map_err(|error| error.to_string())?,
-            },
-            TransactionOp::Put {
-                key: ALL_SESSIONS_KEY.into(),
-                value: serde_json::to_vec(&sessions).map_err(|error| error.to_string())?,
-            },
-        ],
-    };
-    Ok((session, transaction))
+    let operations = vec![
+        TransactionOp::AssertValue {
+            key: session_key.clone(),
+            expected: None,
+        },
+        TransactionOp::AssertValue {
+            key: ALL_SESSIONS_KEY.into(),
+            expected: old_sessions,
+        },
+        TransactionOp::Put {
+            key: session_key,
+            value: serde_json::to_vec(&session).map_err(|error| error.to_string())?,
+        },
+        TransactionOp::Put {
+            key: ALL_SESSIONS_KEY.into(),
+            value: serde_json::to_vec(&sessions).map_err(|error| error.to_string())?,
+        },
+    ];
+    Ok((session, operations))
 }
 
 fn create_session(
     context: &SessionContext<'_, '_>,
     id: SessionId,
 ) -> Result<SessionResponse, String> {
-    let (session, transaction) = prepare_create(context, id)?;
+    let (session, operations) = prepare_create(context, id)?;
     context
         .kernel
-        .transact_durable(&transaction.namespace, &transaction.operations)
+        .transact_durable(&session_namespace(), &operations)
         .map_err(|error| error.to_string())?;
     Ok(SessionResponse::Created { session })
 }

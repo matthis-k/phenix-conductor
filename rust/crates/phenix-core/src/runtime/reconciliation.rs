@@ -23,6 +23,7 @@ impl StopView<'_> {
         self.tasks.cancel_calls(plugin, self.generation);
         self.tasks.cancel_plugin_generation(plugin, self.generation);
         let live_call = self.tasks.begin_call(plugin, self.generation);
+        let prepared_mutations = PreparedMutationScope::new(self.generation);
         let host = PluginHost {
             graph_generation: self.generation,
             component_graph: self.graph,
@@ -36,6 +37,7 @@ impl StopView<'_> {
             events: self.events,
             tasks: self.tasks,
             persistence: self.persistence,
+            prepared_mutations: &prepared_mutations,
             provenance: self.provenance,
             continuation: None,
             active_services: BTreeSet::new(),
@@ -132,6 +134,8 @@ impl Kernel {
                                 .tasks
                                 .begin_call(&binding.provider, Some(candidate.generation()));
                             let cancellation = live_call.cancellation_token().clone();
+                            let prepared_mutations =
+                                PreparedMutationScope::new(Some(candidate.generation()));
                             let host = PluginHost {
                                 graph_generation: Some(candidate.generation()),
                                 component_graph: candidate.component_graph(),
@@ -145,6 +149,7 @@ impl Kernel {
                                 events: &self.events,
                                 tasks: &self.tasks,
                                 persistence: &self.persistence,
+                                prepared_mutations: &prepared_mutations,
                                 provenance: &self.provenance,
                                 continuation: None,
                                 active_services: BTreeSet::new(),
@@ -214,6 +219,8 @@ impl Kernel {
                 if let Some(mut instance) = instance {
                     let live_call = self.tasks.begin_call(plugin, Some(candidate.generation()));
                     let cancellation = live_call.cancellation_token().clone();
+                    let prepared_mutations =
+                        PreparedMutationScope::new(Some(candidate.generation()));
                     let host = PluginHost {
                         graph_generation: Some(candidate.generation()),
                         component_graph: candidate.component_graph(),
@@ -227,6 +234,7 @@ impl Kernel {
                         events: &self.events,
                         tasks: &self.tasks,
                         persistence: &self.persistence,
+                        prepared_mutations: &prepared_mutations,
                         provenance: &self.provenance,
                         continuation: None,
                         active_services: BTreeSet::new(),
