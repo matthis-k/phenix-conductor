@@ -1,9 +1,10 @@
 use crate::{
-    Authority, CapabilityId, ComponentGraphError, ComponentManifest, CompositionMetadataError,
-    ConfigContribution, ConfigMergeError, ConfigurationFrontendId, ConfigurationFrontendMetadata,
-    FrontendConfigContribution, FrontendConfigError, InterfaceId, KernelConfig, KernelError,
-    LayerPolicy, PluginId, PluginManifest, ProviderCompositionPolicy, ResolvedComponentGraph,
-    ResolvedConfigContributions, ServiceId, ServiceRole, SkillResourceMetadata,
+    Authority, BackendFeature, CapabilityId, ComponentGraphError, ComponentManifest,
+    CompositionMetadataError, ConfigContribution, ConfigMergeError, ConfigurationFrontendId,
+    ConfigurationFrontendMetadata, DurableSchemaRegistration, FrontendConfigContribution,
+    FrontendConfigError, InterfaceId, KernelConfig, KernelError, LayerPolicy, PluginId,
+    PluginManifest, ProviderCompositionPolicy, ResolvedComponentGraph, ResolvedConfigContributions,
+    ResourceNamespace, ServiceId, ServiceRole, SkillResourceMetadata,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -45,6 +46,16 @@ pub enum ResolvedHarnessError {
         error: FrontendConfigError,
     },
     DuplicateResource(String),
+    DuplicateDurableSchema(ResourceNamespace),
+    UndeclaredDurableSchema {
+        plugin: PluginId,
+        namespace: ResourceNamespace,
+    },
+    DurableSchemaOwnerMismatch {
+        plugin: PluginId,
+        namespace: ResourceNamespace,
+        owner: PluginId,
+    },
     MissingResourceDependency {
         resource: String,
         dependency: String,
@@ -95,6 +106,21 @@ impl Display for ResolvedHarnessError {
             Self::DuplicateResource(resource) => {
                 write!(f, "duplicate skill/resource metadata: {resource}")
             }
+            Self::DuplicateDurableSchema(namespace) => {
+                write!(f, "duplicate durable schema declaration: {namespace}")
+            }
+            Self::UndeclaredDurableSchema { plugin, namespace } => write!(
+                f,
+                "plugin {plugin} declares durable schema {namespace} without owning that namespace"
+            ),
+            Self::DurableSchemaOwnerMismatch {
+                plugin,
+                namespace,
+                owner,
+            } => write!(
+                f,
+                "plugin {plugin} declares durable schema {namespace}, but the namespace belongs to {owner}"
+            ),
             Self::MissingResourceDependency {
                 resource,
                 dependency,
@@ -163,12 +189,39 @@ pub struct ResolvedHarness {
     generation: GraphGenerationId,
     plugins: Vec<PluginManifest>,
     components: Vec<ComponentManifest>,
+    durable_schemas: Vec<DurableSchemaRegistration>,
     resources: Vec<SkillResourceMetadata>,
     configuration: ResolvedConfigContributions,
     kernel_config: KernelConfig,
     component_graph: ResolvedComponentGraph,
     layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
     provider_policy: ProviderCompositionPolicy,
+}
+
+struct ResolutionInputs {
+    durable_schemas: Vec<DurableSchemaRegistration>,
+    resources: Vec<SkillResourceMetadata>,
+    contributions: Vec<ConfigContribution>,
+    layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+    provider_policy: ProviderCompositionPolicy,
+}
+
+impl ResolutionInputs {
+    fn new(
+        durable_schemas: impl IntoIterator<Item = DurableSchemaRegistration>,
+        resources: impl IntoIterator<Item = SkillResourceMetadata>,
+        contributions: impl IntoIterator<Item = ConfigContribution>,
+        layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+        provider_policy: ProviderCompositionPolicy,
+    ) -> Self {
+        Self {
+            durable_schemas: durable_schemas.into_iter().collect(),
+            resources: resources.into_iter().collect(),
+            contributions: contributions.into_iter().collect(),
+            layer_policies,
+            provider_policy,
+        }
+    }
 }
 
 impl ResolvedHarness {
@@ -178,13 +231,37 @@ impl ResolvedHarness {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            [],
-            contributions,
-            BTreeMap::new(),
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                [],
+                [],
+                contributions,
+                BTreeMap::new(),
+                ProviderCompositionPolicy::default(),
+            ),
+            authority_ceiling,
+        )
+    }
+
+    pub fn resolve_with_durable_schemas(
+        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
+        component_manifests: impl IntoIterator<Item = ComponentManifest>,
+        durable_schemas: impl IntoIterator<Item = DurableSchemaRegistration>,
+        contributions: impl IntoIterator<Item = ConfigContribution>,
+        authority_ceiling: &Authority,
+    ) -> Result<Self, ResolvedHarnessError> {
+        Self::resolve_with_inputs(
+            plugin_manifests,
+            component_manifests,
+            ResolutionInputs::new(
+                durable_schemas,
+                [],
+                contributions,
+                BTreeMap::new(),
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
@@ -196,13 +273,10 @@ impl ResolvedHarness {
         provider_policy: ProviderCompositionPolicy,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            [],
-            contributions,
-            BTreeMap::new(),
-            provider_policy,
+            ResolutionInputs::new([], [], contributions, BTreeMap::new(), provider_policy),
             authority_ceiling,
         )
     }
@@ -214,13 +288,16 @@ impl ResolvedHarness {
         contributions: impl IntoIterator<Item = ConfigContribution>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            resources,
-            contributions,
-            BTreeMap::new(),
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                [],
+                resources,
+                contributions,
+                BTreeMap::new(),
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
@@ -232,13 +309,38 @@ impl ResolvedHarness {
         layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            [],
-            contributions,
-            layer_policies,
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                [],
+                [],
+                contributions,
+                layer_policies,
+                ProviderCompositionPolicy::default(),
+            ),
+            authority_ceiling,
+        )
+    }
+
+    pub fn resolve_with_durable_schemas_and_layer_policies(
+        plugin_manifests: impl IntoIterator<Item = PluginManifest>,
+        component_manifests: impl IntoIterator<Item = ComponentManifest>,
+        durable_schemas: impl IntoIterator<Item = DurableSchemaRegistration>,
+        contributions: impl IntoIterator<Item = ConfigContribution>,
+        layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
+        authority_ceiling: &Authority,
+    ) -> Result<Self, ResolvedHarnessError> {
+        Self::resolve_with_inputs(
+            plugin_manifests,
+            component_manifests,
+            ResolutionInputs::new(
+                durable_schemas,
+                [],
+                contributions,
+                layer_policies,
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
@@ -251,33 +353,33 @@ impl ResolvedHarness {
         layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
-        Self::resolve_with_resources_layer_policies_and_provider_policy(
+        Self::resolve_with_inputs(
             plugin_manifests,
             component_manifests,
-            resources,
-            contributions,
-            layer_policies,
-            ProviderCompositionPolicy::default(),
+            ResolutionInputs::new(
+                [],
+                resources,
+                contributions,
+                layer_policies,
+                ProviderCompositionPolicy::default(),
+            ),
             authority_ceiling,
         )
     }
 
-    fn resolve_with_resources_layer_policies_and_provider_policy(
+    fn resolve_with_inputs(
         plugin_manifests: impl IntoIterator<Item = PluginManifest>,
         component_manifests: impl IntoIterator<Item = ComponentManifest>,
-        resources: impl IntoIterator<Item = SkillResourceMetadata>,
-        contributions: impl IntoIterator<Item = ConfigContribution>,
-        mut layer_policies: BTreeMap<ServiceId, Vec<LayerPolicy>>,
-        provider_policy: ProviderCompositionPolicy,
+        mut inputs: ResolutionInputs,
         authority_ceiling: &Authority,
     ) -> Result<Self, ResolvedHarnessError> {
         let mut plugins: Vec<_> = plugin_manifests.into_iter().collect();
         plugins.sort_by(|left, right| left.id.cmp(&right.id));
         let mut components: Vec<_> = component_manifests.into_iter().collect();
         components.sort_by(|left, right| left.id.cmp(&right.id));
-        let resources = resolve_resources(resources, &components, authority_ceiling)?;
-        validate_layer_policies(&plugins, &layer_policies, authority_ceiling)?;
-        for layers in layer_policies.values_mut() {
+        let resources = resolve_resources(inputs.resources, &components, authority_ceiling)?;
+        validate_layer_policies(&plugins, &inputs.layer_policies, authority_ceiling)?;
+        for layers in inputs.layer_policies.values_mut() {
             layers.sort_by(|left, right| {
                 right
                     .priority
@@ -286,37 +388,41 @@ impl ResolvedHarness {
             });
         }
         let configuration =
-            ResolvedConfigContributions::try_resolve(contributions, authority_ceiling)?;
+            ResolvedConfigContributions::try_resolve(inputs.contributions, authority_ceiling)?;
         let mut kernel_config = KernelConfig::new(plugins.clone())?;
-        for (service, layers) in &layer_policies {
+        for (service, layers) in &inputs.layer_policies {
             kernel_config = kernel_config.with_layer_policy(service.clone(), layers.clone())?;
         }
+        let durable_schemas = resolve_durable_schemas(inputs.durable_schemas, &kernel_config)?;
         let component_graph = ResolvedComponentGraph::compile_with_provider_policy(
             plugins.clone(),
             components.clone(),
             authority_ceiling,
-            &provider_policy,
+            &inputs.provider_policy,
         )?;
-        let generation = generation_identity(
-            &plugins,
-            &components,
-            &resources,
-            &configuration,
-            &layer_policies,
-            &provider_policy,
+        let generation = SemanticGeneration {
+            plugins: &plugins,
+            components: &components,
+            durable_schemas: durable_schema_payload(&durable_schemas),
+            resources: &resources,
+            configuration: configuration.semantic_payload(),
+            layer_policies: layer_policy_payload(&inputs.layer_policies),
+            provider_policy: &inputs.provider_policy,
             authority_ceiling,
-        );
+        }
+        .identity();
 
         Ok(Self {
             generation,
             plugins,
             components,
+            durable_schemas,
             resources,
             configuration,
             kernel_config,
             component_graph,
-            layer_policies,
-            provider_policy,
+            layer_policies: inputs.layer_policies,
+            provider_policy: inputs.provider_policy,
         })
     }
 
@@ -370,6 +476,10 @@ impl ResolvedHarness {
         &self.components
     }
 
+    pub fn durable_schemas(&self) -> &[DurableSchemaRegistration] {
+        &self.durable_schemas
+    }
+
     pub fn resources(&self) -> &[SkillResourceMetadata] {
         &self.resources
     }
@@ -416,25 +526,30 @@ impl ResolvedHarness {
         for (service, layers) in &self.layer_policies {
             kernel_config = kernel_config.with_layer_policy(service.clone(), layers.clone())?;
         }
+        let durable_schemas =
+            resolve_durable_schemas(self.durable_schemas.clone(), &kernel_config)?;
         let component_graph = ResolvedComponentGraph::compile_with_provider_policy(
             plugins.clone(),
             components.clone(),
             authority_ceiling,
             &self.provider_policy,
         )?;
-        let generation = generation_identity(
-            &plugins,
-            &components,
-            &self.resources,
-            &self.configuration,
-            &self.layer_policies,
-            &self.provider_policy,
+        let generation = SemanticGeneration {
+            plugins: &plugins,
+            components: &components,
+            durable_schemas: durable_schema_payload(&durable_schemas),
+            resources: &self.resources,
+            configuration: self.configuration.semantic_payload(),
+            layer_policies: layer_policy_payload(&self.layer_policies),
+            provider_policy: &self.provider_policy,
             authority_ceiling,
-        );
+        }
+        .identity();
         Ok(Self {
             generation,
             plugins,
             components,
+            durable_schemas,
             resources: self.resources.clone(),
             configuration: self.configuration.clone(),
             kernel_config,
@@ -449,11 +564,92 @@ impl ResolvedHarness {
 struct SemanticGeneration<'a> {
     plugins: &'a [PluginManifest],
     components: &'a [ComponentManifest],
+    durable_schemas: serde_json::Value,
     resources: &'a [SkillResourceMetadata],
     configuration: serde_json::Value,
     layer_policies: serde_json::Value,
     provider_policy: &'a ProviderCompositionPolicy,
     authority_ceiling: &'a Authority,
+}
+
+impl SemanticGeneration<'_> {
+    fn identity(&self) -> GraphGenerationId {
+        let encoded = serde_json::to_vec(self).expect("resolved generation metadata serializes");
+        let digest = Sha256::digest(encoded);
+        let mut identity = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            use std::fmt::Write as _;
+            write!(&mut identity, "{byte:02x}").expect("writing to String cannot fail");
+        }
+        GraphGenerationId(identity)
+    }
+}
+
+fn resolve_durable_schemas(
+    durable_schemas: impl IntoIterator<Item = DurableSchemaRegistration>,
+    kernel_config: &KernelConfig,
+) -> Result<Vec<DurableSchemaRegistration>, ResolvedHarnessError> {
+    let mut resolved = BTreeMap::new();
+    for mut registration in durable_schemas {
+        let namespace = registration.schema.namespace.clone();
+        let Some(owner) = kernel_config.resource_owner(&namespace) else {
+            return Err(ResolvedHarnessError::UndeclaredDurableSchema {
+                plugin: registration.owner,
+                namespace,
+            });
+        };
+        if owner != &registration.owner {
+            return Err(ResolvedHarnessError::DurableSchemaOwnerMismatch {
+                plugin: registration.owner,
+                namespace,
+                owner: owner.clone(),
+            });
+        }
+        registration
+            .migrations
+            .sort_by_key(|migration| (migration.from_version, migration.to_version));
+        if resolved.insert(namespace.clone(), registration).is_some() {
+            return Err(ResolvedHarnessError::DuplicateDurableSchema(namespace));
+        }
+    }
+    Ok(resolved.into_values().collect())
+}
+
+fn durable_schema_payload(durable_schemas: &[DurableSchemaRegistration]) -> serde_json::Value {
+    serde_json::Value::Array(
+        durable_schemas
+            .iter()
+            .map(|registration| {
+                serde_json::json!({
+                    "owner": registration.owner.as_str(),
+                    "namespace": registration.schema.namespace.as_str(),
+                    "version": registration.schema.version,
+                    "required_features": registration
+                        .schema
+                        .required_features
+                        .iter()
+                        .map(|feature| backend_feature_name(*feature))
+                        .collect::<Vec<_>>(),
+                    "migrations": registration.migrations.iter().map(|migration| serde_json::json!({
+                        "from_version": migration.from_version,
+                        "to_version": migration.to_version,
+                        "operations": migration.operations,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn backend_feature_name(feature: BackendFeature) -> &'static str {
+    match feature {
+        BackendFeature::Transactions => "transactions",
+        BackendFeature::UniqueKeys => "unique_keys",
+        BackendFeature::ForeignKeys => "foreign_keys",
+        BackendFeature::OrderedAppend => "ordered_append",
+        BackendFeature::IndexedRange => "indexed_range",
+        BackendFeature::Migrations => "migrations",
+    }
 }
 
 fn resolve_resources(
@@ -585,42 +781,14 @@ fn validate_layer_policies(
     Ok(())
 }
 
-fn generation_identity(
-    plugins: &[PluginManifest],
-    components: &[ComponentManifest],
-    resources: &[SkillResourceMetadata],
-    configuration: &ResolvedConfigContributions,
-    layer_policies: &BTreeMap<ServiceId, Vec<LayerPolicy>>,
-    provider_policy: &ProviderCompositionPolicy,
-    authority_ceiling: &Authority,
-) -> GraphGenerationId {
-    let payload = SemanticGeneration {
-        plugins,
-        components,
-        resources,
-        configuration: configuration.semantic_payload(),
-        layer_policies: layer_policy_payload(layer_policies),
-        provider_policy,
-        authority_ceiling,
-    };
-    let encoded = serde_json::to_vec(&payload).expect("resolved generation metadata serializes");
-    let digest = Sha256::digest(encoded);
-    let mut identity = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write as _;
-        write!(&mut identity, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    GraphGenerationId(identity)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ComponentId;
     use crate::{
         CapabilityId, CompatibilityMetadata, ComponentExport, ComponentImport,
-        ConfigContributionSource, ConfigNamespace, ConfigSourceClass, InterfaceId, PluginExecution,
-        PluginId, ReloadPolicy,
+        ConfigContributionSource, ConfigNamespace, ConfigSourceClass, DurableSchema, InterfaceId,
+        PluginExecution, PluginId, ReloadPolicy,
     };
     use std::collections::BTreeSet;
 
@@ -887,6 +1055,66 @@ mod tests {
 
         assert_eq!(baseline.resources()[0].identity, "review");
         assert_ne!(baseline.generation(), changed.generation());
+    }
+
+    #[test]
+    fn durable_schema_metadata_is_resolved_before_activation_and_changes_generation() {
+        let owner_id = plugin("durable-owner");
+        let namespace = ResourceNamespace::parse("durable.state").unwrap();
+        let mut manifest = owner("durable-owner", Authority::default());
+        manifest.resource_namespaces.push(namespace.clone());
+        let baseline = ResolvedHarness::resolve_with_durable_schemas(
+            [manifest.clone()],
+            [],
+            [DurableSchemaRegistration::new(
+                owner_id.clone(),
+                DurableSchema::new(namespace.clone(), 1),
+            )],
+            [],
+            &Authority::default(),
+        )
+        .unwrap();
+        let changed = ResolvedHarness::resolve_with_durable_schemas(
+            [manifest],
+            [],
+            [DurableSchemaRegistration::new(
+                owner_id,
+                DurableSchema::requiring(namespace.clone(), 2, [BackendFeature::Transactions]),
+            )],
+            [],
+            &Authority::default(),
+        )
+        .unwrap();
+
+        assert_eq!(baseline.durable_schemas()[0].schema.version, 1);
+        assert_ne!(baseline.generation(), changed.generation());
+    }
+
+    #[test]
+    fn durable_schema_owner_is_validated_during_resolution() {
+        let namespace = ResourceNamespace::parse("durable.state").unwrap();
+        let mut manifest = owner("actual-owner", Authority::default());
+        manifest.resource_namespaces.push(namespace.clone());
+        let error = ResolvedHarness::resolve_with_durable_schemas(
+            [manifest],
+            [],
+            [DurableSchemaRegistration::new(
+                plugin("wrong-owner"),
+                DurableSchema::new(namespace.clone(), 1),
+            )],
+            [],
+            &Authority::default(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            ResolvedHarnessError::DurableSchemaOwnerMismatch {
+                plugin: plugin("wrong-owner"),
+                namespace,
+                owner: plugin("actual-owner"),
+            }
+        );
     }
 
     #[test]

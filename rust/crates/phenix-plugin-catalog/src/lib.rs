@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+use phenix_core::{DurableSchemaRegistration, PluginId, PluginManifest};
+use phenix_sdk::StaticPluginResources;
+
 pub use phenix_adapter_acp::{adapter_acp_factory, adapter_acp_manifest, ACP_ADAPTER_PLUGIN};
 pub use phenix_core::{ContextResourceId, ContextRevisionId, SessionId};
 pub use phenix_plugin_api::{
@@ -18,12 +21,12 @@ pub use phenix_plugin_artifacts::{
 };
 pub use phenix_plugin_basic_agent::{
     basic_context_component_manifest, basic_context_factory, basic_context_manifest,
-    basic_model_component_manifest, basic_model_factory, basic_model_manifest,
-    basic_skills_component_manifest, basic_skills_factory, basic_skills_manifest,
-    basic_tools_component_manifest, basic_tools_factory, basic_tools_manifest,
-    BasicContextInterface, BasicSkillsInterface, BasicToolsInterface, BASIC_CONTEXT_COMPONENT,
-    BASIC_CONTEXT_PLUGIN, BASIC_MODEL_COMPONENT, BASIC_MODEL_PLUGIN, BASIC_SKILLS_COMPONENT,
-    BASIC_SKILLS_PLUGIN, BASIC_TOOLS_COMPONENT, BASIC_TOOLS_PLUGIN,
+    basic_durable_schema_registrations, basic_model_component_manifest, basic_model_factory,
+    basic_model_manifest, basic_skills_component_manifest, basic_skills_factory,
+    basic_skills_manifest, basic_tools_component_manifest, basic_tools_factory,
+    basic_tools_manifest, BasicContextInterface, BasicSkillsInterface, BasicToolsInterface,
+    BASIC_CONTEXT_COMPONENT, BASIC_CONTEXT_PLUGIN, BASIC_MODEL_COMPONENT, BASIC_MODEL_PLUGIN,
+    BASIC_SKILLS_COMPONENT, BASIC_SKILLS_PLUGIN, BASIC_TOOLS_COMPONENT, BASIC_TOOLS_PLUGIN,
 };
 pub use phenix_plugin_command_toolbelt::{
     cli_auth_state_service, cli_component_id, cli_component_manifest, cli_discover_service,
@@ -131,3 +134,33 @@ pub use phenix_sdk::{
     WorkerTaskRecord, WorkerTaskState, CONTEXT_SERVICE, EXECUTION_SERVICE, JOB_SERVICE,
     PLANNING_SERVICE,
 };
+
+/// Project generated durable resource metadata for a first-party plugin into the
+/// composition plan. Plugins without generated durable resources yield no entries.
+#[must_use]
+pub fn first_party_durable_schema_registrations(
+    manifest: &PluginManifest,
+) -> Vec<DurableSchemaRegistration> {
+    let owner = &manifest.id;
+    if owner == &artifact_manifest().id {
+        return registrations::<phenix_plugin_artifacts::Plugin>(owner);
+    }
+    if owner == &job_manifest().id {
+        return registrations::<phenix_plugin_jobs::Plugin>(owner);
+    }
+    if owner == &options_manifest().id {
+        return registrations::<phenix_plugin_options::Plugin>(owner);
+    }
+    if owner == &planning_manifest().id {
+        return registrations::<phenix_plugin_planning::Plugin>(owner);
+    }
+    let basic = basic_durable_schema_registrations(manifest);
+    if !basic.is_empty() {
+        return basic;
+    }
+    Vec::new()
+}
+
+fn registrations<T: StaticPluginResources>(owner: &PluginId) -> Vec<DurableSchemaRegistration> {
+    T::durable_schema_registrations(owner)
+}

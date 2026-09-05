@@ -156,6 +156,9 @@ fn map_activation_validation_error(
         ResolvedHarnessActivationError::DifferentGenerationAlreadyActive { .. } => {
             unreachable!("configuration validation does not inspect active generation")
         }
+        ResolvedHarnessActivationError::DurableSchemaPreparation(_) => {
+            unreachable!("configuration validation does not prepare durable schemas")
+        }
     }
 }
 

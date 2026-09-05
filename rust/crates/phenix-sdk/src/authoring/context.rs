@@ -501,7 +501,8 @@ mod tests {
             echo.clone(),
             consumer.clone(),
         ];
-        let resolved = ResolvedHarness::resolve(
+        let durable_schemas = phenix_plugin_options_test::options_durable_schema_registrations();
+        let resolved = ResolvedHarness::resolve_with_durable_schemas(
             manifests.clone(),
             [
                 session_component_manifest(),
@@ -510,6 +511,7 @@ mod tests {
                 echo_component_manifest(),
                 consumer_component_manifest(authority.clone()),
             ],
+            durable_schemas,
             [],
             &authority,
         )
