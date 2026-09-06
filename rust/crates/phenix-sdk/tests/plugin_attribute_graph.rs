@@ -88,8 +88,7 @@ fn dependencies_expand_recursively_and_deduplicate_diamonds() {
 
 #[test]
 fn dependencies_reject_incompatible_duplicate_ids() {
-    let error =
-        phenix_sdk::StaticPluginGraph::compose::<composition::ConflictRoot>().unwrap_err();
+    let error = phenix_sdk::StaticPluginGraph::compose::<composition::ConflictRoot>().unwrap_err();
     assert!(matches!(
         error,
         phenix_sdk::StaticPluginGraphError::DuplicateId { .. }
@@ -129,8 +128,7 @@ fn stateless_plugin_module_generates_default_component_and_export() {
 
 #[test]
 fn resource_attribute_owns_schema_and_migration_metadata() {
-    let migrations =
-        <composition::PlanStore as phenix_sdk::StaticResourceDefinition>::migrations();
+    let migrations = <composition::PlanStore as phenix_sdk::StaticResourceDefinition>::migrations();
 
     assert_eq!(
         <composition::PlanStore as phenix_sdk::StaticResourceDefinition>::schema_version(),
@@ -144,8 +142,7 @@ fn resource_attribute_owns_schema_and_migration_metadata() {
 
 #[test]
 fn plugin_resource_field_preserves_identity_schema_and_backend_features() {
-    let resources =
-        <composition::ResourceOwner as phenix_sdk::StaticPluginResources>::resources();
+    let resources = <composition::ResourceOwner as phenix_sdk::StaticPluginResources>::resources();
 
     assert_eq!(resources.len(), 1);
     assert_eq!(resources[0].id.as_str(), "fixture.attr.plans");

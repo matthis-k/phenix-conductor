@@ -42,11 +42,7 @@ mod incompatible_provider {
 struct IncompatibleConsumerApi {
     #[phenix(import)]
     models: Required<
-        Call<
-            IncompatibleModels,
-            IncompatibleConsumerRequest,
-            IncompatibleConsumerResponse,
-        >,
+        Call<IncompatibleModels, IncompatibleConsumerRequest, IncompatibleConsumerResponse>,
     >,
 }
 
@@ -71,8 +67,7 @@ fn incompatible_component_schemas_fail_before_activation() {
         [
             <incompatible_provider::Plugin as StaticPluginDefinition>::component_manifests()
                 .remove(0),
-            <IncompatibleConsumerPlugin as StaticPluginDefinition>::component_manifests()
-                .remove(0),
+            <IncompatibleConsumerPlugin as StaticPluginDefinition>::component_manifests().remove(0),
         ],
         std::iter::empty(),
         &authority,
@@ -146,13 +141,8 @@ struct ReplacementConsumerResponse {
 #[phenix_sdk::component]
 struct ReplacementConsumerApi {
     #[phenix(import)]
-    models: Required<
-        Call<
-            ReplacementModels,
-            ReplacementConsumerRequest,
-            ReplacementConsumerResponse,
-        >,
-    >,
+    models:
+        Required<Call<ReplacementModels, ReplacementConsumerRequest, ReplacementConsumerResponse>>,
 }
 
 #[phenix_sdk::component]
@@ -167,7 +157,9 @@ struct ReplacementConsumerPlugin {
 
 fn replacement_resolves<P>()
 where
-    P: StaticPluginDefinition + phenix_sdk::StaticPluginComponents + phenix_sdk::StaticPluginResources,
+    P: StaticPluginDefinition
+        + phenix_sdk::StaticPluginComponents
+        + phenix_sdk::StaticPluginResources,
 {
     let authority = Authority::default();
     ResolvedHarness::resolve(
@@ -177,8 +169,7 @@ where
         ],
         [
             P::component_manifests().remove(0),
-            <ReplacementConsumerPlugin as StaticPluginDefinition>::component_manifests()
-                .remove(0),
+            <ReplacementConsumerPlugin as StaticPluginDefinition>::component_manifests().remove(0),
         ],
         std::iter::empty(),
         &authority,
