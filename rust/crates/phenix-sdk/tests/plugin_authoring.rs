@@ -606,9 +606,6 @@ fn typed_event_emission_isolates_listener_mismatch_and_emits_diagnostic() {
         )
         .unwrap();
 
-    assert_eq!(PROJECTED_CALLS.load(Ordering::SeqCst), 1);
-    assert_eq!(EXACT_CALLS.load(Ordering::SeqCst), 0);
-    assert_eq!(DIAGNOSTIC_CALLS.load(Ordering::SeqCst), 1);
     let receipt = EVENT_RECEIPT
         .lock()
         .unwrap()
@@ -617,6 +614,10 @@ fn typed_event_emission_isolates_listener_mismatch_and_emits_diagnostic() {
     let EventDeliveryStatus::Succeeded(report) = receipt.wait() else {
         panic!("event delivery did not succeed");
     };
+
+    assert_eq!(PROJECTED_CALLS.load(Ordering::SeqCst), 1);
+    assert_eq!(EXACT_CALLS.load(Ordering::SeqCst), 0);
+    assert_eq!(DIAGNOSTIC_CALLS.load(Ordering::SeqCst), 1);
     assert_eq!(report.warnings.len(), 1);
 }
 
