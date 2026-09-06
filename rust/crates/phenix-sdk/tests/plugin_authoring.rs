@@ -1,9 +1,8 @@
 use phenix_core::{
     Authority, ComponentInterface, EventAdmissionReceipt, EventBus, EventDeliveryStatus,
     EventFailurePolicy, EventSubscription, EventTypeId, Exact, InterfaceCompatibility, Kernel,
-    KernelConfig, PhenixValue, PluginHost, PluginId,
-    PluginInstance, Project, ResolvedHarness, ResolvedHarnessActivation, ServiceId, SubscriptionId,
-    SubscriptionSpec,
+    KernelConfig, PhenixValue, PluginHost, PluginId, PluginInstance, Project, ResolvedHarness,
+    ResolvedHarnessActivation, ServiceId, SubscriptionId, SubscriptionSpec,
 };
 use phenix_sdk::{
     phenix_plugin, EventName, HookName, ListenerProjection, PhenixValue as DerivePhenixValue,
