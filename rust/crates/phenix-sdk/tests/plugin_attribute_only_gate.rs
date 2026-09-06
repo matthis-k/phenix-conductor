@@ -378,7 +378,7 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     kernel.activate_all().unwrap();
 
     let events = kernel.events();
-    let (diagnostics, seen_diagnostics) = mpsc::channel::<EventEnvelope>();
+    let (seen_diagnostics, diagnostics) = mpsc::channel::<EventEnvelope>();
     events
         .install_subscriptions([EventSubscription {
             spec: SubscriptionSpec {
