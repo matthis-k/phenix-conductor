@@ -315,10 +315,11 @@ impl EventBus {
     ) -> Result<(), EventError> {
         let indexed = index_subscriptions(subscriptions)?;
         validate_dependencies(&indexed)?;
-        *self
+        let mut current = self
             .subscriptions
             .lock()
-            .expect("event subscription lock poisoned") = indexed;
+            .expect("event subscription lock poisoned");
+        *current = indexed;
         self.subscription_revision.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
@@ -411,11 +412,16 @@ impl EventBus {
         } else {
             event.clone()
         };
-        let subscriptions = self
-            .subscriptions
-            .lock()
-            .expect("event subscription lock poisoned")
-            .clone();
+        let (subscriptions, revision) = {
+            let current = self
+                .subscriptions
+                .lock()
+                .expect("event subscription lock poisoned");
+            (
+                current.clone(),
+                self.subscription_revision.load(Ordering::Acquire),
+            )
+        };
         let levels = dependency_levels(&subscriptions, &event.event_type, event.version)?;
         for level in &levels {
             for id in level {
@@ -426,7 +432,6 @@ impl EventBus {
             }
         }
         self.reserve_delivery()?;
-        let revision = self.subscription_revision.load(Ordering::Acquire);
         let ancestry = self
             .active_causality
             .lock()
