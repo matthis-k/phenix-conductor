@@ -287,10 +287,9 @@ pub(super) fn invoke_resolved_chain_with(
                 .lock()
                 .expect("service invocation trace mutex poisoned")
                 .set_outcome(trace_index, ServiceParticipantOutcome::Failed);
-            return Err(KernelError::ServiceInvoke {
+            return Err(KernelError::ServiceCancelled {
                 plugin: provider.plugin.clone(),
                 service: chain.service.clone(),
-                message: "plugin invocation cancelled".into(),
             });
         }
         match result {
@@ -373,10 +372,9 @@ pub(super) fn invoke_resolved_chain_with(
                 .lock()
                 .expect("service invocation trace mutex poisoned")
                 .set_outcome(trace_index, ServiceParticipantOutcome::Failed);
-            return Err(KernelError::ServiceInvoke {
+            return Err(KernelError::ServiceCancelled {
                 plugin: provider.plugin.clone(),
                 service: chain.service.clone(),
-                message: "plugin invocation cancelled".into(),
             });
         }
         match result {
