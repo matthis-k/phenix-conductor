@@ -5,14 +5,16 @@ use phenix_core::{
 use std::marker::PhantomData;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Call<I, Request, Response> {
-    marker: PhantomData<fn(I, Request) -> Response>,
+pub struct Call<I, Request, Response, DomainError = std::convert::Infallible> {
+    call: PhantomData<fn(I, Request) -> Response>,
+    error: PhantomData<fn() -> DomainError>,
 }
 
-impl<I, Request, Response> Default for Call<I, Request, Response> {
+impl<I, Request, Response, DomainError> Default for Call<I, Request, Response, DomainError> {
     fn default() -> Self {
         Self {
-            marker: PhantomData,
+            call: PhantomData,
+            error: PhantomData,
         }
     }
 }
@@ -77,18 +79,20 @@ pub trait StaticImportField {
     fn required() -> bool;
 }
 
-impl<I, Request, Response> StaticImportField for Required<Call<I, Request, Response>>
+impl<I, Request, Response, DomainError> StaticImportField
+    for Required<Call<I, Request, Response, DomainError>>
 where
     I: InterfaceMarker,
     Request: HasPhenixSchema,
     Response: HasPhenixSchema,
+    DomainError: HasPhenixSchema,
 {
     fn interface_id() -> InterfaceId {
         I::interface_id()
     }
 
     fn schema() -> InterfaceSchema {
-        InterfaceSchema::of::<Request, Response>()
+        InterfaceSchema::fallible_of::<Request, Response, DomainError>()
     }
 
     fn required() -> bool {
@@ -96,18 +100,20 @@ where
     }
 }
 
-impl<I, Request, Response> StaticImportField for Optional<Call<I, Request, Response>>
+impl<I, Request, Response, DomainError> StaticImportField
+    for Optional<Call<I, Request, Response, DomainError>>
 where
     I: InterfaceMarker,
     Request: HasPhenixSchema,
     Response: HasPhenixSchema,
+    DomainError: HasPhenixSchema,
 {
     fn interface_id() -> InterfaceId {
         I::interface_id()
     }
 
     fn schema() -> InterfaceSchema {
-        InterfaceSchema::of::<Request, Response>()
+        InterfaceSchema::fallible_of::<Request, Response, DomainError>()
     }
 
     fn required() -> bool {
@@ -263,6 +269,15 @@ mod tests {
         assert_eq!(optional.interface.as_str(), "fixture.models@1");
         assert!(!optional.required);
         assert_eq!(optional.schema, InterfaceSchema::of::<String, String>());
+    }
+
+    #[test]
+    fn call_error_type_is_part_of_the_import_schema() {
+        type Infallible = Required<Call<Models, String, String>>;
+        type Fallible = Required<Call<Models, String, String, String>>;
+
+        assert_eq!(Infallible::schema().error(), &PhenixSchema::Never);
+        assert_eq!(Fallible::schema().error(), &PhenixSchema::String);
     }
 
     #[test]

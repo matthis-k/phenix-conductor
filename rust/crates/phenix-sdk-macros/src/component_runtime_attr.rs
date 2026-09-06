@@ -320,10 +320,10 @@ fn export_arm(method: &syn::ImplItemFn, interface: Interface) -> syn::Result<Tok
     } else {
         call
     };
-    let call = if returns_result(&method.sig.output) {
-        quote!((#call).map_err(|error| error.to_string())?)
+    let encode = if returns_result(&method.sig.output) {
+        quote!(::phenix_sdk::encode_result_runtime)
     } else {
-        call
+        quote!(::phenix_sdk::encode_runtime)
     };
     let request_binding = request.is_some().then(|| quote!(let request = #decode;));
 
@@ -334,7 +334,7 @@ fn export_arm(method: &syn::ImplItemFn, interface: Interface) -> syn::Result<Tok
                 let plugin_context = ::phenix_sdk::PluginContext::new(host, (), (), ());
                 #request_binding
                 let response = #call;
-                return ::phenix_sdk::encode_runtime(host, &response);
+                return #encode(host, &response);
             }
         }
     })
