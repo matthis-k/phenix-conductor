@@ -449,7 +449,7 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
         CapabilityId::parse("kernel.persistence.write").unwrap(),
     ]);
     let report = events.dispatch(&event, &listener_authority).unwrap();
-    assert_eq!(report.delivered.len(), 1);
+    assert_eq!(report.delivered.len(), 1, "{report:?}");
     assert!(report.warnings.is_empty());
 
     let mismatched = Request {
