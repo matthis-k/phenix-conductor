@@ -113,7 +113,8 @@ mod tests {
         ];
 
         for (runtime, application) in cases {
-            let error = ApplicationError::from(InvocationFailure::new(runtime, "same display text"));
+            let error =
+                ApplicationError::from(InvocationFailure::new(runtime, "same display text"));
             assert_eq!(error.class(), application);
         }
     }

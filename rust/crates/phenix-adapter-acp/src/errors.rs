@@ -12,10 +12,8 @@ pub fn application_error_to_acp(error: ApplicationError) -> agent_client_protoco
             ))
         }
         ApplicationError::InvalidInput { message } => {
-            agent_client_protocol::Error::invalid_params().data(error_data(
-                "invalid_input",
-                json!({ "message": message }),
-            ))
+            agent_client_protocol::Error::invalid_params()
+                .data(error_data("invalid_input", json!({ "message": message })))
         }
         ApplicationError::InvalidResponse { message } => {
             agent_client_protocol::Error::internal_error().data(error_data(
@@ -24,15 +22,12 @@ pub fn application_error_to_acp(error: ApplicationError) -> agent_client_protoco
             ))
         }
         ApplicationError::NotFound { resource } => {
-            agent_client_protocol::Error::resource_not_found(Some(resource.clone())).data(
-                error_data("not_found", json!({ "resource": resource })),
-            )
+            agent_client_protocol::Error::resource_not_found(Some(resource.clone()))
+                .data(error_data("not_found", json!({ "resource": resource })))
         }
         ApplicationError::Unauthenticated { message } => {
-            agent_client_protocol::Error::auth_required().data(error_data(
-                "unauthenticated",
-                json!({ "message": message }),
-            ))
+            agent_client_protocol::Error::auth_required()
+                .data(error_data("unauthenticated", json!({ "message": message })))
         }
         ApplicationError::PermissionDenied { message } => {
             agent_client_protocol::Error::internal_error().data(error_data(
@@ -40,22 +35,14 @@ pub fn application_error_to_acp(error: ApplicationError) -> agent_client_protoco
                 json!({ "message": message }),
             ))
         }
-        ApplicationError::Conflict { message } => {
-            agent_client_protocol::Error::internal_error().data(error_data(
-                "conflict",
-                json!({ "message": message }),
-            ))
-        }
+        ApplicationError::Conflict { message } => agent_client_protocol::Error::internal_error()
+            .data(error_data("conflict", json!({ "message": message }))),
         ApplicationError::Cancelled => agent_client_protocol::Error::request_cancelled()
             .data(error_data("cancelled", Value::Null)),
         ApplicationError::Disconnected => agent_client_protocol::Error::internal_error()
             .data(error_data("disconnected", Value::Null)),
-        ApplicationError::Failed { message } => {
-            agent_client_protocol::Error::internal_error().data(error_data(
-                "failed",
-                json!({ "message": message }),
-            ))
-        }
+        ApplicationError::Failed { message } => agent_client_protocol::Error::internal_error()
+            .data(error_data("failed", json!({ "message": message }))),
     }
 }
 
@@ -118,9 +105,10 @@ mod tests {
 
     #[test]
     fn malformed_payload_class_survives_application_and_acp_mapping() {
-        let malformed = application_error_to_acp(ApplicationError::from(
-            InvocationFailure::new(InvocationFailureClass::Conversion, "malformed payload"),
-        ));
+        let malformed = application_error_to_acp(ApplicationError::from(InvocationFailure::new(
+            InvocationFailureClass::Conversion,
+            "malformed payload",
+        )));
 
         assert_eq!(malformed.code, ErrorCode::InternalError);
         assert_eq!(class(&malformed), "invalid_response");
