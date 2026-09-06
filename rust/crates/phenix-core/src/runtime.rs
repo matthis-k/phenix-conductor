@@ -21,10 +21,13 @@ use std::{
 mod dispatch;
 mod host;
 mod kernel;
+mod listener;
 mod persistence_bootstrap;
 mod reconciliation;
 #[cfg(test)]
 mod tests;
+
+pub use listener::PluginListener;
 
 const PERSISTENCE_SCHEMA: &str = "kernel.persistence.schema";
 const PERSISTENCE_READ: &str = "kernel.persistence.read";
@@ -349,6 +352,10 @@ pub trait PluginInstance: Send {
         self.invoke(service, input, host).map(LayerResult::Handled)
     }
 
+    /// Legacy transport-only listener binding.
+    ///
+    /// New plugin authoring paths should prefer `bind_plugin_listener`, which
+    /// receives a scoped `PluginHost` at delivery time.
     fn bind_listener(
         &mut self,
         listener: &ResolvedListener,
@@ -360,6 +367,15 @@ pub trait PluginInstance: Send {
         ))
     }
 
+    /// Bind a runtime listener that receives a fresh scoped host for each delivery.
+    fn bind_plugin_listener(
+        &mut self,
+        _listener: &ResolvedListener,
+        _generation: &GraphGenerationId,
+    ) -> Option<Result<Arc<dyn PluginListener>, String>> {
+        None
+    }
+
     fn stop(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
     }
@@ -369,7 +385,12 @@ fn stage_listener_subscriptions(
     graph: &ResolvedComponentGraph,
     generation: &GraphGenerationId,
     config: &KernelConfig,
+    states: &BTreeMap<PluginId, PluginState>,
     instances: &BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
+    events: &Arc<EventBus>,
+    tasks: &Arc<TaskRuntime>,
+    persistence: &Arc<Mutex<Box<dyn PersistenceBackend>>>,
+    provenance: &Arc<Mutex<Vec<ServiceInvocationProvenance>>>,
 ) -> Result<Vec<EventSubscription>, KernelError> {
     let mut subscriptions = Vec::new();
     for listener in graph.listeners() {
@@ -380,7 +401,26 @@ fn stage_listener_subscriptions(
             .lock()
             .expect("plugin instance mutex poisoned during listener binding");
         let handler = catch_unwind(AssertUnwindSafe(|| {
-            instance.bind_listener(listener, generation)
+            match instance.bind_plugin_listener(listener, generation) {
+                Some(handler) => handler.map(|handler| {
+                    listener::scoped_event_handler(
+                        &listener.owning_plugin,
+                        handler,
+                        listener::ListenerRuntimeSources {
+                            graph,
+                            generation,
+                            config,
+                            states,
+                            instances,
+                            events,
+                            tasks,
+                            persistence,
+                            provenance,
+                        },
+                    )
+                }),
+                None => instance.bind_listener(listener, generation),
+            }
         }))
         .map_err(|_| KernelError::ListenerBinding {
             plugin: listener.owning_plugin.clone(),
@@ -429,9 +469,9 @@ pub struct Kernel {
     prepared_embedded_instances: BTreeMap<PluginId, Box<dyn PluginInstance>>,
     instances: BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
     events: Arc<EventBus>,
-    tasks: TaskRuntime,
-    persistence: Mutex<Box<dyn PersistenceBackend>>,
+    tasks: Arc<TaskRuntime>,
+    persistence: Arc<Mutex<Box<dyn PersistenceBackend>>>,
     persistence_bootstrap: Option<crate::ResolvedPersistenceBootstrap>,
-    provenance: Mutex<Vec<ServiceInvocationProvenance>>,
+    provenance: Arc<Mutex<Vec<ServiceInvocationProvenance>>>,
     runtime_active: bool,
 }
