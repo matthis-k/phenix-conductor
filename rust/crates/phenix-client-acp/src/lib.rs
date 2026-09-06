@@ -40,7 +40,7 @@ impl<T: ApplicationTransport> Client<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_core::{ContractId, PhenixContract, PhenixValue, ValueCodec};
+    use phenix_core::{ContractId, PhenixContract, PhenixValue};
 
     #[derive(phenix_sdk_macros::PhenixValue)]
     struct Request;
@@ -51,7 +51,7 @@ mod tests {
         }
     }
 
-    #[derive(phenix_sdk_macros::PhenixValue)]
+    #[derive(Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
     struct Response;
 
     impl PhenixContract for Response {
