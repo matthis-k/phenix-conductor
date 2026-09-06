@@ -1,7 +1,7 @@
 use phenix_core::{
-    Authority, InvocationOutcome, Kernel, KernelConfig, LayerPolicy, LayerResult, PhenixValue,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, Project,
-    ResolvedHarness, ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
+    Authority, InvocationOutcome, Kernel, LayerPolicy, LayerResult, PhenixValue, PluginExecution,
+    PluginHost, PluginId, PluginInstance, PluginManifest, Project, ResolvedHarness,
+    ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_sdk::{
     HasPhenixSchema, StaticComponentBehavior, StaticPluginDefinition, StaticPluginFactory,
@@ -40,7 +40,7 @@ impl Display for DomainFailure {
 mod provider {
     use super::*;
 
-    #[phenix(export(SERVICE), public, terminal)]
+    #[phenix(export("fixture.fallible-provider.run@1"), public, terminal)]
     pub fn run(request: Request) -> Result<Response, DomainFailure> {
         match request.outcome.as_str() {
             "conflict" => Err(DomainFailure::Conflict {
