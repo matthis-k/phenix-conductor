@@ -1,7 +1,7 @@
 use crate::{debug_manifest, DEBUG_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-    ComponentManifest, HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixSchema, PhenixValue,
+    ComponentManifest, HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixValue,
 };
 use phenix_sdk::{
     ContextInterface, FrontendInterface, JobInterface, ModelRoutingInterface, PlanningInterface,
