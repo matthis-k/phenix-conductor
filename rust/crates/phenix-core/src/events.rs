@@ -485,6 +485,9 @@ impl EventBus {
             if let Err(error) = self.enter_causality(event.causality_id, &level) {
                 return EventDeliveryStatus::Failed(error);
             }
+            let event = &event;
+            let graph_generation = graph_generation.as_ref();
+            let bus = self;
             let results = thread::scope(|scope| {
                 let handles = level
                     .iter()
@@ -492,12 +495,12 @@ impl EventBus {
                         let subscription = &subscriptions[id];
                         let handler_authority =
                             emitter_authority.attenuate(&subscription.spec.maximum_authority);
-                        scope.spawn(|| {
+                        scope.spawn(move || {
                             subscription.handler.handle_with_provenance(
-                                self,
-                                &event,
+                                bus,
+                                event,
                                 &handler_authority,
-                                graph_generation.as_ref(),
+                                graph_generation,
                             )
                         })
                     })
@@ -511,6 +514,11 @@ impl EventBus {
                     .collect::<Vec<_>>()
             });
             self.leave_causality(event.causality_id, &level);
+            if self.subscription_revision.load(Ordering::Acquire) != revision {
+                return EventDeliveryStatus::Cancelled(
+                    EventDeliveryCancellation::SubscriptionSetChanged,
+                );
+            }
 
             for (id, result) in level.into_iter().zip(results) {
                 let subscription = &subscriptions[&id];
@@ -1049,9 +1057,119 @@ mod tests {
         .unwrap();
 
         let report = bus.dispatch(&envelope(10), &Authority::default()).unwrap();
+        assert!(report.delivered.is_empty());
+        assert_eq!(
+            report.failures,
+            vec![(subscription("warning"), "expected".into())]
+        );
         assert_eq!(
             report.warnings,
             vec![(subscription("warning"), "expected".into())]
+        );
+    }
+
+    #[test]
+    fn admission_is_bounded_and_reports_a_terminal_status() {
+        let bus = EventBus::with_capacity(1);
+        let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+        let handler_gate = Arc::clone(&gate);
+        bus.replace_subscriptions([EventSubscription {
+            spec: spec("blocked", &[]),
+            handler: Arc::new(move |_: &EventEnvelope, _: &Authority| {
+                let (state, changed) = &*handler_gate;
+                let mut state = state.lock().unwrap();
+                state.0 = true;
+                changed.notify_all();
+                while !state.1 {
+                    state = changed.wait(state).unwrap();
+                }
+                Ok(())
+            }),
+        }])
+        .unwrap();
+
+        let receipt = bus.admit(&envelope(20), &Authority::default()).unwrap();
+        let (state, changed) = &*gate;
+        let state = state.lock().unwrap();
+        let (mut state, timeout) = changed
+            .wait_timeout_while(state, Duration::from_secs(1), |state| !state.0)
+            .unwrap();
+        assert!(!timeout.timed_out(), "listener did not start");
+        assert_eq!(receipt.status(), EventDeliveryStatus::Accepted);
+        assert!(matches!(
+            bus.admit(&envelope(21), &Authority::default()),
+            Err(EventError::QueueSaturated { capacity: 1 })
+        ));
+        state.1 = true;
+        changed.notify_all();
+        drop(state);
+
+        assert!(matches!(
+            receipt.wait(),
+            EventDeliveryStatus::Succeeded(EventDispatchReport { .. })
+        ));
+    }
+
+    #[test]
+    fn fail_delivery_receipt_preserves_the_handler_failure() {
+        let bus = EventBus::default();
+        bus.replace_subscriptions([EventSubscription {
+            spec: spec("failed", &[]),
+            handler: Arc::new(|_: &EventEnvelope, _: &Authority| Err("failed".into())),
+        }])
+        .unwrap();
+
+        let receipt = bus.admit(&envelope(22), &Authority::default()).unwrap();
+        assert_eq!(
+            receipt.wait(),
+            EventDeliveryStatus::Failed(EventError::HandlerFailed {
+                subscription: subscription("failed"),
+                message: "failed".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn subscription_replacement_cancels_an_in_flight_old_delivery() {
+        let bus = EventBus::default();
+        let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+        let handler_gate = Arc::clone(&gate);
+        bus.replace_subscriptions([
+            EventSubscription {
+                spec: spec("first", &[]),
+                handler: Arc::new(move |_: &EventEnvelope, _: &Authority| {
+                    let (state, changed) = &*handler_gate;
+                    let mut state = state.lock().unwrap();
+                    state.0 = true;
+                    changed.notify_all();
+                    while !state.1 {
+                        state = changed.wait(state).unwrap();
+                    }
+                    Ok(())
+                }),
+            },
+            subscription_with("second", &["first"]),
+        ])
+        .unwrap();
+
+        let receipt = bus.admit(&envelope(23), &Authority::default()).unwrap();
+        let (state, changed) = &*gate;
+        let state = state.lock().unwrap();
+        let (mut state, timeout) = changed
+            .wait_timeout_while(state, Duration::from_secs(1), |state| !state.0)
+            .unwrap();
+        assert!(!timeout.timed_out(), "listener did not start");
+        bus.replace_subscriptions([subscription_with("replacement", &[])])
+            .unwrap();
+        state.1 = true;
+        changed.notify_all();
+        drop(state);
+
+        assert_eq!(
+            receipt.wait(),
+            EventDeliveryStatus::Cancelled(
+                EventDeliveryCancellation::SubscriptionSetChanged
+            )
         );
     }
 }
