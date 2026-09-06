@@ -33,9 +33,11 @@ First-party `phenix-plugin-*` and `phenix-adapter-*` crates own independently se
 
 `phenix-harness` owns the supported product assembly. It selects plugins, grants authority, chooses persistence, loads product configuration and skills, and exposes the wrapped `phenix` product.
 
-`phenix-client` owns the internal conductor client/server wire; it is not a public Client SDK. `phenix-adapter-acp` is the transport-independent ACP runtime plugin. Its package and runtime identity exist, while standard ACP dispatch remains unimplemented.
+`phenix-client` owns the internal conductor client/server wire; it is not a public Client SDK. `phenix-adapter-acp` is the transport-independent ACP runtime plugin. It maps standard ACP and descriptor-backed `_phenix/...` extensions to the fixed application interface.
 
-`phenix-application-interface` owns the fixed, versioned application descriptor. Typed Rust declarations derive its `PhenixSchema` payloads. The descriptor covers editor operations, updates, callbacks, capability dependencies, and errors. It contains no runtime service topology or authority policy. The first Rust emitter consumes the serialized descriptor and produces a compiled regression client. ACP transport and production client integration remain follow-up work.
+`phenix-application-interface` owns the fixed, versioned application descriptor. Typed Rust declarations derive its `PhenixSchema` payloads. The descriptor covers editor operations, updates, callbacks, capability dependencies, and errors. It contains no runtime service topology or authority policy. The first Rust emitter consumes the serialized descriptor and produces a compiled regression client.
+
+`phenix-acp-stdio` provides the ACP stdio server and its channel boundary. The remaining runtime bridge and `phenix-acp` executable are required before an editor can spawn it.
 
 ### Rust boundaries
 
@@ -47,6 +49,7 @@ First-party `phenix-plugin-*` and `phenix-adapter-*` crates own independently se
 | `phenix-conductor` | Generic configured server and transport |
 | `phenix-plugin-*` | Independently owned first-party services |
 | `phenix-adapter-acp` | Stateless ACP adapter runtime plugin |
+| `phenix-acp-stdio` | ACP stdio server and configured-runtime hand-off |
 | `phenix-plugin-catalog` | Thin embedded-factory catalog |
 | `phenix-harness` | Supported conductor + selected-plugin product assembly |
 | `phenix-backend-*` | Provider/backend adapters |
