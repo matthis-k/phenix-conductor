@@ -162,7 +162,7 @@ impl From<rusqlite::Error> for PersistenceError {
     }
 }
 
-pub trait PersistenceBackend {
+pub trait PersistenceBackend: Send {
     fn supported_features(&self) -> BTreeSet<BackendFeature>;
 
     fn register_schema(
