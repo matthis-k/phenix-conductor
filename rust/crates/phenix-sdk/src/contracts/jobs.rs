@@ -83,6 +83,6 @@ impl ComponentInterface for JobInterface {
     }
 
     fn schema() -> InterfaceSchema {
-        InterfaceSchema::of::<JobCommand, JobResponse>()
+        InterfaceSchema::fallible_of::<JobCommand, JobResponse, String>()
     }
 }
