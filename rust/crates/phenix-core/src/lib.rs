@@ -48,6 +48,8 @@ extern crate self as phenix_core;
 #[cfg(test)]
 mod component_endpoint_regression;
 #[cfg(test)]
+mod component_reentrancy_regression;
+#[cfg(test)]
 mod host_authority_regression;
 #[cfg(test)]
 mod invalid_candidate_activation_regression;
@@ -187,6 +189,7 @@ pub use runtime::{
     ComponentProviderProvenance, Kernel, LayerResult, PluginHost, PluginInstance,
     PluginRuntimeProvider, PluginState, ProviderEndpointProvenance, RuntimePluginCandidate,
     ServiceInvocationProvenance, ServiceParticipantOutcome, ServiceParticipantProvenance,
+    SharedPluginInvocation,
 };
 pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
 pub use tasks::{CallCancellationToken, CancellationToken, TaskHandle, TaskRuntime, TaskScope};

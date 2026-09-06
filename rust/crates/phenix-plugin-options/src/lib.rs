@@ -452,7 +452,7 @@ impl Api {
         authority = persistence_authority()
     )]
     fn handle(
-        &mut self,
+        &self,
         context: &phenix_sdk::PluginContext<'_, '_, ()>,
         command: OptionCommand,
     ) -> Result<OptionResponse, String> {

@@ -32,7 +32,7 @@ struct Api;
 impl Api {
     #[phenix(export("phenix.tools@1"), terminal, priority = 10)]
     fn handle(
-        &mut self,
+        &self,
         context: &phenix_sdk::PluginContext<'_, '_, ()>,
         command: ToolCommand,
     ) -> Result<ToolResponse, String> {

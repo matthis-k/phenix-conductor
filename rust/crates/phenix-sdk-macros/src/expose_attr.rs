@@ -65,7 +65,7 @@ pub(crate) fn exposed_fields_impl(name: &syn::Ident, fields: &[ExposedField]) ->
                 ::phenix_sdk::remap_exposed_service::<#ty>(owner, #mount, service)
             {
                 return Some(<#ty as ::phenix_sdk::StaticExpose>::dispatch_exposed(
-                    &mut self.#member,
+                    &self.#member,
                     &service,
                     input,
                     host,
@@ -85,7 +85,7 @@ pub(crate) fn exposed_fields_impl(name: &syn::Ident, fields: &[ExposedField]) ->
             }
 
             fn dispatch_exposed_field_for(
-                &mut self,
+                &self,
                 owner: &str,
                 service: &::phenix_sdk::__phenix_plugin::ServiceId,
                 input: &[u8],
@@ -412,7 +412,7 @@ mod tests {
             quote! {
                 impl Models {
                     #[phenix(expose(name = "current"))]
-                    fn selected(&mut self, request: Request) -> Response {
+                    fn selected(&self, request: Request) -> Response {
                         todo!()
                     }
 

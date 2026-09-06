@@ -220,6 +220,12 @@ struct ContinuationState {
     trace: Arc<Mutex<InvocationTrace>>,
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) struct ComponentServiceEndpoint {
+    pub(super) component: ComponentId,
+    pub(super) service: ServiceId,
+}
+
 pub struct PluginHost<'a> {
     graph_generation: Option<&'a GraphGenerationId>,
     component_graph: &'a ResolvedComponentGraph,
@@ -237,6 +243,7 @@ pub struct PluginHost<'a> {
     provenance: &'a Mutex<Vec<ServiceInvocationProvenance>>,
     continuation: Option<ContinuationState>,
     active_services: BTreeSet<ServiceId>,
+    active_component_endpoints: BTreeSet<ComponentServiceEndpoint>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -269,10 +276,48 @@ pub trait PluginRuntimeProvider: Send {
     }
 }
 
+/// Reentrant invocation endpoint that does not require mutable access to a whole Plugin instance.
+///
+/// Implementations keep mutable domain state behind their own narrow synchronization handles.
+/// Core may call this endpoint while another endpoint owned by the same Plugin is active.
+pub trait SharedPluginInvocation: Send + Sync {
+    fn invoke(
+        &self,
+        _service: &ServiceId,
+        _input: &[u8],
+        _host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        Err("service invocation is not implemented".into())
+    }
+
+    fn invoke_component(
+        &self,
+        _component: &ComponentId,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        self.invoke(service, input, host)
+    }
+
+    fn invoke_layer(
+        &self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<LayerResult, String> {
+        self.invoke(service, input, host).map(LayerResult::Handled)
+    }
+}
+
 pub trait PluginInstance: Send {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String>;
 
     fn runtime_provider(&mut self) -> Option<&mut dyn PluginRuntimeProvider> {
+        None
+    }
+
+    fn shared_invocation(&self) -> Option<Arc<dyn SharedPluginInvocation>> {
         None
     }
 

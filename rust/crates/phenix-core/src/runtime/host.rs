@@ -101,6 +101,7 @@ impl<'a> PluginHost<'a> {
                 ServiceDispatchGuards {
                     call_stack: &self.call_stack,
                     active_services: &self.active_services,
+                    active_component_endpoints: &self.active_component_endpoints,
                     terminal_component: Some(handle.exporter()),
                 },
             )
@@ -141,8 +142,12 @@ impl<'a> PluginHost<'a> {
                 input,
                 &delegated_authority,
                 binding,
-                &self.call_stack,
-                &self.active_services,
+                ServiceDispatchGuards {
+                    call_stack: &self.call_stack,
+                    active_services: &self.active_services,
+                    active_component_endpoints: &self.active_component_endpoints,
+                    terminal_component: None,
+                },
             )
         })
     }
@@ -181,6 +186,7 @@ impl<'a> PluginHost<'a> {
             ServiceDispatchGuards {
                 call_stack: &self.call_stack,
                 active_services: &self.active_services,
+                active_component_endpoints: &self.active_component_endpoints,
                 terminal_component: continuation.terminal_component.as_ref(),
             },
             &continuation.trace,

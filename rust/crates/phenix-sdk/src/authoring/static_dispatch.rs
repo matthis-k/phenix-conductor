@@ -2,12 +2,12 @@ use super::{EventContext, StaticPluginComponents, StaticPluginResources};
 use phenix_core::{
     Authority, ComponentId, EventBus, EventEnvelope, EventHandler, EventTypeId, Exact,
     GraphGenerationId, InterfaceId, LayerResult, PhenixValue, PluginContext, PluginHost, PluginId,
-    PluginInstance, Project, ResolvedListener, ServiceId, ValueError,
+    PluginInstance, Project, ResolvedListener, ServiceId, SharedPluginInvocation, ValueError,
 };
 use std::{
     error::Error,
     future::Future,
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Weak},
     task::{Context, Poll, Wake, Waker},
     thread,
 };
@@ -15,10 +15,10 @@ use std::{
 const STRUCTURAL_MISMATCH_EVENT: &str = "kernel.structural_value_mismatch";
 const STRUCTURAL_MISMATCH_EVENT_VERSION: u32 = 1;
 
-/// Erased runtime dispatch generated from a stateful component's typed exports.
+/// Erased runtime dispatch generated from a component's typed exports.
 pub trait StaticComponentDispatch {
     fn dispatch(
-        &mut self,
+        &self,
         service: &ServiceId,
         input: &[u8],
         host: &PluginHost<'_>,
@@ -26,14 +26,14 @@ pub trait StaticComponentDispatch {
 
     fn into_plugin_instance(self) -> Box<dyn PluginInstance>
     where
-        Self: Sized + StaticComponentRuntimeDispatch + Send + 'static,
+        Self: Sized + StaticComponentRuntimeDispatch + Send + Sync + 'static,
     {
-        Box::new(StaticDispatchInstance(self))
+        Box::new(StaticDispatchInstance(Arc::new(self)))
     }
 
     fn default_plugin_instance() -> Box<dyn PluginInstance>
     where
-        Self: Sized + StaticComponentRuntimeDispatch + Default + Send + 'static,
+        Self: Sized + StaticComponentRuntimeDispatch + Default + Send + Sync + 'static,
     {
         Self::default().into_plugin_instance()
     }
@@ -42,14 +42,14 @@ pub trait StaticComponentDispatch {
 /// Live runtime callbacks generated from a component impl.
 pub trait StaticComponentRuntimeDispatch {
     fn dispatch_runtime(
-        &mut self,
+        &self,
         service: &ServiceId,
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String>;
 
     fn dispatch_layer_runtime(
-        &mut self,
+        &self,
         service: &ServiceId,
         input: &[u8],
         host: &PluginHost<'_>,
@@ -57,7 +57,7 @@ pub trait StaticComponentRuntimeDispatch {
 
     #[doc(hidden)]
     fn dispatch_listener_runtime(
-        &mut self,
+        &self,
         _listener: &str,
         _context: &EventContext,
         _payload: &[u8],
@@ -86,14 +86,55 @@ pub trait StaticComponentRuntimeDispatch {
     }
 }
 
-struct StaticDispatchInstance<T>(T);
+struct StaticDispatchInstance<T>(Arc<T>);
+
+struct StaticComponentSharedInvocation<T>(Weak<T>);
+
+impl<T> StaticComponentSharedInvocation<T> {
+    fn component(&self) -> Result<Arc<T>, String> {
+        self.0
+            .upgrade()
+            .ok_or_else(|| "static component state is unavailable".to_owned())
+    }
+}
+
+impl<T> SharedPluginInvocation for StaticComponentSharedInvocation<T>
+where
+    T: StaticComponentDispatch + StaticComponentRuntimeDispatch + Send + Sync + 'static,
+{
+    fn invoke(
+        &self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        self.component()?.dispatch_runtime(service, input, host)
+    }
+
+    fn invoke_layer(
+        &self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<LayerResult, String> {
+        self.component()?
+            .dispatch_layer_runtime(service, input, host)
+            .unwrap_or_else(|| Err(format!("unsupported component layer: {service}")))
+    }
+}
 
 impl<T> PluginInstance for StaticDispatchInstance<T>
 where
-    T: StaticComponentDispatch + StaticComponentRuntimeDispatch + Send + 'static,
+    T: StaticComponentDispatch + StaticComponentRuntimeDispatch + Send + Sync + 'static,
 {
     fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
+    }
+
+    fn shared_invocation(&self) -> Option<Arc<dyn SharedPluginInvocation>> {
+        Some(Arc::new(StaticComponentSharedInvocation(Arc::downgrade(
+            &self.0,
+        ))))
     }
 
     fn invoke(
@@ -256,7 +297,7 @@ where
 /// Author-free component routing generated for a stateful plugin struct.
 pub trait StaticPluginComponentDispatch {
     fn dispatch_component(
-        &mut self,
+        &self,
         component: &ComponentId,
         service: &ServiceId,
         input: &[u8],
@@ -264,7 +305,7 @@ pub trait StaticPluginComponentDispatch {
     ) -> Result<Vec<u8>, String>;
 
     fn dispatch_layer(
-        &mut self,
+        &self,
         service: &ServiceId,
         _input: &[u8],
         _host: &PluginHost<'_>,
@@ -274,14 +315,14 @@ pub trait StaticPluginComponentDispatch {
 
     #[doc(hidden)]
     fn listener_handler(
-        _state: Weak<Mutex<Self>>,
+        _state: Weak<Self>,
         _owner: &PluginId,
         _component: &ComponentId,
         _method: &str,
         _generation: &GraphGenerationId,
     ) -> Option<Arc<dyn EventHandler>>
     where
-        Self: Sized + Send + 'static,
+        Self: Sized + Send + Sync + 'static,
     {
         None
     }
@@ -289,7 +330,7 @@ pub trait StaticPluginComponentDispatch {
     /// Adapt an already-constructed stateful plugin value to the kernel's erased runtime ABI.
     fn into_plugin_instance(self) -> Box<dyn PluginInstance>
     where
-        Self: Sized + StaticPluginComponents + StaticPluginResources + Send + 'static,
+        Self: Sized + StaticPluginComponents + StaticPluginResources + Send + Sync + 'static,
     {
         Box::new(StaticPluginInstance::from_component_dispatch(self))
     }
@@ -298,11 +339,11 @@ pub trait StaticPluginComponentDispatch {
 pub type StaticPluginStart<T> = fn(&mut T, &PluginHost<'_>) -> Result<(), String>;
 pub type StaticPluginStop<T> = fn(&mut T, &PluginHost<'_>) -> Result<(), String>;
 pub type StaticPluginInvoke<T> =
-    fn(&mut T, &ComponentId, &ServiceId, &[u8], &PluginHost<'_>) -> Result<Vec<u8>, String>;
+    fn(&T, &ComponentId, &ServiceId, &[u8], &PluginHost<'_>) -> Result<Vec<u8>, String>;
 
 /// Kernel adapter for an already-constructed Rust plugin value.
 pub struct StaticPluginInstance<T> {
-    plugin: Arc<Mutex<T>>,
+    plugin: Arc<T>,
     start: Option<StaticPluginStart<T>>,
     stop: Option<StaticPluginStop<T>>,
     invoke: StaticPluginInvoke<T>,
@@ -315,7 +356,7 @@ where
     #[must_use]
     pub fn new(plugin: T, invoke: StaticPluginInvoke<T>) -> Self {
         Self {
-            plugin: Arc::new(Mutex::new(plugin)),
+            plugin: Arc::new(plugin),
             start: None,
             stop: None,
             invoke,
@@ -415,12 +456,8 @@ impl<T> StaticPluginInstance<T> {
 
     #[must_use]
     pub fn into_inner(self) -> T {
-        match Arc::try_unwrap(self.plugin) {
-            Ok(plugin) => plugin
-                .into_inner()
-                .unwrap_or_else(|error| error.into_inner()),
-            Err(_) => panic!("static plugin state still has live strong references"),
-        }
+        Arc::try_unwrap(self.plugin)
+            .unwrap_or_else(|_| panic!("static plugin state still has live strong references"))
     }
 
     #[doc(hidden)]
@@ -443,22 +480,102 @@ impl<T> StaticPluginInstance<T> {
     }
 }
 
+fn static_plugin_service<T>(service: &ServiceId) -> Result<ComponentId, String>
+where
+    T: StaticPluginComponents,
+{
+    let mut matches = T::components().into_iter().filter(|component| {
+        component
+            .exports()
+            .iter()
+            .any(|export| export.terminal && export.interface.as_str() == service.as_str())
+    });
+    let component = matches
+        .next()
+        .ok_or_else(|| format!("unsupported static plugin service: {service}"))?;
+    if matches.next().is_some() {
+        return Err(format!("ambiguous static plugin service: {service}"));
+    }
+    Ok(component.id)
+}
+
+struct StaticPluginSharedInvocation<T> {
+    plugin: Weak<T>,
+    invoke: StaticPluginInvoke<T>,
+}
+
+impl<T> StaticPluginSharedInvocation<T> {
+    fn plugin(&self) -> Result<Arc<T>, String> {
+        self.plugin
+            .upgrade()
+            .ok_or_else(|| "static plugin state is unavailable".to_owned())
+    }
+}
+
+impl<T> SharedPluginInvocation for StaticPluginSharedInvocation<T>
+where
+    T: StaticPluginComponents
+        + StaticPluginResources
+        + StaticPluginComponentDispatch
+        + Send
+        + Sync
+        + 'static,
+{
+    fn invoke(
+        &self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        let component = static_plugin_service::<T>(service)?;
+        self.invoke_component(&component, service, input, host)
+    }
+
+    fn invoke_component(
+        &self,
+        component: &ComponentId,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        let plugin = self.plugin()?;
+        (self.invoke)(&plugin, component, service, input, host)
+    }
+
+    fn invoke_layer(
+        &self,
+        service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<LayerResult, String> {
+        self.plugin()?.dispatch_layer(service, input, host)
+    }
+}
+
 impl<T> PluginInstance for StaticPluginInstance<T>
 where
     T: StaticPluginComponents
         + StaticPluginResources
         + StaticPluginComponentDispatch
         + Send
+        + Sync
         + 'static,
 {
     fn start(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        match self.start {
-            Some(start) => match self.plugin.lock() {
-                Ok(mut plugin) => start(&mut plugin, host),
-                Err(_) => Err("static plugin state lock poisoned".to_owned()),
-            },
-            None => Ok(()),
-        }
+        let Some(start) = self.start else {
+            return Ok(());
+        };
+        let plugin = Arc::get_mut(&mut self.plugin).ok_or_else(|| {
+            "static plugin has live invocation references during start".to_owned()
+        })?;
+        start(plugin, host)
+    }
+
+    fn shared_invocation(&self) -> Option<Arc<dyn SharedPluginInvocation>> {
+        Some(Arc::new(StaticPluginSharedInvocation {
+            plugin: Arc::downgrade(&self.plugin),
+            invoke: self.invoke,
+        }))
     }
 
     fn invoke(
@@ -467,19 +584,8 @@ where
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        let mut matches = T::components().into_iter().filter(|component| {
-            component
-                .exports()
-                .iter()
-                .any(|export| export.terminal && export.interface.as_str() == service.as_str())
-        });
-        let component = matches
-            .next()
-            .ok_or_else(|| format!("unsupported static plugin service: {service}"))?;
-        if matches.next().is_some() {
-            return Err(format!("ambiguous static plugin service: {service}"));
-        }
-        self.invoke_component(&component.id, service, input, host)
+        let component = static_plugin_service::<T>(service)?;
+        self.invoke_component(&component, service, input, host)
     }
 
     fn invoke_component(
@@ -489,11 +595,7 @@ where
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        let mut plugin = self
-            .plugin
-            .lock()
-            .map_err(|_| "static plugin state lock poisoned".to_owned())?;
-        (self.invoke)(&mut plugin, component, service, input, host)
+        (self.invoke)(&self.plugin, component, service, input, host)
     }
 
     fn invoke_layer(
@@ -502,11 +604,7 @@ where
         input: &[u8],
         host: &PluginHost<'_>,
     ) -> Result<LayerResult, String> {
-        let mut plugin = self
-            .plugin
-            .lock()
-            .map_err(|_| "static plugin state lock poisoned".to_owned())?;
-        T::dispatch_layer(&mut plugin, service, input, host)
+        self.plugin.dispatch_layer(service, input, host)
     }
 
     fn bind_listener(
@@ -530,13 +628,12 @@ where
     }
 
     fn stop(&mut self, host: &PluginHost<'_>) -> Result<(), String> {
-        match self.stop {
-            Some(stop) => match self.plugin.lock() {
-                Ok(mut plugin) => stop(&mut plugin, host),
-                Err(_) => Err("static plugin state lock poisoned".to_owned()),
-            },
-            None => Ok(()),
-        }
+        let Some(stop) = self.stop else {
+            return Ok(());
+        };
+        let plugin = Arc::get_mut(&mut self.plugin)
+            .ok_or_else(|| "static plugin has live invocation references during stop".to_owned())?;
+        stop(plugin, host)
     }
 }
 
@@ -551,7 +648,7 @@ mod tests {
 
     impl StaticComponentDispatch for Component {
         fn dispatch(
-            &mut self,
+            &self,
             _service: &ServiceId,
             _input: &[u8],
             _host: &PluginHost<'_>,
@@ -562,7 +659,7 @@ mod tests {
 
     impl StaticComponentRuntimeDispatch for Component {
         fn dispatch_runtime(
-            &mut self,
+            &self,
             _service: &ServiceId,
             _input: &[u8],
             _host: &PluginHost<'_>,
@@ -571,7 +668,7 @@ mod tests {
         }
 
         fn dispatch_layer_runtime(
-            &mut self,
+            &self,
             _service: &ServiceId,
             _input: &[u8],
             _host: &PluginHost<'_>,
@@ -583,17 +680,17 @@ mod tests {
     #[test]
     fn generated_component_dispatch_adapts_to_plugin_instance() {
         let instance: Box<dyn PluginInstance> = Component.into_plugin_instance();
-        drop(instance);
+        assert!(instance.shared_invocation().is_some());
     }
 
     #[test]
     fn default_component_builds_a_kernel_plugin_instance() {
         let instance: Box<dyn PluginInstance> = Component::default_plugin_instance();
-        drop(instance);
+        assert!(instance.shared_invocation().is_some());
     }
 
     struct StatefulPlugin {
-        calls: usize,
+        calls: AtomicUsize,
     }
 
     impl StaticPluginComponents for StatefulPlugin {
@@ -610,13 +707,13 @@ mod tests {
 
     impl StaticPluginComponentDispatch for StatefulPlugin {
         fn dispatch_component(
-            &mut self,
+            &self,
             _component: &ComponentId,
             _service: &ServiceId,
             input: &[u8],
             _host: &PluginHost<'_>,
         ) -> Result<Vec<u8>, String> {
-            self.calls += 1;
+            self.calls.fetch_add(1, Ordering::Relaxed);
             Ok(input.to_vec())
         }
     }
@@ -635,29 +732,37 @@ mod tests {
     }
 
     fn invoke(
-        plugin: &mut StatefulPlugin,
+        plugin: &StatefulPlugin,
         _component: &ComponentId,
         _service: &ServiceId,
         input: &[u8],
         _host: &PluginHost<'_>,
     ) -> Result<Vec<u8>, String> {
-        plugin.calls += 1;
+        plugin.calls.fetch_add(1, Ordering::Relaxed);
         Ok(input.to_vec())
     }
 
     #[test]
     fn generated_stateful_plugin_dispatch_adapts_to_plugin_instance() {
-        let instance: Box<dyn PluginInstance> = StatefulPlugin { calls: 7 }.into_plugin_instance();
-        drop(instance);
+        let instance: Box<dyn PluginInstance> = StatefulPlugin {
+            calls: AtomicUsize::new(7),
+        }
+        .into_plugin_instance();
+        assert!(instance.shared_invocation().is_some());
     }
 
     #[test]
     fn stateful_plugin_adapter_preserves_non_default_state_and_callbacks() {
-        let instance = StaticPluginInstance::new(StatefulPlugin { calls: 7 }, invoke)
-            .with_start(start)
-            .with_stop(stop);
+        let instance = StaticPluginInstance::new(
+            StatefulPlugin {
+                calls: AtomicUsize::new(7),
+            },
+            invoke,
+        )
+        .with_start(start)
+        .with_stop(stop);
 
-        assert_eq!(instance.plugin.lock().unwrap().calls, 7);
+        assert_eq!(instance.plugin.calls.load(Ordering::Relaxed), 7);
         assert!(instance.start.is_some());
         assert!(instance.stop.is_some());
     }

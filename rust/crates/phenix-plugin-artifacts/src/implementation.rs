@@ -154,7 +154,7 @@ struct Api;
 impl Api {
     #[phenix(export("phenix.artifacts@1"), terminal, priority = 100)]
     fn handle(
-        &mut self,
+        &self,
         context: &phenix_sdk::PluginContext<'_, '_, ()>,
         command: ArtifactCommand,
     ) -> Result<ArtifactResponse, String> {

@@ -46,7 +46,7 @@ impl Api {
         authority = Authority::new([CapabilityId::parse("models.serve").unwrap()])
     )]
     fn run(
-        &mut self,
+        &self,
         _ctx: &phenix_sdk::CallContext<'_>,
         _request: ConsumerRequest,
     ) -> ConsumerResponse {
@@ -54,14 +54,10 @@ impl Api {
     }
 
     #[phenix(layer(ModelsInference, priority = MODEL_POLICY_PRIORITY))]
-    fn model_policy(&mut self) {}
+    fn model_policy(&self) {}
 
     #[phenix(listen("fixture.models.completed"))]
-    async fn model_completed(
-        &mut self,
-        _context: &phenix_sdk::EventContext,
-        _event: ConsumerResponse,
-    ) {
+    async fn model_completed(&self, _context: &phenix_sdk::EventContext, _event: ConsumerResponse) {
     }
 
     #[phenix(value("fixture.component.status@1"), public)]
@@ -293,7 +289,7 @@ struct ProviderApi;
 #[phenix_sdk::component]
 impl ProviderApi {
     #[phenix(export(AttributeIncompatibleModels), terminal)]
-    fn models(&mut self, request: ProviderRequest) -> ProviderResponse {
+    fn models(&self, request: ProviderRequest) -> ProviderResponse {
         ProviderResponse {
             value: request.prompt,
         }

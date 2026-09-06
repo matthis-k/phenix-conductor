@@ -129,3 +129,26 @@ The repository verifies that:
 - a blocked `PluginHost` task does not prevent an unrelated kernel transition;
 - Rust authoring may adapt private async handlers behind the synchronous Plugin API;
 - the Provider SDK may use a private Tokio runtime without exposing it through Plugin contracts.
+
+## Component invocation and state ownership
+
+`PluginId` remains the authority, lifecycle, resource-ownership, and replacement boundary. Component calls within one Plugin use the same kernel dispatch path as calls between Plugins.
+
+1. Core tracks active component and service endpoints inside the generation-pinned invocation. A call may revisit one Plugin through a distinct endpoint. Repeating an active endpoint fails before handler state is acquired.
+
+2. Generated static Plugins expose immutable dispatch through `SharedPluginInvocation`. Mutable domain state uses explicit synchronization handles with scopes chosen by the Plugin author. The generated adapter does not hold the Plugin instance lock across a handler or outbound call.
+
+3. Export, Layer, and Listener handlers use shared receivers. The macros reject an exported mutable receiver with a diagnostic that directs the author to an explicit synchronization handle. Start and stop retain exclusive mutable access after live shared references have quiesced.
+
+4. Every outbound interface call retains component resolution, Layers, authority attenuation, generation pinning, cancellation, and provenance. Packaging two components in one Plugin does not add a direct-call path around those checks.
+
+5. The Plugin ABI remains synchronous and executor-independent. Generated async handlers synchronously await completion. Long work uses the kernel task boundary and correlated completion.
+
+The repository verifies that:
+
+- typed imports traverse distinct components owned by one Plugin;
+- a causal call may revisit that Plugin through a distinct endpoint;
+- repeated component endpoints fail without hanging;
+- legacy mutable Plugin dispatch rejects causal re-entry before attempting to reacquire the instance lock;
+- first-party Plugins use explicit interior state where handlers mutate data;
+- the existing task, authority, Layer, generation, and provenance regressions run through the same dispatch path.

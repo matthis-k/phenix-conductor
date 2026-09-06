@@ -455,7 +455,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
 
         impl ::phenix_sdk::StaticComponentDispatch for #self_ty {
             fn dispatch(
-                &mut self,
+                &self,
                 service: &::phenix_sdk::__phenix_plugin::ServiceId,
                 input: &[u8],
                 host: &::phenix_sdk::__phenix_plugin::PluginHost<'_>,

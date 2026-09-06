@@ -9,7 +9,10 @@ use phenix_sdk::{
     StaticPluginConfiguration, StaticPluginDefinition, StaticPluginLifecycle,
     StaticPluginResources,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk::PhenixValue)]
 struct Settings {
@@ -85,7 +88,7 @@ struct Api {
     #[phenix(event("fixture.attribute-gate.completed"))]
     completed: Emit<Response>,
 
-    observed: usize,
+    observed: AtomicUsize,
 }
 
 #[allow(dead_code)]
@@ -97,14 +100,14 @@ impl Api {
         terminal,
         authority = authority("models.serve")
     )]
-    async fn run(&mut self, request: Request) -> Response {
+    async fn run(&self, request: Request) -> Response {
         Response {
             value: request.prompt,
         }
     }
 
     #[phenix(export(Internal))]
-    fn internal(&mut self, request: Request) -> Response {
+    fn internal(&self, request: Request) -> Response {
         Response {
             value: request.prompt,
         }
@@ -113,18 +116,18 @@ impl Api {
     #[phenix(
         layer(Internal, priority = 17, authority = authority("models.layer"))
     )]
-    async fn policy(&mut self, _context: &phenix_sdk::LayerContext<'_, '_>, _request: Request) {}
+    async fn policy(&self, _context: &phenix_sdk::LayerContext<'_, '_>, _request: Request) {}
 
     #[phenix(
         listen("fixture.attribute-gate.observed"),
         authority = authority("events.observe")
     )]
     async fn observed(
-        &mut self,
+        &self,
         _context: &phenix_sdk::EventContext,
         _response: Response,
     ) -> Result<(), String> {
-        self.observed += 1;
+        self.observed.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -174,12 +177,12 @@ impl Plugin {
 
     #[phenix(stop)]
     fn stop(&mut self, _context: &phenix_sdk::PluginContext<'_, '_, ()>) -> Result<(), String> {
-        if self.api.observed == 1 {
+        if self.api.observed.load(Ordering::Relaxed) == 1 {
             Ok(())
         } else {
             Err(format!(
                 "generated listener mutated component state {} times",
-                self.api.observed
+                self.api.observed.load(Ordering::Relaxed)
             ))
         }
     }
@@ -191,7 +194,7 @@ fn plugin() -> Plugin {
         api: Api {
             models: Required::default(),
             completed: Emit::default(),
-            observed: 0,
+            observed: AtomicUsize::new(0),
         },
         state: phenix_sdk::Durable::default(),
         config: Settings { retries: 3 },
