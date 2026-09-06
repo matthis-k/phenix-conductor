@@ -7,7 +7,8 @@ use phenix_core::{
 use phenix_sdk::{
     Authority, Call, CapabilityId, Emit, Required, StaticComponentBehavior,
     StaticComponentRuntimeDispatch, StaticPluginComponentDispatch, StaticPluginComponents,
-    StaticPluginConfiguration, StaticPluginDefinition, StaticPluginLifecycle, StaticPluginResources,
+    StaticPluginConfiguration, StaticPluginDefinition, StaticPluginLifecycle,
+    StaticPluginResources,
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
