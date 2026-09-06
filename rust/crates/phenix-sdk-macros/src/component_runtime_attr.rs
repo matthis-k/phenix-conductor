@@ -79,9 +79,18 @@ fn runtime_impl(item: &ItemImpl) -> syn::Result<TokenStream> {
             continue;
         };
         match contribution {
-            Contribution::Export(interface) => exports.push(export_arm(method, interface)?),
-            Contribution::Layer(interface) => layers.push(layer_arm(method, interface)?),
-            Contribution::Listener => listeners.push(listener_arm(method)?),
+            Contribution::Export(interface) => {
+                validate_shared_receiver(method, "exported component")?;
+                exports.push(export_arm(method, interface)?);
+            }
+            Contribution::Layer(interface) => {
+                validate_shared_receiver(method, "component layer")?;
+                layers.push(layer_arm(method, interface)?);
+            }
+            Contribution::Listener => {
+                validate_shared_receiver(method, "component listener")?;
+                listeners.push(listener_arm(method)?);
+            }
             Contribution::Other => {}
         }
     }
@@ -89,7 +98,7 @@ fn runtime_impl(item: &ItemImpl) -> syn::Result<TokenStream> {
     Ok(quote! {
         impl ::phenix_sdk::StaticComponentRuntimeDispatch for #self_ty {
             fn dispatch_runtime(
-                &mut self,
+                &self,
                 service: &::phenix_sdk::__phenix_plugin::ServiceId,
                 input: &[u8],
                 host: &::phenix_sdk::__phenix_plugin::PluginHost<'_>,
@@ -99,7 +108,7 @@ fn runtime_impl(item: &ItemImpl) -> syn::Result<TokenStream> {
             }
 
             fn dispatch_layer_runtime(
-                &mut self,
+                &self,
                 service: &::phenix_sdk::__phenix_plugin::ServiceId,
                 input: &[u8],
                 host: &::phenix_sdk::__phenix_plugin::PluginHost<'_>,
@@ -109,7 +118,7 @@ fn runtime_impl(item: &ItemImpl) -> syn::Result<TokenStream> {
             }
 
             fn dispatch_listener_runtime(
-                &mut self,
+                &self,
                 listener: &str,
                 context: &::phenix_sdk::EventContext,
                 payload: &[u8],
@@ -119,6 +128,21 @@ fn runtime_impl(item: &ItemImpl) -> syn::Result<TokenStream> {
             }
         }
     })
+}
+
+fn validate_shared_receiver(method: &syn::ImplItemFn, role: &str) -> syn::Result<()> {
+    let Some(FnArg::Receiver(receiver)) = method.sig.inputs.first() else {
+        return Ok(());
+    };
+    if receiver.mutability.is_none() {
+        return Ok(());
+    }
+    Err(syn::Error::new_spanned(
+        receiver,
+        format!(
+            "{role} methods must use &self; move mutable state behind an explicit synchronization handle"
+        ),
+    ))
 }
 
 enum Contribution {
@@ -527,4 +551,30 @@ fn success_type(output: &ReturnType) -> Option<&Type> {
 fn type_ends_with(ty: &Type, name: &str) -> bool {
     matches!(ty, Type::Path(path)
         if path.path.segments.last().is_some_and(|segment| segment.ident == name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quote::quote;
+
+    #[test]
+    fn mutable_export_receiver_has_a_targeted_diagnostic() {
+        let error = expand(
+            TokenStream::new(),
+            quote! {
+                impl Api {
+                    #[phenix(export("fixture.api@1"))]
+                    fn run(&mut self, _request: Request) -> Response {
+                        todo!()
+                    }
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("exported component methods must use &self"));
+    }
 }

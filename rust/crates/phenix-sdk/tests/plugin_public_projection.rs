@@ -3,6 +3,7 @@ use phenix_sdk::{
     Authority, HasPhenixSchema, StaticPluginComponents, StaticPluginDefinition,
     StaticPluginPublicProjection,
 };
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk::PhenixValue)]
 struct Request {
@@ -31,14 +32,14 @@ struct Api;
 #[phenix_sdk::component]
 impl Api {
     #[phenix(export(PublicCall), public, terminal)]
-    fn public_call(&mut self, request: Request) -> Response {
+    fn public_call(&self, request: Request) -> Response {
         Response {
             value: request.value,
         }
     }
 
     #[phenix(export(PrivateCall))]
-    fn private_call(&mut self, request: Request) -> Response {
+    fn private_call(&self, request: Request) -> Response {
         Response {
             value: request.value,
         }
@@ -63,26 +64,26 @@ struct Plugin {
 
 #[phenix_sdk::plugin(root, id = "fixture.root-public")]
 struct RootPlugin {
-    calls: usize,
+    calls: AtomicUsize,
 }
 
 #[phenix_sdk::plugin]
 impl RootPlugin {
     #[phenix(expose(name = "run"))]
-    async fn execute(&mut self, request: Request) -> Response {
-        self.calls += 1;
+    async fn execute(&self, request: Request) -> Response {
+        self.calls.fetch_add(1, Ordering::Relaxed);
         Response {
             value: request.value,
         }
     }
 
     #[phenix(on_event("fixture.root-public.changed"))]
-    async fn changed(&mut self, _context: &phenix_sdk::EventContext, _event: Changed) {
-        self.calls += 1;
+    async fn changed(&self, _context: &phenix_sdk::EventContext, _event: Changed) {
+        self.calls.fetch_add(1, Ordering::Relaxed);
     }
 
     fn helper(&self) -> usize {
-        self.calls
+        self.calls.load(Ordering::Relaxed)
     }
 }
 
@@ -105,24 +106,26 @@ struct ExplicitStatus;
 
 #[phenix_sdk::expose]
 struct Counter {
-    count: u64,
+    count: AtomicU64,
 }
 
 #[phenix_sdk::expose]
 impl Counter {
     #[phenix(expose(name = "add"))]
-    fn increment(&mut self, request: CountRequest) -> CountResponse {
-        self.count += request.amount;
-        CountResponse { count: self.count }
+    fn increment(&self, request: CountRequest) -> CountResponse {
+        let count = self.count.fetch_add(request.amount, Ordering::Relaxed) + request.amount;
+        CountResponse { count }
     }
 
     #[phenix(expose(authority = recursive_authority()))]
-    async fn read(&mut self, _request: CountRequest) -> CountResponse {
-        CountResponse { count: self.count }
+    async fn read(&self, _request: CountRequest) -> CountResponse {
+        CountResponse {
+            count: self.count.load(Ordering::Relaxed),
+        }
     }
 
     fn hidden(&self) -> u64 {
-        self.count
+        self.count.load(Ordering::Relaxed)
     }
 }
 
@@ -136,14 +139,14 @@ struct Branch {
 #[phenix_sdk::expose]
 impl Branch {
     #[phenix(expose(name = "branch_state"))]
-    fn state(&mut self, _request: CountRequest) -> CountResponse {
+    fn state(&self, _request: CountRequest) -> CountResponse {
         CountResponse {
-            count: self.counter.count,
+            count: self.counter.count.load(Ordering::Relaxed),
         }
     }
 
     fn hidden(&self) -> u64 {
-        self.hidden.count
+        self.hidden.count.load(Ordering::Relaxed)
     }
 }
 
@@ -171,35 +174,33 @@ struct RecursivePlugin {
     #[phenix(component)]
     worker: Worker,
     hidden: Counter,
-    root_calls: u64,
+    root_calls: AtomicU64,
 }
 
 #[phenix_sdk::plugin]
 impl RecursivePlugin {
     #[phenix(expose)]
-    fn root_sync(&mut self, request: CountRequest) -> CountResponse {
-        self.root_calls += request.amount;
-        CountResponse {
-            count: self.root_calls,
-        }
+    fn root_sync(&self, request: CountRequest) -> CountResponse {
+        let count = self.root_calls.fetch_add(request.amount, Ordering::Relaxed) + request.amount;
+        CountResponse { count }
     }
 
     #[phenix(expose(name = "status"))]
-    async fn root_async(&mut self, _request: CountRequest) -> CountResponse {
+    async fn root_async(&self, _request: CountRequest) -> CountResponse {
         CountResponse {
-            count: self.root_calls,
+            count: self.root_calls.load(Ordering::Relaxed),
         }
     }
 
     #[phenix(export(ExplicitStatus), public)]
-    fn explicit_status(&mut self, _request: CountRequest) -> CountResponse {
+    fn explicit_status(&self, _request: CountRequest) -> CountResponse {
         CountResponse {
-            count: self.root_calls,
+            count: self.root_calls.load(Ordering::Relaxed),
         }
     }
 
     fn hidden(&self) -> u64 {
-        self.hidden.count
+        self.hidden.count.load(Ordering::Relaxed)
     }
 }
 
@@ -216,7 +217,7 @@ struct CollisionPlugin {
 #[phenix_sdk::plugin]
 impl CollisionPlugin {
     #[phenix(expose(name = "same"))]
-    fn direct(&mut self, request: CountRequest) -> CountResponse {
+    fn direct(&self, request: CountRequest) -> CountResponse {
         self.counter.increment(request)
     }
 }
@@ -256,7 +257,7 @@ fn public_projection_is_derived_from_ordinary_component_contributions() {
     let manifest = <Plugin as StaticPluginDefinition>::manifest();
     assert_eq!(manifest.id.as_str(), "fixture.public-projection");
 
-    let mut plugin = Plugin { api: Api };
+    let plugin = Plugin { api: Api };
     let public = plugin.api.public_call(Request {
         value: "public".into(),
     });
@@ -293,7 +294,9 @@ fn root_exposure_uses_member_name_without_an_api_redirect() {
         "fixture.root-public.changed"
     );
 
-    let plugin = RootPlugin { calls: 0 };
+    let plugin = RootPlugin {
+        calls: AtomicUsize::new(0),
+    };
     assert_eq!(plugin.helper(), 0);
     drop(plugin.__phenix_into_plugin_instance());
 }
@@ -301,14 +304,24 @@ fn root_exposure_uses_member_name_without_an_api_redirect() {
 fn recursive_plugin() -> RecursivePlugin {
     RecursivePlugin {
         nested: Branch {
-            counter: Counter { count: 0 },
-            hidden: Counter { count: 100 },
+            counter: Counter {
+                count: AtomicU64::new(0),
+            },
+            hidden: Counter {
+                count: AtomicU64::new(100),
+            },
         },
-        left: Counter { count: 10 },
-        second: Counter { count: 20 },
+        left: Counter {
+            count: AtomicU64::new(10),
+        },
+        second: Counter {
+            count: AtomicU64::new(20),
+        },
         worker: Worker,
-        hidden: Counter { count: 1_000 },
-        root_calls: 0,
+        hidden: Counter {
+            count: AtomicU64::new(1_000),
+        },
+        root_calls: AtomicU64::new(0),
     }
 }
 

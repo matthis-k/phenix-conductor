@@ -41,7 +41,7 @@ pub trait StaticExposeFields {
 
     #[doc(hidden)]
     fn dispatch_exposed_field_for(
-        &mut self,
+        &self,
         _owner: &str,
         _service: &ServiceId,
         _input: &[u8],
@@ -69,7 +69,7 @@ pub trait StaticExpose:
 
     #[doc(hidden)]
     fn dispatch_exposed(
-        &mut self,
+        &self,
         service: &ServiceId,
         input: &[u8],
         host: &PluginHost<'_>,
@@ -123,7 +123,7 @@ pub trait StaticRootExpose: StaticPluginDefinition + StaticExposeFields + Sized 
     }
 
     fn dispatch_root_exposed_field(
-        &mut self,
+        &self,
         service: &ServiceId,
         input: &[u8],
         host: &PluginHost<'_>,

@@ -438,6 +438,7 @@ fn prepared_transaction_requires_write_authority_on_foreign_typed_import() {
         provenance: &kernel.provenance,
         continuation: None,
         active_services: BTreeSet::new(),
+        active_component_endpoints: BTreeSet::new(),
     };
     let denied = host
         .transact_prepared(&[caller_mutation, owner_mutation])
@@ -562,6 +563,7 @@ fn prepared_mutation_cannot_be_transferred_to_another_authorized_importer() {
         provenance: &kernel.provenance,
         continuation: None,
         active_services: BTreeSet::new(),
+        active_component_endpoints: BTreeSet::new(),
     };
 
     let denied = host
@@ -605,6 +607,7 @@ fn persistence_host_rejects_unowned_namespace_before_backend_access() {
         provenance: &kernel.provenance,
         continuation: None,
         active_services: BTreeSet::new(),
+        active_component_endpoints: BTreeSet::new(),
     };
     assert!(matches!(
         host.register_durable_schema(&DurableSchema::new(other_namespace, 1)),

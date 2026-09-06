@@ -16,7 +16,7 @@ impl Api {
         priority = 29,
         authority = Authority::new([CapabilityId::parse("models.serve").unwrap()])
     )]
-    fn run(&mut self, request: String) -> String {
+    fn run(&self, request: String) -> String {
         request
     }
 
@@ -25,13 +25,13 @@ impl Api {
         priority = 17,
         authority = Authority::new([CapabilityId::parse("models.invoke").unwrap()])
     ))]
-    fn policy(&mut self) {}
+    fn policy(&self) {}
 
     #[phenix(
         listen("fixture.models.observed"),
         authority = Authority::new([CapabilityId::parse("models.observe").unwrap()])
     )]
-    fn observed(&mut self, _context: &phenix_sdk::EventContext, _event: String) {}
+    fn observed(&self, _context: &phenix_sdk::EventContext, _event: String) {}
 }
 
 #[allow(dead_code)]
@@ -71,8 +71,8 @@ fn component_authority_survives_macro_lowering() {
     assert_eq!(listeners.len(), 1);
     assert_eq!(listeners[0].required_authority, listener_authority);
 
-    let _listener: fn(&mut Api, &phenix_sdk::EventContext, String) = Api::observed;
-    let mut api = Api;
+    let _listener: fn(&Api, &phenix_sdk::EventContext, String) = Api::observed;
+    let api = Api;
     assert_eq!(api.run("request".into()), "request");
     api.policy();
 }

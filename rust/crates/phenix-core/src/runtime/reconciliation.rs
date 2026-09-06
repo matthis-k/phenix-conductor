@@ -41,6 +41,7 @@ impl StopView<'_> {
             provenance: self.provenance,
             continuation: None,
             active_services: BTreeSet::new(),
+            active_component_endpoints: BTreeSet::new(),
         };
         let mut instance = instance
             .lock()
@@ -153,6 +154,7 @@ impl Kernel {
                                 provenance: &self.provenance,
                                 continuation: None,
                                 active_services: BTreeSet::new(),
+                                active_component_endpoints: BTreeSet::new(),
                             };
                             let mut provider =
                                 provider.lock().expect("plugin instance mutex poisoned");
@@ -238,6 +240,7 @@ impl Kernel {
                         provenance: &self.provenance,
                         continuation: None,
                         active_services: BTreeSet::new(),
+                        active_component_endpoints: BTreeSet::new(),
                     };
                     let started = catch_unwind(AssertUnwindSafe(|| instance.start(&host)));
                     let failure = match started {

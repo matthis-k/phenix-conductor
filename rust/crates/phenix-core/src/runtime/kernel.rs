@@ -238,6 +238,7 @@ impl Kernel {
                             provenance: &self.provenance,
                             continuation: None,
                             active_services: BTreeSet::new(),
+                            active_component_endpoints: BTreeSet::new(),
                         };
                         let mut provider = provider.lock().expect("plugin instance mutex poisoned");
                         let contract = provider.runtime_provider().ok_or_else(|| {
@@ -322,6 +323,7 @@ impl Kernel {
                     provenance: &self.provenance,
                     continuation: None,
                     active_services: BTreeSet::new(),
+                    active_component_endpoints: BTreeSet::new(),
                 };
                 let started = catch_unwind(AssertUnwindSafe(|| instance.start(&host)));
                 let failure = match started {
@@ -435,6 +437,7 @@ impl Kernel {
             ServiceDispatchGuards {
                 call_stack: &BTreeSet::new(),
                 active_services: &BTreeSet::new(),
+                active_component_endpoints: &BTreeSet::new(),
                 terminal_component: Some(component),
             },
         )
@@ -465,8 +468,12 @@ impl Kernel {
             input,
             caller_authority,
             binding,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
+            ServiceDispatchGuards {
+                call_stack: &BTreeSet::new(),
+                active_services: &BTreeSet::new(),
+                active_component_endpoints: &BTreeSet::new(),
+                terminal_component: None,
+            },
         )
     }
 
@@ -499,6 +506,7 @@ impl Kernel {
                 provenance: &self.provenance,
                 continuation: None,
                 active_services: BTreeSet::new(),
+                active_component_endpoints: BTreeSet::new(),
             };
             let mut instance = instance.lock().expect("plugin instance mutex poisoned");
             let stopped = catch_unwind(AssertUnwindSafe(|| instance.stop(&host)));

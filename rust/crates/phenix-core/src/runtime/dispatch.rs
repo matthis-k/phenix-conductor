@@ -49,7 +49,11 @@ pub(super) fn invoke_component_service_with(
         binding,
         provider_provenance,
     } = target;
-    if guards.active_services.contains(service) {
+    let endpoint = ComponentServiceEndpoint {
+        component: component.clone(),
+        service: service.clone(),
+    };
+    if guards.active_component_endpoints.contains(&endpoint) {
         return Err(KernelError::CausalServiceReentry(service.clone()));
     }
     let resolved = runtime
@@ -71,6 +75,8 @@ pub(super) fn invoke_component_service_with(
     let chain = prepare_active_chain(runtime, chain)?;
     let mut next_services = guards.active_services.clone();
     next_services.insert(service.clone());
+    let mut next_component_endpoints = guards.active_component_endpoints.clone();
+    next_component_endpoints.insert(endpoint);
     let trace = Arc::new(Mutex::new(InvocationTrace::new(
         &chain,
         caller_authority,
@@ -86,6 +92,7 @@ pub(super) fn invoke_component_service_with(
         ServiceDispatchGuards {
             call_stack: guards.call_stack,
             active_services: &next_services,
+            active_component_endpoints: &next_component_endpoints,
             terminal_component: Some(component),
         },
         &trace,
@@ -109,17 +116,16 @@ pub(super) fn invoke_service_with(
     input: &[u8],
     caller_authority: &Authority,
     binding: Option<&PluginId>,
-    call_stack: &BTreeSet<PluginId>,
-    active_services: &BTreeSet<ServiceId>,
+    guards: ServiceDispatchGuards<'_>,
 ) -> Result<Vec<u8>, KernelError> {
-    if active_services.contains(service) {
+    if guards.active_services.contains(service) {
         return Err(KernelError::CausalServiceReentry(service.clone()));
     }
     let chain = runtime
         .config
         .resolve_chain(service, caller_authority, binding)?;
     let chain = prepare_active_chain(runtime, chain)?;
-    let mut next_services = active_services.clone();
+    let mut next_services = guards.active_services.clone();
     next_services.insert(service.clone());
     let trace = Arc::new(Mutex::new(InvocationTrace::new(
         &chain,
@@ -134,8 +140,9 @@ pub(super) fn invoke_service_with(
         input,
         caller_authority,
         ServiceDispatchGuards {
-            call_stack,
+            call_stack: guards.call_stack,
             active_services: &next_services,
+            active_component_endpoints: guards.active_component_endpoints,
             terminal_component: None,
         },
         &trace,
@@ -157,6 +164,7 @@ pub(super) fn invoke_service_with(
 pub(super) struct ServiceDispatchGuards<'a> {
     pub(super) call_stack: &'a BTreeSet<PluginId>,
     pub(super) active_services: &'a BTreeSet<ServiceId>,
+    pub(super) active_component_endpoints: &'a BTreeSet<ComponentServiceEndpoint>,
     pub(super) terminal_component: Option<&'a ComponentId>,
 }
 
@@ -174,14 +182,29 @@ pub(super) fn invoke_resolved_chain_with(
     } else {
         (&chain.terminal, false)
     };
-    if guards.call_stack.contains(&provider.plugin) {
+    if runtime.states.get(&provider.plugin).copied() != Some(PluginState::Active) {
+        return Err(KernelError::PluginNotActive(provider.plugin.clone()));
+    }
+    let instance = runtime
+        .instances
+        .get(&provider.plugin)
+        .ok_or_else(|| KernelError::WrongExecutionKind(provider.plugin.clone()))?;
+    let shared_invocation = if guards.call_stack.contains(&provider.plugin) {
+        instance
+            .try_lock()
+            .ok()
+            .and_then(|instance| instance.shared_invocation())
+    } else {
+        instance
+            .lock()
+            .expect("plugin instance mutex poisoned")
+            .shared_invocation()
+    };
+    if guards.call_stack.contains(&provider.plugin) && shared_invocation.is_none() {
         return Err(KernelError::HostOperationDenied {
             plugin: provider.plugin.clone(),
             operation: format!("causal plugin re-entry:{}", chain.service),
         });
-    }
-    if runtime.states.get(&provider.plugin).copied() != Some(PluginState::Active) {
-        return Err(KernelError::PluginNotActive(provider.plugin.clone()));
     }
     let provider_manifest = runtime
         .config
@@ -231,16 +254,20 @@ pub(super) fn invoke_resolved_chain_with(
         provenance: runtime.provenance,
         continuation,
         active_services: guards.active_services.clone(),
+        active_component_endpoints: guards.active_component_endpoints.clone(),
     };
-    let instance = runtime
-        .instances
-        .get(&provider.plugin)
-        .ok_or_else(|| KernelError::WrongExecutionKind(provider.plugin.clone()))?;
-    let mut instance = instance.lock().expect("plugin instance mutex poisoned");
     if is_layer {
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            instance.invoke_layer(&chain.service, input, &host)
-        }));
+        let result = match shared_invocation.as_ref() {
+            Some(invocation) => catch_unwind(AssertUnwindSafe(|| {
+                invocation.invoke_layer(&chain.service, input, &host)
+            })),
+            None => {
+                let mut instance = instance.lock().expect("plugin instance mutex poisoned");
+                catch_unwind(AssertUnwindSafe(|| {
+                    instance.invoke_layer(&chain.service, input, &host)
+                }))
+            }
+        };
         let result = match result {
             Ok(result) => result,
             Err(_) => {
@@ -308,10 +335,25 @@ pub(super) fn invoke_resolved_chain_with(
             }
         }
     } else {
-        let result = catch_unwind(AssertUnwindSafe(|| match guards.terminal_component {
-            Some(component) => instance.invoke_component(component, &chain.service, input, &host),
-            None => instance.invoke(&chain.service, input, &host),
-        }));
+        let result = match shared_invocation.as_ref() {
+            Some(invocation) => {
+                catch_unwind(AssertUnwindSafe(|| match guards.terminal_component {
+                    Some(component) => {
+                        invocation.invoke_component(component, &chain.service, input, &host)
+                    }
+                    None => invocation.invoke(&chain.service, input, &host),
+                }))
+            }
+            None => {
+                let mut instance = instance.lock().expect("plugin instance mutex poisoned");
+                catch_unwind(AssertUnwindSafe(|| match guards.terminal_component {
+                    Some(component) => {
+                        instance.invoke_component(component, &chain.service, input, &host)
+                    }
+                    None => instance.invoke(&chain.service, input, &host),
+                }))
+            }
+        };
         let result = match result {
             Ok(result) => result,
             Err(_) => {

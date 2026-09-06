@@ -19,7 +19,7 @@ struct Api;
 #[phenix_sdk::component]
 impl Api {
     #[phenix(export(Run), terminal, priority = 7)]
-    fn run(&mut self, _request: Request) -> Response {
+    fn run(&self, _request: Request) -> Response {
         Response
     }
 }
