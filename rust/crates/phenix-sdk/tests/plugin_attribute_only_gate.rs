@@ -145,7 +145,7 @@ impl Api {
     )]
     async fn observed(
         &self,
-        context: &phenix_sdk::EventContext,
+        context: &phenix_sdk::EventContext<'_, '_>,
         response: Response,
     ) -> Result<(), String> {
         let dependency = context

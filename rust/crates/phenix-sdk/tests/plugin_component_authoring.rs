@@ -57,7 +57,11 @@ impl Api {
     fn model_policy(&self) {}
 
     #[phenix(listen("fixture.models.completed"))]
-    async fn model_completed(&self, _context: &phenix_sdk::EventContext, _event: ConsumerResponse) {
+    async fn model_completed(
+        &self,
+        _context: &phenix_sdk::EventContext<'_, '_>,
+        _event: ConsumerResponse,
+    ) {
     }
 
     #[phenix(value("fixture.component.status@1"), public)]
