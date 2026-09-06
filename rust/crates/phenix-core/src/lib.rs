@@ -187,7 +187,7 @@ pub use registry::{
 };
 pub use resolver::{GraphGenerationId, ResolvedHarness, ResolvedHarnessError};
 pub use runtime::{
-    ComponentProviderProvenance, Kernel, LayerResult, PluginHost, PluginInstance,
+    ComponentProviderProvenance, Kernel, LayerResult, PluginHost, PluginInstance, PluginListener,
     PluginRuntimeProvider, PluginState, ProviderEndpointProvenance, RuntimePluginCandidate,
     ServiceInvocationProvenance, ServiceParticipantOutcome, ServiceParticipantProvenance,
     SharedPluginInvocation,
