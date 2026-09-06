@@ -28,6 +28,7 @@ struct ScopedPluginListener {
     runtime: ListenerRuntimeSnapshot,
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct ListenerRuntimeSources<'a> {
     pub(super) graph: &'a ResolvedComponentGraph,
     pub(super) generation: &'a GraphGenerationId,

@@ -364,17 +364,19 @@ impl Kernel {
         }
 
         let subscriptions = match self.graph_generation.as_ref() {
-            Some(generation) => stage_listener_subscriptions(
-                &self.component_graph,
-                generation,
-                &config,
-                &next_states,
-                &next_instances,
-                &self.events,
-                &self.tasks,
-                &self.persistence,
-                &self.provenance,
-            ),
+            Some(generation) => {
+                stage_listener_subscriptions(listener::ListenerRuntimeSources {
+                    graph: &self.component_graph,
+                    generation,
+                    config: &config,
+                    states: &next_states,
+                    instances: &next_instances,
+                    events: &self.events,
+                    tasks: &self.tasks,
+                    persistence: &self.persistence,
+                    provenance: &self.provenance,
+                })
+            }
             None if self.component_graph.listeners().next().is_none() => Ok(Vec::new()),
             None => Err(KernelError::ResolvedGenerationMissing),
         };

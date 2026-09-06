@@ -20,8 +20,8 @@ pub mod __phenix_plugin {
         Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
         ComponentInvocationError, ComponentManifest, EventBus, EventHandler, EventSubscription,
         GraphGenerationId, InterfaceId, InterfaceSchema, PhenixValue, PluginContext,
-        PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, ServiceContribution,
-        ServiceId, ServiceRole,
+        PluginExecution, PluginHost, PluginId, PluginInstance, PluginListener, PluginManifest,
+        ServiceContribution, ServiceId, ServiceRole,
     };
 }
 
