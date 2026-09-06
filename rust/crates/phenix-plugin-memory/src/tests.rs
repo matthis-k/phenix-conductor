@@ -445,8 +445,8 @@ fn stop_and_reactivate_preserves_memory_state() {
 
 #[test]
 fn recall_and_revalidation_emit_observable_operation_events() {
-    let (recall_events, recall_observer) = mpsc::channel();
-    let (revalidation_events, revalidation_observer) = mpsc::channel();
+    let (recall_observer, recall_events) = mpsc::channel();
+    let (revalidation_observer, revalidation_events) = mpsc::channel();
 
     let path = temp_db("operation-events");
     let mut kernel = kernel_with(&path);
