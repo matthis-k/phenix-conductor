@@ -4,7 +4,7 @@ status: implemented
 coverage:
   - rust/crates/phenix-sdk/tests/plugin_attribute_only_gate.rs
   - rust/crates/phenix-sdk/tests/plugin_component_authoring.rs
-  - rust/crates/phenix-sdk/tests/plugin_authoring.rs
+  - rust/crates/phenix-sdk/tests/plugin_attribute_graph.rs
   - rust/crates/phenix-sdk/src/authoring/static_dispatch.rs
 
 ## Purpose
