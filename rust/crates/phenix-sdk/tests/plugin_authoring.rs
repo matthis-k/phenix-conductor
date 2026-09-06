@@ -1,6 +1,7 @@
 use phenix_core::{
-    Authority, ComponentInterface, EventBus, EventFailurePolicy, EventSubscription, EventTypeId,
-    Exact, InterfaceCompatibility, Kernel, KernelConfig, PhenixValue, PluginHost, PluginId,
+    Authority, ComponentInterface, EventAdmissionReceipt, EventBus, EventDeliveryStatus,
+    EventFailurePolicy, EventSubscription, EventTypeId, Exact, InterfaceCompatibility, Kernel,
+    KernelConfig, PhenixValue, PluginHost, PluginId,
     PluginInstance, Project, ResolvedHarness, ResolvedHarnessActivation, ServiceId, SubscriptionId,
     SubscriptionSpec,
 };
@@ -9,7 +10,7 @@ use phenix_sdk::{
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, DerivePhenixValue)]
@@ -61,7 +62,7 @@ struct ExactEvent {
 static PROJECTED_CALLS: AtomicUsize = AtomicUsize::new(0);
 static EXACT_CALLS: AtomicUsize = AtomicUsize::new(0);
 static DIAGNOSTIC_CALLS: AtomicUsize = AtomicUsize::new(0);
-static EVENT_WARNINGS: AtomicUsize = AtomicUsize::new(0);
+static EVENT_RECEIPT: Mutex<Option<EventAdmissionReceipt>> = Mutex::new(None);
 
 fn on_projected(event: ProjectedEvent) -> Result<(), String> {
     PROJECTED_CALLS.fetch_add(1, Ordering::SeqCst);
@@ -299,7 +300,7 @@ mod event_emitter {
                 input,
                 |_request: PlanningRequest| -> Result<PlanningResponse, String> {
                     let context = phenix_plugin::context(host, (), ());
-                    let report = context
+                    let receipt = context
                         .sdk
                         .events
                         .created
@@ -308,7 +309,7 @@ mod event_emitter {
                             extra: 7,
                         })
                         .map_err(|error| error.to_string())?;
-                    EVENT_WARNINGS.store(report.warnings.len(), Ordering::SeqCst);
+                    *EVENT_RECEIPT.lock().unwrap() = Some(receipt);
                     Ok(PlanningResponse {
                         plan_id: "event".into(),
                     })
@@ -579,7 +580,7 @@ fn typed_event_emission_isolates_listener_mismatch_and_emits_diagnostic() {
     PROJECTED_CALLS.store(0, Ordering::SeqCst);
     EXACT_CALLS.store(0, Ordering::SeqCst);
     DIAGNOSTIC_CALLS.store(0, Ordering::SeqCst);
-    EVENT_WARNINGS.store(0, Ordering::SeqCst);
+    EVENT_RECEIPT.lock().unwrap().take();
 
     let manifest = event_emitter::phenix_plugin::plugin_manifest(Authority::default());
     let mut kernel = Kernel::new(KernelConfig::new([manifest.clone()]).unwrap());
@@ -608,7 +609,15 @@ fn typed_event_emission_isolates_listener_mismatch_and_emits_diagnostic() {
     assert_eq!(PROJECTED_CALLS.load(Ordering::SeqCst), 1);
     assert_eq!(EXACT_CALLS.load(Ordering::SeqCst), 0);
     assert_eq!(DIAGNOSTIC_CALLS.load(Ordering::SeqCst), 1);
-    assert_eq!(EVENT_WARNINGS.load(Ordering::SeqCst), 1);
+    let receipt = EVENT_RECEIPT
+        .lock()
+        .unwrap()
+        .take()
+        .expect("event admission receipt");
+    let EventDeliveryStatus::Succeeded(report) = receipt.wait() else {
+        panic!("event delivery did not succeed");
+    };
+    assert_eq!(report.warnings.len(), 1);
 }
 
 #[test]
