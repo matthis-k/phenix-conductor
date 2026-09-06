@@ -1,13 +1,18 @@
 use phenix_core::{
-    Authority, InvocationOutcome, Kernel, KernelConfig, PhenixValue, Project, ResolvedHarness,
-    ResolvedHarnessActivation, ServiceId,
+    Authority, InvocationOutcome, Kernel, KernelConfig, LayerPolicy, LayerResult, PhenixValue,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, Project, ResolvedHarness,
+    ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_sdk::{
     HasPhenixSchema, StaticComponentBehavior, StaticPluginDefinition, StaticPluginFactory,
 };
-use std::fmt::{self, Display, Formatter};
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Display, Formatter},
+};
 
 const SERVICE: &str = "fixture.fallible-provider.run@1";
+const LAYER_PLUGIN: &str = "fixture.fallible-provider.layer";
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk::PhenixValue)]
 struct Request {
@@ -51,26 +56,97 @@ mod provider {
     }
 }
 
-fn active_kernel() -> (Kernel, Authority) {
+fn service() -> ServiceId {
+    ServiceId::parse(SERVICE).unwrap()
+}
+
+fn layer_id() -> PluginId {
+    PluginId::parse(LAYER_PLUGIN).unwrap()
+}
+
+fn layer_manifest() -> PluginManifest {
+    PluginManifest {
+        id: layer_id(),
+        version: 1,
+        execution: PluginExecution::Embedded,
+        dependencies: Vec::new(),
+        services: vec![ServiceContribution {
+            role: ServiceRole::Layer,
+            service: service(),
+            priority: 10,
+            required_authority: Authority::default(),
+        }],
+        resource_namespaces: Vec::new(),
+        maximum_authority: Authority::default(),
+    }
+}
+
+struct PassthroughLayer;
+
+impl PluginInstance for PassthroughLayer {
+    fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn invoke_layer(
+        &mut self,
+        _service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<LayerResult, String> {
+        host.continue_service(input, host.authority())
+            .map(LayerResult::Handled)
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn configured_kernel(layered: bool) -> (Kernel, Authority) {
     let authority = Authority::default();
-    let manifest = <provider::Plugin as StaticPluginDefinition>::manifest();
+    let provider_manifest = <provider::Plugin as StaticPluginDefinition>::manifest();
     let components = <provider::Plugin as StaticPluginDefinition>::component_manifests();
-    let resolved = ResolvedHarness::resolve(
-        [manifest.clone()],
+    let mut manifests = vec![provider_manifest.clone()];
+    let mut layer_policies = BTreeMap::new();
+
+    if layered {
+        let layer = layer_manifest();
+        layer_policies.insert(
+            service(),
+            vec![LayerPolicy {
+                plugin: layer.id.clone(),
+                priority: 10,
+                required: true,
+                enabled: true,
+            }],
+        );
+        manifests.push(layer);
+    }
+
+    let resolved = ResolvedHarness::resolve_with_layer_policies(
+        manifests,
         components,
         std::iter::empty(),
+        layer_policies,
         &authority,
     )
     .unwrap();
-    let mut kernel = Kernel::new(KernelConfig::new([manifest.clone()]).unwrap());
+    let mut kernel = Kernel::new(resolved.kernel_config().clone());
     kernel
-        .register_embedded_factory(manifest.id, || {
+        .register_embedded_factory(provider_manifest.id, || {
             <provider::Plugin as StaticPluginFactory>::factory()
         })
         .unwrap();
+    if layered {
+        kernel
+            .register_embedded_factory(layer_id(), || Box::new(PassthroughLayer))
+            .unwrap();
+    }
     kernel.activate_resolved_harness(&resolved).unwrap();
     kernel.activate_all().unwrap();
     (kernel, authority)
+}
+
+fn active_kernel() -> (Kernel, Authority) {
+    configured_kernel(false)
 }
 
 fn invoke(kernel: &mut Kernel, authority: &Authority, outcome: &str) -> InvocationOutcome {
@@ -78,9 +154,7 @@ fn invoke(kernel: &mut Kernel, authority: &Authority, outcome: &str) -> Invocati
         outcome: outcome.into(),
     }))
     .unwrap();
-    let output = kernel
-        .invoke(&ServiceId::parse(SERVICE).unwrap(), &input, authority, None)
-        .unwrap();
+    let output = kernel.invoke(&service(), &input, authority, None).unwrap();
     let value: PhenixValue = serde_json::from_slice(&output).unwrap();
     InvocationOutcome::from_transport_value(value)
 }
@@ -124,6 +198,33 @@ fn generated_provider_dispatch_preserves_structural_domain_errors() {
     );
     assert_eq!(conflict.to_string(), disconnected.to_string());
     assert_ne!(conflict, disconnected);
+}
+
+#[test]
+fn structural_domain_error_survives_layer_dispatch() {
+    let (mut kernel, authority) = configured_kernel(true);
+
+    let outcome = invoke(&mut kernel, &authority, "conflict");
+    let InvocationOutcome::DomainError(value) = outcome else {
+        panic!("layer collapsed the domain error into a runtime failure");
+    };
+    assert_eq!(
+        DomainFailure::try_from(Project(&value)).unwrap(),
+        DomainFailure::Conflict {
+            resource: "workspace".into(),
+        }
+    );
+
+    let provenance = kernel.service_invocation_provenance();
+    let invocation = provenance.last().expect("layered invocation recorded");
+    assert_eq!(invocation.participants.len(), 2);
+    assert_eq!(invocation.participants[0].plugin, layer_id());
+    assert_eq!(invocation.participants[0].role, ServiceRole::Layer);
+    assert_eq!(
+        invocation.participants[1].plugin,
+        <provider::Plugin as StaticPluginDefinition>::manifest().id
+    );
+    assert_eq!(invocation.participants[1].role, ServiceRole::Terminal);
 }
 
 #[test]
