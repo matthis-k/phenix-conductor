@@ -571,10 +571,8 @@ mod tests {
                 value.project().map_err(|error| error.to_string())
             }
             phenix_core::InvocationOutcome::DomainError(error) => {
-                let message = error
-                    .project()
-                    .and_then(String::try_from)
-                    .map_err(|error| error.to_string())?;
+                let projected = error.project().map_err(|error| error.to_string())?;
+                let message: String = String::try_from(projected).map_err(|error| error.to_string())?;
                 Err(message)
             }
         }
