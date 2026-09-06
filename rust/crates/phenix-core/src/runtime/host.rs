@@ -209,7 +209,7 @@ impl<'a> PluginHost<'a> {
         causality_id: u64,
         kernel_policy_revision: u64,
         payload: Vec<u8>,
-    ) -> Result<EventDispatchReport, EventError> {
+    ) -> Result<EventAdmissionReceipt, EventError> {
         let event = EventEnvelope {
             event_type,
             version,
@@ -219,7 +219,7 @@ impl<'a> PluginHost<'a> {
             payload,
         };
         self.events
-            .dispatch_in_generation(&event, self.authority, self.graph_generation)
+            .admit_in_generation(&event, self.authority, self.graph_generation)
     }
 
     pub fn register_durable_schema(&self, schema: &DurableSchema) -> Result<(), KernelError> {

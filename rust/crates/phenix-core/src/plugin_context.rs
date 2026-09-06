@@ -1,6 +1,6 @@
 use crate::{
     Authority, CallCancellationToken, ComponentId, ComponentInterface, ComponentInvocationError,
-    DurableSchema, EventDispatchReport, EventError, EventTypeId, Exact, GraphGenerationId,
+    DurableSchema, EventAdmissionReceipt, EventError, EventTypeId, Exact, GraphGenerationId,
     InterfaceId, KernelError, PhenixValue, PluginHost, PluginId, PreparedMutationHandle, Project,
     ResourceNamespace, SchemaMigration, ServiceId, TaskScope, TransactionOp, ValueError,
 };
@@ -104,7 +104,7 @@ impl<'host, 'runtime> KernelAccess<'host, 'runtime> {
         causality_id: u64,
         kernel_policy_revision: u64,
         payload: Vec<u8>,
-    ) -> Result<EventDispatchReport, EventError> {
+    ) -> Result<EventAdmissionReceipt, EventError> {
         self.host.dispatch_event(
             event_type,
             version,

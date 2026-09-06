@@ -1,7 +1,7 @@
 pub use phenix_core::ListenerProjection;
 use phenix_core::{
     Authority, ComponentId, ComponentInterface, ComponentInvocationError, ComponentManifest,
-    EventBus, EventDispatchReport, EventEnvelope, EventError, EventFailurePolicy,
+    EventAdmissionReceipt, EventBus, EventEnvelope, EventError, EventFailurePolicy,
     EventSubscription, EventTypeId, Exact, InterfaceId, KernelAccess, PhenixValue, PluginContext,
     PluginExecution, PluginHost, PluginId, PluginManifest, Project, SdkClient, SubscriptionId,
     SubscriptionSpec, ValueError,
@@ -301,14 +301,17 @@ impl<'host, 'runtime> EventEmitter<'host, 'runtime> {
         &self.name
     }
 
-    pub fn emit<T>(&self, payload: &T) -> Result<EventDispatchReport, EventEmitError>
+    pub fn emit<T>(&self, payload: &T) -> Result<EventAdmissionReceipt, EventEmitError>
     where
         for<'value> PhenixValue: From<&'value T>,
     {
         self.emit_value(&PhenixValue::from(payload))
     }
 
-    pub fn emit_value(&self, payload: &PhenixValue) -> Result<EventDispatchReport, EventEmitError> {
+    pub fn emit_value(
+        &self,
+        payload: &PhenixValue,
+    ) -> Result<EventAdmissionReceipt, EventEmitError> {
         let payload = serde_json::to_vec(payload)
             .map_err(|error| EventEmitError::Encode(error.to_string()))?;
         self.kernel

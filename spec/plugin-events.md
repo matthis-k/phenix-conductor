@@ -111,6 +111,24 @@ Event Delivery state is runtime-local unless the Event contract explicitly requi
 
 A Listener that produces Durable State writes through its owning Plugin Resource or another declared Interface contract. The kernel does not turn arbitrary Events into product history.
 
+## Scheduled listener delivery
+
+Typed plugin events use bounded asynchronous admission.
+
+`PluginHost` admits an Event and returns an `EventAdmissionReceipt`. Admission captures the Event, resolved subscriptions, effective authority, Graph Generation, Listener dependency levels, causal ancestry, and the subscription revision. Invalid authority or exhausted delivery capacity fails before acceptance.
+
+Accepted delivery runs independently from the emitter. Waiting for completion is a separate receipt operation. Emitting an Event does not wait for its Listeners and does not make Listener failure a hidden veto of the originating operation.
+
+The EventBus bounds accepted outstanding deliveries. Within one delivery, independent Listeners in the same dependency level may run concurrently. Declared dependencies preserve ordering between levels.
+
+The shared-receiver runtime defined by `spec/plugin-threading.md` removes generated whole-Plugin handler locking. Plugins synchronize mutable domain state explicitly. Event delivery therefore does not add a second Plugin-wide state queue or mutex.
+
+Receipts distinguish accepted, succeeded, failed, and cancelled delivery. Only successful handlers enter `delivered`. `ignore` and `warn` preserve the failed handler in `failures`; `warn` also records a warning. `fail_delivery` terminates that delivery with the typed handler failure. None of these policies roll back the Event or prior Listener side effects.
+
+Causal ancestry is retained across asynchronous delivery. Same-subscription causal re-entry fails instead of creating deferred recursion. A subscription revision change cancels an old delivery before its next dependency level or before successful completion, so retired topology cannot continue as the active generation. Work already performed by a Listener is not rolled back.
+
+Delivery-capacity exhaustion is a typed admission failure. An accepted Event is never silently dropped. Receipts report eventual delivery failure or cancellation separately. Event durability and retry after side effects remain userspace contracts.
+
 ## Invariants
 
 - Events represent facts that already exist.
@@ -120,7 +138,10 @@ A Listener that produces Durable State writes through its owning Plugin Resource
 - Event semantics belong to the Event contract, not the kernel.
 - Listener ordering follows declared dependencies, not registration order.
 - Same-subscription causal re-entry is bounded.
+- Event admission is bounded and never silently drops accepted work.
+- Listener receipts distinguish success, failure, and cancellation.
 - Listener failures affect Event Delivery according to policy and do not create hidden veto semantics.
+- Generated Plugin handlers use shared receivers; mutable domain state uses explicit synchronization.
 - Listeners use ordinary Host Capabilities and Interface dispatch.
 - Event Delivery does not become Durable State or product history unless a userspace contract stores it.
 
@@ -131,6 +152,12 @@ A Listener that produces Durable State writes through its owning Plugin Resource
 - deterministic serial ordering follows the declared Listener DAG;
 - independent Listeners may run concurrently when allowed;
 - recursive same-subscription causal re-entry is blocked;
+- admission capacity fails before acceptance;
+- accepted delivery exposes a terminal receipt status;
+- `warn` records failure without reporting the handler as delivered;
+- `fail_delivery` preserves the handler failure and does not roll back prior Listener work;
+- subscription replacement cancels an old in-flight delivery;
+- Graph Generation provenance survives admission and delivery;
 - first-party and alternate Listeners use the same Event mechanism;
 - a Listener cannot bypass Plugin authority;
 - Listener failure cannot veto or roll back the originating operation;

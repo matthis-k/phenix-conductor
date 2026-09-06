@@ -5,9 +5,9 @@ use std::{
     error::Error,
     fmt::{self, Display, Formatter},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, Sender},
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
     },
     thread,
 };
@@ -93,8 +93,74 @@ pub struct EventSubscription {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EventDispatchReport {
     pub delivered: Vec<SubscriptionId>,
+    pub failures: Vec<(SubscriptionId, String)>,
     pub warnings: Vec<(SubscriptionId, String)>,
     pub graph_generation: Option<GraphGenerationId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EventDeliveryCancellation {
+    SubscriptionSetChanged,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EventDeliveryStatus {
+    Accepted,
+    Succeeded(EventDispatchReport),
+    Failed(EventError),
+    Cancelled(EventDeliveryCancellation),
+}
+
+struct EventReceiptState {
+    status: Mutex<EventDeliveryStatus>,
+    ready: Condvar,
+}
+
+#[derive(Clone)]
+pub struct EventAdmissionReceipt {
+    id: u64,
+    state: Arc<EventReceiptState>,
+}
+
+impl fmt::Debug for EventAdmissionReceipt {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EventAdmissionReceipt")
+            .field("id", &self.id)
+            .field("status", &self.status())
+            .finish()
+    }
+}
+
+impl EventAdmissionReceipt {
+    #[must_use]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    #[must_use]
+    pub fn status(&self) -> EventDeliveryStatus {
+        self.state
+            .status
+            .lock()
+            .expect("event receipt lock poisoned")
+            .clone()
+    }
+
+    pub fn wait(&self) -> EventDeliveryStatus {
+        let mut status = self
+            .state
+            .status
+            .lock()
+            .expect("event receipt lock poisoned");
+        while matches!(*status, EventDeliveryStatus::Accepted) {
+            status = self
+                .state
+                .ready
+                .wait(status)
+                .expect("event receipt lock poisoned while waiting");
+        }
+        status.clone()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -115,6 +181,11 @@ pub enum EventError {
         subscription: SubscriptionId,
         message: String,
     },
+    QueueSaturated {
+        capacity: usize,
+    },
+    QueueUnavailable(String),
+    DeliveryCancelled(EventDeliveryCancellation),
 }
 
 impl Display for EventError {
@@ -142,27 +213,79 @@ impl Display for EventError {
                 subscription,
                 message,
             } => write!(f, "event subscription {subscription} failed: {message}"),
+            Self::QueueSaturated { capacity } => {
+                write!(f, "event delivery queue is full at capacity {capacity}")
+            }
+            Self::QueueUnavailable(message) => {
+                write!(f, "event delivery queue is unavailable: {message}")
+            }
+            Self::DeliveryCancelled(EventDeliveryCancellation::SubscriptionSetChanged) => {
+                f.write_str("event delivery cancelled because subscriptions changed")
+            }
         }
     }
 }
 
 impl Error for EventError {}
 
-#[derive(Default)]
+const DEFAULT_DELIVERY_CAPACITY: usize = 64;
+
+struct PendingDelivery {
+    event: EventEnvelope,
+    emitter_authority: Authority,
+    graph_generation: Option<GraphGenerationId>,
+    subscriptions: BTreeMap<SubscriptionId, EventSubscription>,
+    levels: Vec<Vec<SubscriptionId>>,
+    ancestry: BTreeSet<SubscriptionId>,
+    revision: u64,
+}
+
+#[derive(Clone)]
 pub struct EventBus {
-    kernel_subscribers: Mutex<Vec<Sender<KernelEvent>>>,
-    subscriptions: Mutex<BTreeMap<SubscriptionId, EventSubscription>>,
-    active_causality: Mutex<BTreeMap<u64, BTreeSet<SubscriptionId>>>,
-    next_root_causality: AtomicU64,
+    kernel_subscribers: Arc<Mutex<Vec<Sender<KernelEvent>>>>,
+    subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, EventSubscription>>>,
+    active_causality: Arc<Mutex<BTreeMap<u64, BTreeSet<SubscriptionId>>>>,
+    next_root_causality: Arc<AtomicU64>,
+    next_delivery: Arc<AtomicU64>,
+    subscription_revision: Arc<AtomicU64>,
+    in_flight: Arc<AtomicUsize>,
+    delivery_capacity: usize,
+}
+
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::with_capacity(DEFAULT_DELIVERY_CAPACITY)
+    }
 }
 
 impl fmt::Debug for EventBus {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("EventBus").finish_non_exhaustive()
+        f.debug_struct("EventBus")
+            .field("delivery_capacity", &self.delivery_capacity)
+            .field("in_flight", &self.in_flight.load(Ordering::Acquire))
+            .finish_non_exhaustive()
     }
 }
 
 impl EventBus {
+    #[must_use]
+    pub fn with_capacity(delivery_capacity: usize) -> Self {
+        assert!(
+            delivery_capacity > 0,
+            "event delivery capacity must be positive"
+        );
+        Self {
+            kernel_subscribers: Arc::new(Mutex::new(Vec::new())),
+            subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
+            active_causality: Arc::new(Mutex::new(BTreeMap::new())),
+            next_root_causality: Arc::new(AtomicU64::new(0)),
+            next_delivery: Arc::new(AtomicU64::new(0)),
+            subscription_revision: Arc::new(AtomicU64::new(0)),
+            in_flight: Arc::new(AtomicUsize::new(0)),
+            delivery_capacity,
+        }
+    }
+
     pub fn validate_subscriptions(
         subscriptions: impl IntoIterator<Item = EventSubscription>,
     ) -> Result<(), EventError> {
@@ -192,10 +315,12 @@ impl EventBus {
     ) -> Result<(), EventError> {
         let indexed = index_subscriptions(subscriptions)?;
         validate_dependencies(&indexed)?;
-        *self
+        let mut current = self
             .subscriptions
             .lock()
-            .expect("event subscription lock poisoned") = indexed;
+            .expect("event subscription lock poisoned");
+        *current = indexed;
+        self.subscription_revision.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 
@@ -218,6 +343,7 @@ impl EventBus {
         }
         validate_dependencies(&candidate)?;
         *current = candidate;
+        self.subscription_revision.fetch_add(1, Ordering::AcqRel);
         Ok(installed)
     }
 
@@ -235,6 +361,7 @@ impl EventBus {
         }
         validate_dependencies(&candidate)?;
         *current = candidate;
+        self.subscription_revision.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 
@@ -252,36 +379,130 @@ impl EventBus {
         emitter_authority: &Authority,
         graph_generation: Option<&GraphGenerationId>,
     ) -> Result<EventDispatchReport, EventError> {
-        let normalized_event;
+        match self
+            .admit_in_generation(event, emitter_authority, graph_generation)?
+            .wait()
+        {
+            EventDeliveryStatus::Succeeded(report) => Ok(report),
+            EventDeliveryStatus::Failed(error) => Err(error),
+            EventDeliveryStatus::Cancelled(reason) => Err(EventError::DeliveryCancelled(reason)),
+            EventDeliveryStatus::Accepted => unreachable!("wait returns a terminal status"),
+        }
+    }
+
+    pub fn admit(
+        &self,
+        event: &EventEnvelope,
+        emitter_authority: &Authority,
+    ) -> Result<EventAdmissionReceipt, EventError> {
+        self.admit_in_generation(event, emitter_authority, None)
+    }
+
+    pub fn admit_in_generation(
+        &self,
+        event: &EventEnvelope,
+        emitter_authority: &Authority,
+        graph_generation: Option<&GraphGenerationId>,
+    ) -> Result<EventAdmissionReceipt, EventError> {
         let event = if event.causality_id == 0 {
-            normalized_event = EventEnvelope {
+            EventEnvelope {
                 causality_id: self.next_root_causality_id(),
                 ..event.clone()
-            };
-            &normalized_event
+            }
         } else {
-            event
+            event.clone()
         };
-        let subscriptions = self
-            .subscriptions
-            .lock()
-            .expect("event subscription lock poisoned")
-            .clone();
+        let (subscriptions, revision) = {
+            let current = self
+                .subscriptions
+                .lock()
+                .expect("event subscription lock poisoned");
+            (
+                current.clone(),
+                self.subscription_revision.load(Ordering::Acquire),
+            )
+        };
         let levels = dependency_levels(&subscriptions, &event.event_type, event.version)?;
-        let mut report = EventDispatchReport {
-            graph_generation: graph_generation.cloned(),
-            ..EventDispatchReport::default()
-        };
-
-        for level in levels {
-            for id in &level {
+        for level in &levels {
+            for id in level {
                 let subscription = &subscriptions[id];
                 if !emitter_authority.permits_all(&subscription.spec.required_authority) {
                     return Err(EventError::AuthorityDenied(id.clone()));
                 }
             }
-            self.enter_causality(event.causality_id, &level)?;
+        }
+        self.reserve_delivery()?;
+        let ancestry = self
+            .active_causality
+            .lock()
+            .expect("event causality lock poisoned")
+            .get(&event.causality_id)
+            .cloned()
+            .unwrap_or_default();
+        let id = self.next_delivery_id();
+        let state = Arc::new(EventReceiptState {
+            status: Mutex::new(EventDeliveryStatus::Accepted),
+            ready: Condvar::new(),
+        });
+        let receipt = EventAdmissionReceipt {
+            id,
+            state: Arc::clone(&state),
+        };
+        let bus = self.clone();
+        let authority = emitter_authority.clone();
+        let delivery = PendingDelivery {
+            event,
+            emitter_authority: authority,
+            graph_generation: graph_generation.cloned(),
+            subscriptions,
+            levels,
+            ancestry,
+            revision,
+        };
+        let spawn = thread::Builder::new()
+            .name(format!("phenix-event-{id}"))
+            .spawn(move || {
+                let status = bus.execute_delivery(delivery);
+                *state.status.lock().expect("event receipt lock poisoned") = status;
+                state.ready.notify_all();
+                bus.in_flight.fetch_sub(1, Ordering::AcqRel);
+            });
+        if let Err(error) = spawn {
+            self.in_flight.fetch_sub(1, Ordering::AcqRel);
+            return Err(EventError::QueueUnavailable(error.to_string()));
+        }
+        Ok(receipt)
+    }
 
+    fn execute_delivery(&self, delivery: PendingDelivery) -> EventDeliveryStatus {
+        let PendingDelivery {
+            event,
+            emitter_authority,
+            graph_generation,
+            subscriptions,
+            levels,
+            ancestry,
+            revision,
+        } = delivery;
+        let mut report = EventDispatchReport {
+            graph_generation: graph_generation.clone(),
+            ..EventDispatchReport::default()
+        };
+        for level in levels {
+            if self.subscription_revision.load(Ordering::Acquire) != revision {
+                return EventDeliveryStatus::Cancelled(
+                    EventDeliveryCancellation::SubscriptionSetChanged,
+                );
+            }
+            if let Some(id) = level.iter().find(|id| ancestry.contains(*id)) {
+                return EventDeliveryStatus::Failed(EventError::CausalReentry(id.clone()));
+            }
+            if let Err(error) = self.enter_causality(event.causality_id, &level) {
+                return EventDeliveryStatus::Failed(error);
+            }
+            let event = &event;
+            let graph_generation = graph_generation.as_ref();
+            let bus = self;
             let results = thread::scope(|scope| {
                 let handles = level
                     .iter()
@@ -291,7 +512,7 @@ impl EventBus {
                             emitter_authority.attenuate(&subscription.spec.maximum_authority);
                         scope.spawn(move || {
                             subscription.handler.handle_with_provenance(
-                                self,
+                                bus,
                                 event,
                                 &handler_authority,
                                 graph_generation,
@@ -301,51 +522,68 @@ impl EventBus {
                     .collect::<Vec<_>>();
                 handles
                     .into_iter()
-                    .map(|handle| {
-                        handle
-                            .join()
-                            .expect("event listener panicked during delivery")
+                    .map(|handle| match handle.join() {
+                        Ok(result) => result,
+                        Err(_) => Err("event listener panicked during delivery".into()),
                     })
                     .collect::<Vec<_>>()
             });
             self.leave_causality(event.causality_id, &level);
+            if self.subscription_revision.load(Ordering::Acquire) != revision {
+                return EventDeliveryStatus::Cancelled(
+                    EventDeliveryCancellation::SubscriptionSetChanged,
+                );
+            }
 
             for (id, result) in level.into_iter().zip(results) {
                 let subscription = &subscriptions[&id];
                 match result {
                     Ok(()) => report.delivered.push(id),
-                    Err(_) if subscription.spec.failure_policy == EventFailurePolicy::Ignore => {
-                        report.delivered.push(id);
-                    }
-                    Err(message)
-                        if subscription.spec.failure_policy == EventFailurePolicy::Warn =>
-                    {
-                        report.delivered.push(id.clone());
-                        report.warnings.push((id, message));
-                    }
                     Err(message) => {
-                        return Err(EventError::HandlerFailed {
-                            subscription: id,
-                            message,
-                        });
+                        report.failures.push((id.clone(), message.clone()));
+                        match subscription.spec.failure_policy {
+                            EventFailurePolicy::Ignore => {}
+                            EventFailurePolicy::Warn => report.warnings.push((id, message)),
+                            EventFailurePolicy::FailDelivery => {
+                                return EventDeliveryStatus::Failed(EventError::HandlerFailed {
+                                    subscription: id,
+                                    message,
+                                });
+                            }
+                        }
                     }
                 }
             }
         }
+        EventDeliveryStatus::Succeeded(report)
+    }
 
-        Ok(report)
+    fn reserve_delivery(&self) -> Result<(), EventError> {
+        let mut current = self.in_flight.load(Ordering::Acquire);
+        loop {
+            if current >= self.delivery_capacity {
+                return Err(EventError::QueueSaturated {
+                    capacity: self.delivery_capacity,
+                });
+            }
+            match self.in_flight.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(actual) => current = actual,
+            }
+        }
     }
 
     fn next_root_causality_id(&self) -> u64 {
-        loop {
-            let id = self
-                .next_root_causality
-                .fetch_add(1, Ordering::Relaxed)
-                .wrapping_add(1);
-            if id != 0 {
-                return id;
-            }
-        }
+        next_nonzero_id(&self.next_root_causality)
+    }
+
+    fn next_delivery_id(&self) -> u64 {
+        next_nonzero_id(&self.next_delivery)
     }
 
     fn enter_causality(
@@ -387,6 +625,15 @@ impl EventBus {
         }
         if active_for_cause.is_empty() {
             active.remove(&causality_id);
+        }
+    }
+}
+
+fn next_nonzero_id(counter: &AtomicU64) -> u64 {
+    loop {
+        let id = counter.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+        if id != 0 {
+            return id;
         }
     }
 }
@@ -825,9 +1072,117 @@ mod tests {
         .unwrap();
 
         let report = bus.dispatch(&envelope(10), &Authority::default()).unwrap();
+        assert!(report.delivered.is_empty());
+        assert_eq!(
+            report.failures,
+            vec![(subscription("warning"), "expected".into())]
+        );
         assert_eq!(
             report.warnings,
             vec![(subscription("warning"), "expected".into())]
+        );
+    }
+
+    #[test]
+    fn admission_is_bounded_and_reports_a_terminal_status() {
+        let bus = EventBus::with_capacity(1);
+        let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+        let handler_gate = Arc::clone(&gate);
+        bus.replace_subscriptions([EventSubscription {
+            spec: spec("blocked", &[]),
+            handler: Arc::new(move |_: &EventEnvelope, _: &Authority| {
+                let (state, changed) = &*handler_gate;
+                let mut state = state.lock().unwrap();
+                state.0 = true;
+                changed.notify_all();
+                while !state.1 {
+                    state = changed.wait(state).unwrap();
+                }
+                Ok(())
+            }),
+        }])
+        .unwrap();
+
+        let receipt = bus.admit(&envelope(20), &Authority::default()).unwrap();
+        let (state, changed) = &*gate;
+        let state = state.lock().unwrap();
+        let (mut state, timeout) = changed
+            .wait_timeout_while(state, Duration::from_secs(1), |state| !state.0)
+            .unwrap();
+        assert!(!timeout.timed_out(), "listener did not start");
+        assert_eq!(receipt.status(), EventDeliveryStatus::Accepted);
+        assert!(matches!(
+            bus.admit(&envelope(21), &Authority::default()),
+            Err(EventError::QueueSaturated { capacity: 1 })
+        ));
+        state.1 = true;
+        changed.notify_all();
+        drop(state);
+
+        assert!(matches!(
+            receipt.wait(),
+            EventDeliveryStatus::Succeeded(EventDispatchReport { .. })
+        ));
+    }
+
+    #[test]
+    fn fail_delivery_receipt_preserves_the_handler_failure() {
+        let bus = EventBus::default();
+        bus.replace_subscriptions([EventSubscription {
+            spec: spec("failed", &[]),
+            handler: Arc::new(|_: &EventEnvelope, _: &Authority| Err("failed".into())),
+        }])
+        .unwrap();
+
+        let receipt = bus.admit(&envelope(22), &Authority::default()).unwrap();
+        assert_eq!(
+            receipt.wait(),
+            EventDeliveryStatus::Failed(EventError::HandlerFailed {
+                subscription: subscription("failed"),
+                message: "failed".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn subscription_replacement_cancels_an_in_flight_old_delivery() {
+        let bus = EventBus::default();
+        let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+        let handler_gate = Arc::clone(&gate);
+        bus.replace_subscriptions([
+            EventSubscription {
+                spec: spec("first", &[]),
+                handler: Arc::new(move |_: &EventEnvelope, _: &Authority| {
+                    let (state, changed) = &*handler_gate;
+                    let mut state = state.lock().unwrap();
+                    state.0 = true;
+                    changed.notify_all();
+                    while !state.1 {
+                        state = changed.wait(state).unwrap();
+                    }
+                    Ok(())
+                }),
+            },
+            subscription_with("second", &["first"]),
+        ])
+        .unwrap();
+
+        let receipt = bus.admit(&envelope(23), &Authority::default()).unwrap();
+        let (state, changed) = &*gate;
+        let state = state.lock().unwrap();
+        let (mut state, timeout) = changed
+            .wait_timeout_while(state, Duration::from_secs(1), |state| !state.0)
+            .unwrap();
+        assert!(!timeout.timed_out(), "listener did not start");
+        bus.replace_subscriptions([subscription_with("replacement", &[])])
+            .unwrap();
+        state.1 = true;
+        changed.notify_all();
+        drop(state);
+
+        assert_eq!(
+            receipt.wait(),
+            EventDeliveryStatus::Cancelled(EventDeliveryCancellation::SubscriptionSetChanged)
         );
     }
 }
