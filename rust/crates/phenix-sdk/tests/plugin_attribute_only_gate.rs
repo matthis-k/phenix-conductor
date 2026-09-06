@@ -58,6 +58,22 @@ impl phenix_sdk::SdkContract for DependencyContract {
     type Interface = DependencyContract;
 }
 
+struct UndeclaredContract;
+
+impl ComponentInterface for UndeclaredContract {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse("fixture.attribute-gate.undeclared@1").unwrap()
+    }
+
+    fn schema() -> InterfaceSchema {
+        InterfaceSchema::of::<Request, Response>()
+    }
+}
+
+impl phenix_sdk::SdkContract for UndeclaredContract {
+    type Interface = UndeclaredContract;
+}
+
 #[phenix_sdk::plugin("fixture.attribute-gate.sessions")]
 mod sessions {
     use super::{Dependency, Internal, Request, Response};
@@ -151,6 +167,69 @@ impl Api {
         context: &phenix_sdk::EventContext<'_, '_>,
         response: Response,
     ) -> Result<(), String> {
+        if context.emitter() != &sessions::Plugin::plugin_id() {
+            return Err("listener lost emitter provenance".into());
+        }
+        if context.causality_id() != 41 {
+            return Err("listener lost causality provenance".into());
+        }
+        let generation = context
+            .graph_generation()
+            .ok_or_else(|| "listener lost graph generation".to_owned())?;
+        if context.plugin_context().plugin.id != &Plugin::plugin_id() {
+            return Err("listener lost owner identity".into());
+        }
+        if context.kernel.cancellation_token().is_none() {
+            return Err("listener has no cancellation scope".into());
+        }
+        let task_scope = context
+            .kernel
+            .task_scope()
+            .ok_or_else(|| "listener has no task scope".to_owned())?;
+        if task_scope.graph_generation() != generation
+            || task_scope.plugin() != Some(&Plugin::plugin_id())
+        {
+            return Err("listener task scope lost owner or generation".into());
+        }
+        let requested_task_authority = Authority::new([
+            CapabilityId::parse("models.invoke").unwrap(),
+            CapabilityId::parse("models.serve").unwrap(),
+        ]);
+        let expected_task_authority = context.authority().attenuate(&requested_task_authority);
+        let task = task_scope.spawn(&requested_task_authority, |token| {
+            (token.graph_generation().clone(), token.authority().clone())
+        });
+        let (task_generation, task_authority) = task
+            .join()
+            .map_err(|_| "listener task panicked".to_owned())?;
+        if &task_generation != generation || task_authority != expected_task_authority {
+            return Err("listener task escaped generation or authority".into());
+        }
+
+        if context
+            .sdk
+            .require::<UndeclaredContract>()
+            .invoke::<_, Response>(&Request {
+                prompt: "undeclared".into(),
+            })
+            .is_ok()
+        {
+            return Err("listener invoked an undeclared import".into());
+        }
+        if context
+            .kernel
+            .transact_durable(
+                &ResourceNamespace::parse("fixture.attribute-gate.foreign").unwrap(),
+                &[TransactionOp::Put {
+                    key: "forbidden".into(),
+                    value: Vec::new(),
+                }],
+            )
+            .is_ok()
+        {
+            return Err("listener wrote a foreign resource namespace".into());
+        }
+
         let dependency = context
             .sdk
             .require::<DependencyContract>()
@@ -453,7 +532,18 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     ]);
     let report = events.dispatch(&event, &listener_authority).unwrap();
     assert_eq!(report.delivered.len(), 1);
+    assert!(report.failures.is_empty());
     assert!(report.warnings.is_empty());
+
+    let attenuated_report = events
+        .dispatch(&event, &authority("events.observe"))
+        .unwrap();
+    assert!(attenuated_report.delivered.is_empty());
+    assert_eq!(attenuated_report.failures.len(), 1);
+    assert_eq!(attenuated_report.warnings.len(), 1);
+    assert!(attenuated_report.failures[0]
+        .1
+        .contains("kernel.persistence.write"));
 
     let mismatched = Request {
         prompt: "wrong-shape".into(),
