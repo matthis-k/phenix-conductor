@@ -284,7 +284,12 @@ impl Kernel {
             candidate.component_graph(),
             candidate.generation(),
             &candidate_config,
+            &next_states,
             &next_instances,
+            &self.events,
+            &self.tasks,
+            &self.persistence,
+            &self.provenance,
         ) {
             Ok(subscriptions) => subscriptions,
             Err(error) => {
