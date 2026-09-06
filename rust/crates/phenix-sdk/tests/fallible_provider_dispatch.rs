@@ -153,7 +153,15 @@ fn invoke(kernel: &mut Kernel, authority: &Authority, outcome: &str) -> Invocati
         outcome: outcome.into(),
     }))
     .unwrap();
-    let output = kernel.invoke(&service(), &input, authority, None).unwrap();
+    let output = kernel
+        .invoke_component(
+            &provider::Plugin::component_id(),
+            &service(),
+            &input,
+            authority,
+            &provider::Plugin::plugin_id(),
+        )
+        .unwrap();
     let value: PhenixValue = serde_json::from_slice(&output).unwrap();
     InvocationOutcome::from_transport_value(value)
 }
