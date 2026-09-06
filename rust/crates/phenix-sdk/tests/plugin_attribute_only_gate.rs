@@ -1,13 +1,13 @@
 use phenix_core::{
-    EventEnvelope, EventFailurePolicy, EventSubscription, EventTypeId, GraphReconciler, Kernel,
-    PluginId, ResolvedHarness, ResolvedHarnessActivation, ServiceId, SubscriptionId,
-    SubscriptionSpec,
+    ComponentInterface, EventEnvelope, EventFailurePolicy, EventSubscription, EventTypeId,
+    GraphReconciler, InterfaceId, InterfaceSchema, Kernel, PluginId, ResolvedHarness,
+    ResolvedHarnessActivation, ResourceNamespace, ServiceId, SubscriptionId, SubscriptionSpec,
+    TransactionOp,
 };
 use phenix_sdk::{
     Authority, Call, CapabilityId, Emit, Required, StaticComponentBehavior,
     StaticComponentRuntimeDispatch, StaticPluginComponentDispatch, StaticPluginComponents,
-    StaticPluginConfiguration, StaticPluginDefinition, StaticPluginLifecycle,
-    StaticPluginResources,
+    StaticPluginConfiguration, StaticPluginDefinition, StaticPluginLifecycle, StaticPluginResources,
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -38,6 +38,22 @@ struct Internal;
 #[phenix_sdk::interface("fixture.attribute-gate.dependency@1")]
 struct Dependency;
 
+struct DependencyContract;
+
+impl ComponentInterface for DependencyContract {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse("fixture.attribute-gate.dependency@1").unwrap()
+    }
+
+    fn schema() -> InterfaceSchema {
+        InterfaceSchema::of::<Request, Response>()
+    }
+}
+
+impl phenix_sdk::SdkContract for DependencyContract {
+    type Interface = DependencyContract;
+}
+
 #[phenix_sdk::plugin("fixture.attribute-gate.sessions")]
 mod sessions {
     use super::{Dependency, Internal, Request, Response};
@@ -65,6 +81,9 @@ fn plugin_authority() -> Authority {
     Authority::new([
         CapabilityId::parse("plugin.run").unwrap(),
         CapabilityId::parse("kernel.persistence.schema").unwrap(),
+        CapabilityId::parse("kernel.persistence.write").unwrap(),
+        CapabilityId::parse("models.invoke").unwrap(),
+        CapabilityId::parse("events.observe").unwrap(),
     ])
 }
 
@@ -72,6 +91,7 @@ fn runtime_authority() -> Authority {
     Authority::new([
         CapabilityId::parse("plugin.run").unwrap(),
         CapabilityId::parse("kernel.persistence.schema").unwrap(),
+        CapabilityId::parse("kernel.persistence.write").unwrap(),
         CapabilityId::parse("models.invoke").unwrap(),
         CapabilityId::parse("models.serve").unwrap(),
         CapabilityId::parse("models.layer").unwrap(),
@@ -124,9 +144,26 @@ impl Api {
     )]
     async fn observed(
         &self,
-        _context: &phenix_sdk::EventContext,
-        _response: Response,
+        context: &phenix_sdk::EventContext,
+        response: Response,
     ) -> Result<(), String> {
+        let dependency = context
+            .sdk
+            .require::<DependencyContract>()
+            .invoke::<_, Response>(&Request {
+                prompt: response.value,
+            })
+            .map_err(|error| error.to_string())?;
+        context
+            .kernel
+            .transact_durable(
+                &ResourceNamespace::parse("fixture.attribute-gate.state").unwrap(),
+                &[TransactionOp::Put {
+                    key: "listener-import".into(),
+                    value: dependency.value.into_bytes(),
+                }],
+            )
+            .map_err(|error| error.to_string())?;
         self.observed.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
@@ -399,9 +436,12 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
         kernel_policy_revision: 0,
         payload,
     };
-    let report = events
-        .dispatch(&event, &authority("events.observe"))
-        .unwrap();
+    let listener_authority = Authority::new([
+        CapabilityId::parse("events.observe").unwrap(),
+        CapabilityId::parse("models.invoke").unwrap(),
+        CapabilityId::parse("kernel.persistence.write").unwrap(),
+    ]);
+    let report = events.dispatch(&event, &listener_authority).unwrap();
     assert_eq!(report.delivered.len(), 1);
     assert!(report.warnings.is_empty());
 
