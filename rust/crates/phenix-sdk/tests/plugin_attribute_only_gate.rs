@@ -416,7 +416,8 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     let mismatch_report = events
         .dispatch(&mismatch_event, &authority("events.observe"))
         .unwrap();
-    assert_eq!(mismatch_report.delivered.len(), 1);
+    assert!(mismatch_report.delivered.is_empty());
+    assert_eq!(mismatch_report.failures.len(), 1);
     assert_eq!(mismatch_report.warnings.len(), 1);
 
     let diagnostics = diagnostics.lock().unwrap();
