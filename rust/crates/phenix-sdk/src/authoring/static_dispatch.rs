@@ -394,13 +394,7 @@ where
             Ok(()) => Ok(()),
             Err(error) => {
                 if let Some(value_error) = error.downcast_ref::<ValueError>() {
-                    report_listener_mismatch(
-                        host,
-                        &self.owner,
-                        self.listener,
-                        event,
-                        value_error,
-                    );
+                    report_listener_mismatch(host, &self.owner, self.listener, event, value_error);
                 }
                 Err(error.to_string())
             }
