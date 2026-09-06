@@ -260,7 +260,10 @@ impl fmt::Debug for EventBus {
 impl EventBus {
     #[must_use]
     pub fn with_capacity(delivery_capacity: usize) -> Self {
-        assert!(delivery_capacity > 0, "event delivery capacity must be positive");
+        assert!(
+            delivery_capacity > 0,
+            "event delivery capacity must be positive"
+        );
         Self {
             kernel_subscribers: Arc::new(Mutex::new(Vec::new())),
             subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
