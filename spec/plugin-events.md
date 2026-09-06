@@ -137,3 +137,26 @@ A Listener that produces Durable State writes through its owning Plugin Resource
 - a pre-operation policy is implemented through a Layer rather than an Event;
 - a Phenix observation Hook can be implemented through the ordinary Event mechanism;
 - the kernel Event module contains no orchestration, context, tool, model, or session-specific action type.
+
+## Scheduled listener delivery
+
+Proposed follow-up; implementation and regressions are pending. The baseline status above does not certify this boundary.
+
+Generated listeners use try_lock while invocations hold their plugin state. Self-emitted events and contending listeners can be skipped; Ignore and Warn currently count failed handlers as delivered.
+
+1. Route typed plugin events through one kernel-owned bounded delivery queue. Admission captures event data, resolved subscriptions, effective authority, generation, dependency DAG, and causal ancestry. Emit returns an admission receipt; waiting for completion is a separate host/controller operation outside invocation state guards.
+
+2. Drain ready deliveries after the originating invocation releases state. Serialize deliveries that share mutable listener state and honor declared dependencies; independent listeners may run concurrently through bounded workers. Replace skip-on-busy behavior with scheduling, not a blocking reentrant mutex.
+
+3. Represent accepted, succeeded, failed, and cancelled deliveries distinctly. Only successful handlers enter delivered. Ignore/Warn/FailDelivery determine reporting and dependent-delivery policy, never erase execution failure or roll back the originating operation. Preserve the existing policy's dependency continuation behavior explicitly.
+
+4. Carry causal ancestry across deferred deliveries so queueing cannot turn a recursive subscription loop into unbounded work. Replacement or unload cancels queued deliveries owned by the old generation; an old receipt must never execute on a new instance.
+
+5. Queue exhaustion returns a typed admission failure without silently dropping an accepted event or blocking an emitter on its own progress. Receipts report eventual delivery failure separately. Event durability remains a userspace contract; do not promise replay across process restart or automatic retries after handler side effects.
+
+Acceptance requires:
+
+- A stateful plugin emits an event from a callable and its own listener runs once after the callable releases state.
+- Two listeners sharing state both run; dependencies retain their order under contention.
+- Admission, warnings, failed handlers, queue saturation, and cancellation produce distinct truthful receipts.
+- Deferred recursion is rejected; unload/replacement prevents queued events reaching the new generation.
