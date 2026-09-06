@@ -1559,6 +1559,7 @@ dependencies = [
 name = "phenix-client-acp"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "phenix-application-interface",
  "phenix-core",
  "phenix-sdk-macros",

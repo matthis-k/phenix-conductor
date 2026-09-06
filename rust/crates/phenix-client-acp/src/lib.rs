@@ -83,8 +83,8 @@ mod tests {
     }
 
     fn client(error: ApplicationError) -> Client<RejectingTransport> {
-        let capability = ContractId::parse(FixtureOperation::CAPABILITY)
-            .expect("static capability id is valid");
+        let capability =
+            ContractId::parse(FixtureOperation::CAPABILITY).expect("static capability id is valid");
         let capabilities = Capabilities::negotiate(&application_descriptor(), [capability])
             .expect("discovery has no missing dependency");
         Client::new(RejectingTransport(error), capabilities)
@@ -94,8 +94,7 @@ mod tests {
     fn generated_api_reports_the_fixed_interface_identity() {
         assert_eq!(generated::INTERFACE_ID, INTERFACE_ID);
         assert!(generated::type_schemas().contains_key(
-            &ContractId::parse("phenix.application.error@1")
-                .expect("static contract id is valid"),
+            &ContractId::parse("phenix.application.error@1").expect("static contract id is valid"),
         ));
     }
 
@@ -122,7 +121,9 @@ mod tests {
         ];
 
         for expected in cases {
-            let result = futures::executor::block_on(client(expected.clone()).invoke::<FixtureOperation>(Request));
+            let result = futures::executor::block_on(
+                client(expected.clone()).invoke::<FixtureOperation>(Request),
+            );
             assert_eq!(result, Err(expected));
         }
     }
