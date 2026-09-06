@@ -1,9 +1,10 @@
 use crate::{
     runtime_provider_service, Authority, ComponentExport, ComponentId, ComponentImport,
-    ComponentInterface, ComponentManifest, InterfaceId, Kernel, PhenixValue, PluginArtifact,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, PluginRuntimeProvider,
-    ResolvedHarness, ResolvedHarnessActivation, ResolvedImportHandle, RuntimeId,
-    RuntimePluginCandidate, ServiceContribution, ServiceId, ServiceRole,
+    ComponentInterface, ComponentManifest, InterfaceId, InterfaceSchema, InvocationOutcome, Kernel,
+    PhenixValue, PluginArtifact, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, PluginRuntimeProvider, ResolvedHarness, ResolvedHarnessActivation,
+    ResolvedImportHandle, RuntimeId, RuntimePluginCandidate, ServiceContribution, ServiceId,
+    ServiceRole,
 };
 use std::collections::BTreeMap;
 
@@ -20,6 +21,10 @@ struct EchoInterface;
 impl ComponentInterface for EchoInterface {
     fn interface_id() -> InterfaceId {
         InterfaceId::parse("fixture.echo@1").unwrap()
+    }
+
+    fn schema() -> InterfaceSchema {
+        InterfaceSchema::fallible_of::<String, String, String>()
     }
 }
 
@@ -49,8 +54,13 @@ impl PluginInstance for EchoProvider {
         let PhenixValue::String(value) = request else {
             return Err("expected string request".into());
         };
-        serde_json::to_vec(&PhenixValue::String(format!("{}:{value}", self.0)))
-            .map_err(|error| error.to_string())
+        let response = if value == "domain-error" {
+            InvocationOutcome::domain_error(PhenixValue::String(format!("{}:conflict", self.0)))
+                .into_transport_value()
+        } else {
+            PhenixValue::String(format!("{}:{value}", self.0))
+        };
+        serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
@@ -178,10 +188,18 @@ fn handle(resolved: &ResolvedHarness) -> ResolvedImportHandle {
         .clone()
 }
 
-fn invoke(handle: &ResolvedImportHandle, kernel: &mut Kernel) -> PhenixValue {
+fn invoke_request(
+    handle: &ResolvedImportHandle,
+    kernel: &mut Kernel,
+    request: &str,
+) -> PhenixValue {
     handle
-        .invoke_value::<EchoInterface>(kernel, &PhenixValue::String("hello".into()))
+        .invoke_value::<EchoInterface>(kernel, &PhenixValue::String(request.into()))
         .unwrap()
+}
+
+fn invoke(handle: &ResolvedImportHandle, kernel: &mut Kernel) -> PhenixValue {
+    invoke_request(handle, kernel, "hello")
 }
 
 #[test]
@@ -238,5 +256,40 @@ fn typed_component_consumer_is_runtime_agnostic() {
     assert_eq!(
         invoke(&runtime_handle, &mut runtime_kernel),
         PhenixValue::String("runtime:hello".into())
+    );
+}
+
+#[test]
+fn structural_domain_error_survives_runtime_bridge() {
+    let consumer = consumer_manifest();
+    let runtime = RuntimeId::parse("fixture.runtime").unwrap();
+    let bridge = runtime_bridge_manifest(&runtime);
+    let runtime_provider = runtime_provider_manifest(runtime);
+    let resolved = ResolvedHarness::resolve(
+        [consumer.clone(), bridge.clone(), runtime_provider],
+        components(),
+        [],
+        &Authority::default(),
+    )
+    .unwrap();
+    let handle = handle(&resolved);
+    let mut kernel = Kernel::new(resolved.kernel_config().clone());
+    kernel.activate_resolved_harness(&resolved).unwrap();
+    kernel
+        .register_embedded_factory(consumer.id, || Box::new(Noop))
+        .unwrap();
+    kernel
+        .register_embedded_factory(bridge.id, || Box::new(EchoRuntimeBridge))
+        .unwrap();
+    kernel.activate_all().unwrap();
+
+    let outcome = InvocationOutcome::from_transport_value(invoke_request(
+        &handle,
+        &mut kernel,
+        "domain-error",
+    ));
+    assert_eq!(
+        outcome,
+        InvocationOutcome::DomainError(PhenixValue::String("runtime:conflict".into()))
     );
 }
