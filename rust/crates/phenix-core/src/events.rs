@@ -230,6 +230,16 @@ impl Error for EventError {}
 
 const DEFAULT_DELIVERY_CAPACITY: usize = 64;
 
+struct PendingDelivery {
+    event: EventEnvelope,
+    emitter_authority: Authority,
+    graph_generation: Option<GraphGenerationId>,
+    subscriptions: BTreeMap<SubscriptionId, EventSubscription>,
+    levels: Vec<Vec<SubscriptionId>>,
+    ancestry: BTreeSet<SubscriptionId>,
+    revision: u64,
+}
+
 #[derive(Clone)]
 pub struct EventBus {
     kernel_subscribers: Arc<Mutex<Vec<Sender<KernelEvent>>>>,
@@ -435,19 +445,19 @@ impl EventBus {
         };
         let bus = self.clone();
         let authority = emitter_authority.clone();
-        let generation = graph_generation.cloned();
+        let delivery = PendingDelivery {
+            event,
+            emitter_authority: authority,
+            graph_generation: graph_generation.cloned(),
+            subscriptions,
+            levels,
+            ancestry,
+            revision,
+        };
         let spawn = thread::Builder::new()
             .name(format!("phenix-event-{id}"))
             .spawn(move || {
-                let status = bus.execute_delivery(
-                    event,
-                    authority,
-                    generation,
-                    subscriptions,
-                    levels,
-                    ancestry,
-                    revision,
-                );
+                let status = bus.execute_delivery(delivery);
                 *state.status.lock().expect("event receipt lock poisoned") = status;
                 state.ready.notify_all();
                 bus.in_flight.fetch_sub(1, Ordering::AcqRel);
@@ -459,16 +469,16 @@ impl EventBus {
         Ok(receipt)
     }
 
-    fn execute_delivery(
-        &self,
-        event: EventEnvelope,
-        emitter_authority: Authority,
-        graph_generation: Option<GraphGenerationId>,
-        subscriptions: BTreeMap<SubscriptionId, EventSubscription>,
-        levels: Vec<Vec<SubscriptionId>>,
-        ancestry: BTreeSet<SubscriptionId>,
-        revision: u64,
-    ) -> EventDeliveryStatus {
+    fn execute_delivery(&self, delivery: PendingDelivery) -> EventDeliveryStatus {
+        let PendingDelivery {
+            event,
+            emitter_authority,
+            graph_generation,
+            subscriptions,
+            levels,
+            ancestry,
+            revision,
+        } = delivery;
         let mut report = EventDispatchReport {
             graph_generation: graph_generation.clone(),
             ..EventDispatchReport::default()
