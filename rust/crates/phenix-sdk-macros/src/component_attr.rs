@@ -1538,7 +1538,7 @@ mod tests {
         assert!(output.contains("fixture.api.run@1"));
         assert!(output.contains("priority : 37"));
         assert!(output.contains("required_authority : Authority :: default"));
-        assert!(output.contains("InterfaceSchema :: fallible_of :: < Request , Response , Error >"));
+        assert!(output.contains("InterfaceSchema :: fallible_of :: < Request , Response , Error , >"));
         assert!(output.contains("StaticComponentLayer :: with_authority :: < Models >"));
         assert!(output.contains("fixture.completed"));
         assert!(output.contains("fixture.status@1"));
