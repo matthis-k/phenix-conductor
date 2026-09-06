@@ -561,9 +561,7 @@ fn resolve_bool(
     };
     match option.value {
         OptionValue::Bool(value) => Ok(value),
-        value => Err(format!(
-            "option {key} must resolve to bool, got {value:?}"
-        )),
+        value => Err(format!("option {key} must resolve to bool, got {value:?}")),
     }
 }
 
