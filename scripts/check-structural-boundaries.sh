@@ -49,7 +49,7 @@ if [[ -n "${PHENIX_LEGACY_PLUGIN_AUTHORING_FIXTURE:-}" ]]; then
   check_fixture \
     "$legacy_plugin_authoring_pattern" \
     "$PHENIX_LEGACY_PLUGIN_AUTHORING_FIXTURE" \
-    "first-party runtime plugins must use the canonical attribute authoring API"
+    "Rust plugin authoring must use the canonical attribute API"
   exit
 fi
 
@@ -103,12 +103,13 @@ for crate in rust/crates/phenix-{adapter,plugin}-*; do
   fi
 done
 
+if git grep -n -E "$legacy_plugin_authoring_pattern" -- 'rust/crates/**/*.rs'; then
+  printf '%s\n' "Rust plugin authoring must use the canonical attribute API" >&2
+  exit 1
+fi
+
 for crate in rust/crates/phenix-{adapter,plugin}-*; do
   [[ -d "$crate/src" ]] || continue
-  if git grep -n -E "$legacy_plugin_authoring_pattern" -- "$crate/src"; then
-    printf '%s\n' "first-party runtime plugins must use the canonical attribute authoring API" >&2
-    exit 1
-  fi
   if git grep -n -E "$hidden_static_discovery_pattern" -- "$crate/src"; then
     printf '%s\n' "static plugin wiring must not use hidden global discovery" >&2
     exit 1
