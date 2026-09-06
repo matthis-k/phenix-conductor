@@ -139,12 +139,12 @@ fn expand_struct(
                     .find(|listener| listener.method == method)?;
                 let state = ::std::sync::Weak::clone(&state);
                 let owner = owner.clone();
-                let graph_generation = generation.clone();
+                let component = component.clone();
                 let method = listener.method;
                 return Some(::phenix_sdk::StaticPluginInstance::<Self>::listener_handler(
                     owner,
                     method,
-                    move |envelope, authority| {
+                    move |envelope, host| {
                         let Some(state) = state.upgrade() else {
                             return Err(Box::new(::std::io::Error::other(format!(
                                 "stateful listener {method} plugin state is unavailable"
@@ -152,8 +152,9 @@ fn expand_struct(
                         };
                         let plugin = state;
                         let context = ::phenix_sdk::EventContext::from_event(
-                            authority,
-                            Some(&graph_generation),
+                            host,
+                            component.clone(),
+                            envelope,
                         );
                         ::phenix_sdk::StaticComponentRuntimeDispatch::dispatch_listener_runtime(
                             &*plugin,
@@ -180,12 +181,12 @@ fn expand_struct(
                     .find(|listener| listener.method == method)?;
                 let state = ::std::sync::Weak::clone(&state);
                 let owner = owner.clone();
-                let graph_generation = generation.clone();
+                let component = component.clone();
                 let method = listener.method;
                 return Some(::phenix_sdk::StaticPluginInstance::<Self>::listener_handler(
                     owner,
                     method,
-                    move |envelope, authority| {
+                    move |envelope, host| {
                         let Some(state) = state.upgrade() else {
                             return Err(Box::new(::std::io::Error::other(format!(
                                 "stateful listener {method} plugin state is unavailable"
@@ -193,8 +194,9 @@ fn expand_struct(
                         };
                         let plugin = state;
                         let context = ::phenix_sdk::EventContext::from_event(
-                            authority,
-                            Some(&graph_generation),
+                            host,
+                            component.clone(),
+                            envelope,
                         );
                         ::phenix_sdk::StaticComponentRuntimeDispatch::dispatch_listener_runtime(
                             &plugin.#field,
@@ -245,8 +247,8 @@ fn expand_struct(
                 owner: &::phenix_sdk::__phenix_plugin::PluginId,
                 component: &::phenix_sdk::__phenix_plugin::ComponentId,
                 method: &str,
-                generation: &::phenix_sdk::__phenix_plugin::GraphGenerationId,
-            ) -> Option<::std::sync::Arc<dyn ::phenix_sdk::__phenix_plugin::EventHandler>>
+                _generation: &::phenix_sdk::__phenix_plugin::GraphGenerationId,
+            ) -> Option<::std::sync::Arc<dyn ::phenix_sdk::__phenix_plugin::PluginListener>>
             where
                 Self: Send + Sync + 'static,
             {
