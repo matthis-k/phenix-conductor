@@ -388,7 +388,7 @@ impl ComponentInterface for OptionsInterface {
     }
 
     fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<OptionCommand, OptionResponse>()
+        phenix_core::InterfaceSchema::fallible_of::<OptionCommand, OptionResponse, String>()
     }
 }
 
