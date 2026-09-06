@@ -18,11 +18,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-fn event_subscription<F>(
-    id: &str,
-    event: &str,
-    handler: F,
-) -> EventSubscription
+fn event_subscription<F>(id: &str, event: &str, handler: F) -> EventSubscription
 where
     F: Fn(&EventEnvelope, &Authority) -> Result<(), String> + Send + Sync + 'static,
 {
