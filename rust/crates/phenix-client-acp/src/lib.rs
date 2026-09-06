@@ -1,11 +1,5 @@
 #![forbid(unsafe_code)]
 
-//! Generated, typed application API for ACP-facing Phenix clients.
-//!
-//! The application descriptor owns identifiers and structural payloads. This crate
-//! owns the public client façade; ACP transport and connection lifecycle remain
-//! handwritten and are added below this stable generated API.
-
 use phenix_application_interface::{
     ApplicationClient, ApplicationTransport, Capabilities, Operation,
 };
@@ -14,17 +8,10 @@ pub use phenix_application_interface::{
     application_descriptor, types::ApplicationError, INTERFACE_ID,
 };
 
-/// Types, capabilities, event/callback identities, and operation wrappers generated
-/// from the fixed application descriptor at build time.
 pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/application.rs"));
 }
 
-/// Capability-checked typed application client.
-///
-/// The contained transport is deliberately protocol-neutral. ACP connection,
-/// request correlation, and stream lifecycle are layered in handwritten code
-/// without changing descriptor-generated public types.
 pub struct Client<T> {
     application: ApplicationClient<T>,
 }
@@ -53,12 +40,61 @@ impl<T: ApplicationTransport> Client<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_core::{ContractId, PhenixContract, PhenixValue, ValueCodec};
+
+    #[derive(phenix_sdk_macros::PhenixValue)]
+    struct Request;
+
+    impl PhenixContract for Request {
+        fn contract_id() -> ContractId {
+            ContractId::parse("fixture.client.request@1").expect("static contract id is valid")
+        }
+    }
+
+    #[derive(phenix_sdk_macros::PhenixValue)]
+    struct Response;
+
+    impl PhenixContract for Response {
+        fn contract_id() -> ContractId {
+            ContractId::parse("fixture.client.response@1").expect("static contract id is valid")
+        }
+    }
+
+    struct FixtureOperation;
+
+    impl Operation for FixtureOperation {
+        const ID: &'static str = "phenix.application.capabilities@1";
+        const CAPABILITY: &'static str = "phenix.application.capability.discovery@1";
+        type Input = Request;
+        type Output = Response;
+    }
+
+    #[derive(Clone)]
+    struct RejectingTransport(ApplicationError);
+
+    impl ApplicationTransport for RejectingTransport {
+        fn invoke(
+            &self,
+            _operation: &ContractId,
+            _input: PhenixValue,
+        ) -> impl std::future::Future<Output = Result<PhenixValue, ApplicationError>> {
+            std::future::ready(Err(self.0.clone()))
+        }
+    }
+
+    fn client(error: ApplicationError) -> Client<RejectingTransport> {
+        let capability = ContractId::parse(FixtureOperation::CAPABILITY)
+            .expect("static capability id is valid");
+        let capabilities = Capabilities::negotiate(&application_descriptor(), [capability])
+            .expect("discovery has no missing dependency");
+        Client::new(RejectingTransport(error), capabilities)
+    }
 
     #[test]
     fn generated_api_reports_the_fixed_interface_identity() {
         assert_eq!(generated::INTERFACE_ID, INTERFACE_ID);
         assert!(generated::type_schemas().contains_key(
-            &phenix_core::ContractId::parse("phenix.application.error@1")
+            &ContractId::parse("phenix.application.error@1")
                 .expect("static contract id is valid"),
         ));
     }
@@ -70,5 +106,24 @@ mod tests {
         let second = phenix_application_interface::generate::rust(&application_descriptor())
             .expect("fixed descriptor is generatable");
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn typed_client_preserves_typed_application_failures() {
+        let cases = [
+            ApplicationError::Conflict {
+                message: "same text".to_owned(),
+            },
+            ApplicationError::PermissionDenied {
+                message: "same text".to_owned(),
+            },
+            ApplicationError::Cancelled,
+            ApplicationError::Disconnected,
+        ];
+
+        for expected in cases {
+            let result = futures::executor::block_on(client(expected.clone()).invoke::<FixtureOperation>(Request));
+            assert_eq!(result, Err(expected));
+        }
     }
 }
