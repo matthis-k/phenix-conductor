@@ -1,7 +1,7 @@
 use phenix_core::{
     Authority, InvocationOutcome, Kernel, KernelConfig, LayerPolicy, LayerResult, PhenixValue,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, Project, ResolvedHarness,
-    ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
+    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, Project,
+    ResolvedHarness, ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_sdk::{
     HasPhenixSchema, StaticComponentBehavior, StaticPluginDefinition, StaticPluginFactory,
