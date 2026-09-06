@@ -50,10 +50,10 @@ impl Kernel {
             prepared_embedded_instances: BTreeMap::new(),
             instances: BTreeMap::new(),
             events: Arc::new(EventBus::default()),
-            tasks: TaskRuntime::default(),
-            persistence: Mutex::new(persistence),
+            tasks: Arc::new(TaskRuntime::default()),
+            persistence: Arc::new(Mutex::new(persistence)),
             persistence_bootstrap,
-            provenance: Mutex::new(Vec::new()),
+            provenance: Arc::new(Mutex::new(Vec::new())),
             runtime_active: false,
         }
     }
@@ -364,12 +364,17 @@ impl Kernel {
         }
 
         let subscriptions = match self.graph_generation.as_ref() {
-            Some(generation) => stage_listener_subscriptions(
-                &self.component_graph,
+            Some(generation) => stage_listener_subscriptions(listener::ListenerRuntimeSources {
+                graph: &self.component_graph,
                 generation,
-                &config,
-                &next_instances,
-            ),
+                config: &config,
+                states: &next_states,
+                instances: &next_instances,
+                events: &self.events,
+                tasks: &self.tasks,
+                persistence: &self.persistence,
+                provenance: &self.provenance,
+            }),
             None if self.component_graph.listeners().next().is_none() => Ok(Vec::new()),
             None => Err(KernelError::ResolvedGenerationMissing),
         };

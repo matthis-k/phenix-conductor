@@ -280,12 +280,17 @@ impl Kernel {
             }
         }
 
-        let subscriptions = match stage_listener_subscriptions(
-            candidate.component_graph(),
-            candidate.generation(),
-            &candidate_config,
-            &next_instances,
-        ) {
+        let subscriptions = match stage_listener_subscriptions(listener::ListenerRuntimeSources {
+            graph: candidate.component_graph(),
+            generation: candidate.generation(),
+            config: &candidate_config,
+            states: &next_states,
+            instances: &next_instances,
+            events: &self.events,
+            tasks: &self.tasks,
+            persistence: &self.persistence,
+            provenance: &self.provenance,
+        }) {
             Ok(subscriptions) => subscriptions,
             Err(error) => {
                 cleanup_staged(

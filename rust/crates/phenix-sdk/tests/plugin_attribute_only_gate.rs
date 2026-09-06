@@ -1,7 +1,8 @@
 use phenix_core::{
-    EventEnvelope, EventFailurePolicy, EventSubscription, EventTypeId, GraphReconciler, Kernel,
-    PluginId, ResolvedHarness, ResolvedHarnessActivation, ServiceId, SubscriptionId,
-    SubscriptionSpec,
+    ComponentInterface, DurableSchema, EventEnvelope, EventFailurePolicy, EventSubscription,
+    EventTypeId, GraphReconciler, InterfaceId, InterfaceSchema, Kernel, PluginId, ResolvedHarness,
+    ResolvedHarnessActivation, ResourceNamespace, ServiceId, SubscriptionId, SubscriptionSpec,
+    TransactionOp,
 };
 use phenix_sdk::{
     Authority, Call, CapabilityId, Emit, Required, StaticComponentBehavior,
@@ -9,9 +10,12 @@ use phenix_sdk::{
     StaticPluginConfiguration, StaticPluginDefinition, StaticPluginLifecycle,
     StaticPluginResources,
 };
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc,
+    },
+    time::Duration,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk::PhenixValue)]
@@ -37,6 +41,38 @@ struct Internal;
 
 #[phenix_sdk::interface("fixture.attribute-gate.dependency@1")]
 struct Dependency;
+
+struct DependencyContract;
+
+impl ComponentInterface for DependencyContract {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse("fixture.attribute-gate.dependency@1").unwrap()
+    }
+
+    fn schema() -> InterfaceSchema {
+        InterfaceSchema::of::<Request, Response>()
+    }
+}
+
+impl phenix_sdk::SdkContract for DependencyContract {
+    type Interface = DependencyContract;
+}
+
+struct UndeclaredContract;
+
+impl ComponentInterface for UndeclaredContract {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse("fixture.attribute-gate.undeclared@1").unwrap()
+    }
+
+    fn schema() -> InterfaceSchema {
+        InterfaceSchema::of::<Request, Response>()
+    }
+}
+
+impl phenix_sdk::SdkContract for UndeclaredContract {
+    type Interface = UndeclaredContract;
+}
 
 #[phenix_sdk::plugin("fixture.attribute-gate.sessions")]
 mod sessions {
@@ -65,6 +101,9 @@ fn plugin_authority() -> Authority {
     Authority::new([
         CapabilityId::parse("plugin.run").unwrap(),
         CapabilityId::parse("kernel.persistence.schema").unwrap(),
+        CapabilityId::parse("kernel.persistence.write").unwrap(),
+        CapabilityId::parse("models.invoke").unwrap(),
+        CapabilityId::parse("events.observe").unwrap(),
     ])
 }
 
@@ -72,6 +111,7 @@ fn runtime_authority() -> Authority {
     Authority::new([
         CapabilityId::parse("plugin.run").unwrap(),
         CapabilityId::parse("kernel.persistence.schema").unwrap(),
+        CapabilityId::parse("kernel.persistence.write").unwrap(),
         CapabilityId::parse("models.invoke").unwrap(),
         CapabilityId::parse("models.serve").unwrap(),
         CapabilityId::parse("models.layer").unwrap(),
@@ -124,9 +164,89 @@ impl Api {
     )]
     async fn observed(
         &self,
-        _context: &phenix_sdk::EventContext,
-        _response: Response,
+        context: &phenix_sdk::EventContext<'_, '_>,
+        response: Response,
     ) -> Result<(), String> {
+        if context.emitter() != &sessions::Plugin::plugin_id() {
+            return Err("listener lost emitter provenance".into());
+        }
+        if context.causality_id() != 41 {
+            return Err("listener lost causality provenance".into());
+        }
+        let generation = context
+            .graph_generation()
+            .ok_or_else(|| "listener lost graph generation".to_owned())?;
+        if context.plugin_context().plugin.id != &Plugin::plugin_id() {
+            return Err("listener lost owner identity".into());
+        }
+        if context.kernel.cancellation_token().is_none() {
+            return Err("listener has no cancellation scope".into());
+        }
+        let task_scope = context
+            .kernel
+            .task_scope()
+            .ok_or_else(|| "listener has no task scope".to_owned())?;
+        if task_scope.graph_generation() != generation
+            || task_scope.plugin() != Some(&Plugin::plugin_id())
+        {
+            return Err("listener task scope lost owner or generation".into());
+        }
+        let requested_task_authority = Authority::new([
+            CapabilityId::parse("models.invoke").unwrap(),
+            CapabilityId::parse("models.serve").unwrap(),
+        ]);
+        let expected_task_authority = context.authority().attenuate(&requested_task_authority);
+        let task = task_scope.spawn(&requested_task_authority, |token| {
+            (token.graph_generation().clone(), token.authority().clone())
+        });
+        let (task_generation, task_authority) = task
+            .join()
+            .map_err(|_| "listener task panicked".to_owned())?;
+        if &task_generation != generation || task_authority != expected_task_authority {
+            return Err("listener task escaped generation or authority".into());
+        }
+
+        if context
+            .sdk
+            .require::<UndeclaredContract>()
+            .invoke::<_, Response>(&Request {
+                prompt: "undeclared".into(),
+            })
+            .is_ok()
+        {
+            return Err("listener invoked an undeclared import".into());
+        }
+        if context
+            .kernel
+            .transact_durable(
+                &ResourceNamespace::parse("fixture.attribute-gate.foreign").unwrap(),
+                &[TransactionOp::Put {
+                    key: "forbidden".into(),
+                    value: Vec::new(),
+                }],
+            )
+            .is_ok()
+        {
+            return Err("listener wrote a foreign resource namespace".into());
+        }
+
+        let dependency = context
+            .sdk
+            .require::<DependencyContract>()
+            .invoke::<_, Response>(&Request {
+                prompt: response.value,
+            })
+            .map_err(|error| error.to_string())?;
+        context
+            .kernel
+            .transact_durable(
+                &ResourceNamespace::parse("fixture.attribute-gate.state").unwrap(),
+                &[TransactionOp::Put {
+                    key: "listener-import".into(),
+                    value: dependency.value.into_bytes(),
+                }],
+            )
+            .map_err(|error| error.to_string())?;
         self.observed.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
@@ -171,8 +291,14 @@ struct Plugin {
 #[phenix_sdk::plugin]
 impl Plugin {
     #[phenix(start)]
-    fn start(&mut self, _context: &phenix_sdk::PluginContext<'_, '_, ()>) -> Result<(), String> {
-        Ok(())
+    fn start(&mut self, context: &phenix_sdk::PluginContext<'_, '_, ()>) -> Result<(), String> {
+        context
+            .kernel
+            .register_durable_schema(&DurableSchema::new(
+                ResourceNamespace::parse("fixture.attribute-gate.state").unwrap(),
+                1,
+            ))
+            .map_err(|error| error.to_string())
     }
 
     #[phenix(stop)]
@@ -331,8 +457,7 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     kernel.activate_all().unwrap();
 
     let events = kernel.events();
-    let diagnostics = Arc::new(Mutex::new(Vec::<EventEnvelope>::new()));
-    let seen_diagnostics = Arc::clone(&diagnostics);
+    let (seen_diagnostics, diagnostics) = mpsc::channel::<EventEnvelope>();
     events
         .install_subscriptions([EventSubscription {
             spec: SubscriptionSpec {
@@ -347,8 +472,9 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
                 kernel_policy_revision: 0,
             },
             handler: Arc::new(move |event: &EventEnvelope, _: &Authority| {
-                seen_diagnostics.lock().unwrap().push(event.clone());
-                Ok(())
+                seen_diagnostics
+                    .send(event.clone())
+                    .map_err(|error| error.to_string())
             }),
         }])
         .unwrap();
@@ -399,11 +525,25 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
         kernel_policy_revision: 0,
         payload,
     };
-    let report = events
+    let listener_authority = Authority::new([
+        CapabilityId::parse("events.observe").unwrap(),
+        CapabilityId::parse("models.invoke").unwrap(),
+        CapabilityId::parse("kernel.persistence.write").unwrap(),
+    ]);
+    let report = events.dispatch(&event, &listener_authority).unwrap();
+    assert_eq!(report.delivered.len(), 1);
+    assert!(report.failures.is_empty());
+    assert!(report.warnings.is_empty());
+
+    let attenuated_report = events
         .dispatch(&event, &authority("events.observe"))
         .unwrap();
-    assert_eq!(report.delivered.len(), 1);
-    assert!(report.warnings.is_empty());
+    assert!(attenuated_report.delivered.is_empty());
+    assert_eq!(attenuated_report.failures.len(), 1);
+    assert_eq!(attenuated_report.warnings.len(), 1);
+    assert!(attenuated_report.failures[0]
+        .1
+        .contains("kernel.persistence.write"));
 
     let mismatched = Request {
         prompt: "wrong-shape".into(),
@@ -420,12 +560,11 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     assert_eq!(mismatch_report.failures.len(), 1);
     assert_eq!(mismatch_report.warnings.len(), 1);
 
-    let diagnostics = diagnostics.lock().unwrap();
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].emitter, Plugin::plugin_id());
-    assert_eq!(diagnostics[0].causality_id, 42);
+    let diagnostic = diagnostics.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(diagnostic.emitter, Plugin::plugin_id());
+    assert_eq!(diagnostic.causality_id, 42);
     let diagnostic_payload: serde_json::Value =
-        serde_json::from_slice(&diagnostics[0].payload).unwrap();
+        serde_json::from_slice(&diagnostic.payload).unwrap();
     assert_eq!(
         diagnostic_payload["event"],
         serde_json::json!("fixture.attribute-gate.observed")
@@ -438,8 +577,6 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
         diagnostic_payload["direction"],
         serde_json::json!("listener")
     );
-    drop(diagnostics);
-
     let without_plugin = ResolvedHarness::resolve(
         [<sessions::Plugin as StaticPluginDefinition>::manifest()],
         [<sessions::Plugin as StaticPluginDefinition>::component_manifests().remove(0)],

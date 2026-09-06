@@ -78,7 +78,7 @@ impl RootPlugin {
     }
 
     #[phenix(on_event("fixture.root-public.changed"))]
-    async fn changed(&self, _context: &phenix_sdk::EventContext, _event: Changed) {
+    async fn changed(&self, _context: &phenix_sdk::EventContext<'_, '_>, _event: Changed) {
         self.calls.fetch_add(1, Ordering::Relaxed);
     }
 

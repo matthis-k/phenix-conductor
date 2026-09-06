@@ -38,7 +38,7 @@ The fields have distinct roles:
 
 The context does not create another owner for plugin state. The dynamic `PluginInstance` owns live state and constructs a fresh context for each host-backed callback.
 
-The Core `stop` callback has no host, so it cannot construct a runtime context. Stop logic works directly with instance-owned data.
+The Core `stop` callback receives a scoped host. Stop logic uses instance-owned data and only the host operations valid during shutdown.
 
 ## ABI adapter
 
@@ -157,3 +157,26 @@ A plugin may have multiple components. Component callbacks bind SDK clients to t
 - Generic kernel mechanisms are available through `ctx.kernel`.
 - Call authority and graph generation are available through `ctx.call`.
 - Recursive SDK calls cannot expand effective authority.
+
+## Executable listener context
+
+Generated listeners execute with the same scoped host boundary as callable handlers. `EventContext` wraps the listener's `PluginContext` and adds event metadata without granting additional authority.
+
+When an admitted delivery runs, Core constructs a fresh listener `PluginHost` bound to the resolved listener component, owning plugin, pinned graph generation, cancellation scope, and effective listener authority. That authority is the intersection of emitter authority, listener policy, and resolved plugin/component maxima.
+
+The generated listener context therefore exposes ordinary typed imports through `ctx.sdk`, generic kernel mechanisms through `ctx.kernel`, current plugin identity and state through `ctx.plugin`, and call metadata through `ctx.call`. Event metadata remains available through `EventContext`, including emitter, event identity, causality, policy revision, and graph generation.
+
+Listener imports use the same component graph and provider handles as callable handlers. Undeclared imports fail through normal component-graph checks. Persistence uses the ordinary host capability and resource-ownership checks, so a listener cannot write another plugin's namespace or expand its authority.
+
+Listener task scopes retain the listener owner, pinned graph generation, and attenuated authority. Spawned work receives owned task metadata rather than a borrowed host. Live listener calls receive the normal call-cancellation token. Reconciliation cancels matching old-generation calls and owned tasks when a plugin generation is stopped or replaced.
+
+Host and SDK borrows remain inside one delivery callback. A listener cannot retain a borrowed context across deliveries. Subscription replacement cancels stale queued or in-flight delivery at the event transport boundary, while plugin replacement cancels the matching old-generation call and task scopes.
+
+## Listener invariants
+
+- A generated listener can call a declared typed import and write its own durable resource.
+- Undeclared imports and foreign namespace writes use the same rejection paths as callable handlers.
+- Emitter authority cannot be expanded by listener imports, persistence, or spawned tasks.
+- Listener callbacks retain emitter, causality, graph generation, cancellation, and owner identity.
+- Listener task scopes retain owner and graph generation and attenuate requested authority.
+- Replacement cannot make an old-generation listener context target a new generation.

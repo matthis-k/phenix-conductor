@@ -1,8 +1,8 @@
 use super::{EventContext, StaticPluginComponents, StaticPluginResources};
 use phenix_core::{
-    Authority, ComponentId, EventBus, EventEnvelope, EventHandler, EventTypeId, Exact,
-    GraphGenerationId, InterfaceId, LayerResult, PhenixValue, PluginContext, PluginHost, PluginId,
-    PluginInstance, Project, ResolvedListener, ServiceId, SharedPluginInvocation, ValueError,
+    Authority, ComponentId, EventEnvelope, EventTypeId, Exact, GraphGenerationId, InterfaceId,
+    LayerResult, PhenixValue, PluginContext, PluginHost, PluginId, PluginInstance, PluginListener,
+    Project, ResolvedListener, ServiceId, SharedPluginInvocation, ValueError,
 };
 use std::{
     error::Error,
@@ -59,7 +59,7 @@ pub trait StaticComponentRuntimeDispatch {
     fn dispatch_listener_runtime(
         &self,
         _listener: &str,
-        _context: &EventContext,
+        _context: &EventContext<'_, '_>,
         _payload: &[u8],
     ) -> Option<Result<(), Box<dyn Error + Send + Sync>>> {
         None
@@ -320,7 +320,7 @@ pub trait StaticPluginComponentDispatch {
         _component: &ComponentId,
         _method: &str,
         _generation: &GraphGenerationId,
-    ) -> Option<Arc<dyn EventHandler>>
+    ) -> Option<Arc<dyn PluginListener>>
     where
         Self: Sized + Send + Sync + 'static,
     {
@@ -380,32 +380,21 @@ struct StaticListenerEventHandler<F> {
     handler: F,
 }
 
-impl<F> EventHandler for StaticListenerEventHandler<F>
+impl<F> PluginListener for StaticListenerEventHandler<F>
 where
-    F: Fn(&EventEnvelope, &Authority) -> Result<(), Box<dyn Error + Send + Sync>> + Send + Sync,
+    F: for<'runtime> Fn(
+            &EventEnvelope,
+            &PluginHost<'runtime>,
+        ) -> Result<(), Box<dyn Error + Send + Sync>>
+        + Send
+        + Sync,
 {
-    fn handle(&self, event: &EventEnvelope, authority: &Authority) -> Result<(), String> {
-        (self.handler)(event, authority).map_err(|error| error.to_string())
-    }
-
-    fn handle_with_bus(
-        &self,
-        bus: &EventBus,
-        event: &EventEnvelope,
-        authority: &Authority,
-    ) -> Result<(), String> {
-        match (self.handler)(event, authority) {
+    fn handle(&self, event: &EventEnvelope, host: &PluginHost<'_>) -> Result<(), String> {
+        match (self.handler)(event, host) {
             Ok(()) => Ok(()),
             Err(error) => {
                 if let Some(value_error) = error.downcast_ref::<ValueError>() {
-                    report_listener_mismatch(
-                        bus,
-                        &self.owner,
-                        self.listener,
-                        event,
-                        authority,
-                        value_error,
-                    );
+                    report_listener_mismatch(host, &self.owner, self.listener, event, value_error);
                 }
                 Err(error.to_string())
             }
@@ -414,13 +403,15 @@ where
 }
 
 fn report_listener_mismatch(
-    events: &EventBus,
+    host: &PluginHost<'_>,
     owner: &PluginId,
     listener: &str,
     source: &EventEnvelope,
-    authority: &Authority,
     error: &ValueError,
 ) {
+    if host.plugin() != owner {
+        return;
+    }
     let Ok(payload) = serde_json::to_vec(&serde_json::json!({
         "event": source.event_type.as_str(),
         "listener": listener,
@@ -429,16 +420,15 @@ fn report_listener_mismatch(
     })) else {
         return;
     };
-    let diagnostic = EventEnvelope {
-        event_type: EventTypeId::parse(STRUCTURAL_MISMATCH_EVENT)
-            .expect("static structural mismatch event type is valid"),
-        version: STRUCTURAL_MISMATCH_EVENT_VERSION,
-        emitter: owner.clone(),
-        causality_id: source.causality_id,
-        kernel_policy_revision: source.kernel_policy_revision,
+    let event_type = EventTypeId::parse(STRUCTURAL_MISMATCH_EVENT)
+        .expect("static structural mismatch event type is valid");
+    let _ = host.dispatch_event(
+        event_type,
+        STRUCTURAL_MISMATCH_EVENT_VERSION,
+        source.causality_id,
+        source.kernel_policy_revision,
         payload,
-    };
-    let _ = events.dispatch(&diagnostic, authority);
+    );
 }
 
 impl<T> StaticPluginInstance<T> {
@@ -465,9 +455,12 @@ impl<T> StaticPluginInstance<T> {
         owner: PluginId,
         listener: &'static str,
         handler: F,
-    ) -> Arc<dyn EventHandler>
+    ) -> Arc<dyn PluginListener>
     where
-        F: Fn(&EventEnvelope, &Authority) -> Result<(), Box<dyn Error + Send + Sync>>
+        F: for<'runtime> Fn(
+                &EventEnvelope,
+                &PluginHost<'runtime>,
+            ) -> Result<(), Box<dyn Error + Send + Sync>>
             + Send
             + Sync
             + 'static,
@@ -607,24 +600,26 @@ where
         self.plugin.dispatch_layer(service, input, host)
     }
 
-    fn bind_listener(
+    fn bind_plugin_listener(
         &mut self,
         listener: &ResolvedListener,
         generation: &GraphGenerationId,
-    ) -> Result<Arc<dyn EventHandler>, String> {
-        T::listener_handler(
-            Arc::downgrade(&self.plugin),
-            &listener.owning_plugin,
-            &listener.component,
-            &listener.declaration.method,
-            generation,
-        )
-        .ok_or_else(|| {
-            format!(
-                "unsupported component listener: {}/{}",
-                listener.component, listener.declaration.method
+    ) -> Option<Result<Arc<dyn PluginListener>, String>> {
+        Some(
+            T::listener_handler(
+                Arc::downgrade(&self.plugin),
+                &listener.owning_plugin,
+                &listener.component,
+                &listener.declaration.method,
+                generation,
             )
-        })
+            .ok_or_else(|| {
+                format!(
+                    "unsupported component listener: {}/{}",
+                    listener.component, listener.declaration.method
+                )
+            }),
+        )
     }
 
     fn stop(&mut self, host: &PluginHost<'_>) -> Result<(), String> {

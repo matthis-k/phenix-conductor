@@ -14,31 +14,14 @@ use phenix_sdk::{
 use std::{
     fs,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::{SystemTime, UNIX_EPOCH},
+    sync::{mpsc, Arc},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-static RECALL_EVENTS: AtomicUsize = AtomicUsize::new(0);
-static REVALIDATION_EVENTS: AtomicUsize = AtomicUsize::new(0);
-
-fn on_recall(_event: &EventEnvelope, _authority: &Authority) -> Result<(), String> {
-    RECALL_EVENTS.fetch_add(1, Ordering::SeqCst);
-    Ok(())
-}
-
-fn on_revalidation(_event: &EventEnvelope, _authority: &Authority) -> Result<(), String> {
-    REVALIDATION_EVENTS.fetch_add(1, Ordering::SeqCst);
-    Ok(())
-}
-
-fn event_subscription(
-    id: &str,
-    event: &str,
-    handler: fn(&EventEnvelope, &Authority) -> Result<(), String>,
-) -> EventSubscription {
+fn event_subscription<F>(id: &str, event: &str, handler: F) -> EventSubscription
+where
+    F: Fn(&EventEnvelope, &Authority) -> Result<(), String> + Send + Sync + 'static,
+{
     EventSubscription {
         spec: SubscriptionSpec {
             id: SubscriptionId::parse(id).unwrap(),
@@ -462,19 +445,25 @@ fn stop_and_reactivate_preserves_memory_state() {
 
 #[test]
 fn recall_and_revalidation_emit_observable_operation_events() {
-    RECALL_EVENTS.store(0, Ordering::SeqCst);
-    REVALIDATION_EVENTS.store(0, Ordering::SeqCst);
+    let (recall_observer, recall_events) = mpsc::channel();
+    let (revalidation_observer, revalidation_events) = mpsc::channel();
 
     let path = temp_db("operation-events");
     let mut kernel = kernel_with(&path);
     kernel
         .events()
         .replace_subscriptions([
-            event_subscription("memory-recall-observer", RECALL_EVENT, on_recall),
+            event_subscription("memory-recall-observer", RECALL_EVENT, move |_, _| {
+                recall_observer.send(()).map_err(|error| error.to_string())
+            }),
             event_subscription(
                 "memory-revalidation-observer",
                 REVALIDATION_EVENT,
-                on_revalidation,
+                move |_, _| {
+                    revalidation_observer
+                        .send(())
+                        .map_err(|error| error.to_string())
+                },
             ),
         ])
         .unwrap();
@@ -509,7 +498,9 @@ fn recall_and_revalidation_emit_observable_operation_events() {
     )
     .unwrap();
 
-    assert_eq!(RECALL_EVENTS.load(Ordering::SeqCst), 1);
-    assert_eq!(REVALIDATION_EVENTS.load(Ordering::SeqCst), 1);
+    recall_events.recv_timeout(Duration::from_secs(1)).unwrap();
+    revalidation_events
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
     let _ = fs::remove_file(path);
 }
