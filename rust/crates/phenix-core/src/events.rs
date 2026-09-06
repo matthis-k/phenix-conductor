@@ -1167,9 +1167,7 @@ mod tests {
 
         assert_eq!(
             receipt.wait(),
-            EventDeliveryStatus::Cancelled(
-                EventDeliveryCancellation::SubscriptionSetChanged
-            )
+            EventDeliveryStatus::Cancelled(EventDeliveryCancellation::SubscriptionSetChanged)
         );
     }
 }
