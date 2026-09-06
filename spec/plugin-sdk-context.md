@@ -160,23 +160,23 @@ A plugin may have multiple components. Component callbacks bind SDK clients to t
 
 ## Executable listener context
 
-Proposed follow-up; implementation and regressions are pending. The baseline status above does not certify this boundary.
+Generated listeners execute with the same scoped host boundary as callable handlers. `EventContext` wraps the listener's `PluginContext` and adds event metadata without granting additional authority.
 
-Generated listeners accept EventContext, which contains only authority and generation metadata. They cannot use ordinary imported interfaces, plugin persistence, or task scopes through that context.
+When an admitted delivery runs, Core constructs a fresh listener `PluginHost` bound to the resolved listener component, owning plugin, pinned graph generation, cancellation scope, and effective listener authority. That authority is the intersection of emitter authority, listener policy, and resolved plugin/component maxima.
 
-1. Construct a fresh listener PluginHost when an admitted delivery executes. Bind it to the resolved listener component, owning plugin, pinned generation, cancellation scope, and the intersection of emitter authority, listener policy, and owner/component maxima.
+The generated listener context therefore exposes ordinary typed imports through `ctx.sdk`, generic kernel mechanisms through `ctx.kernel`, current plugin identity and state through `ctx.plugin`, and call metadata through `ctx.call`. Event metadata remains available through `EventContext`, including emitter, event identity, causality, policy revision, and graph generation.
 
-2. Reuse PluginContext for listener kernel access, generated typed imports, plugin state/resource handles, and call metadata. Keep EventContext as event metadata inside that context, including emitter, event identity, and causality; metadata alone grants no execution authority.
+Listener imports use the same component graph and provider handles as callable handlers. Undeclared imports fail through normal component-graph checks. Persistence uses the ordinary host capability and resource-ownership checks, so a listener cannot write another plugin's namespace or expand its authority.
 
-3. Generate listener signatures and imported SDK clients from the same contracts used by callable handlers. All service calls, persistence operations, and spawned tasks pass through existing host checks. Do not add a second listener-specific service API or expose a mutable Kernel.
+Listener task scopes retain the listener owner, pinned graph generation, and attenuated authority. Spawned work receives owned task metadata rather than a borrowed host. Live listener calls receive the normal call-cancellation token. Reconciliation cancels matching old-generation calls and owned tasks when a plugin generation is stopped or replaced.
 
-4. Keep host/client borrows inside the delivery lifetime. Spawned work uses owned attenuated task data and correlated completion through the supported task/controller boundary. Reconstruct context at dispatch time and reject stale generation work; never retain a borrowed host in a listener closure.
+Host and SDK borrows remain inside one delivery callback. A listener cannot retain a borrowed context across deliveries. Subscription replacement cancels stale queued or in-flight delivery at the event transport boundary, while plugin replacement cancels the matching old-generation call and task scopes.
 
-5. Migrate existing listener examples and hooks to the scoped context, including one listener that writes its own resource and calls another plugin. Replace metadata-only executable listener plumbing.
+## Listener invariants
 
-Acceptance requires:
-
-- A generated listener calls a declared typed import and writes its own durable resource.
-- Undeclared imports, foreign namespace writes, and authority expansion are rejected through ordinary host checks.
-- Listener calls and tasks retain causal provenance, generation, cancellation, and owner identity.
-- Replacement cancels queued/in-flight listener work and prevents retained context from calling a new generation.
+- A generated listener can call a declared typed import and write its own durable resource.
+- Undeclared imports and foreign namespace writes use the same rejection paths as callable handlers.
+- Emitter authority cannot be expanded by listener imports, persistence, or spawned tasks.
+- Listener callbacks retain emitter, causality, graph generation, cancellation, and owner identity.
+- Listener task scopes retain owner and graph generation and attenuate requested authority.
+- Replacement cannot make an old-generation listener context target a new generation.
