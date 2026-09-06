@@ -67,9 +67,9 @@ The command toolbelt and ACP adapter use their current package and Plugin identi
 
 ## Static authoring
 
-First-party runtime Plugin sources must not reintroduce the legacy `phenix_plugin!` declaration DSL.
+Rust Plugins use the attribute-driven SDK contract in `plugin-authoring-macro.md`. The retired `phenix_plugin!` declaration DSL is not part of the SDK and Source validation rejects any Rust use of it.
 
-The current static authoring model is the attribute-driven Rust SDK contract in `plugin-authoring-macro.md`. `plugin_attribute_only_gate.rs` proves that generated manifests, components, resources, lifecycle, listeners, Layers, and runtime dispatch do not require parallel manual wiring.
+`plugin_attribute_only_gate.rs` proves that generated manifests, components, resources, lifecycle, listeners, Layers, and runtime dispatch do not require parallel manual wiring.
 
 ## Runtime package set
 
@@ -125,6 +125,6 @@ A rule without a deterministic structural owner belongs in a behavioral test ins
 - `phenixPlugins` contains runtime Plugins only.
 - Independently packaged runtime Plugins have independent implementation ownership.
 - Retired prerelease runtime identities stay absent.
-- Static first-party Plugin authoring does not reintroduce parallel wiring.
+- Rust Plugin authoring has one attribute-driven API.
 - Structural data rules have one Source-check owner.
 - Runtime semantics remain covered by Rust or Product regressions, not inferred by Source scripts.
