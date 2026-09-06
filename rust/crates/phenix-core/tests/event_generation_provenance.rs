@@ -1,5 +1,6 @@
 use phenix_core::{
-    Authority, EventBus, EventEnvelope, EventFailurePolicy, EventHandler, EventSubscription,
+    Authority, EventBus, EventDeliveryStatus, EventEnvelope, EventFailurePolicy,
+    EventHandler, EventSubscription,
     EventTypeId, GraphGenerationId, Kernel, PluginExecution, PluginHost, PluginId, PluginInstance,
     PluginManifest, ResolvedHarness, ResolvedHarnessActivation, ServiceContribution, ServiceId,
     ServiceRole, SubscriptionId, SubscriptionSpec,
@@ -25,7 +26,7 @@ impl PluginInstance for Emitter {
         if service.as_str() != SERVICE {
             return Err(format!("unsupported service: {service}"));
         }
-        let report = host
+        let receipt = host
             .dispatch_event(
                 EventTypeId::parse(EVENT).unwrap(),
                 1,
@@ -34,6 +35,9 @@ impl PluginInstance for Emitter {
                 Vec::new(),
             )
             .map_err(|error| error.to_string())?;
+        let EventDeliveryStatus::Succeeded(report) = receipt.wait() else {
+            return Err("event delivery did not succeed".into());
+        };
         Ok(report
             .graph_generation
             .map(|generation| generation.as_str().as_bytes().to_vec())

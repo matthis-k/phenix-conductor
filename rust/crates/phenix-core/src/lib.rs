@@ -115,7 +115,8 @@ pub use contract::{
     SchemaCompatibility, SchemaMismatch, Type, TypeKind, ValueCodec, ValueError, ValueMatch,
 };
 pub use events::{
-    EventBus, EventDispatchReport, EventEnvelope, EventError, EventFailurePolicy, EventHandler,
+    EventAdmissionReceipt, EventBus, EventDeliveryCancellation, EventDeliveryStatus,
+    EventDispatchReport, EventEnvelope, EventError, EventFailurePolicy, EventHandler,
     EventSubscription, KernelEvent, SubscriptionSpec,
 };
 pub use frontend_metadata::FrontendMetadataResolutionError;

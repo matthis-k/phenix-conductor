@@ -1,7 +1,7 @@
 use crate::{
     prepared_mutation::PreparedMutationScope, ArtifactRevision, Authority, CallCancellationToken,
     CapabilityId, ComponentGraphError, ComponentId, ComponentInterface, ComponentInvocationError,
-    DurableSchema, EventBus, EventDispatchReport, EventEnvelope, EventError, EventHandler,
+    DurableSchema, EventAdmissionReceipt, EventBus, EventEnvelope, EventError, EventHandler,
     EventSubscription, EventTypeId, GraphGenerationId, InterfaceId, KernelConfig, KernelError,
     KernelEvent, KernelPolicyIdentity, LocalPersistence, PersistenceBackend, PluginArtifact,
     PluginExecution, PluginId, PluginManifest, ProviderFallbackReason, ProviderSelectionReason,
