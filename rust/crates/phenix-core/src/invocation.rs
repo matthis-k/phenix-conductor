@@ -134,6 +134,7 @@ fn kernel_failure_class(error: &KernelError) -> InvocationFailureClass {
         KernelError::ServiceDenied { .. } | KernelError::HostOperationDenied { .. } => {
             InvocationFailureClass::Authority
         }
+        KernelError::ServiceCancelled { .. } => InvocationFailureClass::Cancellation,
         KernelError::ContinuationUnavailable
         | KernelError::ContinuationAlreadyUsed(_)
         | KernelError::CausalServiceReentry(_) => InvocationFailureClass::Host,
@@ -333,5 +334,16 @@ mod tests {
         assert_ne!(authority, cancellation);
         assert_eq!(authority.class(), InvocationFailureClass::Authority);
         assert_eq!(cancellation.class(), InvocationFailureClass::Cancellation);
+    }
+
+    #[test]
+    fn kernel_cancellation_maps_without_message_matching() {
+        let error = ComponentInvocationError::Kernel(KernelError::ServiceCancelled {
+            plugin: crate::PluginId::parse("fixture.provider").unwrap(),
+            service: crate::ServiceId::parse("fixture.run@1").unwrap(),
+        });
+        let failure = InvocationFailure::from(error);
+
+        assert_eq!(failure.class(), InvocationFailureClass::Cancellation);
     }
 }
