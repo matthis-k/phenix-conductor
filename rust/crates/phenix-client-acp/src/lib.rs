@@ -10,15 +10,15 @@ use phenix_application_interface::{
     ApplicationClient, ApplicationTransport, Capabilities, Operation,
 };
 
-pub use phenix_application_interface::{application_descriptor, types::ApplicationError, INTERFACE_ID};
+pub use phenix_application_interface::{
+    application_descriptor, types::ApplicationError, INTERFACE_ID,
+};
 
 /// Types, capabilities, event/callback identities, and operation wrappers generated
 /// from the fixed application descriptor at build time.
 pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/application.rs"));
 }
-
-pub use generated::*;
 
 /// Capability-checked typed application client.
 ///
