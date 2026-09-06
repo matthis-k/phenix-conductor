@@ -1,6 +1,6 @@
 use phenix_core::{
-    ComponentInterface, EventEnvelope, EventFailurePolicy, EventSubscription, EventTypeId,
-    GraphReconciler, InterfaceId, InterfaceSchema, Kernel, PluginId, ResolvedHarness,
+    ComponentInterface, DurableSchema, EventEnvelope, EventFailurePolicy, EventSubscription,
+    EventTypeId, GraphReconciler, InterfaceId, InterfaceSchema, Kernel, PluginId, ResolvedHarness,
     ResolvedHarnessActivation, ResourceNamespace, ServiceId, SubscriptionId, SubscriptionSpec,
     TransactionOp,
 };
@@ -209,8 +209,14 @@ struct Plugin {
 #[phenix_sdk::plugin]
 impl Plugin {
     #[phenix(start)]
-    fn start(&mut self, _context: &phenix_sdk::PluginContext<'_, '_, ()>) -> Result<(), String> {
-        Ok(())
+    fn start(&mut self, context: &phenix_sdk::PluginContext<'_, '_, ()>) -> Result<(), String> {
+        context
+            .kernel
+            .register_durable_schema(&DurableSchema::new(
+                ResourceNamespace::parse("fixture.attribute-gate.state").unwrap(),
+                1,
+            ))
+            .map_err(|error| error.to_string())
     }
 
     #[phenix(stop)]
