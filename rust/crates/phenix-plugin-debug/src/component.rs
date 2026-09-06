@@ -1,7 +1,7 @@
 use crate::{debug_manifest, DEBUG_SERVICE};
 use phenix_core::{
     Authority, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
-    ComponentManifest, HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixSchema,
+    ComponentManifest, HasPhenixSchema, InterfaceId, InterfaceSchema, PhenixValue,
 };
 use phenix_sdk::{
     ContextInterface, FrontendInterface, JobInterface, ModelRoutingInterface, PlanningInterface,
@@ -64,7 +64,7 @@ fn optional_import<Request: HasPhenixSchema>(
 ) -> ComponentImport {
     ComponentImport {
         interface,
-        schema: InterfaceSchema::new(Request::phenix_schema(), PhenixSchema::Any),
+        schema: InterfaceSchema::fallible_of::<Request, PhenixValue, PhenixValue>(),
         required: false,
         authority: authority.clone(),
     }

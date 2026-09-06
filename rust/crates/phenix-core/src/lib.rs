@@ -17,7 +17,9 @@ mod contract_wire;
 mod events;
 mod frontend_metadata;
 mod identity;
+mod infallible_value;
 mod inspection;
+mod invocation;
 mod live_reconciliation;
 mod management;
 mod manifest;
@@ -127,6 +129,9 @@ pub use identity::{
     SubscriptionId,
 };
 pub use inspection::{ResolvedHarnessInspection, ResolvedListenerInspection};
+pub use invocation::{
+    CallError, InvocationFailure, InvocationFailureClass, InvocationOutcome, InvocationResult,
+};
 pub use live_reconciliation::LiveReconciliationError;
 pub use management::{
     PluginBuildReport, PluginLoadRequest, PluginManagementContext, PluginManagementError,

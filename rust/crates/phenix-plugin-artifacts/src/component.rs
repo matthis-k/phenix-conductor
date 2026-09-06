@@ -10,7 +10,11 @@ impl ComponentInterface for ArtifactInterface {
     }
 
     fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<crate::ArtifactCommand, crate::ArtifactResponse>()
+        phenix_core::InterfaceSchema::fallible_of::<
+            crate::ArtifactCommand,
+            crate::ArtifactResponse,
+            String,
+        >()
     }
 }
 

@@ -1,9 +1,10 @@
 use crate::{
     runtime_provider_service, Authority, ComponentExport, ComponentId, ComponentImport,
-    ComponentInterface, ComponentManifest, InterfaceId, Kernel, PhenixValue, PluginArtifact,
-    PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest, PluginRuntimeProvider,
-    ResolvedHarness, ResolvedHarnessActivation, ResolvedImportHandle, RuntimeId,
-    RuntimePluginCandidate, ServiceContribution, ServiceId, ServiceRole,
+    ComponentInterface, ComponentManifest, InterfaceId, InterfaceSchema, InvocationOutcome, Kernel,
+    PhenixValue, PluginArtifact, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, PluginRuntimeProvider, ResolvedHarness, ResolvedHarnessActivation,
+    ResolvedImportHandle, RuntimeId, RuntimePluginCandidate, ServiceContribution, ServiceId,
+    ServiceRole,
 };
 use std::collections::BTreeMap;
 
@@ -21,6 +22,22 @@ impl ComponentInterface for EchoInterface {
     fn interface_id() -> InterfaceId {
         InterfaceId::parse("fixture.echo@1").unwrap()
     }
+
+    fn schema() -> InterfaceSchema {
+        InterfaceSchema::fallible_of::<String, String, String>()
+    }
+}
+
+struct RelayInterface;
+
+impl ComponentInterface for RelayInterface {
+    fn interface_id() -> InterfaceId {
+        InterfaceId::parse("fixture.relay@1").unwrap()
+    }
+
+    fn schema() -> InterfaceSchema {
+        InterfaceSchema::fallible_of::<String, String, String>()
+    }
 }
 
 struct Noop;
@@ -28,6 +45,32 @@ struct Noop;
 impl PluginInstance for Noop {
     fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
         Ok(())
+    }
+}
+
+struct RelayConsumer;
+
+impl PluginInstance for RelayConsumer {
+    fn start(&mut self, _host: &PluginHost<'_>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn invoke_component(
+        &mut self,
+        target: &ComponentId,
+        _service: &ServiceId,
+        input: &[u8],
+        host: &PluginHost<'_>,
+    ) -> Result<Vec<u8>, String> {
+        if target != &component("fixture.consumer") {
+            return Err(format!("unexpected relay target: {target}"));
+        }
+        let request: PhenixValue =
+            serde_json::from_slice(input).map_err(|error| error.to_string())?;
+        let response = host
+            .invoke_import::<EchoInterface>(&component("fixture.consumer"), &request)
+            .map_err(|error| error.to_string())?;
+        serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
@@ -49,8 +92,13 @@ impl PluginInstance for EchoProvider {
         let PhenixValue::String(value) = request else {
             return Err("expected string request".into());
         };
-        serde_json::to_vec(&PhenixValue::String(format!("{}:{value}", self.0)))
-            .map_err(|error| error.to_string())
+        let response = if value == "domain-error" {
+            InvocationOutcome::domain_error(PhenixValue::String(format!("{}:conflict", self.0)))
+                .into_transport_value()
+        } else {
+            PhenixValue::String(format!("{}:{value}", self.0))
+        };
+        serde_json::to_vec(&response).map_err(|error| error.to_string())
     }
 }
 
@@ -147,7 +195,12 @@ fn components() -> [ComponentManifest; 2] {
                 required: true,
                 authority: Authority::default(),
             }],
-            exports: Vec::new(),
+            exports: vec![ComponentExport {
+                interface: RelayInterface::interface_id(),
+                schema: RelayInterface::schema(),
+                priority: 0,
+                required_authority: Authority::default(),
+            }],
             maximum_authority: Authority::default(),
         },
         ComponentManifest {
@@ -178,10 +231,18 @@ fn handle(resolved: &ResolvedHarness) -> ResolvedImportHandle {
         .clone()
 }
 
-fn invoke(handle: &ResolvedImportHandle, kernel: &mut Kernel) -> PhenixValue {
+fn invoke_request(
+    handle: &ResolvedImportHandle,
+    kernel: &mut Kernel,
+    request: &str,
+) -> PhenixValue {
     handle
-        .invoke_value::<EchoInterface>(kernel, &PhenixValue::String("hello".into()))
+        .invoke_value::<EchoInterface>(kernel, &PhenixValue::String(request.into()))
         .unwrap()
+}
+
+fn invoke(handle: &ResolvedImportHandle, kernel: &mut Kernel) -> PhenixValue {
+    invoke_request(handle, kernel, "hello")
 }
 
 #[test]
@@ -238,5 +299,79 @@ fn typed_component_consumer_is_runtime_agnostic() {
     assert_eq!(
         invoke(&runtime_handle, &mut runtime_kernel),
         PhenixValue::String("runtime:hello".into())
+    );
+}
+
+#[test]
+fn structural_domain_error_survives_nested_import() {
+    let consumer = consumer_manifest();
+    let provider = embedded_provider_manifest();
+    let resolved = ResolvedHarness::resolve(
+        [consumer.clone(), provider.clone()],
+        components(),
+        [],
+        &Authority::default(),
+    )
+    .unwrap();
+    let mut kernel = Kernel::new(resolved.kernel_config().clone());
+    kernel.activate_resolved_harness(&resolved).unwrap();
+    kernel
+        .register_embedded_factory(consumer.id, || Box::new(RelayConsumer))
+        .unwrap();
+    kernel
+        .register_embedded_factory(provider.id, || Box::new(EchoProvider("embedded")))
+        .unwrap();
+    kernel.activate_all().unwrap();
+
+    let input = serde_json::to_vec(&PhenixValue::String("domain-error".into())).unwrap();
+    let output = kernel
+        .invoke_component(
+            &component("fixture.consumer"),
+            &ServiceId::parse(RelayInterface::interface_id().as_str().to_owned()).unwrap(),
+            &input,
+            &Authority::default(),
+            &plugin("fixture.consumer"),
+        )
+        .unwrap();
+    let value: PhenixValue = serde_json::from_slice(&output).unwrap();
+
+    assert_eq!(
+        InvocationOutcome::from_transport_value(value),
+        InvocationOutcome::DomainError(PhenixValue::String("embedded:conflict".into()))
+    );
+}
+
+#[test]
+fn structural_domain_error_survives_runtime_bridge() {
+    let consumer = consumer_manifest();
+    let runtime = RuntimeId::parse("fixture.runtime").unwrap();
+    let bridge = runtime_bridge_manifest(&runtime);
+    let runtime_provider = runtime_provider_manifest(runtime);
+    let resolved = ResolvedHarness::resolve(
+        [consumer.clone(), bridge.clone(), runtime_provider],
+        components(),
+        [],
+        &Authority::default(),
+    )
+    .unwrap();
+    let handle = handle(&resolved);
+    let mut kernel = Kernel::new(resolved.kernel_config().clone());
+    kernel.activate_resolved_harness(&resolved).unwrap();
+    kernel
+        .register_embedded_factory(consumer.id, || Box::new(Noop))
+        .unwrap();
+    kernel
+        .register_embedded_factory(bridge.id, || Box::new(EchoRuntimeBridge))
+        .unwrap();
+    kernel.activate_all().unwrap();
+
+    let outcome = InvocationOutcome::from_transport_value(invoke_request(
+        &handle,
+        &mut kernel,
+        "domain-error",
+    ));
+    assert_eq!(
+        outcome,
+        InvocationOutcome::DomainError(PhenixValue::String("runtime:conflict".into()))
     );
 }

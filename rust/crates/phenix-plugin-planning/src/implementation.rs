@@ -566,7 +566,15 @@ mod tests {
             .map_err(|error| error.to_string())?;
         let output: phenix_core::PhenixValue =
             serde_json::from_slice(&output).map_err(|error| error.to_string())?;
-        output.project().map_err(|error| error.to_string())
+        match phenix_core::InvocationOutcome::from_transport_value(output) {
+            phenix_core::InvocationOutcome::Success(value) => {
+                value.project().map_err(|error| error.to_string())
+            }
+            phenix_core::InvocationOutcome::DomainError(error) => {
+                let message: String = error.project().map_err(|error| error.to_string())?;
+                Err(message)
+            }
+        }
     }
 
     #[test]

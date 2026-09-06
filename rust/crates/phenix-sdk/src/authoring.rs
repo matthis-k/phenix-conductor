@@ -468,9 +468,10 @@ pub use static_component::{
 };
 pub use static_config::{StaticPluginConfigDescriptor, StaticPluginConfiguration};
 pub use static_dispatch::{
-    block_on_static, decode_exact_runtime, decode_projected_runtime, encode_runtime, LayerContext,
-    StaticComponentDispatch, StaticComponentRuntimeDispatch, StaticPluginComponentDispatch,
-    StaticPluginInstance, StaticPluginInvoke, StaticPluginStart, StaticPluginStop,
+    block_on_static, decode_exact_runtime, decode_projected_runtime, encode_result_runtime,
+    encode_runtime, LayerContext, StaticComponentDispatch, StaticComponentRuntimeDispatch,
+    StaticPluginComponentDispatch, StaticPluginInstance, StaticPluginInvoke, StaticPluginStart,
+    StaticPluginStop,
 };
 pub use static_import::{
     Call, Emit, Host, Optional, Required, StaticComponentEvent, StaticComponentHost,

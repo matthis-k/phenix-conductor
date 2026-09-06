@@ -1,3 +1,5 @@
+use super::encode_result_runtime;
+
 pub use phenix_core::ListenerProjection;
 use phenix_core::{
     Authority, ComponentId, ComponentInterface, ComponentInvocationError, ComponentManifest,
@@ -385,17 +387,14 @@ pub fn dispatch_projected_provider<Request, Response, E, F>(
 where
     for<'value> Request: TryFrom<Project<&'value PhenixValue>, Error = ValueError>,
     for<'value> PhenixValue: From<&'value Response>,
-    E: Display,
+    for<'value> PhenixValue: From<&'value E>,
     F: FnOnce(Request) -> Result<Response, E>,
 {
     let kernel = PluginContext::new(host, (), (), ()).kernel;
     let request = kernel
         .decode_projected::<Request>(interface, input)
         .map_err(|error| error.to_string())?;
-    let response = handler(request).map_err(|error| error.to_string())?;
-    kernel
-        .encode_value(&response)
-        .map_err(|error| error.to_string())
+    encode_result_runtime(host, &handler(request))
 }
 
 pub fn dispatch_exact_provider<Request, Response, E, F>(
@@ -407,17 +406,14 @@ pub fn dispatch_exact_provider<Request, Response, E, F>(
 where
     for<'value> Request: TryFrom<Exact<&'value PhenixValue>, Error = ValueError>,
     for<'value> PhenixValue: From<&'value Response>,
-    E: Display,
+    for<'value> PhenixValue: From<&'value E>,
     F: FnOnce(Request) -> Result<Response, E>,
 {
     let kernel = PluginContext::new(host, (), (), ()).kernel;
     let request = kernel
         .decode_exact::<Request>(interface, input)
         .map_err(|error| error.to_string())?;
-    let response = handler(request).map_err(|error| error.to_string())?;
-    kernel
-        .encode_value(&response)
-        .map_err(|error| error.to_string())
+    encode_result_runtime(host, &handler(request))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

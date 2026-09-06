@@ -75,6 +75,10 @@ pub enum KernelError {
         service: ServiceId,
         message: String,
     },
+    ServiceCancelled {
+        plugin: PluginId,
+        service: ServiceId,
+    },
     PluginNotActive(PluginId),
     HostOperationDenied {
         plugin: PluginId,
@@ -182,6 +186,9 @@ impl Display for KernelError {
                 service,
                 message,
             } => write!(f, "plugin {plugin} denied service {service}: {message}"),
+            Self::ServiceCancelled { plugin, service } => {
+                write!(f, "plugin {plugin} cancelled service {service}")
+            }
             Self::PluginNotActive(plugin) => write!(f, "plugin is not active: {plugin}"),
             Self::HostOperationDenied { plugin, operation } => {
                 write!(

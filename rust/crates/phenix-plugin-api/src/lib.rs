@@ -549,17 +549,19 @@ fn resolve_bool(
     let response = context
         .sdk
         .options
-        .invoke_projected(&OptionCommand::Resolve {
-            key: key.clone(),
-            context: option_context.clone(),
-        })
+        .invoke_fallible_projected::<OptionCommand, OptionResponse, String>(
+            &OptionCommand::Resolve {
+                key: key.clone(),
+                context: option_context.clone(),
+            },
+        )
         .map_err(|error| error.to_string())?;
     let OptionResponse::Value { option } = response else {
         return Err(format!("unexpected option resolution response for {key}"));
     };
     match option.value {
         OptionValue::Bool(value) => Ok(value),
-        _ => Err(format!("option {key} is not boolean")),
+        value => Err(format!("option {key} must resolve to bool, got {value:?}")),
     }
 }
 

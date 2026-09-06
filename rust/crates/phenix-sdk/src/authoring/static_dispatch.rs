@@ -278,6 +278,22 @@ where
         .map_err(|error| error.to_string())
 }
 
+#[doc(hidden)]
+pub fn encode_result_runtime<T, E>(
+    _host: &PluginHost<'_>,
+    response: &Result<T, E>,
+) -> Result<Vec<u8>, String>
+where
+    for<'value> PhenixValue: From<&'value T>,
+    for<'value> PhenixValue: From<&'value E>,
+{
+    let outcome = match response {
+        Ok(response) => phenix_core::InvocationOutcome::success(PhenixValue::from(response)),
+        Err(error) => phenix_core::InvocationOutcome::domain_error(PhenixValue::from(error)),
+    };
+    serde_json::to_vec(&outcome.into_transport_value()).map_err(|error| error.to_string())
+}
+
 fn decode_listener_runtime<T, F>(
     payload: &[u8],
     decode: F,

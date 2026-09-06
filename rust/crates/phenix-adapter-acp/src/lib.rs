@@ -7,6 +7,7 @@
 mod callbacks;
 mod dispatch;
 mod elicitation;
+mod errors;
 mod extension_callbacks;
 mod extension_dispatch;
 mod extensions;
@@ -19,6 +20,7 @@ pub use agent_client_protocol as wire;
 pub use callbacks::*;
 pub use dispatch::*;
 pub use elicitation::*;
+pub use errors::*;
 pub use extensions::*;
 pub use updates::*;
 

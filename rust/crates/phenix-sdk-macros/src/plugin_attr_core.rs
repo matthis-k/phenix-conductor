@@ -1,6 +1,6 @@
 use crate::component_attr::{
-    export_descriptor, export_signature_types, is_call_context_parameter, parse_export,
-    value_response_type, ExportContribution,
+    export_descriptor, export_error_type, export_signature_types, is_call_context_parameter,
+    parse_export, value_response_type, ExportContribution,
 };
 use crate::interface_attr::validate_interface_id;
 use proc_macro2::TokenStream;
@@ -528,6 +528,7 @@ fn expand_module(args: TokenStream, mut item: ItemMod) -> syn::Result<TokenStrea
                 &export.export,
                 &export.decoded_request,
                 &export.response,
+                export.domain_error.as_ref(),
             )
         })
         .collect::<Vec<_>>();
@@ -551,7 +552,7 @@ fn expand_module(args: TokenStream, mut item: ItemMod) -> syn::Result<TokenStrea
         } else {
             quote!(_request)
         };
-        let handler = if export.returns_result {
+        let handler = if export.domain_error.is_some() {
             quote!(|#request_binding: #decoded_request| #call)
         } else {
             quote!(|#request_binding: #decoded_request| Ok::<_, String>(#call))
@@ -727,7 +728,7 @@ struct StatelessExportContribution {
     projection: StatelessRequestProjection,
     has_context: bool,
     has_request: bool,
-    returns_result: bool,
+    domain_error: Option<Type>,
 }
 
 #[derive(Clone, Copy)]
@@ -782,7 +783,7 @@ fn module_contributions(items: &mut [Item]) -> syn::Result<ModuleContributions> 
                     projection,
                     has_context,
                     has_request,
-                    returns_result: signature_returns_result(&function.sig),
+                    domain_error: export_error_type(&function.sig.output)?,
                 });
             }
             Some(StatelessContribution::Value(value)) => {
@@ -831,19 +832,6 @@ fn stateless_request_projection(request: &Type) -> syn::Result<(Type, StatelessR
         ));
     };
     Ok((inner.clone(), projection))
-}
-
-fn signature_returns_result(signature: &syn::Signature) -> bool {
-    let ReturnType::Type(_, output) = &signature.output else {
-        return false;
-    };
-    let Type::Path(path) = output.as_ref() else {
-        return false;
-    };
-    path.path
-        .segments
-        .last()
-        .is_some_and(|segment| segment.ident == "Result")
 }
 
 fn validate_stateless_value_signature(

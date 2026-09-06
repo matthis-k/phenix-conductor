@@ -280,7 +280,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
                     projection,
                     context,
                     has_request,
-                    signature_returns_result(&method.sig),
+                    export_error_type(&method.sig.output)?,
                     method.sig.asyncness.is_some(),
                 ));
             }
@@ -301,11 +301,11 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
     }
 
     let self_ty = &item.self_ty;
-    let export_descriptors = exports
-        .iter()
-        .map(|(method, export, request, response, ..)| {
-            export_descriptor(method, export, request, response)
-        });
+    let export_descriptors = exports.iter().map(
+        |(method, export, request, response, _, _, _, _, domain_error, _)| {
+            export_descriptor(method, export, request, response, domain_error.as_ref())
+        },
+    );
     let layer_descriptors = layers.iter().map(|(method, layer)| {
         let interface = &layer.interface;
         let priority = &layer.priority;
@@ -366,7 +366,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
             projection,
             context,
             has_request,
-            returns_result,
+            domain_error,
             is_async,
         )| {
             let interface = export.interface_expression();
@@ -407,7 +407,7 @@ fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
             } else {
                 quote!(_request)
             };
-            let handler = if *returns_result {
+            let handler = if domain_error.is_some() {
                 quote!(|#request_binding: #decoded_request| #call)
             } else {
                 quote!(|#request_binding: #decoded_request| Ok::<_, String>(#call))
@@ -513,19 +513,6 @@ fn component_request_projection(request: &Type) -> syn::Result<(Type, ComponentR
         ));
     };
     Ok((inner.clone(), projection))
-}
-
-fn signature_returns_result(signature: &Signature) -> bool {
-    let ReturnType::Type(_, output) = &signature.output else {
-        return false;
-    };
-    let Type::Path(path) = output.as_ref() else {
-        return false;
-    };
-    path.path
-        .segments
-        .last()
-        .is_some_and(|segment| segment.ident == "Result")
 }
 
 enum MethodContribution {
@@ -747,6 +734,7 @@ pub(crate) fn export_descriptor(
     export: &ExportContribution,
     request: &Type,
     response: &Type,
+    domain_error: Option<&Type>,
 ) -> TokenStream {
     let interface = export.interface.expression();
     let public = export.public;
@@ -761,10 +749,22 @@ pub(crate) fn export_descriptor(
         .as_ref()
         .map(|authority| quote!(#authority))
         .unwrap_or_else(|| quote!(::phenix_sdk::__phenix_plugin::Authority::default()));
+    let schema = match domain_error {
+        Some(domain_error) => quote! {
+            ::phenix_sdk::__phenix_plugin::InterfaceSchema::fallible_of::<
+                #request,
+                #response,
+                #domain_error,
+            >()
+        },
+        None => quote! {
+            ::phenix_sdk::__phenix_plugin::InterfaceSchema::of::<#request, #response>()
+        },
+    };
     quote! {
         ::phenix_sdk::StaticComponentExport {
             interface: #interface,
-            schema: ::phenix_sdk::__phenix_plugin::InterfaceSchema::of::<#request, #response>(),
+            schema: #schema,
             method: stringify!(#method),
             public: #public,
             terminal: #terminal,
@@ -893,6 +893,34 @@ fn export_response_type(output: &ReturnType) -> syn::Result<Type> {
         ));
     };
     Ok(response.clone())
+}
+
+pub(crate) fn export_error_type(output: &ReturnType) -> syn::Result<Option<Type>> {
+    let ReturnType::Type(_, output) = output else {
+        return Ok(None);
+    };
+    let Type::Path(path) = output.as_ref() else {
+        return Ok(None);
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return Ok(None);
+    };
+    if segment.ident != "Result" {
+        return Ok(None);
+    }
+    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return Err(syn::Error::new_spanned(
+            output,
+            "export Result response must name its domain error type",
+        ));
+    };
+    let Some(GenericArgument::Type(error)) = arguments.args.iter().nth(1) else {
+        return Err(syn::Error::new_spanned(
+            output,
+            "export Result response must name its domain error type",
+        ));
+    };
+    Ok(Some(error.clone()))
 }
 
 pub(crate) fn value_response_type(signature: &Signature) -> syn::Result<Type> {
@@ -1510,6 +1538,9 @@ mod tests {
         assert!(output.contains("fixture.api.run@1"));
         assert!(output.contains("priority : 37"));
         assert!(output.contains("required_authority : Authority :: default"));
+        assert!(
+            output.contains("InterfaceSchema :: fallible_of :: < Request , Response , Error , >")
+        );
         assert!(output.contains("StaticComponentLayer :: with_authority :: < Models >"));
         assert!(output.contains("fixture.completed"));
         assert!(output.contains("fixture.status@1"));
