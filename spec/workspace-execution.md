@@ -1,5 +1,7 @@
 # Workspace execution
 
+status: specification-only
+
 ## Goal
 
 The workspace API should expose only operations that still benefit from typed tool boundaries.
