@@ -565,13 +565,5 @@ fn resolve_bool(
     }
 }
 
-fn option_context_default() -> OptionContext {
-    OptionContext::default()
-}
-
-fn sdk_config_root() -> Option<PathBuf> {
-    None
-}
-
 #[cfg(test)]
 mod tests;

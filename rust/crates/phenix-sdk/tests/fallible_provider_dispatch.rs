@@ -4,7 +4,7 @@ use phenix_core::{
     ResolvedHarnessActivation, ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_sdk::{
-    HasPhenixSchema, StaticComponentBehavior, StaticPluginDefinition, StaticPluginFactory,
+    HasPhenixSchema, StaticComponentBehavior, StaticPluginDefinition, StaticPluginGraph,
 };
 use std::{
     collections::BTreeMap,
@@ -130,10 +130,9 @@ fn configured_kernel(layered: bool) -> (Kernel, Authority) {
     )
     .unwrap();
     let mut kernel = Kernel::new(resolved.kernel_config().clone());
-    kernel
-        .register_embedded_factory(provider_manifest.id, || {
-            <provider::Plugin as StaticPluginFactory>::factory()
-        })
+    StaticPluginGraph::compose::<provider::Plugin>()
+        .unwrap()
+        .preload_embedded_factories(&mut kernel)
         .unwrap();
     if layered {
         kernel
