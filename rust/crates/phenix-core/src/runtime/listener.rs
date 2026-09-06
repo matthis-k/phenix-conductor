@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Weak;
 
 /// Runtime callback bound to one resolved plugin listener.
 ///
@@ -15,7 +16,7 @@ struct ListenerRuntimeSnapshot {
     config: KernelConfig,
     states: BTreeMap<PluginId, PluginState>,
     instances: BTreeMap<PluginId, Arc<Mutex<Box<dyn PluginInstance>>>>,
-    events: Arc<EventBus>,
+    events: Weak<EventBus>,
     tasks: Arc<TaskRuntime>,
     persistence: Arc<Mutex<Box<dyn PersistenceBackend>>>,
     provenance: Arc<Mutex<Vec<ServiceInvocationProvenance>>>,
@@ -53,7 +54,7 @@ pub(super) fn scoped_event_handler(
             config: sources.config.clone(),
             states: sources.states.clone(),
             instances: sources.instances.clone(),
-            events: Arc::clone(sources.events),
+            events: Arc::downgrade(sources.events),
             tasks: Arc::clone(sources.tasks),
             persistence: Arc::clone(sources.persistence),
             provenance: Arc::clone(sources.provenance),
@@ -63,6 +64,11 @@ pub(super) fn scoped_event_handler(
 
 impl ScopedPluginListener {
     fn run(&self, event: &EventEnvelope, authority: &Authority) -> Result<(), String> {
+        let events = self
+            .runtime
+            .events
+            .upgrade()
+            .ok_or_else(|| "listener runtime is unavailable".to_owned())?;
         let live_call = self
             .runtime
             .tasks
@@ -79,7 +85,7 @@ impl ScopedPluginListener {
             authority,
             call_cancellation: Some(cancellation.clone()),
             call_stack: BTreeSet::from([self.owner.clone()]),
-            events: &self.runtime.events,
+            events: &events,
             tasks: &self.runtime.tasks,
             persistence: &self.runtime.persistence,
             prepared_mutations: &prepared_mutations,
@@ -112,11 +118,8 @@ impl EventHandler for ScopedPluginListener {
     ) -> Result<(), String> {
         if graph_generation.is_some_and(|generation| generation != &self.runtime.generation) {
             return Err(format!(
-                "listener generation mismatch: expected {}, got {}",
-                self.runtime.generation,
-                graph_generation
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| "none".into())
+                "listener generation mismatch: expected {:?}, got {:?}",
+                self.runtime.generation, graph_generation
             ));
         }
         self.run(event, authority)
