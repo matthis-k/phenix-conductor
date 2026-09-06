@@ -1556,6 +1556,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-client-acp"
+version = "0.1.0"
+dependencies = [
+ "phenix-application-interface",
+ "phenix-core",
+ "phenix-sdk-macros",
+]
+
+[[package]]
 name = "phenix-conductor"
 version = "0.1.0"
 dependencies = [
