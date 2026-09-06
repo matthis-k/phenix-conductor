@@ -17,6 +17,7 @@ mod contract_wire;
 mod events;
 mod frontend_metadata;
 mod identity;
+mod infallible_value;
 mod inspection;
 mod invocation;
 mod live_reconciliation;
