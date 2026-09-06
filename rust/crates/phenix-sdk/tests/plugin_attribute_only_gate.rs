@@ -10,9 +10,12 @@ use phenix_sdk::{
     StaticPluginConfiguration, StaticPluginDefinition, StaticPluginLifecycle,
     StaticPluginResources,
 };
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc,
+    },
+    time::Duration,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, phenix_sdk::PhenixValue)]
@@ -375,8 +378,7 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     kernel.activate_all().unwrap();
 
     let events = kernel.events();
-    let diagnostics = Arc::new(Mutex::new(Vec::<EventEnvelope>::new()));
-    let seen_diagnostics = Arc::clone(&diagnostics);
+    let (diagnostics, seen_diagnostics) = mpsc::channel::<EventEnvelope>();
     events
         .install_subscriptions([EventSubscription {
             spec: SubscriptionSpec {
@@ -391,8 +393,9 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
                 kernel_policy_revision: 0,
             },
             handler: Arc::new(move |event: &EventEnvelope, _: &Authority| {
-                seen_diagnostics.lock().unwrap().push(event.clone());
-                Ok(())
+                seen_diagnostics
+                    .send(event.clone())
+                    .map_err(|error| error.to_string())
             }),
         }])
         .unwrap();
@@ -449,7 +452,7 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
         CapabilityId::parse("kernel.persistence.write").unwrap(),
     ]);
     let report = events.dispatch(&event, &listener_authority).unwrap();
-    assert_eq!(report.delivered.len(), 1, "{report:?}");
+    assert_eq!(report.delivered.len(), 1);
     assert!(report.warnings.is_empty());
 
     let mismatched = Request {
@@ -467,12 +470,11 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
     assert_eq!(mismatch_report.failures.len(), 1);
     assert_eq!(mismatch_report.warnings.len(), 1);
 
-    let diagnostics = diagnostics.lock().unwrap();
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].emitter, Plugin::plugin_id());
-    assert_eq!(diagnostics[0].causality_id, 42);
+    let diagnostic = diagnostics.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(diagnostic.emitter, Plugin::plugin_id());
+    assert_eq!(diagnostic.causality_id, 42);
     let diagnostic_payload: serde_json::Value =
-        serde_json::from_slice(&diagnostics[0].payload).unwrap();
+        serde_json::from_slice(&diagnostic.payload).unwrap();
     assert_eq!(
         diagnostic_payload["event"],
         serde_json::json!("fixture.attribute-gate.observed")
@@ -485,8 +487,6 @@ fn attribute_only_plugin_activates_generated_runtime_without_parallel_wiring() {
         diagnostic_payload["direction"],
         serde_json::json!("listener")
     );
-    drop(diagnostics);
-
     let without_plugin = ResolvedHarness::resolve(
         [<sessions::Plugin as StaticPluginDefinition>::manifest()],
         [<sessions::Plugin as StaticPluginDefinition>::component_manifests().remove(0)],
