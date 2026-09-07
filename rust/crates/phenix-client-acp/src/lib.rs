@@ -538,15 +538,15 @@ mod tests {
 
     #[test]
     fn descriptor_extensions_use_the_fixed_operation_and_schema_ids() {
-        let capability = ContractId::parse("phenix.application.capability.sessions@1")
+        let capability = ContractId::parse("phenix.application.capability.skills@1")
             .expect("static capability id is valid");
         let extensions = DescriptorExtensions::from_descriptor([capability]);
-        let operation = ContractId::parse("phenix.application.session.create@1")
+        let operation = ContractId::parse("phenix.application.skill-list@1")
             .expect("static operation id is valid");
         let method = extensions
             .require(&operation)
-            .expect("sessions capability supports creation");
-        assert_eq!(method.method, "_phenix/session.create@1");
+            .expect("skills capability supports listing");
+        assert_eq!(method.method, "_phenix/skill-list@1");
         assert_eq!(method.operation, operation);
     }
 
