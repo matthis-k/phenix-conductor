@@ -1,0 +1,12 @@
+[package]
+name = "phenix-binding-generator"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[package.metadata.phenix]
+role = "passive-library"
+
+[dependencies]
+phenix-application-interface = { path = "../phenix-application-interface" }
+phenix-core = { path = "../phenix-core" }
