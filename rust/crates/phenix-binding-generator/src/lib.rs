@@ -439,7 +439,7 @@ mod tests {
         assert!(first.contains("descriptor.events_by_extension"));
         assert!(first.contains("descriptor.callbacks_by_extension"));
         assert!(first.contains("descriptor.conversions"));
-        assert!(first.contains("request = \"phenix.application.session-input@1\""));
+        assert!(first.contains("request = \"phenix.application.type.session-input@1\""));
         assert!(first.contains("descriptor.error_variants"));
     }
 }
