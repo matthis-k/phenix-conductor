@@ -9,7 +9,7 @@ use agent_client_protocol::schema::{
     },
     ProtocolVersion,
 };
-use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectTo, ConnectionTo};
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client as AcpRole, ConnectTo, ConnectionTo};
 use phenix_application_interface::{
     ApplicationClient, ApplicationTransport, Capabilities, Operation,
 };
@@ -275,7 +275,7 @@ impl<T> StreamClient<T> {
     }
 }
 
-impl<T: ConnectTo<Agent>> StreamClient<T> {
+impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
     pub async fn connect_with<F, Fut, R>(self, use_connection: F) -> Result<R, ClientError>
     where
         F: FnOnce(AcpConnection) -> Fut,
