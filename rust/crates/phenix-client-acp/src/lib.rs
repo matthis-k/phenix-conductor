@@ -2,7 +2,7 @@
 
 use agent_client_protocol::schema::{
     v1::{
-        CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest,
+        CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest, InitializeResponse,
         ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
         NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
         ResumeSessionResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
@@ -589,6 +589,47 @@ mod tests {
             extensions.require(&operation),
             Err(ClientError::UnsupportedCapability { .. })
         ));
+    }
+
+    #[test]
+    fn stream_client_initializes_and_maps_a_session_request() {
+        let (client_transport, server_transport) = agent_client_protocol::Channel::duplex();
+        let server = Agent
+            .builder()
+            .on_receive_request(
+                async move |request: InitializeRequest, responder, _connection| {
+                    let mut meta = serde_json::Map::new();
+                    meta.insert(
+                        "phenix.extensions".to_owned(),
+                        serde_json::json!({
+                            "interface": INTERFACE_ID,
+                            "methods": [],
+                        }),
+                    );
+                    responder.respond(InitializeResponse::new(request.protocol_version).meta(meta))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |_request: NewSessionRequest, responder, _connection| {
+                    responder.respond(NewSessionResponse::new("session-1"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .connect_to(server_transport);
+        let client = StreamClient::new(client_transport).connect_with(|connection| async move {
+            let session = connection
+                .new_session(NewSessionRequest::new("/workspace"))
+                .await?;
+            assert_eq!(session.session_id.to_string(), "session-1");
+            Ok(())
+        });
+
+        let (server_result, client_result) = futures::executor::block_on(async {
+            futures::join!(server, client)
+        });
+        client_result.expect("client completes the ACP session request");
+        server_result.expect("server completes after the client disconnects");
     }
 
     #[test]
