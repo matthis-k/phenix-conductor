@@ -5,8 +5,8 @@ use agent_client_protocol::schema::{
         CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest,
         InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
         LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-        ResumeSessionRequest, ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
-        SetSessionConfigOptionResponse,
+        ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
+        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
     },
     ProtocolVersion,
 };
@@ -282,7 +282,11 @@ impl SessionUpdates {
         )
     }
 
-    pub fn resume_at(&self, session_id: impl Into<String>, next_sequence: u64) -> Result<(), ClientError> {
+    pub fn resume_at(
+        &self,
+        session_id: impl Into<String>,
+        next_sequence: u64,
+    ) -> Result<(), ClientError> {
         self.ordered
             .lock()
             .map_err(|_| ClientError::Protocol("ACP update order lock poisoned".to_owned()))?
@@ -352,11 +356,14 @@ impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
                         .block_task()
                         .await?;
                     let extensions = descriptor_extensions(&initialized)?;
-                    use_connection(AcpConnection { connection, extensions })
-                        .await
-                        .map_err(|error| {
-                            agent_client_protocol::Error::internal_error().data(error.to_string())
-                        })
+                    use_connection(AcpConnection {
+                        connection,
+                        extensions,
+                    })
+                    .await
+                    .map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })
                 },
             )
             .await
