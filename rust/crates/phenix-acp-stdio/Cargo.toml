@@ -15,4 +15,5 @@ agent-client-protocol.workspace = true
 phenix-adapter-acp = { path = "../phenix-adapter-acp" }
 phenix-application-interface = { path = "../phenix-application-interface" }
 phenix-core = { path = "../phenix-core" }
+serde_json.workspace = true
 tokio.workspace = true
