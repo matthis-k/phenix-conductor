@@ -183,7 +183,9 @@ fn application_error_to_acp(error: ApplicationError) -> Error {
         | ApplicationError::Conflict { .. }
         | ApplicationError::Failed { .. }
         | ApplicationError::Disconnected => Error::internal_error(),
-        ApplicationError::NotFound { resource } => Error::resource_not_found(Some(resource.clone())),
+        ApplicationError::NotFound { resource } => {
+            Error::resource_not_found(Some(resource.clone()))
+        }
         ApplicationError::Unauthenticated { .. } => Error::auth_required(),
         ApplicationError::Cancelled => Error::request_cancelled(),
     };
