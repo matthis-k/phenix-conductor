@@ -8,7 +8,8 @@ fn table_len(table: &Table) -> usize {
 #[test]
 fn generated_lua_descriptor_matches_the_fixed_application_descriptor() {
     let descriptor = application_descriptor();
-    let source = phenix_binding_generator::lua(&descriptor).expect("fixed descriptor generates Lua");
+    let source =
+        phenix_binding_generator::lua(&descriptor).expect("fixed descriptor generates Lua");
     let lua = Lua::new();
     let generated: Table = lua.load(source).eval().expect("generated Lua evaluates");
 
@@ -171,10 +172,10 @@ fn generated_lua_descriptor_matches_the_fixed_application_descriptor() {
     let errors = generated
         .get::<Table>("error_variants")
         .expect("generated application error variants");
-    assert!(errors.contains_key("cancelled").expect("cancelled error key"));
-    assert!(
-        errors
-            .contains_key("unsupported_capability")
-            .expect("unsupported capability error key")
-    );
+    assert!(errors
+        .contains_key("cancelled")
+        .expect("cancelled error key"));
+    assert!(errors
+        .contains_key("unsupported_capability")
+        .expect("unsupported capability error key"));
 }
