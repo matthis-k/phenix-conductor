@@ -34,9 +34,7 @@ impl super::AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| {
-                super::ClientError::Protocol(format!("ACP extension request failed: {error}"))
-            })?;
+            .map_err(super::request_error)?;
         let output = serde_json::from_value::<phenix_core::PhenixValue>(response).map_err(|error| {
             super::ClientError::Protocol(format!("cannot decode ACP extension output: {error}"))
         })?;
