@@ -104,7 +104,7 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
                 "[{}] = {{ id = {}, name = {}, capability = {}, input = {}, output = {}, error = {}, extension = {} }},",
                 lua_string(id.as_str()),
                 lua_string(id.as_str()),
-                lua_string(&operation_name(id.as_str())),
+                lua_string(&binding_name(id.as_str())),
                 lua_string(operation.capability.as_str()),
                 lua_string(operation.input.as_str()),
                 lua_string(operation.output.as_str()),
@@ -121,12 +121,14 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
             &mut source,
             2,
             &format!(
-                "[{}] = {{ id = {}, capability = {}, payload = {}, ordering = {} }},",
+                "[{}] = {{ id = {}, name = {}, capability = {}, payload = {}, ordering = {}, extension = {} }},",
                 lua_string(id.as_str()),
                 lua_string(id.as_str()),
+                lua_string(&binding_name(id.as_str())),
                 lua_string(event.capability.as_str()),
                 lua_string(event.payload.as_str()),
                 lua_string(&format!("{:?}", event.ordering).to_lowercase()),
+                lua_string(&extension_name(id.as_str())),
             ),
         );
     }
@@ -138,17 +140,51 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
             &mut source,
             2,
             &format!(
-                "[{}] = {{ id = {}, capability = {}, request = {}, response = {}, semantics = {} }},",
+                "[{}] = {{ id = {}, name = {}, capability = {}, request = {}, response = {}, semantics = {}, extension = {} }},",
                 lua_string(id.as_str()),
                 lua_string(id.as_str()),
+                lua_string(&binding_name(id.as_str())),
                 lua_string(callback.capability.as_str()),
                 lua_string(callback.request.as_str()),
                 lua_string(callback.response.as_str()),
                 lua_string(&format!("{:?}", callback.semantics).to_lowercase()),
+                lua_string(&extension_name(id.as_str())),
             ),
         );
     }
     source.push_str("  },\n");
+    source.push_str("}\n");
+
+    source.push_str("descriptor.has_capability = function(capabilities, capability)\n");
+    source.push_str("  return capabilities[capability] == true\n");
+    source.push_str("end\n");
+
+    source.push_str("descriptor.events_by_extension = {\n");
+    for id in descriptor.events.keys() {
+        line(
+            &mut source,
+            1,
+            &format!(
+                "[{}] = {},",
+                lua_string(&extension_name(id.as_str())),
+                lua_string(id.as_str()),
+            ),
+        );
+    }
+    source.push_str("}\n");
+
+    source.push_str("descriptor.callbacks_by_extension = {\n");
+    for id in descriptor.callbacks.keys() {
+        line(
+            &mut source,
+            1,
+            &format!(
+                "[{}] = {},",
+                lua_string(&extension_name(id.as_str())),
+                lua_string(id.as_str()),
+            ),
+        );
+    }
     source.push_str("}\n");
 
     source.push_str("descriptor.bind = function(client)\n");
@@ -159,7 +195,7 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
             2,
             &format!(
                 "[{}] = function(input) return client:_invoke_application({}, input) end,",
-                lua_string(&operation_name(id.as_str())),
+                lua_string(&binding_name(id.as_str())),
                 lua_string(id.as_str()),
             ),
         );
@@ -231,7 +267,7 @@ fn line(source: &mut String, indent: usize, value: &str) {
     source.push('\n');
 }
 
-fn operation_name(id: &str) -> String {
+fn binding_name(id: &str) -> String {
     id.strip_prefix("phenix.application.")
         .unwrap_or(id)
         .split('@')
@@ -285,5 +321,12 @@ mod tests {
         assert!(first.contains("schema = { kind ="));
         assert!(first.contains("client:_invoke_application"));
         assert!(first.contains("[\"skill_list\"] = function"));
+        assert!(first.contains("[\"session_update\"]"));
+        assert!(first.contains("_phenix/session-update@1"));
+        assert!(first.contains("[\"client_callable\"]"));
+        assert!(first.contains("_phenix/client-callable@1"));
+        assert!(first.contains("descriptor.has_capability"));
+        assert!(first.contains("descriptor.events_by_extension"));
+        assert!(first.contains("descriptor.callbacks_by_extension"));
     }
 }
