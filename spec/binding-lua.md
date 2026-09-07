@@ -199,14 +199,14 @@ The direct ACP stdio migration may land before this binding. Switching `phenix-n
 
 ## Completion
 
-- [ ] a reusable binding generator consumes the fixed application descriptor;
-- [ ] Lua is implemented as the first generator target rather than a one-off API definition;
-- [ ] `phenix-binding-lua` builds an importable native Lua module named `phenix`;
-- [ ] it depends on `phenix-client-acp` rather than reimplementing ACP;
+- [x] a reusable binding generator consumes the fixed application descriptor;
+- [x] Lua is implemented as the first generator target rather than a one-off API definition;
+- [x] `phenix-binding-lua` builds an importable native Lua module named `phenix`;
+- [x] it depends on `phenix-client-acp` rather than reimplementing ACP;
 - [ ] generated Lua operations, events, callbacks, capabilities, types, and application errors agree with the fixed descriptor;
-- [ ] LuaJIT/Neovim loading is supported;
-- [ ] the API is asynchronous and host-neutral;
+- [x] LuaJIT/Neovim loading is supported;
+- [x] the API is asynchronous and host-neutral;
 - [ ] standard ACP and Phenix extensions are exposed as Lua-native operations;
-- [ ] transport stays below the Client SDK;
-- [ ] durable runtime state remains Phenix-owned;
+- [x] transport stays below the Client SDK;
+- [x] durable runtime state remains Phenix-owned;
 - [ ] exact-head Source, Rust, Product, Docs, and Maintenance validation passes.

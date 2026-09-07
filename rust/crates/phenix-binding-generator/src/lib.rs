@@ -45,6 +45,11 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
         "capabilities",
         descriptor.capabilities.keys().map(|id| id.as_str()),
     );
+    section(
+        &mut source,
+        "types",
+        descriptor.types.keys().map(|id| id.as_str()),
+    );
     source.push_str("  operations = {\n");
     for (id, operation) in &descriptor.operations {
         line(
@@ -143,5 +148,6 @@ mod tests {
         assert!(first.contains("phenix.application.skill-list@1"));
         assert!(first.contains("_phenix/skill-list@1"));
         assert!(first.contains("phenix.application.capability.skills@1"));
+        assert!(first.contains("phenix.application.error@1"));
     }
 }

@@ -20,6 +20,7 @@ use phenix_core::{ContractId, PhenixSchema};
 use std::{
     collections::{BTreeMap, BTreeSet},
     future::Future,
+    num::NonZeroUsize,
     path::PathBuf,
     sync::{mpsc, Arc, Mutex},
 };
@@ -108,6 +109,7 @@ pub enum ClientError {
         expected: u64,
         received: u64,
     },
+    UpdateQueueFull,
 }
 
 impl std::fmt::Display for ClientError {
@@ -130,6 +132,7 @@ impl std::fmt::Display for ClientError {
                 formatter,
                 "ACP session {session_id} update sequence is {received}; expected {expected}"
             ),
+            Self::UpdateQueueFull => write!(formatter, "ACP update queue is full"),
         }
     }
 }
@@ -266,7 +269,13 @@ impl OrderedUpdates {
 #[derive(Clone)]
 pub struct SessionUpdates {
     ordered: Arc<Mutex<OrderedUpdates>>,
-    sender: mpsc::Sender<SessionNotification>,
+    sender: UpdateSender,
+}
+
+#[derive(Clone)]
+enum UpdateSender {
+    Unbounded(mpsc::Sender<SessionNotification>),
+    Bounded(mpsc::SyncSender<SessionNotification>),
 }
 
 impl SessionUpdates {
@@ -276,7 +285,20 @@ impl SessionUpdates {
         (
             Self {
                 ordered: Arc::new(Mutex::new(OrderedUpdates::default())),
-                sender,
+                sender: UpdateSender::Unbounded(sender),
+            },
+            receiver,
+        )
+    }
+
+    /// Creates a bounded update queue for hosts that must control local memory use.
+    #[must_use]
+    pub fn bounded(capacity: NonZeroUsize) -> (Self, mpsc::Receiver<SessionNotification>) {
+        let (sender, receiver) = mpsc::sync_channel(capacity.get());
+        (
+            Self {
+                ordered: Arc::new(Mutex::new(OrderedUpdates::default())),
+                sender: UpdateSender::Bounded(sender),
             },
             receiver,
         )
@@ -306,9 +328,19 @@ impl SessionUpdates {
                 .map_err(|_| ClientError::Protocol("ACP update order lock poisoned".to_owned()))?
                 .accept(notification.session_id.to_string(), sequence)?;
         }
-        self.sender
-            .send(notification)
-            .map_err(|_| ClientError::Transport("ACP update receiver disconnected".to_owned()))
+        match &self.sender {
+            UpdateSender::Unbounded(sender) => sender
+                .send(notification)
+                .map_err(|_| ClientError::Transport("ACP update receiver disconnected".to_owned())),
+            UpdateSender::Bounded(sender) => {
+                sender.try_send(notification).map_err(|error| match error {
+                    mpsc::TrySendError::Full(_) => ClientError::UpdateQueueFull,
+                    mpsc::TrySendError::Disconnected(_) => {
+                        ClientError::Transport("ACP update receiver disconnected".to_owned())
+                    }
+                })
+            }
+        }
     }
 }
 
@@ -423,6 +455,20 @@ impl AcpClient {
     {
         StreamClient::new(self.config.agent())
             .connect_with(use_connection)
+            .await
+    }
+
+    pub async fn connect_with_updates<F, Fut, R>(
+        &self,
+        updates: SessionUpdates,
+        use_connection: F,
+    ) -> Result<R, ClientError>
+    where
+        F: FnOnce(AcpConnection) -> Fut,
+        Fut: Future<Output = Result<R, ClientError>>,
+    {
+        StreamClient::new(self.config.agent())
+            .connect_with_updates(updates, use_connection)
             .await
     }
 
@@ -794,5 +840,30 @@ mod tests {
         updates
             .accept("session-1", 7)
             .expect("resumed update is ordered");
+    }
+
+    #[test]
+    fn bounded_session_updates_reject_overflow() {
+        let (updates, receiver) =
+            SessionUpdates::bounded(std::num::NonZeroUsize::new(1).expect("one is non-zero"));
+        let notification = || {
+            SessionNotification::new(
+                "session-1",
+                agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(
+                    agent_client_protocol::schema::v1::ContentChunk::new(
+                        agent_client_protocol::schema::v1::ContentBlock::Text(
+                            agent_client_protocol::schema::v1::TextContent::new("hello"),
+                        ),
+                    ),
+                ),
+            )
+        };
+
+        updates.receive(notification()).expect("first update fits");
+        assert!(matches!(
+            updates.receive(notification()),
+            Err(ClientError::UpdateQueueFull)
+        ));
+        drop(receiver);
     }
 }
