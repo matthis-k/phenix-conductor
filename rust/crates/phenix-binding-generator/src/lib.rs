@@ -288,7 +288,9 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
     source.push_str("  return descriptor.operations[id] or descriptor.operations[descriptor.operations_by_extension[id]]\n");
     source.push_str("end\n");
     source.push_str("descriptor.event = function(id)\n");
-    source.push_str("  return descriptor.events[id] or descriptor.events[descriptor.events_by_extension[id]]\n");
+    source.push_str(
+        "  return descriptor.events[id] or descriptor.events[descriptor.events_by_extension[id]]\n",
+    );
     source.push_str("end\n");
     source.push_str("descriptor.callback = function(id)\n");
     source.push_str("  return descriptor.callbacks[id] or descriptor.callbacks[descriptor.callbacks_by_extension[id]]\n");
