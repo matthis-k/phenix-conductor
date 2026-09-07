@@ -249,11 +249,10 @@ impl UserData for Client {
             capabilities(lua, &this.state)
         });
         methods.add_method("extensions", |lua, this, ()| {
-            let extensions = this
-                .state
-                .extensions
-                .lock()
-                .map_err(|_| lua_error(BindingError::transport("extension lock is poisoned")))?;
+            let extensions =
+                this.state.extensions.lock().map_err(|_| {
+                    lua_error(BindingError::transport("extension lock is poisoned"))
+                })?;
             let result = lua.create_table()?;
             for operation in extensions.iter() {
                 result.set(operation.as_str(), true)?;
@@ -270,11 +269,10 @@ impl UserData for Client {
             let bind: mlua::Function = descriptor.get("bind")?;
             let application: Table = bind.call(lua.create_userdata(this.clone())?)?;
             let operations: Table = descriptor.get("operations")?;
-            let extensions = this
-                .state
-                .extensions
-                .lock()
-                .map_err(|_| lua_error(BindingError::transport("extension lock is poisoned")))?;
+            let extensions =
+                this.state.extensions.lock().map_err(|_| {
+                    lua_error(BindingError::transport("extension lock is poisoned"))
+                })?;
             for pair in operations.pairs::<String, Table>() {
                 let (operation, metadata) = pair?;
                 if !extensions.contains(operation.as_str()) {
