@@ -55,9 +55,10 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
             &mut source,
             2,
             &format!(
-                "[{}] = {{ id = {}, dependencies = {{ {} }} }},",
+                "[{}] = {{ id = {}, name = {}, dependencies = {{ {} }} }},",
                 lua_string(id.as_str()),
                 lua_string(id.as_str()),
+                lua_string(&binding_name(id.as_str())),
                 dependencies,
             ),
         );
@@ -86,12 +87,34 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
             errors.extend(variants.keys().map(|key| error_kind(key.as_str())));
         }
     }
-    for error in errors {
+    for error in &errors {
         line(
             &mut source,
             2,
-            &format!("[{}] = {},", lua_string(&error), lua_string(&error)),
+            &format!("[{}] = {},", lua_string(error), lua_string(error)),
         );
+    }
+    source.push_str("  },\n");
+
+    source.push_str("  error_variants = {\n");
+    for operation in descriptor.operations.values() {
+        if let Some(Type::Variant(variants)) = descriptor.types.get(&operation.error) {
+            for (variant, schema) in variants {
+                let kind = error_kind(variant.as_str());
+                line(
+                    &mut source,
+                    2,
+                    &format!(
+                        "[{}] = {{ kind = {}, variant = {}, schema = {} }},",
+                        lua_string(&kind),
+                        lua_string(&kind),
+                        lua_string(variant.as_str()),
+                        schema_literal(schema),
+                    ),
+                );
+            }
+            break;
+        }
     }
     source.push_str("  },\n");
 
@@ -155,9 +178,33 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
     source.push_str("  },\n");
     source.push_str("}\n");
 
-    source.push_str("descriptor.has_capability = function(capabilities, capability)\n");
-    source.push_str("  return capabilities[capability] == true\n");
-    source.push_str("end\n");
+    source.push_str("descriptor.capabilities_by_name = {\n");
+    for id in descriptor.capabilities.keys() {
+        line(
+            &mut source,
+            1,
+            &format!(
+                "[{}] = {},",
+                lua_string(&binding_name(id.as_str())),
+                lua_string(id.as_str()),
+            ),
+        );
+    }
+    source.push_str("}\n");
+
+    source.push_str("descriptor.operations_by_extension = {\n");
+    for id in descriptor.operations.keys() {
+        line(
+            &mut source,
+            1,
+            &format!(
+                "[{}] = {},",
+                lua_string(&extension_name(id.as_str())),
+                lua_string(id.as_str()),
+            ),
+        );
+    }
+    source.push_str("}\n");
 
     source.push_str("descriptor.events_by_extension = {\n");
     for id in descriptor.events.keys() {
@@ -186,6 +233,66 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
         );
     }
     source.push_str("}\n");
+
+    source.push_str("descriptor.conversions = {\n");
+    source.push_str("  operations = {\n");
+    for (id, operation) in &descriptor.operations {
+        line(
+            &mut source,
+            2,
+            &format!(
+                "[{}] = {{ request = {}, result = {}, error = {} }},",
+                lua_string(id.as_str()),
+                lua_string(operation.input.as_str()),
+                lua_string(operation.output.as_str()),
+                lua_string(operation.error.as_str()),
+            ),
+        );
+    }
+    source.push_str("  },\n");
+    source.push_str("  events = {\n");
+    for (id, event) in &descriptor.events {
+        line(
+            &mut source,
+            2,
+            &format!(
+                "[{}] = {{ payload = {} }},",
+                lua_string(id.as_str()),
+                lua_string(event.payload.as_str()),
+            ),
+        );
+    }
+    source.push_str("  },\n");
+    source.push_str("  callbacks = {\n");
+    for (id, callback) in &descriptor.callbacks {
+        line(
+            &mut source,
+            2,
+            &format!(
+                "[{}] = {{ request = {}, response = {} }},",
+                lua_string(id.as_str()),
+                lua_string(callback.request.as_str()),
+                lua_string(callback.response.as_str()),
+            ),
+        );
+    }
+    source.push_str("  },\n");
+    source.push_str("}\n");
+
+    source.push_str("descriptor.has_capability = function(capabilities, capability)\n");
+    source.push_str("  local id = descriptor.capabilities_by_name[capability] or capability\n");
+    source.push_str("  return descriptor.capabilities[id] ~= nil and capabilities[id] == true\n");
+    source.push_str("end\n");
+
+    source.push_str("descriptor.operation = function(id)\n");
+    source.push_str("  return descriptor.operations[id] or descriptor.operations[descriptor.operations_by_extension[id]]\n");
+    source.push_str("end\n");
+    source.push_str("descriptor.event = function(id)\n");
+    source.push_str("  return descriptor.events[id] or descriptor.events[descriptor.events_by_extension[id]]\n");
+    source.push_str("end\n");
+    source.push_str("descriptor.callback = function(id)\n");
+    source.push_str("  return descriptor.callbacks[id] or descriptor.callbacks[descriptor.callbacks_by_extension[id]]\n");
+    source.push_str("end\n");
 
     source.push_str("descriptor.bind = function(client)\n");
     source.push_str("  return {\n");
@@ -326,7 +433,11 @@ mod tests {
         assert!(first.contains("[\"client_callable\"]"));
         assert!(first.contains("_phenix/client-callable@1"));
         assert!(first.contains("descriptor.has_capability"));
+        assert!(first.contains("descriptor.operations_by_extension"));
         assert!(first.contains("descriptor.events_by_extension"));
         assert!(first.contains("descriptor.callbacks_by_extension"));
+        assert!(first.contains("descriptor.conversions"));
+        assert!(first.contains("request = \"phenix.application.session-input@1\""));
+        assert!(first.contains("descriptor.error_variants"));
     }
 }
