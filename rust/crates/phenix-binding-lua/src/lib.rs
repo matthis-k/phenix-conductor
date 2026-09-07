@@ -109,9 +109,7 @@ impl BindingError {
                 "unsupported_capability".to_owned(),
                 None,
             ),
-            ClientError::UpdateQueueFull => {
-                (ErrorKind::QueueFull, "queue_full".to_owned(), None)
-            }
+            ClientError::UpdateQueueFull => (ErrorKind::QueueFull, "queue_full".to_owned(), None),
         };
         Self {
             kind,
