@@ -7,8 +7,8 @@
 //! and ordered updates, so the binding never invokes a host event loop itself.
 
 use agent_client_protocol::schema::v1::{
-    CancelNotification, CloseSessionRequest, ContentBlock, ListSessionsRequest,
-    LoadSessionRequest, NewSessionRequest, PromptRequest, ResumeSessionRequest, TextContent,
+    CancelNotification, CloseSessionRequest, ContentBlock, ListSessionsRequest, LoadSessionRequest,
+    NewSessionRequest, PromptRequest, ResumeSessionRequest, TextContent,
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -310,17 +310,14 @@ impl UserData for Sessions {
                 lua.create_userdata(request)
             },
         );
-        methods.add_method(
-            "load",
-            |lua, this, (session_id, cwd): (String, String)| {
-                let request = request_for(&this.state, |reply| Command::LoadSession {
-                    session_id,
-                    cwd: PathBuf::from(cwd),
-                    reply,
-                })?;
-                lua.create_userdata(request)
-            },
-        );
+        methods.add_method("load", |lua, this, (session_id, cwd): (String, String)| {
+            let request = request_for(&this.state, |reply| Command::LoadSession {
+                session_id,
+                cwd: PathBuf::from(cwd),
+                reply,
+            })?;
+            lua.create_userdata(request)
+        });
     }
 }
 
@@ -630,7 +627,11 @@ fn run_client(
     }
 }
 
-fn lua_to_phenix(lua: &Lua, schema: &PhenixSchema, value: Value) -> Result<PhenixValue, BindingError> {
+fn lua_to_phenix(
+    lua: &Lua,
+    schema: &PhenixSchema,
+    value: Value,
+) -> Result<PhenixValue, BindingError> {
     match schema {
         Type::Any => lua_any_to_phenix(value),
         Type::Never => Err(BindingError::conversion(
@@ -688,9 +689,7 @@ fn lua_to_phenix(lua: &Lua, schema: &PhenixSchema, value: Value) -> Result<Pheni
             let Value::Table(table) = value else {
                 return Err(type_error("list table", &value));
             };
-            Ok(PhenixValue::List(lua_sequence_to_phenix(
-                lua, table, item,
-            )?))
+            Ok(PhenixValue::List(lua_sequence_to_phenix(lua, table, item)?))
         }
         Type::Map(item) => {
             let Value::Table(table) = value else {
@@ -716,13 +715,13 @@ fn lua_to_phenix(lua: &Lua, schema: &PhenixSchema, value: Value) -> Result<Pheni
             let Value::Table(table) = value else {
                 return Err(type_error("variant table", &value));
             };
-            let kind = table
-                .get::<String>("kind")
-                .map_err(|_| BindingError::conversion("variant table requires string field kind"))?;
-            let key = Key::parse(kind.clone()).map_err(BindingError::conversion)?;
-            let payload_schema = variants.get(kind.as_str()).ok_or_else(|| {
-                BindingError::conversion(format!("unknown variant kind {kind}"))
+            let kind = table.get::<String>("kind").map_err(|_| {
+                BindingError::conversion("variant table requires string field kind")
             })?;
+            let key = Key::parse(kind.clone()).map_err(BindingError::conversion)?;
+            let payload_schema = variants
+                .get(kind.as_str())
+                .ok_or_else(|| BindingError::conversion(format!("unknown variant kind {kind}")))?;
             let payload = match payload_schema {
                 Type::Table(fields) => {
                     PhenixValue::Table(lua_table_to_record(lua, table, fields, Some("kind"))?)
@@ -730,9 +729,7 @@ fn lua_to_phenix(lua: &Lua, schema: &PhenixSchema, value: Value) -> Result<Pheni
                 Type::Unit => PhenixValue::Unit,
                 schema => {
                     let value = table.get::<Value>("value").map_err(|error| {
-                        BindingError::conversion(format!(
-                            "variant {kind} requires value: {error}"
-                        ))
+                        BindingError::conversion(format!("variant {kind} requires value: {error}"))
                     })?;
                     lua_to_phenix(lua, schema, value)?
                 }
@@ -925,10 +922,7 @@ fn phenix_to_lua(lua: &Lua, value: &PhenixValue) -> Result<Value, BindingError> 
 }
 
 fn type_error(expected: &str, value: &Value) -> BindingError {
-    BindingError::conversion(format!(
-        "expected {expected}, got {}",
-        value.type_name()
-    ))
+    BindingError::conversion(format!("expected {expected}, got {}", value.type_name()))
 }
 
 #[mlua::lua_module(name = "phenix")]
@@ -990,8 +984,8 @@ mod tests {
         input.set("title", "renamed").expect("title");
         input.set("extra", true).expect("extra");
 
-        let error = lua_to_phenix(&lua, schema, Value::Table(input))
-            .expect_err("unknown fields must fail");
+        let error =
+            lua_to_phenix(&lua, schema, Value::Table(input)).expect_err("unknown fields must fail");
         assert_eq!(error.kind, ErrorKind::Conversion);
         assert!(error.message.contains("unexpected record field extra"));
     }
