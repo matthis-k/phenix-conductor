@@ -189,9 +189,7 @@ fn generated_lua_bindings_dispatch_every_descriptor_operation() {
     let generated: Table = lua.load(source).eval().expect("generated Lua evaluates");
     let client = lua.create_table().expect("fake client");
     let invoke = lua
-        .create_function(
-            |_lua, (_client, operation, _input): (Table, String, Value)| Ok(operation),
-        )
+        .create_function(|_lua, (_client, operation, _input): (Table, String, Value)| Ok(operation))
         .expect("fake invoke function");
     client
         .set("_invoke_application", invoke)
