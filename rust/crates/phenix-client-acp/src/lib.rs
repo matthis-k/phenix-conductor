@@ -3,10 +3,10 @@
 use agent_client_protocol::schema::{
     v1::{
         CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest,
-        ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-        LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-        ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
-        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+        ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+        NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
+        ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
+        SetSessionConfigOptionResponse,
     },
     ProtocolVersion,
 };
