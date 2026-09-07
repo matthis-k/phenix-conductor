@@ -4,9 +4,8 @@ use agent_client_protocol::schema::{
     v1::{
         CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest,
         ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-        NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-        ResumeSessionRequest, ResumeSessionResponse, SetSessionConfigOptionRequest,
-        SetSessionConfigOptionResponse,
+        NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
+        ResumeSessionResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
     },
     ProtocolVersion,
 };
@@ -96,8 +95,15 @@ impl StdioConfig {
 pub enum ClientError {
     Transport(String),
     Protocol(String),
-    UnsupportedCapability { operation: ContractId, capability: ContractId },
-    OutOfOrderUpdate { session_id: String, expected: u64, received: u64 },
+    UnsupportedCapability {
+        operation: ContractId,
+        capability: ContractId,
+    },
+    OutOfOrderUpdate {
+        session_id: String,
+        expected: u64,
+        received: u64,
+    },
 }
 
 impl std::fmt::Display for ClientError {
@@ -230,7 +236,11 @@ pub struct OrderedUpdates {
 }
 
 impl OrderedUpdates {
-    pub fn accept(&mut self, session_id: impl Into<String>, sequence: u64) -> Result<(), ClientError> {
+    pub fn accept(
+        &mut self,
+        session_id: impl Into<String>,
+        sequence: u64,
+    ) -> Result<(), ClientError> {
         let session_id = session_id.into();
         let expected = self.next_sequence.entry(session_id.clone()).or_insert(0);
         if sequence != *expected {
@@ -337,8 +347,9 @@ fn descriptor_extensions(
         .map(ContractId::parse)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| {
-            agent_client_protocol::Error::invalid_params()
-                .data(format!("ACP peer advertised an invalid Phenix capability: {error}"))
+            agent_client_protocol::Error::invalid_params().data(format!(
+                "ACP peer advertised an invalid Phenix capability: {error}"
+            ))
         })?;
     Ok(DescriptorExtensions::from_descriptor(capabilities))
 }
@@ -518,10 +529,9 @@ mod tests {
         ];
 
         for expected in cases {
-            let result =
-                futures::executor::block_on(client(expected.clone()).invoke::<FixtureOperation>(
-                    Request,
-                ));
+            let result = futures::executor::block_on(
+                client(expected.clone()).invoke::<FixtureOperation>(Request),
+            );
             assert_eq!(result, Err(expected));
         }
     }
@@ -554,7 +564,9 @@ mod tests {
     #[test]
     fn ordered_updates_reject_gaps_and_allow_resume() {
         let mut updates = OrderedUpdates::default();
-        updates.accept("session-1", 0).expect("first update is ordered");
+        updates
+            .accept("session-1", 0)
+            .expect("first update is ordered");
         assert!(matches!(
             updates.accept("session-1", 2),
             Err(ClientError::OutOfOrderUpdate {
@@ -564,6 +576,8 @@ mod tests {
             })
         ));
         updates.resume_at("session-1", 7);
-        updates.accept("session-1", 7).expect("resumed update is ordered");
+        updates
+            .accept("session-1", 7)
+            .expect("resumed update is ordered");
     }
 }
