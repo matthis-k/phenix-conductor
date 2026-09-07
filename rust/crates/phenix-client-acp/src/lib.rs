@@ -441,7 +441,7 @@ fn descriptor_extensions(
     let value = serde_json::to_value(initialized)
         .map_err(agent_client_protocol::Error::into_internal_error)?;
     let extension = value
-        .get("meta")
+        .get("_meta")
         .and_then(|meta| meta.get("phenix.extensions"))
         .ok_or_else(|| {
             agent_client_protocol::Error::invalid_params()
