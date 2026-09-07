@@ -8,7 +8,8 @@
 
 use agent_client_protocol::schema::v1::{
     CancelNotification, CloseSessionRequest, ContentBlock, ListSessionsRequest, LoadSessionRequest,
-    NewSessionRequest, PromptRequest, ResumeSessionRequest, TextContent,
+    NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest,
+    TextContent,
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -72,6 +73,13 @@ impl BindingError {
         }
     }
 
+    fn unsupported(operation: &ContractId) -> Self {
+        Self {
+            kind: ErrorKind::UnsupportedCapability,
+            message: format!("application operation {operation} is not a negotiated ACP extension"),
+        }
+    }
+
     fn from_client(error: ClientError) -> Self {
         let kind = match error {
             ClientError::Transport(_) => ErrorKind::Transport,
@@ -107,6 +115,7 @@ enum Command {
     },
     ListSessions {
         cwd: Option<PathBuf>,
+        cursor: Option<String>,
         reply: oneshot::Sender<CommandResult>,
     },
     ResumeSession {
@@ -128,6 +137,12 @@ enum Command {
         text: String,
         reply: oneshot::Sender<CommandResult>,
     },
+    SetOption {
+        session_id: String,
+        config_id: String,
+        value: String,
+        reply: oneshot::Sender<CommandResult>,
+    },
     Application {
         operation: ContractId,
         input: PhenixValue,
@@ -142,6 +157,7 @@ struct ClientState {
     commands: mpsc::UnboundedSender<Command>,
     updates: Mutex<std_mpsc::Receiver<agent_client_protocol::schema::v1::SessionNotification>>,
     capabilities: Mutex<BTreeSet<String>>,
+    extensions: Mutex<BTreeSet<String>>,
     terminal_error: Mutex<Option<BindingError>>,
 }
 
@@ -164,6 +180,13 @@ impl ClientState {
             .ok()
             .and_then(|error| error.clone())
             .unwrap_or_else(|| BindingError::transport("ACP connection is closed"))
+    }
+
+    fn supports_extension(&self, operation: &ContractId) -> Result<bool, BindingError> {
+        self.extensions
+            .lock()
+            .map(|extensions| extensions.contains(operation.as_str()))
+            .map_err(|_| BindingError::transport("extension lock is poisoned"))
     }
 }
 
@@ -225,21 +248,54 @@ impl UserData for Client {
         methods.add_method("capabilities", |lua, this, ()| {
             capabilities(lua, &this.state)
         });
+        methods.add_method("extensions", |lua, this, ()| {
+            let extensions = this
+                .state
+                .extensions
+                .lock()
+                .map_err(|_| lua_error(BindingError::transport("extension lock is poisoned")))?;
+            let result = lua.create_table()?;
+            for operation in extensions.iter() {
+                result.set(operation.as_str(), true)?;
+            }
+            Ok(result)
+        });
         methods.add_method("sessions", |lua, this, ()| {
             lua.create_userdata(Sessions {
                 state: Arc::clone(&this.state),
             })
         });
-        methods.add_method("application", |lua, this, ()| {
+        methods.add_method("application", |lua, this, ()| -> LuaResult<Table> {
             let descriptor = descriptor(lua)?;
             let bind: mlua::Function = descriptor.get("bind")?;
-            bind.call(lua.create_userdata(this.clone())?)
+            let application: Table = bind.call(lua.create_userdata(this.clone())?)?;
+            let operations: Table = descriptor.get("operations")?;
+            let extensions = this
+                .state
+                .extensions
+                .lock()
+                .map_err(|_| lua_error(BindingError::transport("extension lock is poisoned")))?;
+            for pair in operations.pairs::<String, Table>() {
+                let (operation, metadata) = pair?;
+                if !extensions.contains(operation.as_str()) {
+                    let name: String = metadata.get("name")?;
+                    application.set(name, Value::Nil)?;
+                }
+            }
+            Ok(application)
         });
         methods.add_method(
             "_invoke_application",
             |lua, this, (operation, input): (String, Value)| {
                 let operation = ContractId::parse(operation)
                     .map_err(|error| lua_error(BindingError::conversion(error)))?;
+                if !this
+                    .state
+                    .supports_extension(&operation)
+                    .map_err(lua_error)?
+                {
+                    return Err(lua_error(BindingError::unsupported(&operation)));
+                }
                 let descriptor = application_descriptor();
                 let declaration = descriptor.operations.get(&operation).ok_or_else(|| {
                     lua_error(BindingError::conversion(format!(
@@ -292,13 +348,17 @@ impl UserData for Sessions {
             })?;
             lua.create_userdata(request)
         });
-        methods.add_method("list", |lua, this, cwd: Option<String>| {
-            let request = request_for(&this.state, |reply| Command::ListSessions {
-                cwd: cwd.map(PathBuf::from),
-                reply,
-            })?;
-            lua.create_userdata(request)
-        });
+        methods.add_method(
+            "list",
+            |lua, this, (cwd, cursor): (Option<String>, Option<String>)| {
+                let request = request_for(&this.state, |reply| Command::ListSessions {
+                    cwd: cwd.map(PathBuf::from),
+                    cursor,
+                    reply,
+                })?;
+                lua.create_userdata(request)
+            },
+        );
         methods.add_method(
             "resume",
             |lua, this, (session_id, cwd): (String, String)| {
@@ -332,6 +392,18 @@ impl UserData for Session {
             })?;
             lua.create_userdata(request)
         });
+        methods.add_method(
+            "set_option",
+            |lua, this, (config_id, value): (String, String)| {
+                let request = request_for(&this.state, |reply| Command::SetOption {
+                    session_id: this.id.clone(),
+                    config_id,
+                    value,
+                    reply,
+                })?;
+                lua.create_userdata(request)
+            },
+        );
         methods.add_method("close", |lua, this, ()| {
             let request = request_for(&this.state, |reply| Command::CloseSession {
                 session_id: this.id.clone(),
@@ -493,6 +565,7 @@ fn connect(options: Table) -> LuaResult<Client> {
         commands,
         updates: Mutex::new(update_receiver),
         capabilities: Mutex::new(BTreeSet::new()),
+        extensions: Mutex::new(BTreeSet::new()),
         terminal_error: Mutex::new(None),
     });
     let worker_state = Arc::clone(&state);
@@ -513,13 +586,21 @@ fn run_client(
     let result = futures::executor::block_on(AcpClient::new(config).connect_with_updates(
         updates,
         move |connection| async move {
+            let negotiated_extensions = connection.negotiated_extensions();
+            if let Ok(mut extensions) = worker_state.extensions.lock() {
+                extensions.extend(
+                    negotiated_extensions
+                        .iter()
+                        .map(|extension| extension.operation.to_string()),
+                );
+            }
             if let Ok(mut capabilities) = worker_state.capabilities.lock() {
                 capabilities.extend([
                     "phenix.application.capability.discovery@1".to_owned(),
                     "phenix.application.capability.sessions@1".to_owned(),
                     "phenix.application.capability.prompt@1".to_owned(),
                 ]);
-                for extension in connection.negotiated_extensions() {
+                for extension in &negotiated_extensions {
                     capabilities.insert(extension.capability.to_string());
                 }
             }
@@ -534,10 +615,13 @@ fn run_client(
                             .map_err(BindingError::from_client);
                         let _ = reply.send(result);
                     }
-                    Command::ListSessions { cwd, reply } => {
+                    Command::ListSessions { cwd, cursor, reply } => {
                         let mut request = ListSessionsRequest::new();
                         if let Some(cwd) = cwd {
                             request = request.cwd(cwd);
+                        }
+                        if let Some(cursor) = cursor {
+                            request = request.cursor(cursor);
                         }
                         let result = connection
                             .list_sessions(request)
@@ -600,6 +684,27 @@ fn run_client(
                                 )
                             })
                             .map_err(BindingError::from_client);
+                        let _ = reply.send(result);
+                    }
+                    Command::SetOption {
+                        session_id,
+                        config_id,
+                        value,
+                        reply,
+                    } => {
+                        let result = connection
+                            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                                session_id,
+                                config_id,
+                                value,
+                            ))
+                            .await
+                            .map_err(BindingError::from_client)
+                            .and_then(|response| {
+                                serde_json::to_value(response)
+                                    .map(Response::Json)
+                                    .map_err(|error| BindingError::conversion(error.to_string()))
+                            });
                         let _ = reply.send(result);
                     }
                     Command::Application {
