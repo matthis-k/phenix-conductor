@@ -15,6 +15,7 @@ phenix-sdk-macros = { path = "../phenix-sdk-macros" }
 
 [build-dependencies]
 phenix-application-interface = { path = "../phenix-application-interface" }
+sha2.workspace = true
 
 [dev-dependencies]
 futures.workspace = true

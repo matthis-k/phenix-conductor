@@ -93,6 +93,7 @@ mod tests {
     #[test]
     fn generated_api_reports_the_fixed_interface_identity() {
         assert_eq!(generated::INTERFACE_ID, INTERFACE_ID);
+        assert_eq!(generated::DESCRIPTOR_SHA256.len(), 64);
         assert!(generated::type_schemas().contains_key(
             &ContractId::parse("phenix.application.error@1").expect("static contract id is valid"),
         ));
