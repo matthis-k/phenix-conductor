@@ -1,4 +1,4 @@
-use mlua::{Lua, Table, Value};
+use mlua::{Function, Lua, Table, Value};
 use phenix_client_acp::application_descriptor;
 
 fn table_len(table: &Table) -> usize {
@@ -178,4 +178,46 @@ fn generated_lua_descriptor_matches_the_fixed_application_descriptor() {
     assert!(errors
         .contains_key("unsupported_capability")
         .expect("unsupported capability error key"));
+}
+
+#[test]
+fn generated_lua_bindings_dispatch_every_descriptor_operation() {
+    let descriptor = application_descriptor();
+    let source =
+        phenix_binding_generator::lua(&descriptor).expect("fixed descriptor generates Lua");
+    let lua = Lua::new();
+    let generated: Table = lua.load(source).eval().expect("generated Lua evaluates");
+    let client = lua.create_table().expect("fake client");
+    let invoke = lua
+        .create_function(
+            |_lua, (_client, operation, _input): (Table, String, Value)| Ok(operation),
+        )
+        .expect("fake invoke function");
+    client
+        .set("_invoke_application", invoke)
+        .expect("fake invoke method");
+
+    let bind = generated
+        .get::<Function>("bind")
+        .expect("generated bind function");
+    let bindings: Table = bind.call(client).expect("bind fake client");
+    let operations = generated
+        .get::<Table>("operations")
+        .expect("generated operations");
+
+    for id in descriptor.operations.keys() {
+        let metadata = operations
+            .get::<Table>(id.as_str())
+            .expect("generated operation metadata");
+        let name = metadata
+            .get::<String>("name")
+            .expect("generated operation name");
+        let operation = bindings
+            .get::<Function>(name)
+            .expect("generated operation wrapper");
+        let dispatched = operation
+            .call::<String>(Value::Nil)
+            .expect("generated wrapper dispatches");
+        assert_eq!(dispatched, id.as_str());
+    }
 }
