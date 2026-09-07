@@ -1673,6 +1673,7 @@ dependencies = [
  "mlua",
  "phenix-binding-generator",
  "phenix-client-acp",
+ "phenix-core",
  "serde_json",
 ]
 
