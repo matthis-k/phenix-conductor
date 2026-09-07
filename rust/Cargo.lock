@@ -1563,6 +1563,7 @@ dependencies = [
  "phenix-application-interface",
  "phenix-core",
  "phenix-sdk-macros",
+ "sha2",
 ]
 
 [[package]]
