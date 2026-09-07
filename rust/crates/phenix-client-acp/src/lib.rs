@@ -5,7 +5,7 @@ use agent_client_protocol::schema::{
         CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest,
         InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
         LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-        ResumeSessionRequest, ResumeSessionResponse, SetSessionConfigOptionRequest,
+        ResumeSessionRequest, ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
         SetSessionConfigOptionResponse,
     },
     ProtocolVersion,
@@ -21,6 +21,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     future::Future,
     path::PathBuf,
+    sync::{mpsc, Arc, Mutex},
 };
 
 pub use phenix_application_interface::{
@@ -262,6 +263,51 @@ impl OrderedUpdates {
     }
 }
 
+#[derive(Clone)]
+pub struct SessionUpdates {
+    ordered: Arc<Mutex<OrderedUpdates>>,
+    sender: mpsc::Sender<SessionNotification>,
+}
+
+impl SessionUpdates {
+    #[must_use]
+    pub fn channel() -> (Self, mpsc::Receiver<SessionNotification>) {
+        let (sender, receiver) = mpsc::channel();
+        (
+            Self {
+                ordered: Arc::new(Mutex::new(OrderedUpdates::default())),
+                sender,
+            },
+            receiver,
+        )
+    }
+
+    pub fn resume_at(&self, session_id: impl Into<String>, next_sequence: u64) -> Result<(), ClientError> {
+        self.ordered
+            .lock()
+            .map_err(|_| ClientError::Protocol("ACP update order lock poisoned".to_owned()))?
+            .resume_at(session_id, next_sequence);
+        Ok(())
+    }
+
+    fn receive(&self, notification: SessionNotification) -> Result<(), ClientError> {
+        if let Some(sequence) = notification
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("phenix.sequence"))
+            .and_then(serde_json::Value::as_u64)
+        {
+            self.ordered
+                .lock()
+                .map_err(|_| ClientError::Protocol("ACP update order lock poisoned".to_owned()))?
+                .accept(notification.session_id.to_string(), sequence)?;
+        }
+        self.sender
+            .send(notification)
+            .map_err(|_| ClientError::Transport("ACP update receiver disconnected".to_owned()))
+    }
+}
+
 pub struct StreamClient<T> {
     transport: T,
 }
@@ -279,6 +325,44 @@ impl<T> StreamClient<T> {
 }
 
 impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
+    pub async fn connect_with_updates<F, Fut, R>(
+        self,
+        updates: SessionUpdates,
+        use_connection: F,
+    ) -> Result<R, ClientError>
+    where
+        F: FnOnce(AcpConnection) -> Fut,
+        Fut: Future<Output = Result<R, ClientError>>,
+    {
+        agent_client_protocol::Client
+            .builder()
+            .on_receive_notification(
+                async move |notification: SessionNotification, _connection| {
+                    updates.receive(notification).map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })
+                },
+                agent_client_protocol::on_receive_notification!(),
+            )
+            .connect_with(
+                self.transport,
+                move |connection: ConnectionTo<Agent>| async move {
+                    let initialized = connection
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
+                    let extensions = descriptor_extensions(&initialized)?;
+                    use_connection(AcpConnection { connection, extensions })
+                        .await
+                        .map_err(|error| {
+                            agent_client_protocol::Error::internal_error().data(error.to_string())
+                        })
+                },
+            )
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))
+    }
+
     pub async fn connect_with<F, Fut, R>(self, use_connection: F) -> Result<R, ClientError>
     where
         F: FnOnce(AcpConnection) -> Fut,
