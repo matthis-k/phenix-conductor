@@ -9,7 +9,7 @@ use agent_client_protocol::schema::{
     },
     ProtocolVersion,
 };
-use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectTo, ConnectionTo};
 use phenix_application_interface::{
     ApplicationClient, ApplicationTransport, Capabilities, Operation,
 };
@@ -259,6 +259,53 @@ impl OrderedUpdates {
     }
 }
 
+pub struct StreamClient<T> {
+    transport: T,
+}
+
+impl<T> StreamClient<T> {
+    #[must_use]
+    pub const fn new(transport: T) -> Self {
+        Self { transport }
+    }
+
+    #[must_use]
+    pub fn into_transport(self) -> T {
+        self.transport
+    }
+}
+
+impl<T: ConnectTo<Agent>> StreamClient<T> {
+    pub async fn connect_with<F, Fut, R>(self, use_connection: F) -> Result<R, ClientError>
+    where
+        F: FnOnce(AcpConnection) -> Fut,
+        Fut: Future<Output = Result<R, ClientError>>,
+    {
+        agent_client_protocol::Client
+            .builder()
+            .connect_with(
+                self.transport,
+                move |connection: ConnectionTo<Agent>| async move {
+                    let initialized = connection
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
+                    let extensions = descriptor_extensions(&initialized)?;
+                    use_connection(AcpConnection {
+                        connection,
+                        extensions,
+                    })
+                    .await
+                    .map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })
+                },
+            )
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))
+    }
+}
+
 #[derive(Clone)]
 pub struct AcpClient {
     config: StdioConfig,
@@ -280,28 +327,9 @@ impl AcpClient {
         F: FnOnce(AcpConnection) -> Fut,
         Fut: Future<Output = Result<R, ClientError>>,
     {
-        agent_client_protocol::Client
-            .builder()
-            .connect_with(
-                self.config.agent(),
-                move |connection: ConnectionTo<Agent>| async move {
-                    let initialized = connection
-                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
-                        .block_task()
-                        .await?;
-                    let extensions = descriptor_extensions(&initialized)?;
-                    use_connection(AcpConnection {
-                        connection,
-                        extensions,
-                    })
-                    .await
-                    .map_err(|error| {
-                        agent_client_protocol::Error::internal_error().data(error.to_string())
-                    })
-                },
-            )
+        StreamClient::new(self.config.agent())
+            .connect_with(use_connection)
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
     }
 
     pub async fn reconnect_with<F, Fut, R>(&self, use_connection: F) -> Result<R, ClientError>
