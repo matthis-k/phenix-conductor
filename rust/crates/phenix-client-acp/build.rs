@@ -9,8 +9,10 @@ fn main() {
     )
     .expect("the fixed application descriptor is Rust-generatable");
     let fingerprint = format!("{:x}", Sha256::digest(source.as_bytes()));
-    let source = format!("pub const DESCRIPTOR_SHA256: &str = {fingerprint:?};
-{source}");
+    let source = format!(
+        "pub const DESCRIPTOR_SHA256: &str = {fingerprint:?};
+{source}"
+    );
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo supplies OUT_DIR"))
         .join("application.rs");
     fs::write(output, source).expect("write generated application API");
