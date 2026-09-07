@@ -724,6 +724,58 @@ mod tests {
     }
 
     #[test]
+    fn session_updates_deliver_only_ordered_phenix_notifications() {
+        let (updates, receiver) = SessionUpdates::channel();
+        let mut meta = serde_json::Map::new();
+        meta.insert("phenix.sequence".to_owned(), serde_json::Value::from(0));
+        let notification = SessionNotification::new(
+            "session-1",
+            agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(
+                agent_client_protocol::schema::v1::ContentChunk::new(
+                    agent_client_protocol::schema::v1::ContentBlock::Text(
+                        agent_client_protocol::schema::v1::TextContent::new("hello"),
+                    ),
+                ),
+            ),
+        )
+        .meta(meta);
+        updates
+            .receive(notification)
+            .expect("first Phenix notification is ordered");
+        assert_eq!(
+            receiver
+                .try_recv()
+                .expect("ordered notification is delivered")
+                .session_id
+                .to_string(),
+            "session-1"
+        );
+
+        let mut gap_meta = serde_json::Map::new();
+        gap_meta.insert("phenix.sequence".to_owned(), serde_json::Value::from(2));
+        let gap = SessionNotification::new(
+            "session-1",
+            agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(
+                agent_client_protocol::schema::v1::ContentChunk::new(
+                    agent_client_protocol::schema::v1::ContentBlock::Text(
+                        agent_client_protocol::schema::v1::TextContent::new("gap"),
+                    ),
+                ),
+            ),
+        )
+        .meta(gap_meta);
+        assert!(matches!(
+            updates.receive(gap),
+            Err(ClientError::OutOfOrderUpdate {
+                expected: 1,
+                received: 2,
+                ..
+            })
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
     fn ordered_updates_reject_gaps_and_allow_resume() {
         let mut updates = OrderedUpdates::default();
         updates
