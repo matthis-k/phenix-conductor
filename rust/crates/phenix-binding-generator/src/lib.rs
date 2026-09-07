@@ -6,6 +6,8 @@
 //! runtime plugins, ACP adapters, or language-host integrations.
 
 use phenix_application_interface::{generate, ApplicationDescriptor};
+use phenix_core::Type;
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GenerationError {
@@ -24,41 +26,85 @@ impl std::fmt::Display for GenerationError {
 
 impl std::error::Error for GenerationError {}
 
-/// Generates a deterministic Lua descriptor module.
+/// Generates a deterministic Lua application module.
 ///
 /// Native Lua ABI integration, async dispatch, and transport ownership remain
-/// handwritten in the binding package. This output contains only stable
-/// application identities and descriptor-owned type references.
+/// handwritten in the binding package. The generated module owns stable
+/// application identities, schemas, error kinds, and operation wrappers.
 pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError> {
     generate::rust(descriptor).map_err(|error| GenerationError::Descriptor(error.to_string()))?;
 
     let mut source = String::new();
     source.push_str("-- Generated from the fixed Phenix application descriptor. Do not edit.\n");
-    source.push_str("return {\n");
+    source.push_str("local descriptor = {\n");
     line(
         &mut source,
         1,
         &format!("interface_id = {},", lua_string(descriptor.id.as_str())),
     );
-    section(
-        &mut source,
-        "capabilities",
-        descriptor.capabilities.keys().map(|id| id.as_str()),
-    );
-    section(
-        &mut source,
-        "types",
-        descriptor.types.keys().map(|id| id.as_str()),
-    );
+
+    source.push_str("  capabilities = {\n");
+    for (id, capability) in &descriptor.capabilities {
+        let dependencies = capability
+            .dependencies
+            .iter()
+            .map(|dependency| lua_string(dependency.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        line(
+            &mut source,
+            2,
+            &format!(
+                "[{}] = {{ id = {}, dependencies = {{ {} }} }},",
+                lua_string(id.as_str()),
+                lua_string(id.as_str()),
+                dependencies,
+            ),
+        );
+    }
+    source.push_str("  },\n");
+
+    source.push_str("  types = {\n");
+    for (id, schema) in &descriptor.types {
+        line(
+            &mut source,
+            2,
+            &format!(
+                "[{}] = {{ id = {}, schema = {} }},",
+                lua_string(id.as_str()),
+                lua_string(id.as_str()),
+                schema_literal(schema),
+            ),
+        );
+    }
+    source.push_str("  },\n");
+
+    source.push_str("  errors = {\n");
+    let mut errors = BTreeSet::new();
+    for operation in descriptor.operations.values() {
+        if let Some(Type::Variant(variants)) = descriptor.types.get(&operation.error) {
+            errors.extend(variants.keys().map(|key| error_kind(key.as_str())));
+        }
+    }
+    for error in errors {
+        line(
+            &mut source,
+            2,
+            &format!("[{}] = {},", lua_string(&error), lua_string(&error)),
+        );
+    }
+    source.push_str("  },\n");
+
     source.push_str("  operations = {\n");
     for (id, operation) in &descriptor.operations {
         line(
             &mut source,
             2,
             &format!(
-                "[{}] = {{ id = {}, capability = {}, input = {}, output = {}, error = {}, extension = {} }},",
+                "[{}] = {{ id = {}, name = {}, capability = {}, input = {}, output = {}, error = {}, extension = {} }},",
                 lua_string(id.as_str()),
                 lua_string(id.as_str()),
+                lua_string(&operation_name(id.as_str())),
                 lua_string(operation.capability.as_str()),
                 lua_string(operation.input.as_str()),
                 lua_string(operation.output.as_str()),
@@ -68,6 +114,7 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
         );
     }
     source.push_str("  },\n");
+
     source.push_str("  events = {\n");
     for (id, event) in &descriptor.events {
         line(
@@ -84,6 +131,7 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
         );
     }
     source.push_str("  },\n");
+
     source.push_str("  callbacks = {\n");
     for (id, callback) in &descriptor.callbacks {
         line(
@@ -102,25 +150,109 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
     }
     source.push_str("  },\n");
     source.push_str("}\n");
+
+    source.push_str("descriptor.bind = function(client)\n");
+    source.push_str("  return {\n");
+    for id in descriptor.operations.keys() {
+        line(
+            &mut source,
+            2,
+            &format!(
+                "[{}] = function(input) return client:_invoke_application({}, input) end,",
+                lua_string(&operation_name(id.as_str())),
+                lua_string(id.as_str()),
+            ),
+        );
+    }
+    source.push_str("  }\n");
+    source.push_str("end\n");
+    source.push_str("return descriptor\n");
     Ok(source)
 }
 
-fn section<'a>(source: &mut String, name: &str, ids: impl Iterator<Item = &'a str>) {
-    line(source, 1, &format!("{name} = {{"));
-    for id in ids {
-        line(
-            source,
-            2,
-            &format!("[{}] = {},", lua_string(id), lua_string(id)),
-        );
+fn schema_literal(schema: &Type) -> String {
+    match schema {
+        Type::Any => "{ kind = \"any\" }".to_owned(),
+        Type::Never => "{ kind = \"never\" }".to_owned(),
+        Type::Unit => "{ kind = \"unit\" }".to_owned(),
+        Type::Bool => "{ kind = \"bool\" }".to_owned(),
+        Type::I64 => "{ kind = \"i64\" }".to_owned(),
+        Type::U64 => "{ kind = \"u64\" }".to_owned(),
+        Type::F64 => "{ kind = \"f64\" }".to_owned(),
+        Type::String => "{ kind = \"string\" }".to_owned(),
+        Type::Bytes => "{ kind = \"bytes\" }".to_owned(),
+        Type::Option(item) => format!("{{ kind = \"option\", item = {} }}", schema_literal(item)),
+        Type::Array { item, len } => format!(
+            "{{ kind = \"array\", item = {}, len = {len} }}",
+            schema_literal(item)
+        ),
+        Type::List(item) => format!("{{ kind = \"list\", item = {} }}", schema_literal(item)),
+        Type::Map(item) => format!("{{ kind = \"map\", item = {} }}", schema_literal(item)),
+        Type::Table(fields) => {
+            let fields = fields
+                .iter()
+                .map(|(key, value)| {
+                    format!("[{}] = {}", lua_string(key.as_str()), schema_literal(value))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ kind = \"table\", fields = {{ {fields} }} }}")
+        }
+        Type::Variant(variants) => {
+            let variants = variants
+                .iter()
+                .map(|(key, value)| {
+                    format!("[{}] = {}", lua_string(key.as_str()), schema_literal(value))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ kind = \"variant\", variants = {{ {variants} }} }}")
+        }
+        Type::Callable {
+            contract,
+            input,
+            output,
+        } => format!(
+            "{{ kind = \"callable\", contract = {}, input = {}, output = {} }}",
+            lua_string(contract.as_str()),
+            schema_literal(input),
+            schema_literal(output),
+        ),
+        Type::Object { contract } => format!(
+            "{{ kind = \"object\", contract = {} }}",
+            lua_string(contract.as_str())
+        ),
     }
-    line(source, 1, "},");
 }
 
 fn line(source: &mut String, indent: usize, value: &str) {
     source.push_str(&"  ".repeat(indent));
     source.push_str(value);
     source.push('\n');
+}
+
+fn operation_name(id: &str) -> String {
+    id.strip_prefix("phenix.application.")
+        .unwrap_or(id)
+        .split('@')
+        .next()
+        .unwrap_or(id)
+        .replace(['-', '.', '/'], "_")
+}
+
+fn error_kind(name: &str) -> String {
+    let mut result = String::new();
+    for (index, character) in name.chars().enumerate() {
+        if character.is_uppercase() {
+            if index > 0 {
+                result.push('_');
+            }
+            result.extend(character.to_lowercase());
+        } else {
+            result.push(character);
+        }
+    }
+    result
 }
 
 fn extension_name(id: &str) -> String {
@@ -149,5 +281,9 @@ mod tests {
         assert!(first.contains("_phenix/skill-list@1"));
         assert!(first.contains("phenix.application.capability.skills@1"));
         assert!(first.contains("phenix.application.error@1"));
+        assert!(first.contains("unsupported_capability"));
+        assert!(first.contains("schema = { kind ="));
+        assert!(first.contains("client:_invoke_application"));
+        assert!(first.contains("[\"skill_list\"] = function"));
     }
 }
