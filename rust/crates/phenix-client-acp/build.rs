@@ -37,17 +37,9 @@ impl super::AcpConnection {
             .map_err(|error| {
                 super::ClientError::Protocol(format!("ACP extension request failed: {error}"))
             })?;
-        let agent_client_protocol::schema::v1::AgentResponse::ExtMethodResponse(response) = response
-        else {
-            return Err(super::ClientError::Protocol(
-                "ACP extension request returned a non-extension response".to_owned(),
-            ));
-        };
-        let output = serde_json::from_str::<phenix_core::PhenixValue>(response.0.get()).map_err(
-            |error| {
-                super::ClientError::Protocol(format!("cannot decode ACP extension output: {error}"))
-            },
-        )?;
+        let output = serde_json::from_value::<phenix_core::PhenixValue>(response).map_err(|error| {
+            super::ClientError::Protocol(format!("cannot decode ACP extension output: {error}"))
+        })?;
         method.output.parse(&output).map_err(|error| {
             super::ClientError::Protocol(format!(
                 "ACP extension output violates the application descriptor: {error}"
