@@ -124,10 +124,7 @@ fn extension_name(id: &str) -> String {
 }
 
 fn lua_string(value: &str) -> String {
-    format!(
-        "\"{}\"",
-        value.replace('\\', "\\\\").replace('"', "\\\"")
-    )
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]
