@@ -15,7 +15,9 @@ pub enum GenerationError {
 impl std::fmt::Display for GenerationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Descriptor(message) => write!(formatter, "cannot generate binding API: {message}"),
+            Self::Descriptor(message) => {
+                write!(formatter, "cannot generate binding API: {message}")
+            }
         }
     }
 }
@@ -38,7 +40,11 @@ pub fn lua(descriptor: &ApplicationDescriptor) -> Result<String, GenerationError
         1,
         &format!("interface_id = {},", lua_string(descriptor.id.as_str())),
     );
-    section(&mut source, "capabilities", descriptor.capabilities.keys().map(|id| id.as_str()));
+    section(
+        &mut source,
+        "capabilities",
+        descriptor.capabilities.keys().map(|id| id.as_str()),
+    );
     source.push_str("  operations = {\n");
     for (id, operation) in &descriptor.operations {
         line(
