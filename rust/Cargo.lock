@@ -1547,20 +1547,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "phenix-binding-generator"
+version = "0.1.0"
+dependencies = [
+ "phenix-application-interface",
+ "phenix-core",
+]
+
+[[package]]
 name = "phenix-client"
 version = "0.1.0"
 dependencies = [
  "phenix-domain",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "phenix-binding-generator"
-version = "0.1.0"
-dependencies = [
- "phenix-application-interface",
- "phenix-core",
 ]
 
 [[package]]
