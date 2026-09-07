@@ -9,7 +9,9 @@ use agent_client_protocol::schema::{
     },
     ProtocolVersion,
 };
-use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client as AcpRole, ConnectTo, ConnectionTo};
+use agent_client_protocol::{
+    AcpAgent, AcpAgentConfig, Agent, Client as AcpRole, ConnectTo, ConnectionTo,
+};
 use phenix_application_interface::{
     ApplicationClient, ApplicationTransport, Capabilities, Operation,
 };
