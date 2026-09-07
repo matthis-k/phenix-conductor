@@ -2,10 +2,11 @@
 
 use agent_client_protocol::schema::{
     v1::{
-        CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest, InitializeResponse,
-        ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-        NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
-        ResumeSessionResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+        CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest,
+        InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+        LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+        ResumeSessionRequest, ResumeSessionResponse, SetSessionConfigOptionRequest,
+        SetSessionConfigOptionResponse,
     },
     ProtocolVersion,
 };
@@ -625,9 +626,8 @@ mod tests {
             Ok(())
         });
 
-        let (server_result, client_result) = futures::executor::block_on(async {
-            futures::join!(server, client)
-        });
+        let (server_result, client_result) =
+            futures::executor::block_on(async { futures::join!(server, client) });
         client_result.expect("client completes the ACP session request");
         server_result.expect("server completes after the client disconnects");
     }
