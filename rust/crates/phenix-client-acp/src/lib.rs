@@ -3,7 +3,7 @@
 use agent_client_protocol::schema::{
     v1::{
         CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest,
-        InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+        ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
         LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
         ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
         SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
