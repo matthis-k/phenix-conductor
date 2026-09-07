@@ -569,6 +569,7 @@ impl AcpConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::v1::InitializeResponse;
     use phenix_core::{PhenixContract, PhenixValue};
 
     #[derive(phenix_sdk_macros::PhenixValue)]
