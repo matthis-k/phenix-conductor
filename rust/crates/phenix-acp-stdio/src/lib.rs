@@ -9,6 +9,7 @@ use agent_client_protocol::{schema::v1::*, Agent, Error, Stdio};
 use phenix_adapter_acp::ApplicationAdapter;
 use phenix_application_interface::{types::ApplicationError, ApplicationTransport};
 use phenix_core::{ContractId, PhenixValue};
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
@@ -170,19 +171,38 @@ pub async fn serve_stdio(
 }
 
 fn application_error_to_acp(error: ApplicationError) -> Error {
-    match error {
-        ApplicationError::UnsupportedCapability { capability } => Error::method_not_found().data(
-            format!("unsupported Phenix application capability: {capability}"),
-        ),
-        ApplicationError::InvalidInput { message } => Error::invalid_params().data(message),
-        ApplicationError::InvalidResponse { message } => Error::internal_error().data(message),
-        ApplicationError::NotFound { resource } => Error::resource_not_found(Some(resource)),
-        ApplicationError::Unauthenticated { message } => Error::auth_required().data(message),
-        ApplicationError::PermissionDenied { message }
-        | ApplicationError::Conflict { message }
-        | ApplicationError::Failed { message } => Error::internal_error().data(message),
+    let data = json!({
+        "phenix.class": error.class(),
+        "phenix.details": application_error_details(&error),
+    });
+    let error = match &error {
+        ApplicationError::UnsupportedCapability { .. } => Error::method_not_found(),
+        ApplicationError::InvalidInput { .. } => Error::invalid_params(),
+        ApplicationError::InvalidResponse { .. }
+        | ApplicationError::PermissionDenied { .. }
+        | ApplicationError::Conflict { .. }
+        | ApplicationError::Failed { .. }
+        | ApplicationError::Disconnected => Error::internal_error(),
+        ApplicationError::NotFound { resource } => Error::resource_not_found(Some(resource.clone())),
+        ApplicationError::Unauthenticated { .. } => Error::auth_required(),
         ApplicationError::Cancelled => Error::request_cancelled(),
-        ApplicationError::Disconnected => Error::internal_error().data("application disconnected"),
+    };
+    error.data(data)
+}
+
+fn application_error_details(error: &ApplicationError) -> serde_json::Value {
+    match error {
+        ApplicationError::UnsupportedCapability { capability } => {
+            json!({ "capability": capability.as_str() })
+        }
+        ApplicationError::InvalidInput { message }
+        | ApplicationError::InvalidResponse { message }
+        | ApplicationError::Unauthenticated { message }
+        | ApplicationError::PermissionDenied { message }
+        | ApplicationError::Conflict { message }
+        | ApplicationError::Failed { message } => json!({ "message": message }),
+        ApplicationError::NotFound { resource } => json!({ "resource": resource }),
+        ApplicationError::Cancelled | ApplicationError::Disconnected => serde_json::Value::Null,
     }
 }
 
@@ -208,5 +228,23 @@ mod tests {
             .unwrap();
         assert_eq!(output, PhenixValue::String("output".to_owned()));
         worker.await.unwrap();
+    }
+
+    #[test]
+    fn application_error_bridge_preserves_structural_class_and_details() {
+        let error = application_error_to_acp(ApplicationError::PermissionDenied {
+            message: "same display text".to_owned(),
+        });
+        let data = error.data.expect("structured ACP error data");
+        assert_eq!(data["phenix.class"], "permission_denied");
+        assert_eq!(data["phenix.details"]["message"], "same display text");
+    }
+
+    #[test]
+    fn cancellation_keeps_its_application_error_class() {
+        let error = application_error_to_acp(ApplicationError::Cancelled);
+        let data = error.data.expect("structured ACP error data");
+        assert_eq!(data["phenix.class"], "cancelled");
+        assert!(data["phenix.details"].is_null());
     }
 }
