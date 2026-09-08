@@ -258,3 +258,205 @@ impl ResolvedSdkContributions {
                     }
                 })?;
                 if schema != observable.schema {
+                    return Err(SdkResolutionError::InvalidObservableResource {
+                        namespace: namespace.clone(),
+                        resource: resource.clone(),
+                        message: "declared observable schema does not match the registered address"
+                            .to_owned(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ResolvedHarness {
+    pub fn resolve_sdk_contributions(
+        &self,
+        contributions: impl IntoIterator<Item = SdkContribution>,
+    ) -> Result<ResolvedSdkContributions, SdkResolutionError> {
+        ResolvedSdkContributions::resolve(self.plugins(), self.components(), contributions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Authority, ComponentExport, ComponentId, ObservableRegistration, PhenixValue,
+        PluginExecution, SnapshotPolicy, Type,
+    };
+
+    fn plugin(value: &str, execution: PluginExecution) -> PluginManifest {
+        PluginManifest {
+            id: PluginId::parse(value).unwrap(),
+            version: 1,
+            execution,
+            dependencies: Vec::new(),
+            services: Vec::new(),
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    fn component(owner: &str, interface: &str) -> ComponentManifest {
+        ComponentManifest {
+            listeners: Vec::new(),
+            id: ComponentId::parse(format!("{owner}.component")).unwrap(),
+            owner: PluginId::parse(owner).unwrap(),
+            imports: Vec::new(),
+            exports: vec![ComponentExport {
+                interface: InterfaceId::parse(interface).unwrap(),
+                schema: Default::default(),
+                priority: 0,
+                required_authority: Authority::default(),
+            }],
+            maximum_authority: Authority::default(),
+        }
+    }
+
+    fn contribution(provider: &str, namespace: &str) -> SdkContribution {
+        SdkContribution::new(
+            PluginId::parse(provider).unwrap(),
+            SdkNamespace::parse(namespace).unwrap(),
+        )
+    }
+
+    #[test]
+    fn distinct_plugins_extend_distinct_sdk_namespaces() {
+        let plugins = [
+            plugin("phenix-sdk", PluginExecution::ResourceOnly),
+            plugin("testing", PluginExecution::ResourceOnly),
+        ];
+        let resolved = ResolvedSdkContributions::resolve(
+            &plugins,
+            &[],
+            [
+                contribution("phenix-sdk", "phenix"),
+                contribution("testing", "testing"),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(resolved.iter().count(), 2);
+    }
+
+    #[test]
+    fn resource_only_plugin_can_publish_client_helpers() {
+        let plugins = [plugin("testing", PluginExecution::ResourceOnly)];
+        let mut testing = contribution("testing", "testing");
+        testing
+            .resources
+            .insert(SdkResourceId::parse("sdk/rust/testing").unwrap());
+
+        let resolved = ResolvedSdkContributions::resolve(&plugins, &[], [testing]).unwrap();
+
+        assert!(resolved
+            .get(&SdkNamespace::parse("testing").unwrap())
+            .unwrap()
+            .resources
+            .contains(&SdkResourceId::parse("sdk/rust/testing").unwrap()));
+    }
+
+    #[test]
+    fn sdk_interface_must_exist_in_selected_component_graph() {
+        let plugins = [plugin("testing", PluginExecution::Embedded)];
+        let mut testing = contribution("testing", "testing");
+        testing
+            .interfaces
+            .insert(InterfaceId::parse("testing.inspect@1").unwrap());
+
+        assert!(matches!(
+            ResolvedSdkContributions::resolve(&plugins, &[], [testing]),
+            Err(SdkResolutionError::UnavailableInterface { interface, .. })
+                if interface == InterfaceId::parse("testing.inspect@1").unwrap()
+        ));
+
+        let mut testing = contribution("testing", "testing");
+        testing
+            .interfaces
+            .insert(InterfaceId::parse("testing.inspect@1").unwrap());
+        ResolvedSdkContributions::resolve(
+            &plugins,
+            &[component("testing", "testing.inspect@1")],
+            [testing],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn duplicate_namespace_is_rejected() {
+        let plugins = [
+            plugin("testing-a", PluginExecution::ResourceOnly),
+            plugin("testing-b", PluginExecution::ResourceOnly),
+        ];
+
+        assert!(matches!(
+            ResolvedSdkContributions::resolve(
+                &plugins,
+                &[],
+                [
+                    contribution("testing-a", "testing"),
+                    contribution("testing-b", "testing"),
+                ],
+            ),
+            Err(SdkResolutionError::DuplicateNamespace(namespace))
+                if namespace == SdkNamespace::parse("testing").unwrap()
+        ));
+    }
+
+    #[test]
+    fn contribution_provider_must_be_selected() {
+        assert!(matches!(
+            ResolvedSdkContributions::resolve(
+                &[],
+                &[],
+                [contribution("testing", "testing")],
+            ),
+            Err(SdkResolutionError::UnknownProvider { provider, .. })
+                if provider == PluginId::parse("testing").unwrap()
+        ));
+    }
+
+    #[test]
+    fn empty_composition_has_no_sdk_namespaces() {
+        assert!(ResolvedSdkContributions::resolve(&[], &[], [])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn observable_metadata_is_validated_against_the_live_store() {
+        let plugins = [plugin("testing", PluginExecution::ResourceOnly)];
+        let mut testing = contribution("testing", "testing");
+        testing.insert_observable(SdkObservableResource::new(
+            SdkResourceId::parse("sdk/testing/state").unwrap(),
+            ["state"],
+            ValueId::parse("testing.state@1").unwrap(),
+            ValuePath::root(),
+            Type::U64,
+        ));
+        let resolved = ResolvedSdkContributions::resolve(&plugins, &[], [testing]).unwrap();
+        let store = ObservableStore::default();
+        store
+            .register(ObservableRegistration {
+                id: ValueId::parse("testing.state@1").unwrap(),
+                owner: PluginId::parse("testing").unwrap(),
+                schema: Type::U64,
+                snapshot_policy: SnapshotPolicy::CurrentOnly,
+                initial: PhenixValue::U64(0),
+            })
+            .unwrap();
+        resolved.validate_observables(&store).unwrap();
+    }
+
+    #[test]
+    fn sdk_value_cannot_publish_a_value_outside_its_authoritative_schema() {
+        assert!(SdkValue::new(Type::U64, PhenixValue::U64(1)).is_ok());
+        assert!(matches!(
+            SdkValue::new(Type::U64, PhenixValue::String("wrong".to_owned())),
+            Err(SdkResolutionError::InvalidValue { .. })
+        ));
+    }
+}
