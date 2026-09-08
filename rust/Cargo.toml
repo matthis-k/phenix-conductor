@@ -5,6 +5,8 @@ members = [
   "crates/phenix-adapter-acp",
   "crates/phenix-acp-stdio",
   "crates/phenix-client-acp",
+  "crates/phenix-binding-generator",
+  "crates/phenix-binding-lua",
   "crates/phenix-core",
   "crates/phenix-domain",
   "crates/phenix-client",
@@ -50,6 +52,7 @@ futures = "0.3"
 genai = "0.6.0"
 getrandom = "0.4"
 jsonschema = "0.33"
+mlua = "0.12.1"
 reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
