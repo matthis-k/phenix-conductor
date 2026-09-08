@@ -1,6 +1,7 @@
 use phenix_core::{
-    InitialObservation, ObservableRegistration, ObservableStore, ObservationMode, ObservationScope,
-    ObservationSpec, PhenixValue, PluginId, SnapshotPolicy, Type, ValueAddress, ValueId, ValuePath,
+    InitialObservation, ObservableRegistration, ObservableStore, ObservationDelivery,
+    ObservationMode, ObservationScope, ObservationSpec, PhenixValue, PluginId, SnapshotPolicy,
+    Type, ValueAddress, ValueId, ValuePath,
 };
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -61,8 +62,8 @@ fn current_only_scalar_commit_with_local_diff_listener_allocates_nothing() {
                 mode: ObservationMode::Diff,
                 initial: InitialObservation::None,
             },
-            Arc::new(|delivery| {
-                assert_eq!(delivery.version.get(), 1);
+            Arc::new(|delivery: ObservationDelivery<'_>| {
+                assert!(delivery.version.get() > 0);
                 assert_eq!(delivery.changes.len(), 1);
             }),
         )

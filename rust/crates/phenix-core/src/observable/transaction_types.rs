@@ -6,6 +6,7 @@ pub struct ObservableTransaction<'state, 'roots> {
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 enum TouchedKind {
     Replace,
     Remove,
@@ -23,6 +24,7 @@ struct TouchedMutation<'roots> {
     kind: TouchedKind,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum UndoRecord<'roots> {
     Replace {
         value: &'roots ValueId,

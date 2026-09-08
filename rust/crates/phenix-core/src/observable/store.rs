@@ -330,12 +330,6 @@ impl ObservableStore {
 
         Ok(result)
     }
-
-    #[cfg(test)]
-    fn counters(&self) -> (usize, usize) {
-        let state = self.state.lock().expect("observable store lock poisoned");
-        (state.snapshot_copies, state.match_visits)
-    }
 }
 
 fn ensure_open(state: &StoreState) -> Result<(), ObservableError> {

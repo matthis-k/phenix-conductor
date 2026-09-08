@@ -186,6 +186,16 @@ fn application_error_to_acp(error: ApplicationError) -> Error {
         ApplicationError::NotFound { resource } => {
             Error::resource_not_found(Some(resource.clone()))
         }
+        ApplicationError::UnknownValue { value } | ApplicationError::StaleReference { value } => {
+            Error::resource_not_found(Some(value.clone()))
+        }
+        ApplicationError::InvalidPath { .. } | ApplicationError::SchemaMismatch { .. } => {
+            Error::invalid_params()
+        }
+        ApplicationError::UnsupportedSnapshotPolicy { .. }
+        | ApplicationError::TransactionConflict { .. }
+        | ApplicationError::SubscriptionCapacity
+        | ApplicationError::Closed => Error::internal_error(),
         ApplicationError::Unauthenticated { .. } => Error::auth_required(),
         ApplicationError::Cancelled => Error::request_cancelled(),
     };
@@ -202,9 +212,19 @@ fn application_error_details(error: &ApplicationError) -> serde_json::Value {
         | ApplicationError::Unauthenticated { message }
         | ApplicationError::PermissionDenied { message }
         | ApplicationError::Conflict { message }
-        | ApplicationError::Failed { message } => json!({ "message": message }),
+        | ApplicationError::Failed { message }
+        | ApplicationError::InvalidPath { message }
+        | ApplicationError::SchemaMismatch { message }
+        | ApplicationError::UnsupportedSnapshotPolicy { message }
+        | ApplicationError::TransactionConflict { message } => json!({ "message": message }),
         ApplicationError::NotFound { resource } => json!({ "resource": resource }),
-        ApplicationError::Cancelled | ApplicationError::Disconnected => serde_json::Value::Null,
+        ApplicationError::UnknownValue { value } | ApplicationError::StaleReference { value } => {
+            json!({ "value": value })
+        }
+        ApplicationError::Cancelled
+        | ApplicationError::Disconnected
+        | ApplicationError::SubscriptionCapacity
+        | ApplicationError::Closed => serde_json::Value::Null,
     }
 }
 
