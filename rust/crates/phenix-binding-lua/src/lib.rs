@@ -20,7 +20,8 @@ use mlua::{
     UserDataMethods, Value,
 };
 use phenix_client_acp::{
-    application_descriptor, AcpClient, ClientError, SessionUpdates, StdioConfig, INTERFACE_ID,
+    application_descriptor, AcpClient, ApplicationEvent, ClientError, ExtensionUpdates,
+    SessionUpdates, StdioConfig, INTERFACE_ID,
 };
 use phenix_core::{ContractId, Key, PhenixSchema, PhenixValue, Type};
 use std::{
@@ -188,6 +189,7 @@ enum Command {
 struct ClientState {
     commands: mpsc::UnboundedSender<Command>,
     updates: Mutex<std_mpsc::Receiver<agent_client_protocol::schema::v1::SessionNotification>>,
+    extension_updates: Mutex<std_mpsc::Receiver<ApplicationEvent>>,
     capabilities: Mutex<BTreeSet<String>>,
     extensions: Mutex<BTreeSet<String>>,
     terminal_error: Mutex<Option<BindingError>>,
@@ -360,8 +362,25 @@ impl UserData for Client {
                 Ok(notification) => {
                     let value = serde_json::to_value(notification)
                         .map_err(|error| lua_error(BindingError::conversion(error.to_string())))?;
-                    lua.to_value(&value)
+                    return lua.to_value(&value);
                 }
+                Err(std_mpsc::TryRecvError::Empty) => {}
+                Err(std_mpsc::TryRecvError::Disconnected) => {
+                    return Err(lua_error(this.state.failure()));
+                }
+            }
+            let extension = this
+                .state
+                .extension_updates
+                .lock()
+                .map_err(|_| {
+                    lua_error(BindingError::transport(
+                        "ACP extension event queue lock is poisoned",
+                    ))
+                })?
+                .try_recv();
+            match extension {
+                Ok(event) => application_event_to_lua(lua, event),
                 Err(std_mpsc::TryRecvError::Empty) => Ok(Value::Nil),
                 Err(std_mpsc::TryRecvError::Disconnected) => Err(lua_error(this.state.failure())),
             }
@@ -600,9 +619,13 @@ fn connect(options: Table) -> LuaResult<Client> {
     let (updates, update_receiver) = SessionUpdates::bounded(
         NonZeroUsize::new(256).expect("static update queue capacity is non-zero"),
     );
+    let (extension_updates, extension_update_receiver) = ExtensionUpdates::bounded(
+        NonZeroUsize::new(256).expect("static extension queue capacity is non-zero"),
+    );
     let state = Arc::new(ClientState {
         commands,
         updates: Mutex::new(update_receiver),
+        extension_updates: Mutex::new(extension_update_receiver),
         capabilities: Mutex::new(BTreeSet::new()),
         extensions: Mutex::new(BTreeSet::new()),
         terminal_error: Mutex::new(None),
@@ -610,7 +633,7 @@ fn connect(options: Table) -> LuaResult<Client> {
     let worker_state = Arc::clone(&state);
     thread::Builder::new()
         .name("phenix-lua-acp".to_owned())
-        .spawn(move || run_client(config, receiver, updates, worker_state))
+        .spawn(move || run_client(config, receiver, updates, extension_updates, worker_state))
         .map_err(|error| lua_error(BindingError::transport(error.to_string())))?;
     Ok(Client { state })
 }
@@ -619,156 +642,170 @@ fn run_client(
     config: StdioConfig,
     mut commands: mpsc::UnboundedReceiver<Command>,
     updates: SessionUpdates,
+    extension_updates: ExtensionUpdates,
     state: Arc<ClientState>,
 ) {
     let worker_state = Arc::clone(&state);
-    let result = futures::executor::block_on(AcpClient::new(config).connect_with_updates(
-        updates,
-        move |connection| async move {
-            let negotiated_extensions = connection.negotiated_extensions();
-            if let Ok(mut extensions) = worker_state.extensions.lock() {
-                extensions.extend(
-                    negotiated_extensions
-                        .iter()
-                        .map(|extension| extension.operation.to_string()),
-                );
-            }
-            if let Ok(mut capabilities) = worker_state.capabilities.lock() {
-                capabilities.extend([
-                    "phenix.application.capability.discovery@1".to_owned(),
-                    "phenix.application.capability.sessions@1".to_owned(),
-                    "phenix.application.capability.prompt@1".to_owned(),
-                ]);
-                for extension in &negotiated_extensions {
-                    capabilities.insert(extension.capability.to_string());
+    let result =
+        futures::executor::block_on(AcpClient::new(config).connect_with_updates_and_extensions(
+            updates,
+            extension_updates,
+            move |connection| async move {
+                let negotiated_extensions = connection.negotiated_extensions();
+                if let Ok(mut extensions) = worker_state.extensions.lock() {
+                    extensions.extend(
+                        negotiated_extensions
+                            .iter()
+                            .map(|extension| extension.operation.to_string()),
+                    );
                 }
-            }
+                if let Ok(mut capabilities) = worker_state.capabilities.lock() {
+                    capabilities.extend([
+                        "phenix.application.capability.discovery@1".to_owned(),
+                        "phenix.application.capability.sessions@1".to_owned(),
+                        "phenix.application.capability.prompt@1".to_owned(),
+                    ]);
+                    for extension in &negotiated_extensions {
+                        capabilities.insert(extension.capability.to_string());
+                    }
+                }
 
-            while let Some(command) = commands.next().await {
-                match command {
-                    Command::NewSession { cwd, reply } => {
-                        let result = connection
-                            .new_session(NewSessionRequest::new(cwd))
-                            .await
-                            .map(|response| Response::Session(response.session_id.to_string()))
-                            .map_err(BindingError::from_client);
-                        let _ = reply.send(result);
-                    }
-                    Command::ListSessions { cwd, cursor, reply } => {
-                        let mut request = ListSessionsRequest::new();
-                        if let Some(cwd) = cwd {
-                            request = request.cwd(cwd);
+                while let Some(command) = commands.next().await {
+                    match command {
+                        Command::NewSession { cwd, reply } => {
+                            let result = connection
+                                .new_session(NewSessionRequest::new(cwd))
+                                .await
+                                .map(|response| Response::Session(response.session_id.to_string()))
+                                .map_err(BindingError::from_client);
+                            let _ = reply.send(result);
                         }
-                        if let Some(cursor) = cursor {
-                            request = request.cursor(cursor);
+                        Command::ListSessions { cwd, cursor, reply } => {
+                            let mut request = ListSessionsRequest::new();
+                            if let Some(cwd) = cwd {
+                                request = request.cwd(cwd);
+                            }
+                            if let Some(cursor) = cursor {
+                                request = request.cursor(cursor);
+                            }
+                            let result = connection
+                                .list_sessions(request)
+                                .await
+                                .map_err(BindingError::from_client)
+                                .and_then(|response| {
+                                    serde_json::to_value(response).map(Response::Json).map_err(
+                                        |error| BindingError::conversion(error.to_string()),
+                                    )
+                                });
+                            let _ = reply.send(result);
                         }
-                        let result = connection
-                            .list_sessions(request)
-                            .await
-                            .map_err(BindingError::from_client)
-                            .and_then(|response| {
-                                serde_json::to_value(response)
-                                    .map(Response::Json)
-                                    .map_err(|error| BindingError::conversion(error.to_string()))
-                            });
-                        let _ = reply.send(result);
-                    }
-                    Command::ResumeSession {
-                        session_id,
-                        cwd,
-                        reply,
-                    } => {
-                        let result = connection
-                            .resume_session(ResumeSessionRequest::new(session_id.clone(), cwd))
-                            .await
-                            .map(|_| Response::Session(session_id))
-                            .map_err(BindingError::from_client);
-                        let _ = reply.send(result);
-                    }
-                    Command::LoadSession {
-                        session_id,
-                        cwd,
-                        reply,
-                    } => {
-                        let result = connection
-                            .load_session(LoadSessionRequest::new(session_id.clone(), cwd))
-                            .await
-                            .map(|_| Response::Session(session_id))
-                            .map_err(BindingError::from_client);
-                        let _ = reply.send(result);
-                    }
-                    Command::CloseSession { session_id, reply } => {
-                        let result = connection
-                            .close_session(CloseSessionRequest::new(session_id))
-                            .await
-                            .map(|_| Response::Acknowledged)
-                            .map_err(BindingError::from_client);
-                        let _ = reply.send(result);
-                    }
-                    Command::Prompt {
-                        session_id,
-                        text,
-                        reply,
-                    } => {
-                        let request = PromptRequest::new(
+                        Command::ResumeSession {
                             session_id,
-                            vec![ContentBlock::Text(TextContent::new(text))],
-                        );
-                        let result = connection
-                            .prompt(request)
-                            .await
-                            .map(|response| {
-                                Response::PromptComplete(
-                                    format!("{:?}", response.stop_reason).to_lowercase(),
-                                )
-                            })
-                            .map_err(BindingError::from_client);
-                        let _ = reply.send(result);
-                    }
-                    Command::SetOption {
-                        session_id,
-                        config_id,
-                        value,
-                        reply,
-                    } => {
-                        let result = connection
-                            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                            cwd,
+                            reply,
+                        } => {
+                            let result = connection
+                                .resume_session(ResumeSessionRequest::new(session_id.clone(), cwd))
+                                .await
+                                .map(|_| Response::Session(session_id))
+                                .map_err(BindingError::from_client);
+                            let _ = reply.send(result);
+                        }
+                        Command::LoadSession {
+                            session_id,
+                            cwd,
+                            reply,
+                        } => {
+                            let result = connection
+                                .load_session(LoadSessionRequest::new(session_id.clone(), cwd))
+                                .await
+                                .map(|_| Response::Session(session_id))
+                                .map_err(BindingError::from_client);
+                            let _ = reply.send(result);
+                        }
+                        Command::CloseSession { session_id, reply } => {
+                            let result = connection
+                                .close_session(CloseSessionRequest::new(session_id))
+                                .await
+                                .map(|_| Response::Acknowledged)
+                                .map_err(BindingError::from_client);
+                            let _ = reply.send(result);
+                        }
+                        Command::Prompt {
+                            session_id,
+                            text,
+                            reply,
+                        } => {
+                            let request = PromptRequest::new(
                                 session_id,
-                                config_id,
-                                value.as_str(),
-                            ))
-                            .await
-                            .map_err(BindingError::from_client)
-                            .and_then(|response| {
-                                serde_json::to_value(response)
-                                    .map(Response::Json)
-                                    .map_err(|error| BindingError::conversion(error.to_string()))
-                            });
-                        let _ = reply.send(result);
-                    }
-                    Command::Application {
-                        operation,
-                        input,
-                        reply,
-                    } => {
-                        let result = connection
-                            .invoke_extension(&operation, input)
-                            .await
-                            .map(|value| Response::Application { operation, value })
-                            .map_err(BindingError::from_client);
-                        let _ = reply.send(result);
-                    }
-                    Command::Cancel { session_id } => {
-                        connection.cancel(CancelNotification::new(session_id));
+                                vec![ContentBlock::Text(TextContent::new(text))],
+                            );
+                            let result = connection
+                                .prompt(request)
+                                .await
+                                .map(|response| {
+                                    Response::PromptComplete(
+                                        format!("{:?}", response.stop_reason).to_lowercase(),
+                                    )
+                                })
+                                .map_err(BindingError::from_client);
+                            let _ = reply.send(result);
+                        }
+                        Command::SetOption {
+                            session_id,
+                            config_id,
+                            value,
+                            reply,
+                        } => {
+                            let result = connection
+                                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                                    session_id,
+                                    config_id,
+                                    value.as_str(),
+                                ))
+                                .await
+                                .map_err(BindingError::from_client)
+                                .and_then(|response| {
+                                    serde_json::to_value(response).map(Response::Json).map_err(
+                                        |error| BindingError::conversion(error.to_string()),
+                                    )
+                                });
+                            let _ = reply.send(result);
+                        }
+                        Command::Application {
+                            operation,
+                            input,
+                            reply,
+                        } => {
+                            let result = connection
+                                .invoke_extension(&operation, input)
+                                .await
+                                .map(|value| Response::Application { operation, value })
+                                .map_err(BindingError::from_client);
+                            let _ = reply.send(result);
+                        }
+                        Command::Cancel { session_id } => {
+                            connection.cancel(CancelNotification::new(session_id));
+                        }
                     }
                 }
-            }
-            Ok(())
-        },
-    ));
+                Ok(())
+            },
+        ));
     if let Err(error) = result {
         state.record_failure(BindingError::from_client(error));
     }
+}
+
+fn application_event_to_lua(lua: &Lua, event: ApplicationEvent) -> LuaResult<Value> {
+    let result = lua.create_table()?;
+    result.set("kind", "application_event")?;
+    result.set("event", event.event.as_str())?;
+    result.set(
+        "payload",
+        phenix_to_lua(lua, &event.payload).map_err(lua_error)?,
+    )?;
+    Ok(Value::Table(result))
 }
 
 fn lua_to_phenix(
