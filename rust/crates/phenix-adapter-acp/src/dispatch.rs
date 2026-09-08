@@ -10,7 +10,7 @@ use phenix_application_interface::{
     CloseSession, CreateSession, ListModels, ListRoutingProfiles, ListSessions, Operation, Prompt,
     ResumeSession, SelectModel, SelectRoutingProfile,
 };
-use phenix_core::{ContractId, ModelId, RoutingProfileId, SessionId};
+use phenix_core::{ContractId, ModelId, PhenixValue, RoutingProfileId, SessionId};
 use std::path::Path;
 use wire::schema::v1::{
     AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock,
@@ -90,6 +90,30 @@ impl<T: ApplicationTransport> ApplicationAdapter<T> {
             .agent_capabilities(self.agent_capabilities())
             .agent_info(Implementation::new("phenix", env!("CARGO_PKG_VERSION")).title("Phenix"))
             .meta(extension_meta(&self.descriptor, &self.capabilities))
+    }
+
+    pub fn extension_event(
+        &self,
+        event: &ContractId,
+        payload: &PhenixValue,
+    ) -> Result<wire::schema::v1::ExtNotification, ApplicationError> {
+        let declaration =
+            self.descriptor
+                .events
+                .get(event)
+                .ok_or_else(|| ApplicationError::InvalidResponse {
+                    message: format!("application descriptor is missing event {event}"),
+                })?;
+        if !self
+            .capabilities
+            .iter()
+            .any(|capability| capability == &declaration.capability)
+        {
+            return Err(ApplicationError::UnsupportedCapability {
+                capability: declaration.capability.clone(),
+            });
+        }
+        crate::translate_extension_event(event, payload)
     }
 
     pub async fn new_session(

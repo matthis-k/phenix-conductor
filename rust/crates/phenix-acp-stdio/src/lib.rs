@@ -19,6 +19,11 @@ pub struct ApplicationInvocation {
     response: oneshot::Sender<Result<PhenixValue, ApplicationError>>,
 }
 
+pub struct ApplicationEvent {
+    pub event: ContractId,
+    pub payload: PhenixValue,
+}
+
 impl ApplicationInvocation {
     pub fn respond(self, response: Result<PhenixValue, ApplicationError>) {
         let _ = self.response.send(response);
@@ -65,6 +70,17 @@ pub async fn serve_stdio(
     transport: ChannelTransport,
     advertised: impl IntoIterator<Item = ContractId>,
 ) -> Result<(), Error> {
+    let (keep_events_open, events) = mpsc::channel(1);
+    let result = serve_stdio_with_events(transport, advertised, events).await;
+    drop(keep_events_open);
+    result
+}
+
+pub async fn serve_stdio_with_events(
+    transport: ChannelTransport,
+    advertised: impl IntoIterator<Item = ContractId>,
+    mut events: mpsc::Receiver<ApplicationEvent>,
+) -> Result<(), Error> {
     let adapter =
         Arc::new(ApplicationAdapter::new(transport, advertised).map_err(application_error_to_acp)?);
 
@@ -77,6 +93,7 @@ pub async fn serve_stdio(
     let prompt = Arc::clone(&adapter);
     let cancel = Arc::clone(&adapter);
     let set_config = Arc::clone(&adapter);
+    let event_adapter = Arc::clone(&adapter);
 
     Agent
         .builder()
@@ -166,7 +183,25 @@ pub async fn serve_stdio(
             },
             agent_client_protocol::on_receive_notification!(),
         )
-        .connect_to(Stdio::new())
+        .connect_with(
+            Stdio::new(),
+            move |connection: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>| async move {
+            loop {
+                tokio::select! {
+                    event = events.recv() => match event {
+                        Some(event) => {
+                            let notification = event_adapter
+                                .extension_event(&event.event, &event.payload)
+                                .map_err(application_error_to_acp)?;
+                            connection.send_notification(AgentNotification::ExtNotification(notification))?;
+                        }
+                        None => return Ok(()),
+                    },
+                    () = connection.incoming_closed() => return Ok(()),
+                }
+            }
+        },
+        )
         .await
 }
 
