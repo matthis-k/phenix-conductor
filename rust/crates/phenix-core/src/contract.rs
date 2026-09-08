@@ -1,6 +1,5 @@
 use crate::{
-    CapabilityGenerationId, ClientConnectionId, GraphGenerationId, InterfaceId, PluginId,
-    RuntimeId,
+    CapabilityGenerationId, ClientConnectionId, GraphGenerationId, InterfaceId, PluginId, RuntimeId,
 };
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use std::{
@@ -1531,7 +1530,10 @@ mod tests {
         let encoded = serde_json::to_value(&reference).unwrap();
         assert_eq!(encoded["owner"]["kind"], "client");
         assert_eq!(encoded["owner"]["id"], "client.connection");
-        assert_eq!(serde_json::from_value::<CallableRef>(encoded).unwrap(), reference);
+        assert_eq!(
+            serde_json::from_value::<CallableRef>(encoded).unwrap(),
+            reference
+        );
     }
 
     #[test]
