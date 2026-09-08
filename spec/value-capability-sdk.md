@@ -2,6 +2,8 @@
 
 ## Status
 
+status: partial
+
 This is the authoritative architecture contract for the value/capability SDK work spanning #503, #505, #504, and #506.
 
 It supersedes earlier operation-specific or callback-specific implementation guidance where the two conflict. Existing product semantics remain valid unless this document explicitly changes the underlying ABI.

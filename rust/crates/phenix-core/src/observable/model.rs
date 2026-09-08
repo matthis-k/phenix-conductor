@@ -520,11 +520,11 @@ impl ObservableRef {
         generation: crate::GraphGenerationId,
         id: ReferenceId,
     ) -> Self {
-        Self(ObjectRef::new(
+        Self(ObjectRef::for_plugin(
             crate::ContractId::parse(OBSERVABLE_CONTRACT)
                 .expect("static observable contract id is valid"),
             provider,
-            generation,
+            &generation,
             id,
         ))
     }

@@ -113,7 +113,7 @@ pub use configuration::{
     FrontendConfigError, ResolvedConfigContribution, ResolvedConfigContributions,
 };
 pub use contract::{
-    Bytes, CallableRef, Contract, ContractId, ContractValue, Exact, HasPhenixSchema, Key,
+    Bytes, CallableRef, CapabilityOwnerId, Contract, ContractId, ContractValue, Exact, HasPhenixSchema, Key,
     ObjectRef, PhenixContract, PhenixSchema, PhenixValue, Project, ReferenceId,
     SchemaCompatibility, SchemaMismatch, Type, TypeKind, ValueCodec, ValueError, ValueMatch,
 };
@@ -124,7 +124,7 @@ pub use events::{
 };
 pub use frontend_metadata::FrontendMetadataResolutionError;
 pub use identity::{
-    CallableId, CapabilityId, ComponentId, ConfigurationFrontendId, ContextResourceId,
+    CallableId, CapabilityGenerationId, CapabilityId, ClientConnectionId, ComponentId, ConfigurationFrontendId, ContextResourceId,
     ContextRevisionId, EventTypeId, InterfaceId, ModelId, PluginId, ResourceNamespace,
     RoutingProfileId, RuntimeId, SdkNamespace, SdkResourceId, ServiceId, SessionId, SkillId,
     SubscriptionId,
