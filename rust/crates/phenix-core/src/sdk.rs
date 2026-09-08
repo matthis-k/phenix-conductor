@@ -26,7 +26,9 @@ impl SdkValue {
     ) -> Result<Self, SdkResolutionError> {
         schema
             .parse(&value)
-            .map_err(|error| SdkResolutionError::InvalidValue { message: error.to_string() })?;
+            .map_err(|error| SdkResolutionError::InvalidValue {
+                message: error.to_string(),
+            })?;
         Ok(Self { schema, value })
     }
 }
