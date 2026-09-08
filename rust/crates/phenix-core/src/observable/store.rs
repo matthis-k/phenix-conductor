@@ -49,9 +49,9 @@ impl ObservableStore {
             .schema
             .parse(&registration.initial)
             .map_err(|error| ObservableError::SchemaMismatch {
-                value: registration.id.clone(),
-                path: ValuePath::root(),
-                message: error.to_string(),
+                value: Box::new(registration.id.clone()),
+                path: Box::new(ValuePath::root()),
+                message: error.to_string().into(),
             })?;
         let mut state = self.state.lock().expect("observable store lock poisoned");
         ensure_open(&state)?;

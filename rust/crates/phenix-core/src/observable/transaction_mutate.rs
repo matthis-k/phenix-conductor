@@ -15,9 +15,9 @@ impl<'roots> ObservableTransaction<'_, 'roots> {
         target_schema
             .parse(&replacement)
             .map_err(|error| ObservableError::SchemaMismatch {
-                value: value.clone(),
-                path: path.clone(),
-                message: error.to_string(),
+                value: Box::new(value.clone()),
+                path: Box::new(path.clone()),
+                message: error.to_string().into(),
             })?;
         let previous = replace_at(&mut registered.current, path.segments(), replacement)
             .map_err(|message| ObservableError::TransactionConflict {
@@ -41,9 +41,9 @@ impl<'roots> ObservableTransaction<'_, 'roots> {
         self.ensure_declared(value)?;
         if path.is_root() {
             return Err(ObservableError::InvalidPath {
-                value: value.clone(),
-                path,
-                message: "registered roots cannot be removed".to_owned(),
+                value: Box::new(value.clone()),
+                path: Box::new(path),
+                message: "registered roots cannot be removed".into(),
             });
         }
         if let Some(ValuePathSegment::Index(index)) = path.segments().last() {
@@ -80,9 +80,9 @@ impl<'roots> ObservableTransaction<'_, 'roots> {
                 Ok(())
             }
             _ => Err(ObservableError::InvalidPath {
-                value: value.clone(),
-                path,
-                message: "fixed structural members cannot be removed".to_owned(),
+                value: Box::new(value.clone()),
+                path: Box::new(path),
+                message: "fixed structural members cannot be removed".into(),
             }),
         }
     }
@@ -107,9 +107,9 @@ impl<'roots> ObservableTransaction<'_, 'roots> {
             Type::Array { item, len } => (item.as_ref(), Some(*len)),
             _ => {
                 return Err(ObservableError::InvalidPath {
-                    value: value.clone(),
-                    path,
-                    message: "splice target must be a list or array".to_owned(),
+                    value: Box::new(value.clone()),
+                    path: Box::new(path),
+                    message: "splice target must be a list or array".into(),
                 });
             }
         };
@@ -118,9 +118,9 @@ impl<'roots> ObservableTransaction<'_, 'roots> {
             item_schema
                 .parse(item)
                 .map_err(|error| ObservableError::SchemaMismatch {
-                    value: value.clone(),
-                    path: path.clone(),
-                    message: error.to_string(),
+                    value: Box::new(value.clone()),
+                    path: Box::new(path.clone()),
+                    message: error.to_string().into(),
                 })?;
         }
 
@@ -164,9 +164,9 @@ impl<'roots> ObservableTransaction<'_, 'roots> {
             let final_len = items.len() - delete_count + inserted.len();
             if final_len != len {
                 return Err(ObservableError::SchemaMismatch {
-                    value: value.clone(),
-                    path,
-                    message: format!("fixed array length must remain {len}, got {final_len}"),
+                    value: Box::new(value.clone()),
+                    path: Box::new(path),
+                    message: format!("fixed array length must remain {len}, got {final_len}").into(),
                 });
             }
         }

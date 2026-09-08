@@ -104,8 +104,12 @@ impl From<phenix_core::ObservableError> for ApplicationError {
             ObservableError::DuplicateValue(value) => Self::Conflict {
                 message: format!("observable value {value} is already registered"),
             },
-            ObservableError::InvalidPath { message, .. } => Self::InvalidPath { message },
-            ObservableError::SchemaMismatch { message, .. } => Self::SchemaMismatch { message },
+            ObservableError::InvalidPath { message, .. } => Self::InvalidPath {
+                message: message.to_string(),
+            },
+            ObservableError::SchemaMismatch { message, .. } => Self::SchemaMismatch {
+                message: message.to_string(),
+            },
             ObservableError::StaleReference(value) => Self::StaleReference {
                 value: value.to_string(),
             },

@@ -264,6 +264,11 @@ impl ValuePath {
     }
 
     #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
+    #[must_use]
     pub fn len(&self) -> usize {
         self.segments.len()
     }
@@ -329,6 +334,7 @@ pub struct ObservationSpec {
     pub initial: InitialObservation,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ValueChange {
@@ -413,14 +419,14 @@ pub enum ObservableError {
     UnknownValue(ValueId),
     DuplicateValue(ValueId),
     InvalidPath {
-        value: ValueId,
-        path: ValuePath,
-        message: String,
+        value: Box<ValueId>,
+        path: Box<ValuePath>,
+        message: Box<str>,
     },
     SchemaMismatch {
-        value: ValueId,
-        path: ValuePath,
-        message: String,
+        value: Box<ValueId>,
+        path: Box<ValuePath>,
+        message: Box<str>,
     },
     StaleReference(ValueId),
     UnsupportedSnapshotPolicy {

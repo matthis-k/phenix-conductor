@@ -117,9 +117,9 @@ fn validate_path<'schema>(
     path: &ValuePath,
 ) -> Result<&'schema PhenixSchema, ObservableError> {
     schema_at_path(schema, path.segments()).map_err(|message| ObservableError::InvalidPath {
-        value: value.clone(),
-        path: path.clone(),
-        message,
+        value: Box::new(value.clone()),
+        path: Box::new(path.clone()),
+        message: message.into(),
     })
 }
 
@@ -309,7 +309,7 @@ fn restore_optional(
                 Ok(())
             }
             (PhenixValue::Variant { value, .. }, ValuePathSegment::VariantPayload, Some(previous)) => {
-                *value = Box::new(previous);
+                **value = previous;
                 Ok(())
             }
             _ => Err(format!("cannot restore path segment {head:?}")),

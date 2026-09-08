@@ -1,4 +1,5 @@
-use phenix_core::{ObservableRef, PhenixSchema, PhenixValue, ValueId};
+use super::*;
+use phenix_core::{ObservableRef, ValueId};
 
 variants!(ObservablePathSegment, "phenix.application.type.observable-path-segment@1", {
     Field { key: String },

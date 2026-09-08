@@ -1,6 +1,6 @@
 impl<'roots> ObservableTransaction<'_, 'roots> {
     fn ensure_declared(&self, value: &ValueId) -> Result<(), ObservableError> {
-        if self.declared.iter().any(|declared| *declared == value) {
+        if self.declared.contains(&value) {
             Ok(())
         } else {
             Err(ObservableError::TransactionConflict {
