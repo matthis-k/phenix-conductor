@@ -20,7 +20,8 @@ use mlua::{
     UserDataMethods, Value,
 };
 use phenix_client_acp::{
-    application_descriptor, AcpClient, ClientError, SessionUpdates, StdioConfig, INTERFACE_ID,
+    application_descriptor, AcpClient, ClientError, RequestRejection, SessionUpdates, StdioConfig,
+    INTERFACE_ID,
 };
 use phenix_core::{ContractId, Key, PhenixSchema, PhenixValue, Type};
 use std::{
@@ -99,10 +100,10 @@ impl BindingError {
             ClientError::Cancelled { details, .. } => {
                 (ErrorKind::Cancelled, "cancelled".to_owned(), details)
             }
-            ClientError::Rejected { class, details, .. } => (
+            ClientError::Rejected(rejection) => (
                 ErrorKind::Rejected,
-                class.unwrap_or_else(|| "rejected".to_owned()),
-                details,
+                rejection.class.unwrap_or_else(|| "rejected".to_owned()),
+                rejection.details,
             ),
             ClientError::UnsupportedCapability { .. } => (
                 ErrorKind::UnsupportedCapability,
@@ -1104,12 +1105,12 @@ mod tests {
             message: "same display text".to_owned(),
             details: None,
         });
-        let rejected = BindingError::from_client(ClientError::Rejected {
+        let rejected = BindingError::from_client(ClientError::Rejected(Box::new(RequestRejection {
             code: agent_client_protocol::ErrorCode::InternalError,
             class: Some("permission_denied".to_owned()),
             message: "same display text".to_owned(),
             details: Some(serde_json::json!({ "message": "same display text" })),
-        });
+        })));
 
         assert_eq!(cancelled.kind, ErrorKind::Cancelled);
         assert_eq!(cancelled.code, "cancelled");

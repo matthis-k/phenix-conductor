@@ -97,6 +97,14 @@ impl StdioConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequestRejection {
+    pub code: ErrorCode,
+    pub class: Option<String>,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientError {
     Transport(String),
     Protocol(String),
@@ -104,12 +112,7 @@ pub enum ClientError {
         message: String,
         details: Option<serde_json::Value>,
     },
-    Rejected {
-        code: ErrorCode,
-        class: Option<String>,
-        message: String,
-        details: Option<serde_json::Value>,
-    },
+    Rejected(Box<RequestRejection>),
     UnsupportedCapability {
         operation: ContractId,
         capability: ContractId,
@@ -128,16 +131,19 @@ impl std::fmt::Display for ClientError {
             Self::Transport(message) => write!(formatter, "ACP transport failure: {message}"),
             Self::Protocol(message) => write!(formatter, "ACP protocol failure: {message}"),
             Self::Cancelled { message, .. } => write!(formatter, "ACP request cancelled: {message}"),
-            Self::Rejected {
-                code,
-                class,
-                message,
-                ..
-            } => {
-                if let Some(class) = class {
-                    write!(formatter, "ACP peer rejected request ({class}, {code}): {message}")
+            Self::Rejected(rejection) => {
+                if let Some(class) = &rejection.class {
+                    write!(
+                        formatter,
+                        "ACP peer rejected request ({class}, {}): {}",
+                        rejection.code, rejection.message
+                    )
                 } else {
-                    write!(formatter, "ACP peer rejected request ({code}): {message}")
+                    write!(
+                        formatter,
+                        "ACP peer rejected request ({}): {}",
+                        rejection.code, rejection.message
+                    )
                 }
             }
             Self::UnsupportedCapability {
@@ -170,12 +176,12 @@ fn request_error(error: agent_client_protocol::Error) -> ClientError {
     if code == ErrorCode::RequestCancelled || class.as_deref() == Some("cancelled") {
         ClientError::Cancelled { message, details }
     } else {
-        ClientError::Rejected {
+        ClientError::Rejected(Box::new(RequestRejection {
             code,
             class,
             message,
             details,
-        }
+        }))
     }
 }
 
@@ -776,12 +782,12 @@ mod tests {
         ));
         assert!(matches!(
             rejected,
-            ClientError::Rejected {
-                code: ErrorCode::InternalError,
-                class: Some(ref class),
-                details: Some(ref details),
-                ..
-            } if class == "permission_denied" && details["message"] == "same display text"
+            ClientError::Rejected(ref rejection)
+                if rejection.code == ErrorCode::InternalError
+                    && rejection.class.as_deref() == Some("permission_denied")
+                    && rejection.details.as_ref().is_some_and(
+                        |details| details["message"] == "same display text"
+                    )
         ));
     }
 
@@ -797,11 +803,11 @@ mod tests {
         ));
         assert!(matches!(
             rejected,
-            ClientError::Rejected {
-                class: Some(ref class),
-                details: Some(ref details),
-                ..
-            } if class == "conflict" && details["message"] == "same display text"
+            ClientError::Rejected(ref rejection)
+                if rejection.class.as_deref() == Some("conflict")
+                    && rejection.details.as_ref().is_some_and(
+                        |details| details["message"] == "same display text"
+                    )
         ));
     }
 
