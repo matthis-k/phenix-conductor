@@ -2,8 +2,9 @@ use crate::{extension_name, wire, ApplicationAdapter};
 use phenix_application_interface::types::ApplicationError;
 use phenix_application_interface::{
     application_descriptor, ActivateSkill, ApplicationTransport, Authenticate,
-    DiscoverAuthentication, GetDiagnostics, GetExecutionTree, GetLineage, GetProvenance,
-    InvokeCallable, ListCallables, ListSkills, Operation, RenameSession,
+    DiscoverAuthentication, GetDiagnostics, GetExecutionTree, GetLineage, GetObservable,
+    GetProvenance, InvokeCallable, ListCallables, ListObservables, ListSkills, Operation,
+    RenameSession, SubscribeObservable, UnsubscribeObservable,
 };
 use phenix_core::{ContractId, PhenixValue, ValueCodec};
 use std::sync::Arc;
@@ -36,6 +37,10 @@ impl<T: ApplicationTransport> ApplicationAdapter<T> {
             GetExecutionTree,
             GetProvenance,
             GetDiagnostics,
+            ListObservables,
+            GetObservable,
+            SubscribeObservable,
+            UnsubscribeObservable,
         );
 
         Err(ApplicationError::InvalidInput {

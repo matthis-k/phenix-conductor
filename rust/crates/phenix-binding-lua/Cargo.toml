@@ -10,6 +10,8 @@ role = "passive-library"
 [lib]
 name = "phenix"
 crate-type = ["cdylib", "rlib"]
+test = false
+doctest = false
 
 [dependencies]
 agent-client-protocol.workspace = true

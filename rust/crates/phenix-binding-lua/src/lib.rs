@@ -35,6 +35,8 @@ use std::{
 enum ErrorKind {
     Transport,
     Protocol,
+    Cancelled,
+    Rejected,
     UnsupportedCapability,
     QueueFull,
     Conversion,
@@ -45,6 +47,8 @@ impl ErrorKind {
         match self {
             Self::Transport => "transport",
             Self::Protocol => "protocol",
+            Self::Cancelled => "cancelled",
+            Self::Rejected => "rejected",
             Self::UnsupportedCapability => "unsupported_capability",
             Self::QueueFull => "queue_full",
             Self::Conversion => "conversion",
@@ -55,41 +59,69 @@ impl ErrorKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct BindingError {
     kind: ErrorKind,
+    code: String,
     message: String,
+    details: Box<Option<serde_json::Value>>,
 }
 
 impl BindingError {
-    fn transport(message: impl Into<String>) -> Self {
+    fn local(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
-            kind: ErrorKind::Transport,
+            code: kind.as_str().to_owned(),
+            kind,
             message: message.into(),
+            details: Box::new(None),
         }
+    }
+
+    fn transport(message: impl Into<String>) -> Self {
+        Self::local(ErrorKind::Transport, message)
     }
 
     fn conversion(message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::Conversion,
-            message: message.into(),
-        }
+        Self::local(ErrorKind::Conversion, message)
     }
 
     fn unsupported(operation: &ContractId) -> Self {
-        Self {
-            kind: ErrorKind::UnsupportedCapability,
-            message: format!("application operation {operation} is not a negotiated ACP extension"),
-        }
+        Self::local(
+            ErrorKind::UnsupportedCapability,
+            format!("application operation {operation} is not a negotiated ACP extension"),
+        )
     }
 
     fn from_client(error: ClientError) -> Self {
-        let kind = match error {
-            ClientError::Transport(_) => ErrorKind::Transport,
-            ClientError::Protocol(_) | ClientError::OutOfOrderUpdate { .. } => ErrorKind::Protocol,
-            ClientError::UnsupportedCapability { .. } => ErrorKind::UnsupportedCapability,
-            ClientError::UpdateQueueFull => ErrorKind::QueueFull,
+        let message = error.to_string();
+        let (kind, code, details) = match error {
+            ClientError::Transport(_) => {
+                (ErrorKind::Transport, "transport".to_owned(), Box::new(None))
+            }
+            ClientError::Protocol(_) | ClientError::OutOfOrderUpdate { .. } => {
+                (ErrorKind::Protocol, "protocol".to_owned(), Box::new(None))
+            }
+            ClientError::Cancelled { details, .. } => {
+                (ErrorKind::Cancelled, "cancelled".to_owned(), details)
+            }
+            ClientError::Rejected(rejection) => (
+                ErrorKind::Rejected,
+                rejection.class.unwrap_or_else(|| "rejected".to_owned()),
+                Box::new(rejection.details),
+            ),
+            ClientError::UnsupportedCapability { .. } => (
+                ErrorKind::UnsupportedCapability,
+                "unsupported_capability".to_owned(),
+                Box::new(None),
+            ),
+            ClientError::UpdateQueueFull => (
+                ErrorKind::QueueFull,
+                "queue_full".to_owned(),
+                Box::new(None),
+            ),
         };
         Self {
             kind,
-            message: error.to_string(),
+            code,
+            message,
+            details,
         }
     }
 }
@@ -488,12 +520,21 @@ fn response_values(
 fn error_values(lua: &Lua, error: &BindingError) -> LuaResult<MultiValue> {
     let result = lua.create_table()?;
     result.set("kind", error.kind.as_str())?;
+    result.set("code", error.code.as_str())?;
     result.set("message", error.message.as_str())?;
+    if let Some(details) = error
+        .details
+        .as_ref()
+        .as_ref()
+        .filter(|details| !details.is_null())
+    {
+        result.set("details", lua.to_value(&details)?)?;
+    }
     Ok(MultiValue::from_vec(vec![Value::Nil, Value::Table(result)]))
 }
 
 fn lua_error(error: BindingError) -> LuaError {
-    LuaError::RuntimeError(format!("{}: {}", error.kind.as_str(), error.message))
+    LuaError::RuntimeError(format!("{}: {}", error.code, error.message))
 }
 
 fn capabilities(lua: &Lua, state: &ClientState) -> LuaResult<Table> {
@@ -1043,6 +1084,7 @@ fn phenix(lua: &Lua) -> LuaResult<Table> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_client_acp::RequestRejection;
 
     #[test]
     fn descriptor_source_is_deterministic_and_complete() {
@@ -1065,6 +1107,35 @@ mod tests {
             received: 2,
         });
         assert_eq!(error.kind, ErrorKind::Protocol);
+        assert_eq!(error.code, "protocol");
+    }
+
+    #[test]
+    fn cancellation_and_rejection_keep_distinct_lua_codes() {
+        let cancelled = BindingError::from_client(ClientError::Cancelled {
+            message: "same display text".to_owned(),
+            details: Box::new(None),
+        });
+        let rejected =
+            BindingError::from_client(ClientError::Rejected(Box::new(RequestRejection {
+                code: agent_client_protocol::ErrorCode::InternalError,
+                class: Some("permission_denied".to_owned()),
+                message: "same display text".to_owned(),
+                details: Some(serde_json::json!({ "message": "same display text" })),
+            })));
+
+        assert_eq!(cancelled.kind, ErrorKind::Cancelled);
+        assert_eq!(cancelled.code, "cancelled");
+        assert_eq!(rejected.kind, ErrorKind::Rejected);
+        assert_eq!(rejected.code, "permission_denied");
+        assert_eq!(
+            rejected
+                .details
+                .as_ref()
+                .as_ref()
+                .expect("rejection details")["message"],
+            "same display text"
+        );
     }
 
     #[test]

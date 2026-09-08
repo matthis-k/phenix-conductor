@@ -226,6 +226,12 @@ in
                 assert(type(phenix.connect) == "function")
                 assert(type(phenix.descriptor) == "table")
                 assert(type(phenix.descriptor.operations) == "table")
+                local bindings = phenix.descriptor.bind({
+                  _invoke_application = function(_, operation, _) return operation end,
+                })
+                for operation, metadata in pairs(phenix.descriptor.operations) do
+                  assert(bindings[metadata.name](nil) == operation)
+                end
               '
               touch "$out"
             '';

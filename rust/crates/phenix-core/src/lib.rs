@@ -26,6 +26,7 @@ mod manifest;
 mod metadata_input;
 mod metadata_inspection;
 mod metadata_reconciliation;
+mod observable;
 mod persistence;
 mod persistence_bootstrap;
 mod persistence_provider;
@@ -149,6 +150,14 @@ pub use metadata_reconciliation::{
     MetadataReconciliationError, MetadataReconciliationPreview, PackageMetadataChange,
     ResourceMetadataChange,
 };
+pub use observable::{
+    CommitId, InitialObservation, ObservableError, ObservableMetadata, ObservableRef,
+    ObservableRegistration, ObservableSnapshot, ObservableStore, ObservableTransaction,
+    ObservationDelivery, ObservationGeneration, ObservationHandler, ObservationId,
+    ObservationMode, ObservationScope, ObservationSpec, ObservationSubscription, SnapshotPolicy,
+    ValueAddress, ValueChange, ValueId, ValuePath, ValuePathSegment, ValueVersion,
+    OBSERVABLE_CONTRACT,
+};
 pub use persistence::{
     BackendFeature, DurableSchema, LocalPersistence, NamespaceTransaction, PersistenceBackend,
     PersistenceError, SchemaMigration, TransactionOp,
@@ -197,7 +206,9 @@ pub use runtime::{
     ServiceInvocationProvenance, ServiceParticipantOutcome, ServiceParticipantProvenance,
     SharedPluginInvocation,
 };
-pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
+pub use sdk::{
+    ResolvedSdkContributions, SdkContribution, SdkObservableResource, SdkResolutionError,
+};
 pub use tasks::{CallCancellationToken, CancellationToken, TaskHandle, TaskRuntime, TaskScope};
 pub use typed_component::{
     ComponentInterface, ComponentInvocationError, InterfaceCompatibility, InterfaceSchema,

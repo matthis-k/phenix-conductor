@@ -11,7 +11,7 @@ use agent_client_protocol::schema::{
     ProtocolVersion,
 };
 use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, Agent, Client as AcpRole, ConnectTo, ConnectionTo,
+    AcpAgent, AcpAgentConfig, Agent, Client as AcpRole, ConnectTo, ConnectionTo, ErrorCode,
 };
 use phenix_application_interface::{
     ApplicationClient, ApplicationTransport, Capabilities, Operation,
@@ -97,9 +97,22 @@ impl StdioConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequestRejection {
+    pub code: ErrorCode,
+    pub class: Option<String>,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientError {
     Transport(String),
     Protocol(String),
+    Cancelled {
+        message: String,
+        details: Box<Option<serde_json::Value>>,
+    },
+    Rejected(Box<RequestRejection>),
     UnsupportedCapability {
         operation: ContractId,
         capability: ContractId,
@@ -117,6 +130,22 @@ impl std::fmt::Display for ClientError {
         match self {
             Self::Transport(message) => write!(formatter, "ACP transport failure: {message}"),
             Self::Protocol(message) => write!(formatter, "ACP protocol failure: {message}"),
+            Self::Cancelled { message, .. } => write!(formatter, "ACP request cancelled: {message}"),
+            Self::Rejected(rejection) => {
+                if let Some(class) = &rejection.class {
+                    write!(
+                        formatter,
+                        "ACP peer rejected request ({class}, {}): {}",
+                        rejection.code, rejection.message
+                    )
+                } else {
+                    write!(
+                        formatter,
+                        "ACP peer rejected request ({}): {}",
+                        rejection.code, rejection.message
+                    )
+                }
+            }
             Self::UnsupportedCapability {
                 operation,
                 capability,
@@ -138,6 +167,39 @@ impl std::fmt::Display for ClientError {
 }
 
 impl std::error::Error for ClientError {}
+
+fn request_error(error: agent_client_protocol::Error) -> ClientError {
+    let message = error.to_string();
+    let class = error.data.as_ref().and_then(application_error_class);
+    let details = error.data.as_ref().and_then(application_error_details);
+    let code = error.code;
+    if code == ErrorCode::RequestCancelled || class.as_deref() == Some("cancelled") {
+        ClientError::Cancelled {
+            message,
+            details: Box::new(details),
+        }
+    } else {
+        ClientError::Rejected(Box::new(RequestRejection {
+            code,
+            class,
+            message,
+            details,
+        }))
+    }
+}
+
+fn application_error_class(data: &serde_json::Value) -> Option<String> {
+    data.get("phenix.class")
+        .or_else(|| data.get("phenix").and_then(|phenix| phenix.get("class")))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+fn application_error_details(data: &serde_json::Value) -> Option<serde_json::Value> {
+    data.get("phenix.details")
+        .or_else(|| data.get("phenix").and_then(|phenix| phenix.get("detail")))
+        .cloned()
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExtensionMethod {
@@ -541,7 +603,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn list_sessions(
@@ -552,7 +614,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn resume_session(
@@ -563,7 +625,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn load_session(
@@ -574,7 +636,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn close_session(
@@ -585,7 +647,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn prompt(&self, request: PromptRequest) -> Result<PromptResponse, ClientError> {
@@ -593,7 +655,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn set_session_config_option(
@@ -604,7 +666,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub fn cancel(&self, notification: CancelNotification) {
@@ -703,6 +765,53 @@ mod tests {
             );
             assert_eq!(result, Err(expected));
         }
+    }
+
+    #[test]
+    fn request_errors_distinguish_cancellation_from_peer_rejection() {
+        let cancelled = request_error(agent_client_protocol::Error::request_cancelled().data(
+            serde_json::json!({
+                "phenix.class": "cancelled",
+                "phenix.details": null,
+            }),
+        ));
+        assert!(matches!(cancelled, ClientError::Cancelled { .. }));
+
+        let rejected = request_error(agent_client_protocol::Error::internal_error().data(
+            serde_json::json!({
+                "phenix.class": "permission_denied",
+                "phenix.details": { "message": "same display text" },
+            }),
+        ));
+        assert!(matches!(
+            rejected,
+            ClientError::Rejected(ref rejection)
+                if rejection.code == ErrorCode::InternalError
+                    && rejection.class.as_deref() == Some("permission_denied")
+                    && rejection.details.as_ref().is_some_and(
+                        |details| details["message"] == "same display text"
+                    )
+        ));
+    }
+
+    #[test]
+    fn request_errors_accept_the_adapter_error_data_shape() {
+        let rejected = request_error(agent_client_protocol::Error::internal_error().data(
+            serde_json::json!({
+                "phenix": {
+                    "class": "conflict",
+                    "detail": { "message": "same display text" },
+                }
+            }),
+        ));
+        assert!(matches!(
+            rejected,
+            ClientError::Rejected(ref rejection)
+                if rejection.class.as_deref() == Some("conflict")
+                    && rejection.details.as_ref().is_some_and(
+                        |details| details["message"] == "same display text"
+                    )
+        ));
     }
 
     #[test]

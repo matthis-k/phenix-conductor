@@ -117,8 +117,9 @@
                   -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null
               fi
 
+              # `phenix-binding-lua-load` covers the host-linked LuaJIT module.
               timeout --signal=KILL 300 \
-                cargo test --quiet --workspace --lib --bins --locked
+                cargo test --quiet --workspace --lib --bins --exclude phenix-binding-lua --locked
             '';
           };
 
