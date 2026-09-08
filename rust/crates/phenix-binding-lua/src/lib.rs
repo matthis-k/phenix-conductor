@@ -20,8 +20,7 @@ use mlua::{
     UserDataMethods, Value,
 };
 use phenix_client_acp::{
-    application_descriptor, AcpClient, ClientError, RequestRejection, SessionUpdates, StdioConfig,
-    INTERFACE_ID,
+    application_descriptor, AcpClient, ClientError, SessionUpdates, StdioConfig, INTERFACE_ID,
 };
 use phenix_core::{ContractId, Key, PhenixSchema, PhenixValue, Type};
 use std::{
@@ -62,7 +61,7 @@ struct BindingError {
     kind: ErrorKind,
     code: String,
     message: String,
-    details: Option<serde_json::Value>,
+    details: Box<Option<serde_json::Value>>,
 }
 
 impl BindingError {
@@ -71,7 +70,7 @@ impl BindingError {
             code: kind.as_str().to_owned(),
             kind,
             message: message.into(),
-            details: None,
+            details: Box::new(None),
         }
     }
 
@@ -93,9 +92,11 @@ impl BindingError {
     fn from_client(error: ClientError) -> Self {
         let message = error.to_string();
         let (kind, code, details) = match error {
-            ClientError::Transport(_) => (ErrorKind::Transport, "transport".to_owned(), None),
+            ClientError::Transport(_) => {
+                (ErrorKind::Transport, "transport".to_owned(), Box::new(None))
+            }
             ClientError::Protocol(_) | ClientError::OutOfOrderUpdate { .. } => {
-                (ErrorKind::Protocol, "protocol".to_owned(), None)
+                (ErrorKind::Protocol, "protocol".to_owned(), Box::new(None))
             }
             ClientError::Cancelled { details, .. } => {
                 (ErrorKind::Cancelled, "cancelled".to_owned(), details)
@@ -103,14 +104,18 @@ impl BindingError {
             ClientError::Rejected(rejection) => (
                 ErrorKind::Rejected,
                 rejection.class.unwrap_or_else(|| "rejected".to_owned()),
-                rejection.details,
+                Box::new(rejection.details),
             ),
             ClientError::UnsupportedCapability { .. } => (
                 ErrorKind::UnsupportedCapability,
                 "unsupported_capability".to_owned(),
-                None,
+                Box::new(None),
             ),
-            ClientError::UpdateQueueFull => (ErrorKind::QueueFull, "queue_full".to_owned(), None),
+            ClientError::UpdateQueueFull => (
+                ErrorKind::QueueFull,
+                "queue_full".to_owned(),
+                Box::new(None),
+            ),
         };
         Self {
             kind,
@@ -517,8 +522,13 @@ fn error_values(lua: &Lua, error: &BindingError) -> LuaResult<MultiValue> {
     result.set("kind", error.kind.as_str())?;
     result.set("code", error.code.as_str())?;
     result.set("message", error.message.as_str())?;
-    if let Some(details) = error.details.as_ref().filter(|details| !details.is_null()) {
-        result.set("details", lua.to_value(details)?)?;
+    if let Some(details) = error
+        .details
+        .as_ref()
+        .as_ref()
+        .filter(|details| !details.is_null())
+    {
+        result.set("details", lua.to_value(&details)?)?;
     }
     Ok(MultiValue::from_vec(vec![Value::Nil, Value::Table(result)]))
 }
@@ -1074,6 +1084,7 @@ fn phenix(lua: &Lua) -> LuaResult<Table> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_client_acp::RequestRejection;
 
     #[test]
     fn descriptor_source_is_deterministic_and_complete() {
@@ -1103,7 +1114,7 @@ mod tests {
     fn cancellation_and_rejection_keep_distinct_lua_codes() {
         let cancelled = BindingError::from_client(ClientError::Cancelled {
             message: "same display text".to_owned(),
-            details: None,
+            details: Box::new(None),
         });
         let rejected =
             BindingError::from_client(ClientError::Rejected(Box::new(RequestRejection {
@@ -1118,7 +1129,11 @@ mod tests {
         assert_eq!(rejected.kind, ErrorKind::Rejected);
         assert_eq!(rejected.code, "permission_denied");
         assert_eq!(
-            rejected.details.as_ref().expect("rejection details")["message"],
+            rejected
+                .details
+                .as_ref()
+                .as_ref()
+                .expect("rejection details")["message"],
             "same display text"
         );
     }

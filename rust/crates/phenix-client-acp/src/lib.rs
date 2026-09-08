@@ -110,7 +110,7 @@ pub enum ClientError {
     Protocol(String),
     Cancelled {
         message: String,
-        details: Option<serde_json::Value>,
+        details: Box<Option<serde_json::Value>>,
     },
     Rejected(Box<RequestRejection>),
     UnsupportedCapability {
@@ -174,7 +174,10 @@ fn request_error(error: agent_client_protocol::Error) -> ClientError {
     let details = error.data.as_ref().and_then(application_error_details);
     let code = error.code;
     if code == ErrorCode::RequestCancelled || class.as_deref() == Some("cancelled") {
-        ClientError::Cancelled { message, details }
+        ClientError::Cancelled {
+            message,
+            details: Box::new(details),
+        }
     } else {
         ClientError::Rejected(Box::new(RequestRejection {
             code,
