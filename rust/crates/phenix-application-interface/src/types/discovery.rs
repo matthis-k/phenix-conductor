@@ -66,6 +66,13 @@ record!(CallableInvokeInput, "phenix.application.type.callable-invoke-input@1", 
     input: PhenixValue,
 });
 record!(CallableResult, "phenix.application.type.callable-result@1", { output: PhenixValue });
+record!(CapabilityInvokeInput, "phenix.application.type.capability-invoke-input@1", {
+    callable: PhenixValue,
+    input: PhenixValue,
+});
+record!(CapabilityInvokeResult, "phenix.application.type.capability-invoke-result@1", {
+    output: PhenixValue,
+});
 variants!(Severity, "phenix.application.type.severity@1", { Info, Warning, Error });
 record!(Diagnostic, "phenix.application.type.diagnostic@1", {
     code: String,

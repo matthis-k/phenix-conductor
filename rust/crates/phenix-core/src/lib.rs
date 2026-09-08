@@ -7,6 +7,7 @@ mod activation;
 mod agent;
 mod artifact;
 mod authority;
+mod capability;
 mod component;
 mod composition_metadata;
 mod configuration;
@@ -98,6 +99,7 @@ pub use agent::{
 };
 pub use artifact::{ArtifactRevision, ArtifactRevisionParseError};
 pub use authority::Authority;
+pub use capability::{CapabilityInvokeInput, CapabilityInvokeResult};
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
     ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan,
@@ -207,7 +209,7 @@ pub use runtime::{
     SharedPluginInvocation,
 };
 pub use sdk::{
-    ResolvedSdkContributions, SdkContribution, SdkObservableResource, SdkResolutionError,
+    ResolvedSdkContributions, SdkContribution, SdkObservableResource, SdkResolutionError, SdkValue,
 };
 pub use tasks::{CallCancellationToken, CancellationToken, TaskHandle, TaskRuntime, TaskScope};
 pub use typed_component::{

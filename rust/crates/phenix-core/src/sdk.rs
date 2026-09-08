@@ -9,6 +9,28 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+/// A language-facing SDK is always published as one authoritative schema/value pair.
+///
+/// Callable values cannot recover their input and output schemas from a raw reference,
+/// so consumers must retain this pair through every transport boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SdkValue {
+    pub schema: PhenixSchema,
+    pub value: crate::PhenixValue,
+}
+
+impl SdkValue {
+    pub fn new(
+        schema: PhenixSchema,
+        value: crate::PhenixValue,
+    ) -> Result<Self, SdkResolutionError> {
+        schema
+            .parse(&value)
+            .map_err(|error| SdkResolutionError::InvalidValue { message: error.to_string() })?;
+        Ok(Self { schema, value })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SdkObservableResource {
     pub id: SdkResourceId,
@@ -74,6 +96,9 @@ impl SdkContribution {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SdkResolutionError {
+    InvalidValue {
+        message: String,
+    },
     UnknownProvider {
         namespace: SdkNamespace,
         provider: PluginId,
@@ -93,6 +118,9 @@ pub enum SdkResolutionError {
 impl Display for SdkResolutionError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidValue { message } => {
+                write!(f, "SDK value does not match its schema: {message}")
+            }
             Self::UnknownProvider {
                 namespace,
                 provider,
@@ -419,5 +447,14 @@ mod tests {
             })
             .unwrap();
         resolved.validate_observables(&store).unwrap();
+    }
+
+    #[test]
+    fn sdk_value_cannot_publish_a_value_outside_its_authoritative_schema() {
+        assert!(SdkValue::new(Type::U64, PhenixValue::U64(1)).is_ok());
+        assert!(matches!(
+            SdkValue::new(Type::U64, PhenixValue::String("wrong".to_owned())),
+            Err(SdkResolutionError::InvalidValue { .. })
+        ));
     }
 }
