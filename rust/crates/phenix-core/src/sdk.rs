@@ -497,11 +497,8 @@ mod tests {
         let mut phenix = contribution("phenix-sdk", "phenix");
         phenix.publish(SdkValue::new(Type::U64, PhenixValue::U64(1)).unwrap());
         let mut testing = contribution("testing", "testing");
-        testing.publish(SdkValue::new(
-            Type::String,
-            PhenixValue::String("ready".to_owned()),
-        )
-        .unwrap());
+        testing
+            .publish(SdkValue::new(Type::String, PhenixValue::String("ready".to_owned())).unwrap());
 
         let value = ResolvedSdkContributions::resolve(&plugins, &[], [testing, phenix])
             .unwrap()
