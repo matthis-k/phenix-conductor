@@ -13,7 +13,7 @@ use std::{
 ///
 /// Callable values cannot recover their input and output schemas from a raw reference,
 /// so consumers must retain this pair through every transport boundary.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SdkValue {
     pub schema: PhenixSchema,
     pub value: crate::PhenixValue,
@@ -69,7 +69,7 @@ impl SdkObservableResource {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SdkContribution {
     pub provider: PluginId,
     pub namespace: SdkNamespace,
@@ -77,6 +77,8 @@ pub struct SdkContribution {
     pub resources: BTreeSet<SdkResourceId>,
     #[serde(default)]
     pub observables: BTreeMap<SdkResourceId, SdkObservableResource>,
+    #[serde(default)]
+    pub value: Option<SdkValue>,
 }
 
 impl SdkContribution {
@@ -87,7 +89,12 @@ impl SdkContribution {
             interfaces: BTreeSet::new(),
             resources: BTreeSet::new(),
             observables: BTreeMap::new(),
+            value: None,
         }
+    }
+
+    pub fn publish(&mut self, value: SdkValue) {
+        self.value = Some(value);
     }
 
     pub fn insert_observable(&mut self, observable: SdkObservableResource) {
@@ -154,7 +161,7 @@ impl Display for SdkResolutionError {
 
 impl Error for SdkResolutionError {}
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResolvedSdkContributions {
     namespaces: BTreeMap<SdkNamespace, SdkContribution>,
 }
@@ -230,6 +237,27 @@ impl ResolvedSdkContributions {
         self.namespaces.is_empty()
     }
 
+    pub fn value(&self) -> Result<SdkValue, SdkResolutionError> {
+        let mut schema = BTreeMap::new();
+        let mut value = BTreeMap::new();
+        for (namespace, contribution) in &self.namespaces {
+            let Some(entry) = &contribution.value else {
+                continue;
+            };
+            schema.insert(
+                crate::Key::parse(namespace.as_str().to_owned())
+                    .expect("SDK namespaces are structural keys"),
+                entry.schema.clone(),
+            );
+            value.insert(
+                crate::Key::parse(namespace.as_str().to_owned())
+                    .expect("SDK namespaces are structural keys"),
+                entry.value.clone(),
+            );
+        }
+        SdkValue::new(Type::Table(schema), crate::PhenixValue::Table(value))
+    }
+
     pub fn validate_observables(&self, store: &ObservableStore) -> Result<(), SdkResolutionError> {
         for (namespace, contribution) in &self.namespaces {
             for (resource, observable) in &contribution.observables {
@@ -284,7 +312,7 @@ impl ResolvedHarness {
 mod tests {
     use super::*;
     use crate::{
-        Authority, ComponentExport, ComponentId, ObservableRegistration, PhenixValue,
+        Authority, ComponentExport, ComponentId, Key, ObservableRegistration, PhenixValue,
         PluginExecution, SnapshotPolicy, Type,
     };
 
@@ -458,5 +486,44 @@ mod tests {
             SdkValue::new(Type::U64, PhenixValue::String("wrong".to_owned())),
             Err(SdkResolutionError::InvalidValue { .. })
         ));
+    }
+
+    #[test]
+    fn resolved_values_are_projected_under_stable_sdk_namespaces() {
+        let plugins = [
+            plugin("phenix-sdk", PluginExecution::ResourceOnly),
+            plugin("testing", PluginExecution::ResourceOnly),
+        ];
+        let mut phenix = contribution("phenix-sdk", "phenix");
+        phenix.publish(SdkValue::new(Type::U64, PhenixValue::U64(1)).unwrap());
+        let mut testing = contribution("testing", "testing");
+        testing.publish(SdkValue::new(
+            Type::String,
+            PhenixValue::String("ready".to_owned()),
+        )
+        .unwrap());
+
+        let value = ResolvedSdkContributions::resolve(&plugins, &[], [testing, phenix])
+            .unwrap()
+            .value()
+            .unwrap();
+
+        assert_eq!(
+            value.schema,
+            Type::Table(BTreeMap::from([
+                (Key::parse("phenix").unwrap(), Type::U64),
+                (Key::parse("testing").unwrap(), Type::String),
+            ]))
+        );
+        assert_eq!(
+            value.value,
+            PhenixValue::Table(BTreeMap::from([
+                (Key::parse("phenix").unwrap(), PhenixValue::U64(1)),
+                (
+                    Key::parse("testing").unwrap(),
+                    PhenixValue::String("ready".to_owned()),
+                ),
+            ]))
+        );
     }
 }
