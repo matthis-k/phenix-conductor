@@ -1105,12 +1105,13 @@ mod tests {
             message: "same display text".to_owned(),
             details: None,
         });
-        let rejected = BindingError::from_client(ClientError::Rejected(Box::new(RequestRejection {
-            code: agent_client_protocol::ErrorCode::InternalError,
-            class: Some("permission_denied".to_owned()),
-            message: "same display text".to_owned(),
-            details: Some(serde_json::json!({ "message": "same display text" })),
-        })));
+        let rejected =
+            BindingError::from_client(ClientError::Rejected(Box::new(RequestRejection {
+                code: agent_client_protocol::ErrorCode::InternalError,
+                class: Some("permission_denied".to_owned()),
+                message: "same display text".to_owned(),
+                details: Some(serde_json::json!({ "message": "same display text" })),
+            })));
 
         assert_eq!(cancelled.kind, ErrorKind::Cancelled);
         assert_eq!(cancelled.code, "cancelled");
