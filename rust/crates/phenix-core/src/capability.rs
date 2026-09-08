@@ -1,14 +1,14 @@
 use crate::{CallableRef, PhenixValue, Type, ValueError};
 
 /// The transport-neutral input to a capability invocation.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CapabilityInvokeInput {
     pub callable: CallableRef,
     pub input: PhenixValue,
 }
 
 /// The transport-neutral successful result of a capability invocation.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CapabilityInvokeResult {
     pub output: PhenixValue,
 }
