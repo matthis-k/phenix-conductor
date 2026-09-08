@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: partial
 ---
 
 # Observable Phenix values

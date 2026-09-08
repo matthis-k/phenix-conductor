@@ -280,8 +280,7 @@ impl ObservableStore {
         }
         declared.sort_unstable();
 
-        let mut prepared = SmallVec::<[PreparedRoot<'a>; 4]>::new();
-        let result = {
+        let (result, prepared) = {
             let mut state = self.state.lock().expect("observable store lock poisoned");
             ensure_open(&state)?;
             for value in &declared {
@@ -305,10 +304,7 @@ impl ObservableStore {
             };
 
             match transaction.finish() {
-                Ok(deliveries) => {
-                    prepared = deliveries;
-                    output
-                }
+                Ok(deliveries) => (output, deliveries),
                 Err(error) => {
                     transaction.rollback();
                     return Err(error);

@@ -90,7 +90,7 @@ impl<'roots> ObservableTransaction<'_, 'roots> {
                     value: undo_value,
                     path: undo_path,
                     previous,
-                } if undo_value == value => {
+                } if *undo_value == value => {
                     if undo_path == path {
                         probe = previous.clone();
                     } else if undo_path.starts_with(path) {
@@ -117,7 +117,7 @@ impl<'roots> ObservableTransaction<'_, 'roots> {
                     start,
                     inserted_count,
                     removed,
-                } if undo_value == value => {
+                } if *undo_value == value => {
                     if undo_path == path {
                         if let Some(PhenixValue::List(items)) = probe.as_mut() {
                             let end = start.saturating_add(*inserted_count).min(items.len());
