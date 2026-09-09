@@ -1858,13 +1858,16 @@ fn remote_callable(
                     reply,
                 }
             })?;
-            let request = match listener_to_remove.clone() {
-                Some(listener) => request.with_listener_lifecycle(ListenerLifecycle::RemoveOnSuccess(listener)),
-                None => match lifted_listener {
-                    Some(listener) => request.with_listener_lifecycle(ListenerLifecycle::ProjectStop(listener)),
-                    None => request,
-                },
-            };
+            let request =
+                match listener_to_remove.clone() {
+                    Some(listener) => request
+                        .with_listener_lifecycle(ListenerLifecycle::RemoveOnSuccess(listener)),
+                    None => match lifted_listener {
+                        Some(listener) => request
+                            .with_listener_lifecycle(ListenerLifecycle::ProjectStop(listener)),
+                        None => request,
+                    },
+                };
             lua.create_userdata(request)
         })
         .map_err(|error| BindingError::conversion(error.to_string()))?;
