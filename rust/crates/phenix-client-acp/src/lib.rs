@@ -3,10 +3,11 @@
 use agent_client_protocol::schema::{
     v1::{
         AgentNotification, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-        ExtNotification, ExtRequest, ExtResponse, InitializeRequest, ListSessionsRequest, ListSessionsResponse,
-        LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
-        PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse,
-        SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+        ExtNotification, ExtRequest, ExtResponse, InitializeRequest, ListSessionsRequest,
+        ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+        NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
+        ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
+        SetSessionConfigOptionResponse,
     },
     ProtocolVersion,
 };
@@ -385,12 +386,14 @@ impl ExtensionCallbacks {
         request: ExtRequest,
         extensions: &DescriptorExtensions,
     ) -> Result<ExtResponse, ClientError> {
-        let callback = extensions.callback(request.method.as_ref()).ok_or_else(|| {
-            ClientError::Protocol(format!(
-                "ACP peer sent an unadvertised Phenix extension callback {}",
-                request.method
-            ))
-        })?;
+        let callback = extensions
+            .callback(request.method.as_ref())
+            .ok_or_else(|| {
+                ClientError::Protocol(format!(
+                    "ACP peer sent an unadvertised Phenix extension callback {}",
+                    request.method
+                ))
+            })?;
         let input = serde_json::from_str::<PhenixValue>(request.params.get()).map_err(|error| {
             ClientError::Protocol(format!(
                 "cannot decode ACP extension callback {}: {error}",
@@ -412,13 +415,15 @@ impl ExtensionCallbacks {
             })
             .map_err(|error| match error {
                 mpsc::TrySendError::Full(_) => ClientError::UpdateQueueFull,
-                mpsc::TrySendError::Disconnected(_) => {
-                    ClientError::Transport("ACP extension callback receiver disconnected".to_owned())
-                }
+                mpsc::TrySendError::Disconnected(_) => ClientError::Transport(
+                    "ACP extension callback receiver disconnected".to_owned(),
+                ),
             })?;
         let output = received
             .await
-            .map_err(|_| ClientError::Transport("ACP extension callback response dropped".to_owned()))?
+            .map_err(|_| {
+                ClientError::Transport("ACP extension callback response dropped".to_owned())
+            })?
             .map_err(|error| ClientError::Protocol(error.to_string()))?;
         callback.response.parse(&output).map_err(|error| {
             ClientError::Protocol(format!(

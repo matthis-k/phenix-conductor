@@ -2,7 +2,12 @@ use crate::{
     CallableRef, CapabilityGenerationId, CapabilityOwnerId, PhenixValue, ReferenceId, Type,
     ValueError,
 };
-use std::{collections::{BTreeMap, BTreeSet}, error::Error, fmt::{self, Display, Formatter}, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt::{self, Display, Formatter},
+    sync::Arc,
+};
 
 /// The transport-neutral input to a capability invocation.
 #[derive(Clone, Debug, PartialEq)]
@@ -99,10 +104,18 @@ pub enum CapabilityError {
 impl Display for CapabilityError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownReference(reference) => write!(formatter, "unknown capability reference {}", reference.id()),
-            Self::StaleReference(reference) => write!(formatter, "stale capability reference {}", reference.id()),
-            Self::SchemaMismatch { message } => write!(formatter, "capability schema mismatch: {message}"),
-            Self::ProviderFailed { message } => write!(formatter, "capability provider failed: {message}"),
+            Self::UnknownReference(reference) => {
+                write!(formatter, "unknown capability reference {}", reference.id())
+            }
+            Self::StaleReference(reference) => {
+                write!(formatter, "stale capability reference {}", reference.id())
+            }
+            Self::SchemaMismatch { message } => {
+                write!(formatter, "capability schema mismatch: {message}")
+            }
+            Self::ProviderFailed { message } => {
+                write!(formatter, "capability provider failed: {message}")
+            }
             Self::Cancelled => formatter.write_str("capability invocation cancelled"),
             Self::Disconnected => formatter.write_str("capability provider disconnected"),
             Self::QueueFull => formatter.write_str("capability provider queue is full"),
@@ -153,9 +166,10 @@ impl CapabilityRegistry {
 
     /// Makes every reference from an owner generation permanently stale.
     pub fn retire(&mut self, owner: CapabilityOwnerId, generation: CapabilityGenerationId) {
-        self.entries.retain(|(entry_owner, entry_generation, _), _| {
-            entry_owner != &owner || entry_generation != &generation
-        });
+        self.entries
+            .retain(|(entry_owner, entry_generation, _), _| {
+                entry_owner != &owner || entry_generation != &generation
+            });
         self.retired.insert((owner, generation));
     }
 

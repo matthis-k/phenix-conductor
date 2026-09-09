@@ -2,9 +2,9 @@ use crate::{extension_name, wire, ApplicationAdapter};
 use phenix_application_interface::types::ApplicationError;
 use phenix_application_interface::{
     application_descriptor, ActivateSkill, ApplicationTransport, Authenticate,
-    DiscoverAuthentication, GetDiagnostics, GetExecutionTree, GetLineage, GetObservable, GetSdk,
-    GetProvenance, InvokeCallable, InvokeCapability, ListCallables, ListObservables, ListSkills, Operation,
-    RenameSession, SubscribeObservable, UnsubscribeObservable,
+    DiscoverAuthentication, GetDiagnostics, GetExecutionTree, GetLineage, GetObservable,
+    GetProvenance, GetSdk, InvokeCallable, InvokeCapability, ListCallables, ListObservables,
+    ListSkills, Operation, RenameSession, SubscribeObservable, UnsubscribeObservable,
 };
 use phenix_core::{ContractId, PhenixValue, ValueCodec};
 use std::sync::Arc;

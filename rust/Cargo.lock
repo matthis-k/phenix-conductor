@@ -1672,6 +1672,7 @@ dependencies = [
  "agent-client-protocol",
  "futures",
  "mlua",
+ "phenix-application-interface",
  "phenix-binding-generator",
  "phenix-client-acp",
  "phenix-core",

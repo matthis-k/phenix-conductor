@@ -1,7 +1,7 @@
 use crate::{
-    CapabilityOwnerId, ComponentManifest, InterfaceId, ObservableStore, PhenixSchema,
-    PhenixValue, PluginId, PluginManifest, ResolvedHarness, SdkNamespace, SdkResourceId, Type,
-    ValueAddress, ValueId, ValuePath,
+    CapabilityOwnerId, ComponentManifest, InterfaceId, ObservableStore, PhenixSchema, PhenixValue,
+    PluginId, PluginManifest, ResolvedHarness, SdkNamespace, SdkResourceId, Type, ValueAddress,
+    ValueId, ValuePath,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -218,9 +218,8 @@ impl ResolvedSdkContributions {
                 }
             }
             if let Some(value) = &contribution.value {
-                validate_capability_owners(&contribution.provider, &value.value).map_err(
-                    |message| SdkResolutionError::InvalidValue { message },
-                )?;
+                validate_capability_owners(&contribution.provider, &value.value)
+                    .map_err(|message| SdkResolutionError::InvalidValue { message })?;
             }
             let namespace = contribution.namespace.clone();
             if namespaces.insert(namespace.clone(), contribution).is_some() {

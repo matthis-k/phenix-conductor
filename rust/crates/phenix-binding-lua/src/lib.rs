@@ -19,13 +19,13 @@ use mlua::{
     Error as LuaError, Lua, LuaSerdeExt, MultiValue, RegistryKey, Result as LuaResult, Table,
     UserData, UserDataMethods, Value,
 };
+use phenix_application_interface::{
+    types::{CapabilityInvokeInput, CapabilityInvokeResult, Empty},
+    GetSdk, InvokeCapability, Operation,
+};
 use phenix_client_acp::{
     application_descriptor, AcpClient, ApplicationEvent, ClientError, ExtensionCallbacks,
     ExtensionUpdates, SessionUpdates, StdioConfig, INTERFACE_ID,
-};
-use phenix_application_interface::{
-    types::{CapabilityInvokeInput, CapabilityInvokeResult, Empty}, GetSdk, InvokeCapability,
-    Operation,
 };
 use phenix_core::{
     CallableRef, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId, ContractId, Key,
@@ -37,7 +37,10 @@ use std::{
     num::NonZeroUsize,
     path::PathBuf,
     rc::Rc,
-    sync::{atomic::{AtomicU64, Ordering}, mpsc as std_mpsc, Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc as std_mpsc, Arc, Mutex,
+    },
     thread,
 };
 
@@ -285,7 +288,10 @@ impl LocalCallables {
             .map_err(|error| BindingError::conversion(error.to_string()))?;
         self.entries.insert(
             id.clone(),
-            LocalCallable { schema: schema.clone(), function },
+            LocalCallable {
+                schema: schema.clone(),
+                function,
+            },
         );
         Ok(CallableRef::new(
             contract.clone(),
@@ -391,14 +397,22 @@ impl UserData for Client {
         });
         methods.add_method("sdk", |lua, this, ()| {
             let operation = ContractId::parse(GetSdk::ID).expect("static application operation id");
-            if !this.state.supports_extension(&operation).map_err(lua_error)? {
+            if !this
+                .state
+                .supports_extension(&operation)
+                .map_err(lua_error)?
+            {
                 return Err(lua_error(BindingError::unsupported(&operation)));
             }
-            let request = request_for(&this.state, Some(Rc::clone(&this.local_callables)), |reply| Command::Application {
-                operation,
-                input: Empty {}.to_value(),
-                reply,
-            })?;
+            let request = request_for(
+                &this.state,
+                Some(Rc::clone(&this.local_callables)),
+                |reply| Command::Application {
+                    operation,
+                    input: Empty {}.to_value(),
+                    reply,
+                },
+            )?;
             lua.create_userdata(request)
         });
         methods.add_method(
@@ -425,19 +439,18 @@ impl UserData for Client {
                         declaration.input
                     )))
                 })?;
-                let input = lua_to_phenix_with_host(
-                    lua,
-                    schema,
-                    input,
+                let input =
+                    lua_to_phenix_with_host(lua, schema, input, &this.state, &this.local_callables)
+                        .map_err(lua_error)?;
+                let request = request_for(
                     &this.state,
-                    &this.local_callables,
-                )
-                .map_err(lua_error)?;
-                let request = request_for(&this.state, Some(Rc::clone(&this.local_callables)), |reply| Command::Application {
-                    operation,
-                    input,
-                    reply,
-                })?;
+                    Some(Rc::clone(&this.local_callables)),
+                    |reply| Command::Application {
+                        operation,
+                        input,
+                        reply,
+                    },
+                )?;
                 lua.create_userdata(request)
             },
         );
@@ -484,7 +497,12 @@ impl UserData for Client {
                         .try_recv();
                     match callback {
                         Ok(callback) => {
-                            dispatch_local_callback(lua, &this.state, &this.local_callables, callback)?;
+                            dispatch_local_callback(
+                                lua,
+                                &this.state,
+                                &this.local_callables,
+                                callback,
+                            )?;
                             Ok(Value::Nil)
                         }
                         Err(std_mpsc::TryRecvError::Empty) => Ok(Value::Nil),
@@ -586,12 +604,9 @@ impl UserData for Request {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method_mut("poll", |lua, this, ()| match this.poll() {
             None => Ok(MultiValue::new()),
-            Some(Ok(response)) => response_values(
-                lua,
-                &this.state,
-                this.local_callables.as_ref(),
-                response,
-            ),
+            Some(Ok(response)) => {
+                response_values(lua, &this.state, this.local_callables.as_ref(), response)
+            }
             Some(Err(error)) => error_values(lua, &error),
         });
     }
@@ -604,7 +619,11 @@ fn request_for(
 ) -> Result<Request, LuaError> {
     let (reply, receiver) = oneshot::channel();
     state.send(make_command(reply)).map_err(lua_error)?;
-    Ok(Request::pending(Arc::clone(state), local_callables, receiver))
+    Ok(Request::pending(
+        Arc::clone(state),
+        local_callables,
+        receiver,
+    ))
 }
 
 fn response_values(
@@ -765,7 +784,16 @@ fn connect(options: Table) -> LuaResult<Client> {
     let worker_state = Arc::clone(&state);
     thread::Builder::new()
         .name("phenix-lua-acp".to_owned())
-        .spawn(move || run_client(config, receiver, updates, extension_updates, callbacks, worker_state))
+        .spawn(move || {
+            run_client(
+                config,
+                receiver,
+                updates,
+                extension_updates,
+                callbacks,
+                worker_state,
+            )
+        })
         .map_err(|error| lua_error(BindingError::transport(error.to_string())))?;
     Ok(Client {
         state,
@@ -782,8 +810,8 @@ fn run_client(
     state: Arc<ClientState>,
 ) {
     let worker_state = Arc::clone(&state);
-    let result =
-        futures::executor::block_on(AcpClient::new(config).connect_with_updates_extensions_and_callbacks(
+    let result = futures::executor::block_on(
+        AcpClient::new(config).connect_with_updates_extensions_and_callbacks(
             updates,
             extension_updates,
             callbacks,
@@ -927,12 +955,18 @@ fn run_client(
                             reply,
                         } => {
                             let result = connection
-                                .invoke_extension(&ContractId::parse(InvokeCapability::ID).expect("static operation id"), input.to_value())
+                                .invoke_extension(
+                                    &ContractId::parse(InvokeCapability::ID)
+                                        .expect("static operation id"),
+                                    input.to_value(),
+                                )
                                 .await
                                 .map_err(BindingError::from_client)
                                 .and_then(|value| {
                                     let result = CapabilityInvokeResult::from_value(&value)
-                                        .map_err(|error| BindingError::conversion(error.to_string()))?;
+                                        .map_err(|error| {
+                                            BindingError::conversion(error.to_string())
+                                        })?;
                                     output_schema.parse(&result.output).map_err(|error| {
                                         BindingError::conversion(format!(
                                             "capability output violates callable schema: {error}"
@@ -952,7 +986,8 @@ fn run_client(
                 }
                 Ok(())
             },
-        ));
+        ),
+    );
     if let Err(error) = result {
         state.record_failure(BindingError::from_client(error));
     }
@@ -993,18 +1028,35 @@ fn dispatch_local_callback(
         let (contract, input, output, function) = {
             let local = local_callables.borrow();
             let entry = local.entries.get(callable.id()).ok_or_else(|| {
-                BindingError::local(ErrorKind::Rejected, "callback callable is no longer registered")
+                BindingError::local(
+                    ErrorKind::Rejected,
+                    "callback callable is no longer registered",
+                )
             })?;
-            let Type::Callable { contract, input, output } = &entry.schema else {
-                return Err(BindingError::conversion("registered callable schema is not callable"));
+            let Type::Callable {
+                contract,
+                input,
+                output,
+            } = &entry.schema
+            else {
+                return Err(BindingError::conversion(
+                    "registered callable schema is not callable",
+                ));
             };
             let function: mlua::Function = lua
                 .registry_value(&entry.function)
                 .map_err(|error| BindingError::conversion(error.to_string()))?;
-            (contract.clone(), (**input).clone(), (**output).clone(), function)
+            (
+                contract.clone(),
+                (**input).clone(),
+                (**output).clone(),
+                function,
+            )
         };
         if callable.contract() != &contract {
-            return Err(BindingError::conversion("callback callable contract does not match its schema"));
+            return Err(BindingError::conversion(
+                "callback callable contract does not match its schema",
+            ));
         }
         input
             .parse(&invocation.input)
@@ -1021,9 +1073,11 @@ fn dispatch_local_callback(
             Ok(())
         }
         Err(error) => {
-            callback.respond(Err(phenix_application_interface::types::ApplicationError::Failed {
-                message: error.message.clone(),
-            }));
+            callback.respond(Err(
+                phenix_application_interface::types::ApplicationError::Failed {
+                    message: error.message.clone(),
+                },
+            ));
             Err(lua_error(error))
         }
     }
@@ -1159,20 +1213,17 @@ fn lua_to_phenix_with_host(
             let Value::Function(function) = value else {
                 return Err(type_error("function", &value));
             };
-            let reference = local_callables
-                .borrow_mut()
-                .lift(lua, state, schema.clone(), function)?;
+            let reference =
+                local_callables
+                    .borrow_mut()
+                    .lift(lua, state, schema.clone(), function)?;
             Ok(PhenixValue::Callable(reference))
         }
         Type::Option(item) => match value {
             Value::Nil => Ok(PhenixValue::Option(None)),
-            value => Ok(PhenixValue::Option(Some(Box::new(lua_to_phenix_with_host(
-                lua,
-                item,
-                value,
-                state,
-                local_callables,
-            )?)))),
+            value => Ok(PhenixValue::Option(Some(Box::new(
+                lua_to_phenix_with_host(lua, item, value, state, local_callables)?,
+            )))),
         },
         Type::Array { item, len } => {
             let Value::Table(table) = value else {
@@ -1207,13 +1258,7 @@ fn lua_to_phenix_with_host(
                         value
                             .map_err(|error| BindingError::conversion(error.to_string()))
                             .and_then(|value| {
-                                lua_to_phenix_with_host(
-                                    lua,
-                                    item,
-                                    value,
-                                    state,
-                                    local_callables,
-                                )
+                                lua_to_phenix_with_host(lua, item, value, state, local_callables)
                             })
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -1280,9 +1325,9 @@ fn lua_to_phenix_with_host(
                 Type::Table(fields) => {
                     let mut values = BTreeMap::new();
                     for (field, field_schema) in fields {
-                        let value = table.get::<Value>(field.as_str()).map_err(|error| {
-                            BindingError::conversion(error.to_string())
-                        })?;
+                        let value = table
+                            .get::<Value>(field.as_str())
+                            .map_err(|error| BindingError::conversion(error.to_string()))?;
                         values.insert(
                             field.clone(),
                             lua_to_phenix_with_host(
@@ -1503,21 +1548,20 @@ fn phenix_to_lua_with_state(
     schema: &PhenixSchema,
     value: &PhenixValue,
 ) -> Result<Value, BindingError> {
-    schema
-        .parse(value)
-        .map_err(|error| BindingError::conversion(format!("value violates projection schema: {error}")))?;
+    schema.parse(value).map_err(|error| {
+        BindingError::conversion(format!("value violates projection schema: {error}"))
+    })?;
     match (schema, value) {
-        (
-            Type::Callable { input, output, .. },
-            PhenixValue::Callable(reference),
-        ) => remote_callable(
-            lua,
-            state,
-            local_callables,
-            reference.clone(),
-            (**input).clone(),
-            (**output).clone(),
-        ),
+        (Type::Callable { input, output, .. }, PhenixValue::Callable(reference)) => {
+            remote_callable(
+                lua,
+                state,
+                local_callables,
+                reference.clone(),
+                (**input).clone(),
+                (**output).clone(),
+            )
+        }
         (Type::Option(_), PhenixValue::Option(None)) => Ok(Value::Nil),
         (Type::Option(item), PhenixValue::Option(Some(value))) => {
             phenix_to_lua_with_state(lua, state, local_callables, item, value)
@@ -1555,17 +1599,13 @@ fn phenix_to_lua_with_state(
                 .create_table()
                 .map_err(|error| BindingError::conversion(error.to_string()))?;
             for (key, field_schema) in fields {
-                let value = values.get(key).expect("schema validation requires table field");
+                let value = values
+                    .get(key)
+                    .expect("schema validation requires table field");
                 table
                     .set(
                         key.as_str(),
-                        phenix_to_lua_with_state(
-                            lua,
-                            state,
-                            local_callables,
-                            field_schema,
-                            value,
-                        )?,
+                        phenix_to_lua_with_state(lua, state, local_callables, field_schema, value)?,
                     )
                     .map_err(|error| BindingError::conversion(error.to_string()))?;
             }
@@ -1642,13 +1682,15 @@ fn remote_callable(
                 lua_to_phenix(lua, &input_schema, input)
             }
             .map_err(lua_error)?;
-            let request = request_for(&state, local_callables.clone(), |reply| Command::InvokeCapability {
-                input: CapabilityInvokeInput {
-                    callable: PhenixValue::Callable(callable.clone()),
-                    input,
-                },
-                output_schema: output_schema.clone(),
-                reply,
+            let request = request_for(&state, local_callables.clone(), |reply| {
+                Command::InvokeCapability {
+                    input: CapabilityInvokeInput {
+                        callable: PhenixValue::Callable(callable.clone()),
+                        input,
+                    },
+                    output_schema: output_schema.clone(),
+                    reply,
+                }
             })?;
             lua.create_userdata(request)
         })
@@ -1676,9 +1718,7 @@ fn phenix(lua: &Lua) -> LuaResult<Table> {
 mod tests {
     use super::*;
     use phenix_client_acp::RequestRejection;
-    use phenix_core::{
-        CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId, ReferenceId,
-    };
+    use phenix_core::{CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId, ReferenceId};
 
     #[test]
     fn descriptor_source_is_deterministic_and_complete() {
@@ -1787,16 +1827,14 @@ mod tests {
             input: Box::new(Type::U64),
             output: Box::new(Type::String),
         };
-        let Value::Function(proxy) =
-            phenix_to_lua_with_state(
-                &lua,
-                Some(&state),
-                None,
-                &schema,
-                &PhenixValue::Callable(reference.clone()),
-            )
-                .unwrap()
-        else {
+        let Value::Function(proxy) = phenix_to_lua_with_state(
+            &lua,
+            Some(&state),
+            None,
+            &schema,
+            &PhenixValue::Callable(reference.clone()),
+        )
+        .unwrap() else {
             panic!("callable projection must be a Lua function");
         };
 

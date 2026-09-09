@@ -192,9 +192,7 @@ mod tests {
 
     #[test]
     fn callback_request_resolves_descriptor_identity_and_schema() {
-        let adapter = adapter(&[
-            "phenix.application.capability.capabilities@1",
-        ]);
+        let adapter = adapter(&["phenix.application.capability.capabilities@1"]);
         let request = request();
         let (callback, translated) = adapter
             .extension_callback_request(&request)
@@ -209,9 +207,7 @@ mod tests {
 
     #[test]
     fn callback_response_round_trips_typed_application_value() {
-        let adapter = adapter(&[
-            "phenix.application.capability.capabilities@1",
-        ]);
+        let adapter = adapter(&["phenix.application.capability.capabilities@1"]);
         let expected = response();
         let translated: CapabilityInvokeResult = adapter
             .extension_callback_response(&callback_id(), &encoded_response(&expected))
@@ -236,9 +232,7 @@ mod tests {
 
     #[test]
     fn callback_response_rejects_the_wrong_descriptor_shape() {
-        let adapter = adapter(&[
-            "phenix.application.capability.capabilities@1",
-        ]);
+        let adapter = adapter(&["phenix.application.capability.capabilities@1"]);
         let result = adapter.extension_callback_response::<CapabilityInvokeResult>(
             &callback_id(),
             &encoded_response(&Empty {}),
@@ -251,9 +245,7 @@ mod tests {
 
     #[test]
     fn callback_response_rejects_the_wrong_typed_contract() {
-        let adapter = adapter(&[
-            "phenix.application.capability.capabilities@1",
-        ]);
+        let adapter = adapter(&["phenix.application.capability.capabilities@1"]);
         let result = adapter
             .extension_callback_response::<Empty>(&callback_id(), &encoded_response(&response()));
         assert!(matches!(
