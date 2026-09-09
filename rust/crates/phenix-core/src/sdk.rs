@@ -487,7 +487,7 @@ fn observable_listen_schema() -> Type {
                     (key("recursive"), Type::Unit),
                 ])),
             ),
-        ])),
+        ]))),
         output: Box::new(Type::Callable {
             contract: contract(OBSERVABLE_STOP_CONTRACT),
             input: Box::new(Type::Unit),
