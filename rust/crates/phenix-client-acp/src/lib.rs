@@ -374,6 +374,14 @@ pub struct ExtensionCallbacks {
     sender: mpsc::SyncSender<ExtensionCallbackRequest>,
 }
 
+#[derive(Debug)]
+enum CallbackError {
+    Protocol(String),
+    Disconnected(String),
+    QueueFull,
+    Application(ApplicationError),
+}
+
 impl ExtensionCallbacks {
     #[must_use]
     pub fn bounded(capacity: NonZeroUsize) -> (Self, mpsc::Receiver<ExtensionCallbackRequest>) {
@@ -385,23 +393,23 @@ impl ExtensionCallbacks {
         &self,
         request: ExtRequest,
         extensions: &DescriptorExtensions,
-    ) -> Result<ExtResponse, ClientError> {
+    ) -> Result<ExtResponse, CallbackError> {
         let callback = extensions
             .callback(request.method.as_ref())
             .ok_or_else(|| {
-                ClientError::Protocol(format!(
+                CallbackError::Protocol(format!(
                     "ACP peer sent an unadvertised Phenix extension callback {}",
                     request.method
                 ))
             })?;
         let input = serde_json::from_str::<PhenixValue>(request.params.get()).map_err(|error| {
-            ClientError::Protocol(format!(
+            CallbackError::Protocol(format!(
                 "cannot decode ACP extension callback {}: {error}",
                 request.method
             ))
         })?;
         callback.request.parse(&input).map_err(|error| {
-            ClientError::Protocol(format!(
+            CallbackError::Protocol(format!(
                 "ACP extension callback {} violates the application descriptor: {error}",
                 request.method
             ))
@@ -414,26 +422,110 @@ impl ExtensionCallbacks {
                 response,
             })
             .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => ClientError::UpdateQueueFull,
-                mpsc::TrySendError::Disconnected(_) => ClientError::Transport(
+                mpsc::TrySendError::Full(_) => CallbackError::QueueFull,
+                mpsc::TrySendError::Disconnected(_) => CallbackError::Disconnected(
                     "ACP extension callback receiver disconnected".to_owned(),
                 ),
             })?;
         let output = received
             .await
             .map_err(|_| {
-                ClientError::Transport("ACP extension callback response dropped".to_owned())
+                CallbackError::Disconnected("ACP extension callback response dropped".to_owned())
             })?
-            .map_err(|error| ClientError::Protocol(error.to_string()))?;
+            .map_err(CallbackError::Application)?;
         callback.response.parse(&output).map_err(|error| {
-            ClientError::Protocol(format!(
+            CallbackError::Protocol(format!(
                 "ACP extension callback {} returned an invalid response: {error}",
                 callback.callback
             ))
         })?;
         let raw = serde_json::value::to_raw_value(&output)
-            .map_err(|error| ClientError::Protocol(error.to_string()))?;
+            .map_err(|error| CallbackError::Protocol(error.to_string()))?;
         Ok(ExtResponse::new(Arc::from(raw)))
+    }
+}
+
+fn callback_error_to_acp(error: CallbackError) -> agent_client_protocol::Error {
+    match error {
+        CallbackError::Application(error) => callback_application_error_to_acp(error),
+        CallbackError::QueueFull => agent_client_protocol::Error::internal_error().data(
+            serde_json::json!({
+                "phenix.class": "queue_full",
+                "phenix.details": null,
+            }),
+        ),
+        CallbackError::Disconnected(message) => agent_client_protocol::Error::internal_error().data(
+            serde_json::json!({
+                "phenix.class": "disconnected",
+                "phenix.details": { "message": message },
+            }),
+        ),
+        CallbackError::Protocol(message) => agent_client_protocol::Error::invalid_params().data(
+            serde_json::json!({
+                "phenix.class": "schema_mismatch",
+                "phenix.details": { "message": message },
+            }),
+        ),
+    }
+}
+
+fn callback_application_error_to_acp(error: ApplicationError) -> agent_client_protocol::Error {
+    let data = serde_json::json!({
+        "phenix.class": error.class(),
+        "phenix.details": callback_application_error_details(&error),
+    });
+    let error = match &error {
+        ApplicationError::UnsupportedCapability { .. } => agent_client_protocol::Error::method_not_found(),
+        ApplicationError::InvalidInput { .. } => agent_client_protocol::Error::invalid_params(),
+        ApplicationError::InvalidResponse { .. }
+        | ApplicationError::PermissionDenied { .. }
+        | ApplicationError::Conflict { .. }
+        | ApplicationError::Failed { .. }
+        | ApplicationError::Disconnected => agent_client_protocol::Error::internal_error(),
+        ApplicationError::NotFound { resource } => {
+            agent_client_protocol::Error::resource_not_found(Some(resource.clone()))
+        }
+        ApplicationError::UnknownValue { value } | ApplicationError::StaleReference { value } => {
+            agent_client_protocol::Error::resource_not_found(Some(value.clone()))
+        }
+        ApplicationError::InvalidPath { .. } | ApplicationError::SchemaMismatch { .. } => {
+            agent_client_protocol::Error::invalid_params()
+        }
+        ApplicationError::UnsupportedSnapshotPolicy { .. }
+        | ApplicationError::TransactionConflict { .. }
+        | ApplicationError::SubscriptionCapacity
+        | ApplicationError::Closed => agent_client_protocol::Error::internal_error(),
+        ApplicationError::Unauthenticated { .. } => agent_client_protocol::Error::auth_required(),
+        ApplicationError::Cancelled => agent_client_protocol::Error::request_cancelled(),
+    };
+    error.data(data)
+}
+
+fn callback_application_error_details(error: &ApplicationError) -> serde_json::Value {
+    match error {
+        ApplicationError::UnsupportedCapability { capability } => {
+            serde_json::json!({ "capability": capability.as_str() })
+        }
+        ApplicationError::InvalidInput { message }
+        | ApplicationError::InvalidResponse { message }
+        | ApplicationError::Unauthenticated { message }
+        | ApplicationError::PermissionDenied { message }
+        | ApplicationError::Conflict { message }
+        | ApplicationError::Failed { message }
+        | ApplicationError::InvalidPath { message }
+        | ApplicationError::SchemaMismatch { message }
+        | ApplicationError::UnsupportedSnapshotPolicy { message }
+        | ApplicationError::TransactionConflict { message } => {
+            serde_json::json!({ "message": message })
+        }
+        ApplicationError::NotFound { resource } => serde_json::json!({ "resource": resource }),
+        ApplicationError::UnknownValue { value } | ApplicationError::StaleReference { value } => {
+            serde_json::json!({ "value": value })
+        }
+        ApplicationError::Cancelled
+        | ApplicationError::Disconnected
+        | ApplicationError::SubscriptionCapacity
+        | ApplicationError::Closed => serde_json::Value::Null,
     }
 }
 
@@ -857,9 +949,10 @@ impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
                             agent_client_protocol::Error::invalid_params()
                                 .data("ACP peer sent an extension callback before initialize completed")
                         })?;
-                    let response = callbacks.receive(request, &extensions).await.map_err(|error| {
-                        agent_client_protocol::Error::internal_error().data(error.to_string())
-                    })?;
+                    let response = callbacks
+                        .receive(request, &extensions)
+                        .await
+                        .map_err(callback_error_to_acp)?;
                     let response = serde_json::to_value(response).map_err(|error| {
                         agent_client_protocol::Error::internal_error().data(error.to_string())
                     })?;
@@ -1253,6 +1346,25 @@ mod tests {
                         |details| details["message"] == "same display text"
                     )
         ));
+    }
+
+    #[test]
+    fn callback_errors_preserve_capability_classes() {
+        let cancelled = callback_error_to_acp(CallbackError::Application(ApplicationError::Cancelled));
+        assert_eq!(cancelled.code, ErrorCode::RequestCancelled);
+        assert_eq!(
+            cancelled.data.as_ref().unwrap()["phenix.class"],
+            "cancelled"
+        );
+
+        let full = callback_error_to_acp(CallbackError::QueueFull);
+        assert_eq!(full.data.as_ref().unwrap()["phenix.class"], "queue_full");
+
+        let disconnected = callback_error_to_acp(CallbackError::Disconnected("gone".to_owned()));
+        assert_eq!(
+            disconnected.data.as_ref().unwrap()["phenix.class"],
+            "disconnected"
+        );
     }
 
     #[test]
