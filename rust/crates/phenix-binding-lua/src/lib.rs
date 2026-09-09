@@ -20,7 +20,7 @@ use mlua::{
     UserData, UserDataMethods, Value,
 };
 use phenix_application_interface::{
-    types::{CapabilityInvokeInput, CapabilityInvokeResult, Empty},
+    types::{CapabilityInvokeInput, CapabilityInvokeResult, Empty, SdkValue},
     GetSdk, InvokeCapability, Operation,
 };
 use phenix_client_acp::{
@@ -639,6 +639,24 @@ fn response_values(
         })?),
         Response::Json(value) => lua.to_value(&value)?,
         Response::Application { operation, value } => {
+            let sdk_operation = ContractId::parse(GetSdk::ID)
+                .expect("static application operation id");
+            if operation == sdk_operation {
+                let sdk = SdkValue::from_value(&value).map_err(|error| {
+                    lua_error(BindingError::conversion(format!(
+                        "SDK response violates the application contract: {error}"
+                    )))
+                })?;
+                return phenix_to_lua_with_state(
+                    lua,
+                    Some(state),
+                    local_callables,
+                    &sdk.schema,
+                    &sdk.value,
+                )
+                .map(|value| MultiValue::from_vec(vec![value]))
+                .map_err(lua_error);
+            }
             let descriptor = application_descriptor();
             let declaration = descriptor.operations.get(&operation).ok_or_else(|| {
                 lua_error(BindingError::conversion(format!(
@@ -1851,5 +1869,125 @@ mod tests {
         assert_eq!(input.callable, PhenixValue::Callable(reference));
         assert_eq!(input.input, PhenixValue::U64(7));
         assert_eq!(output_schema, Type::String);
+    }
+    #[test]
+    fn sdk_response_projects_callable_leaves_with_their_paired_schema() {
+        let lua = Lua::new();
+        let (commands, mut receiver) = mpsc::unbounded();
+        let (_updates_sender, updates) = std_mpsc::channel();
+        let (_extension_sender, extension_updates) = std_mpsc::channel();
+        let (_callback_sender, callbacks) = std_mpsc::channel();
+        let state = Arc::new(ClientState {
+            commands,
+            updates: Mutex::new(updates),
+            extension_updates: Mutex::new(extension_updates),
+            callbacks: Mutex::new(callbacks),
+            capabilities: Mutex::new(BTreeSet::new()),
+            extensions: Mutex::new(BTreeSet::new()),
+            terminal_error: Mutex::new(None),
+            owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            generation: CapabilityGenerationId::parse("generation-1").unwrap(),
+        });
+        let reference = CallableRef::new(
+            ContractId::parse("fixture.echo@1").unwrap(),
+            CapabilityOwnerId::Plugin(phenix_core::PluginId::parse("fixture").unwrap()),
+            CapabilityGenerationId::parse("plugin-generation").unwrap(),
+            ReferenceId::parse("echo").unwrap(),
+        );
+        let schema = Type::Table(BTreeMap::from([(
+            Key::parse("echo").unwrap(),
+            Type::Callable {
+                contract: reference.contract().clone(),
+                input: Box::new(Type::U64),
+                output: Box::new(Type::String),
+            },
+        )]));
+        let sdk = SdkValue {
+            schema,
+            value: PhenixValue::Table(BTreeMap::from([(
+                Key::parse("echo").unwrap(),
+                PhenixValue::Callable(reference.clone()),
+            )])),
+        };
+        let response = response_values(
+            &lua,
+            &state,
+            None,
+            Response::Application {
+                operation: ContractId::parse(GetSdk::ID).unwrap(),
+                value: sdk.to_value(),
+            },
+        )
+        .unwrap();
+        let Value::Table(root) = response.into_iter().next().unwrap() else {
+            panic!("SDK response must project as a Lua table");
+        };
+        let proxy: mlua::Function = root.get("echo").unwrap();
+
+        let _: mlua::AnyUserData = proxy.call(7_i64).unwrap();
+        let command = futures::executor::block_on(receiver.next()).unwrap();
+        let Command::InvokeCapability {
+            input,
+            output_schema,
+            ..
+        } = command
+        else {
+            panic!("SDK callable must use generic capability invocation");
+        };
+        assert_eq!(input.callable, PhenixValue::Callable(reference));
+        assert_eq!(input.input, PhenixValue::U64(7));
+        assert_eq!(output_schema, Type::String);
+    }
+
+    #[test]
+    fn lua_function_lifting_mints_a_client_owned_typed_capability() {
+        let lua = Lua::new();
+        let (commands, _receiver) = mpsc::unbounded();
+        let (_updates_sender, updates) = std_mpsc::channel();
+        let (_extension_sender, extension_updates) = std_mpsc::channel();
+        let (_callback_sender, callbacks) = std_mpsc::channel();
+        let state = Arc::new(ClientState {
+            commands,
+            updates: Mutex::new(updates),
+            extension_updates: Mutex::new(extension_updates),
+            callbacks: Mutex::new(callbacks),
+            capabilities: Mutex::new(BTreeSet::new()),
+            extensions: Mutex::new(BTreeSet::new()),
+            terminal_error: Mutex::new(None),
+            owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            generation: CapabilityGenerationId::parse("generation-1").unwrap(),
+        });
+        let schema = Type::Callable {
+            contract: ContractId::parse("fixture.listener@1").unwrap(),
+            input: Box::new(Type::U64),
+            output: Box::new(Type::Unit),
+        };
+        let function = lua
+            .load("return function(_) return nil end")
+            .eval::<mlua::Function>()
+            .unwrap();
+        let local_callables = Rc::new(RefCell::new(LocalCallables::default()));
+
+        let value = lua_to_phenix_with_host(
+            &lua,
+            &schema,
+            Value::Function(function),
+            &state,
+            &local_callables,
+        )
+        .unwrap();
+        let PhenixValue::Callable(reference) = value else {
+            panic!("Lua callable conversion must mint a callable reference");
+        };
+        assert_eq!(reference.contract(), &ContractId::parse("fixture.listener@1").unwrap());
+        assert_eq!(
+            reference.owner(),
+            &CapabilityOwnerId::Client(ClientConnectionId::parse("fixture-client").unwrap())
+        );
+        assert_eq!(
+            reference.generation(),
+            &CapabilityGenerationId::parse("generation-1").unwrap()
+        );
+        assert!(local_callables.borrow().entries.contains_key(reference.id()));
     }
 }
