@@ -37,6 +37,12 @@
       "error": "phenix.application.error@1",
       "capability": "phenix.application.capability.discovery@1"
     },
+    "phenix.application.capability-invoke@1": {
+      "input": "phenix.application.type.capability-invoke-input@1",
+      "output": "phenix.application.type.capability-invoke-result@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.capabilities@1"
+    },
     "phenix.application.diagnostics@1": {
       "input": "phenix.application.type.empty@1",
       "output": "phenix.application.type.diagnostics@1",
@@ -109,6 +115,12 @@
       "error": "phenix.application.error@1",
       "capability": "phenix.application.capability.routing@1"
     },
+    "phenix.application.sdk-get@1": {
+      "input": "phenix.application.type.empty@1",
+      "output": "phenix.application.type.sdk-value@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.sdk@1"
+    },
     "phenix.application.session-close@1": {
       "input": "phenix.application.type.session-input@1",
       "output": "phenix.application.type.acknowledged@1",
@@ -176,11 +188,11 @@
     }
   },
   "callbacks": {
-    "phenix.application.client-callable@1": {
-      "request": "phenix.application.type.client-callable-request@1",
-      "response": "phenix.application.type.client-callable-response@1",
-      "capability": "phenix.application.capability.client-callables@1",
-      "semantics": "invocation_consent"
+    "phenix.application.capability-call@1": {
+      "request": "phenix.application.type.capability-invoke-input@1",
+      "response": "phenix.application.type.capability-invoke-result@1",
+      "capability": "phenix.application.capability.capabilities@1",
+      "semantics": "data"
     },
     "phenix.application.elicitation@1": {
       "request": "phenix.application.type.elicitation-request@1",
@@ -206,9 +218,9 @@
         "phenix.application.capability.sessions@1"
       ]
     },
-    "phenix.application.capability.client-callables@1": {
+    "phenix.application.capability.capabilities@1": {
       "dependencies": [
-        "phenix.application.capability.callables@1"
+        "phenix.application.capability.discovery@1"
       ]
     },
     "phenix.application.capability.diagnostics@1": {
@@ -257,6 +269,11 @@
     "phenix.application.capability.routing@1": {
       "dependencies": [
         "phenix.application.capability.sessions@1"
+      ]
+    },
+    "phenix.application.capability.sdk@1": {
+      "dependencies": [
+        "phenix.application.capability.discovery@1"
       ]
     },
     "phenix.application.capability.session-list@1": {
@@ -555,6 +572,25 @@
         }
       }
     },
+    "phenix.application.type.capability-invoke-input@1": {
+      "type": "table",
+      "value": {
+        "callable": {
+          "type": "any"
+        },
+        "input": {
+          "type": "any"
+        }
+      }
+    },
+    "phenix.application.type.capability-invoke-result@1": {
+      "type": "table",
+      "value": {
+        "output": {
+          "type": "any"
+        }
+      }
+    },
     "phenix.application.type.capability-list@1": {
       "type": "table",
       "value": {
@@ -566,173 +602,6 @@
         },
         "interface": {
           "type": "string"
-        }
-      }
-    },
-    "phenix.application.type.client-callable-request@1": {
-      "type": "table",
-      "value": {
-        "call_id": {
-          "type": "string"
-        },
-        "callable_id": {
-          "type": "string"
-        },
-        "execution_id": {
-          "type": "string"
-        },
-        "input": {
-          "type": "any"
-        },
-        "session_id": {
-          "type": "string"
-        }
-      }
-    },
-    "phenix.application.type.client-callable-response@1": {
-      "type": "variant",
-      "value": {
-        "Completed": {
-          "type": "table",
-          "value": {
-            "output": {
-              "type": "any"
-            }
-          }
-        },
-        "Failed": {
-          "type": "table",
-          "value": {
-            "error": {
-              "type": "variant",
-              "value": {
-                "Cancelled": {
-                  "type": "unit"
-                },
-                "Closed": {
-                  "type": "unit"
-                },
-                "Conflict": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "Disconnected": {
-                  "type": "unit"
-                },
-                "Failed": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "InvalidInput": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "InvalidPath": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "InvalidResponse": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "NotFound": {
-                  "type": "table",
-                  "value": {
-                    "resource": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "PermissionDenied": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "SchemaMismatch": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "StaleReference": {
-                  "type": "table",
-                  "value": {
-                    "value": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "SubscriptionCapacity": {
-                  "type": "unit"
-                },
-                "TransactionConflict": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "Unauthenticated": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "UnknownValue": {
-                  "type": "table",
-                  "value": {
-                    "value": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "UnsupportedCapability": {
-                  "type": "table",
-                  "value": {
-                    "capability": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "UnsupportedSnapshotPolicy": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          }
         }
       }
     },
@@ -4037,6 +3906,17 @@
         }
       }
     },
+    "phenix.application.type.sdk-value@1": {
+      "type": "table",
+      "value": {
+        "schema": {
+          "type": "any"
+        },
+        "value": {
+          "type": "any"
+        }
+      }
+    },
     "phenix.application.type.session-change@1": {
       "type": "variant",
       "value": {
@@ -5715,4 +5595,4 @@
       }
     }
   }
-}
+}\n

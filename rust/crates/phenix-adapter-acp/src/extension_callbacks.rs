@@ -129,6 +129,7 @@ mod tests {
     };
     use phenix_core::{
         CallableRef, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId, ReferenceId,
+        SessionId,
     };
     use std::future::ready;
 
