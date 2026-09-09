@@ -123,6 +123,10 @@ pub enum SdkResolutionError {
         resource: SdkResourceId,
         message: String,
     },
+    ConflictingBindingPath {
+        namespace: SdkNamespace,
+        path: Vec<String>,
+    },
 }
 
 impl Display for SdkResolutionError {
@@ -155,6 +159,11 @@ impl Display for SdkResolutionError {
             } => write!(
                 f,
                 "SDK namespace {namespace} observable resource {resource} is invalid: {message}"
+            ),
+            Self::ConflictingBindingPath { namespace, path } => write!(
+                f,
+                "SDK namespace {namespace} publishes multiple resources at binding path {}",
+                path.join(".")
             ),
         }
     }
@@ -198,6 +207,7 @@ impl ResolvedSdkContributions {
                     interface: interface.clone(),
                 });
             }
+            let mut binding_paths = BTreeSet::new();
             for (resource, observable) in &contribution.observables {
                 if resource != &observable.id || !contribution.resources.contains(resource) {
                     return Err(SdkResolutionError::InvalidObservableResource {
@@ -214,6 +224,12 @@ impl ResolvedSdkContributions {
                         namespace: contribution.namespace.clone(),
                         resource: resource.clone(),
                         message: "binding path must contain non-empty segments".to_owned(),
+                    });
+                }
+                if !binding_paths.insert(observable.binding_path.clone()) {
+                    return Err(SdkResolutionError::ConflictingBindingPath {
+                        namespace: contribution.namespace.clone(),
+                        path: observable.binding_path.clone(),
                     });
                 }
             }
@@ -530,6 +546,28 @@ mod tests {
             })
             .unwrap();
         resolved.validate_observables(&store).unwrap();
+    }
+
+    #[test]
+    fn observable_binding_paths_are_unique_within_a_namespace() {
+        let plugins = [plugin("testing", PluginExecution::ResourceOnly)];
+        let mut testing = contribution("testing", "testing");
+        for resource in ["sdk/testing/first", "sdk/testing/second"] {
+            testing.insert_observable(SdkObservableResource::new(
+                SdkResourceId::parse(resource).unwrap(),
+                ["state"],
+                ValueId::parse(format!("testing.{resource}@1")).unwrap(),
+                ValuePath::root(),
+                Type::U64,
+            ));
+        }
+
+        assert!(matches!(
+            ResolvedSdkContributions::resolve(&plugins, &[], [testing]),
+            Err(SdkResolutionError::ConflictingBindingPath { namespace, path })
+                if namespace == SdkNamespace::parse("testing").unwrap()
+                    && path == vec!["state".to_owned()]
+        ));
     }
 
     #[test]
