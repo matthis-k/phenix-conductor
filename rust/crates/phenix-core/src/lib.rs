@@ -212,7 +212,8 @@ pub use runtime::{
     SharedPluginInvocation,
 };
 pub use sdk::{
-    ResolvedSdkContributions, SdkContribution, SdkObservableResource, SdkResolutionError, SdkValue,
+    observable_delivery_schema, ResolvedSdkContributions, SdkContribution, SdkObservableResource,
+    SdkResolutionError, SdkValue,
 };
 pub use tasks::{CallCancellationToken, CancellationToken, TaskHandle, TaskRuntime, TaskScope};
 pub use typed_component::{

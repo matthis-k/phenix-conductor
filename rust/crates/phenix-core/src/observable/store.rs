@@ -323,7 +323,11 @@ impl ObservableStore {
                     observation: admitted.entry.id,
                     generation: admitted.entry.generation,
                     changes: &admitted.changes,
-                    snapshot: root.snapshot.as_ref(),
+                    snapshot: if admitted.entry.spec.mode == ObservationMode::Full {
+                        root.snapshot.as_ref()
+                    } else {
+                        None
+                    },
                 });
             }
         }

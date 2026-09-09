@@ -2,9 +2,9 @@ use crate::{
     CallableRef, CapabilityError, CapabilityGenerationId, CapabilityInvokeInput, CapabilityOwnerId,
     ComponentManifest, ContractId, InitialObservation, InterfaceId, ObservableError,
     ObservableStore, ObservationDelivery, ObservationMode, ObservationScope, ObservationSpec,
-    PhenixSchema, PhenixValue, PluginId, PluginManifest, ReferenceId, ResolvedHarness,
-    SdkNamespace, SdkResourceId, SharedCapabilityRegistry, Type, ValueAddress, ValueChange,
-    ValueId, ValuePath, ValuePathSegment,
+    PhenixSchema, PhenixValue, PluginId, PluginManifest, ReferenceId, ResolvedHarness, RuntimeId,
+    SdkNamespace, SdkResourceId, SharedCapabilityRegistry, Type, ValueAddress, ValueChange, ValueId,
+    ValuePath, ValuePathSegment,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -304,13 +304,13 @@ impl ResolvedSdkContributions {
 
     /// Materializes SDK observable resources as ordinary callable values.
     ///
-    /// The resulting graph is safe to pass to any language binding: `get`,
-    /// `listen`, and the returned `stop` capability all use the same generic
-    /// capability invocation contract as every other SDK callable.
+    /// The runtime owns generated `get`, `listen`, and `stop` callables. The
+    /// observable value itself remains owned by its contributing plugin.
     pub fn value_with_observables(
         &self,
         store: &ObservableStore,
         capabilities: &SharedCapabilityRegistry,
+        runtime: &RuntimeId,
         generation: CapabilityGenerationId,
     ) -> Result<SdkValue, SdkResolutionError> {
         self.validate_observables(store)?;
@@ -326,7 +326,7 @@ impl ResolvedSdkContributions {
                 });
             for observable in contribution.observables.values() {
                 let (resource_schema, resource_value) =
-                    observable_resource_value(&contribution.provider, &generation, observable);
+                    observable_resource_value(runtime, &generation, observable);
                 insert_binding(
                     namespace,
                     &mut namespace_schema,
@@ -353,7 +353,7 @@ impl ResolvedSdkContributions {
             for observable in contribution.observables.values() {
                 register_observable_resource(
                     namespace,
-                    &contribution.provider,
+                    runtime,
                     &generation,
                     observable,
                     store,
@@ -413,21 +413,21 @@ fn empty_sdk_table() -> (PhenixSchema, PhenixValue) {
 }
 
 fn observable_resource_value(
-    provider: &PluginId,
+    runtime: &RuntimeId,
     generation: &CapabilityGenerationId,
     observable: &SdkObservableResource,
 ) -> (PhenixSchema, PhenixValue) {
     let get_schema = observable_get_schema(&observable.schema);
     let listen_schema = observable_listen_schema();
     let get = observable_callable(
-        provider,
+        runtime,
         generation,
         observable,
         "get",
         OBSERVABLE_GET_CONTRACT,
     );
     let listen = observable_callable(
-        provider,
+        runtime,
         generation,
         observable,
         "listen",
@@ -482,6 +482,7 @@ fn observable_listen_schema() -> Type {
                     (key("full"), Type::Unit),
                 ])),
             ),
+            (key("path"), observable_path_schema()),
             (
                 key("scope"),
                 Type::Variant(BTreeMap::from([
@@ -499,10 +500,6 @@ fn observable_listen_schema() -> Type {
 }
 
 /// Canonical structural schema for observable listener deliveries.
-///
-/// The application interface uses the same field and variant shape. Keeping the
-/// schema here lets runtime-owned listener capabilities validate deliveries
-/// before invoking a provider without depending on the application crate.
 #[must_use]
 pub fn observable_delivery_schema() -> Type {
     Type::Table(BTreeMap::from([
@@ -597,7 +594,7 @@ fn observable_change_schema() -> Type {
 }
 
 fn observable_callable(
-    provider: &PluginId,
+    runtime: &RuntimeId,
     generation: &CapabilityGenerationId,
     observable: &SdkObservableResource,
     method: &str,
@@ -605,7 +602,7 @@ fn observable_callable(
 ) -> CallableRef {
     CallableRef::new(
         contract(contract_id),
-        CapabilityOwnerId::Plugin(provider.clone()),
+        CapabilityOwnerId::Runtime(runtime.clone()),
         generation.clone(),
         ReferenceId::parse(format!(
             "sdk/observable/{}/{method}",
@@ -617,14 +614,14 @@ fn observable_callable(
 
 fn register_observable_resource(
     namespace: &SdkNamespace,
-    provider: &PluginId,
+    runtime: &RuntimeId,
     generation: &CapabilityGenerationId,
     observable: &SdkObservableResource,
     store: &ObservableStore,
     capabilities: &SharedCapabilityRegistry,
 ) -> Result<(), SdkResolutionError> {
     let get = observable_callable(
-        provider,
+        runtime,
         generation,
         observable,
         "get",
@@ -648,7 +645,7 @@ fn register_observable_resource(
     )?;
 
     let listen = observable_callable(
-        provider,
+        runtime,
         generation,
         observable,
         "listen",
@@ -656,9 +653,9 @@ fn register_observable_resource(
     );
     let listen_store = store.clone();
     let listen_capabilities = capabilities.clone();
-    let address = observable.address();
+    let base_address = observable.address();
     let resource = observable.id.clone();
-    let stop_provider = provider.clone();
+    let stop_runtime = runtime.clone();
     let stop_generation = generation.clone();
     register_capability(
         namespace,
@@ -667,7 +664,11 @@ fn register_observable_resource(
         listen,
         observable_listen_schema(),
         move |input| {
-            let (listener, scope, mode, initial) = parse_listen_input(input)?;
+            let (listener, path, scope, mode, initial) = parse_listen_input(input)?;
+            let address = ValueAddress {
+                value: base_address.value.clone(),
+                path: join_observable_path(&base_address.path, &path),
+            };
             let callback_capabilities = listen_capabilities.clone();
             let callback = Arc::new(move |delivery: ObservationDelivery<'_>| {
                 let input = observation_delivery_value(delivery);
@@ -680,7 +681,7 @@ fn register_observable_resource(
             let subscription = listen_store
                 .subscribe(
                     ObservationSpec {
-                        address: address.clone(),
+                        address,
                         scope,
                         mode,
                         initial,
@@ -690,7 +691,7 @@ fn register_observable_resource(
                 .map_err(observable_provider_error)?;
             let stop = CallableRef::new(
                 contract(OBSERVABLE_STOP_CONTRACT),
-                CapabilityOwnerId::Plugin(stop_provider.clone()),
+                CapabilityOwnerId::Runtime(stop_runtime.clone()),
                 stop_generation.clone(),
                 ReferenceId::parse(format!(
                     "sdk/observable/{}/subscription/{}-{}",
@@ -757,6 +758,7 @@ fn parse_listen_input(
 ) -> Result<
     (
         CallableRef,
+        ValuePath,
         ObservationScope,
         ObservationMode,
         InitialObservation,
@@ -778,10 +780,104 @@ fn parse_listen_input(
     };
     Ok((
         listener,
+        parse_observable_path(fields.get("path"))?,
         parse_scope(fields.get("scope"))?,
         parse_mode(fields.get("mode"))?,
         parse_initial(fields.get("initial"))?,
     ))
+}
+
+fn parse_observable_path(value: Option<&PhenixValue>) -> Result<ValuePath, CapabilityError> {
+    let Some(PhenixValue::Table(fields)) = value else {
+        return Err(CapabilityError::SchemaMismatch {
+            message: "observable listen path must be a structural path".to_owned(),
+        });
+    };
+    let Some(PhenixValue::List(segments)) = fields.get("segments") else {
+        return Err(CapabilityError::SchemaMismatch {
+            message: "observable listen path is missing segments".to_owned(),
+        });
+    };
+    segments
+        .iter()
+        .map(parse_observable_path_segment)
+        .collect::<Result<Vec<_>, _>>()
+        .map(ValuePath::new)
+}
+
+fn parse_observable_path_segment(value: &PhenixValue) -> Result<ValuePathSegment, CapabilityError> {
+    let PhenixValue::Variant { tag, value } = value else {
+        return Err(CapabilityError::SchemaMismatch {
+            message: "observable path segment must be a variant".to_owned(),
+        });
+    };
+    match tag.as_str() {
+        "Field" => {
+            let PhenixValue::Table(fields) = value.as_ref() else {
+                return Err(CapabilityError::SchemaMismatch {
+                    message: "observable Field path segment must contain a table".to_owned(),
+                });
+            };
+            let Some(PhenixValue::String(field)) = fields.get("key") else {
+                return Err(CapabilityError::SchemaMismatch {
+                    message: "observable Field path segment is missing key".to_owned(),
+                });
+            };
+            crate::Key::parse(field.clone())
+                .map(ValuePathSegment::Field)
+                .map_err(|error| CapabilityError::SchemaMismatch {
+                    message: error.to_owned(),
+                })
+        }
+        "MapKey" => {
+            let PhenixValue::Table(fields) = value.as_ref() else {
+                return Err(CapabilityError::SchemaMismatch {
+                    message: "observable MapKey path segment must contain a table".to_owned(),
+                });
+            };
+            let Some(PhenixValue::String(map_key)) = fields.get("key") else {
+                return Err(CapabilityError::SchemaMismatch {
+                    message: "observable MapKey path segment is missing key".to_owned(),
+                });
+            };
+            Ok(ValuePathSegment::MapKey(map_key.clone()))
+        }
+        "Index" => {
+            let PhenixValue::Table(fields) = value.as_ref() else {
+                return Err(CapabilityError::SchemaMismatch {
+                    message: "observable Index path segment must contain a table".to_owned(),
+                });
+            };
+            let Some(PhenixValue::U64(index)) = fields.get("index") else {
+                return Err(CapabilityError::SchemaMismatch {
+                    message: "observable Index path segment is missing index".to_owned(),
+                });
+            };
+            u32::try_from(*index)
+                .map(ValuePathSegment::Index)
+                .map_err(|_| CapabilityError::SchemaMismatch {
+                    message: "observable Index path segment exceeds u32".to_owned(),
+                })
+        }
+        "VariantPayload" if matches!(value.as_ref(), PhenixValue::Unit) => {
+            Ok(ValuePathSegment::VariantPayload)
+        }
+        "OptionPayload" if matches!(value.as_ref(), PhenixValue::Unit) => {
+            Ok(ValuePathSegment::OptionPayload)
+        }
+        _ => Err(CapabilityError::SchemaMismatch {
+            message: "observable path segment is invalid".to_owned(),
+        }),
+    }
+}
+
+fn join_observable_path(base: &ValuePath, relative: &ValuePath) -> ValuePath {
+    ValuePath::new(
+        base.segments()
+            .iter()
+            .cloned()
+            .chain(relative.segments().iter().cloned()),
+    )
 }
 
 fn parse_scope(value: Option<&PhenixValue>) -> Result<ObservationScope, CapabilityError> {
@@ -828,12 +924,17 @@ fn variant_tag(value: Option<&PhenixValue>) -> Result<&str, CapabilityError> {
 }
 
 fn observation_delivery_value(delivery: ObservationDelivery<'_>) -> PhenixValue {
-    let payload = match delivery.full_value() {
-        Ok(Some(value)) => variant_value(
+    let payload = if delivery.snapshot.is_some() {
+        let value = delivery
+            .full_value()
+            .expect("validated observable delivery address must resolve in its snapshot")
+            .expect("delivery with a snapshot must produce a full value");
+        variant_value(
             "Full",
             PhenixValue::Table(BTreeMap::from([(key("value"), value.clone())])),
-        ),
-        Ok(None) | Err(_) => variant_value(
+        )
+    } else {
+        variant_value(
             "Diff",
             PhenixValue::Table(BTreeMap::from([(
                 key("changes"),
@@ -845,7 +946,7 @@ fn observation_delivery_value(delivery: ObservationDelivery<'_>) -> PhenixValue 
                         .collect(),
                 ),
             )])),
-        ),
+        )
     };
     PhenixValue::Table(BTreeMap::from([
         (key("address"), observable_address_value(delivery.address)),
@@ -1122,7 +1223,7 @@ mod tests {
     use crate::{
         Authority, CallableRef, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId,
         ComponentExport, ComponentId, ContractId, Key, ObservableRegistration, PhenixValue,
-        PluginExecution, ReferenceId, SharedCapabilityRegistry, SnapshotPolicy, Type,
+        PluginExecution, ReferenceId, RuntimeId, SharedCapabilityRegistry, SnapshotPolicy, Type,
     };
     use std::sync::{Arc, Mutex};
 
@@ -1159,6 +1260,34 @@ mod tests {
             PluginId::parse(provider).unwrap(),
             SdkNamespace::parse(namespace).unwrap(),
         )
+    }
+
+    fn listen_input(listener: CallableRef, path: &ValuePath) -> PhenixValue {
+        PhenixValue::Table(BTreeMap::from([
+            (key("listener"), PhenixValue::Callable(listener)),
+            (
+                key("scope"),
+                PhenixValue::Variant {
+                    tag: key("recursive"),
+                    value: Box::new(PhenixValue::Unit),
+                },
+            ),
+            (
+                key("mode"),
+                PhenixValue::Variant {
+                    tag: key("diff"),
+                    value: Box::new(PhenixValue::Unit),
+                },
+            ),
+            (
+                key("initial"),
+                PhenixValue::Variant {
+                    tag: key("full"),
+                    value: Box::new(PhenixValue::Unit),
+                },
+            ),
+            (key("path"), observable_path_value(path)),
+        ]))
     }
 
     #[test]
@@ -1383,6 +1512,21 @@ mod tests {
     }
 
     #[test]
+    fn observable_path_round_trips_every_structural_segment() {
+        let path = ValuePath::new([
+            ValuePathSegment::Field(Key::parse("field").unwrap()),
+            ValuePathSegment::MapKey("map-key".to_owned()),
+            ValuePathSegment::Index(7),
+            ValuePathSegment::VariantPayload,
+            ValuePathSegment::OptionPayload,
+        ]);
+        assert_eq!(
+            parse_observable_path(Some(&observable_path_value(&path))).unwrap(),
+            path
+        );
+    }
+
+    #[test]
     fn observable_resources_materialize_as_generic_callable_values() {
         let plugins = [plugin("testing", PluginExecution::ResourceOnly)];
         let value_id = ValueId::parse("testing.state@1").unwrap();
@@ -1406,12 +1550,10 @@ mod tests {
             })
             .unwrap();
         let capabilities = SharedCapabilityRegistry::default();
+        let runtime = RuntimeId::parse("phenix.sdk-runtime").unwrap();
+        let generation = CapabilityGenerationId::parse("testing-generation").unwrap();
         let sdk = resolved
-            .value_with_observables(
-                &store,
-                &capabilities,
-                CapabilityGenerationId::parse("testing-generation").unwrap(),
-            )
+            .value_with_observables(&store, &capabilities, &runtime, generation.clone())
             .unwrap();
         let PhenixValue::Table(namespaces) = sdk.value else {
             panic!("SDK root is a table");
@@ -1425,6 +1567,8 @@ mod tests {
         let PhenixValue::Callable(get) = state.get("get").unwrap() else {
             panic!("get is callable");
         };
+        assert_eq!(get.owner(), &CapabilityOwnerId::Runtime(runtime.clone()));
+        assert_eq!(get.generation(), &generation);
         let get = capabilities
             .invoke(crate::CapabilityInvokeInput {
                 callable: get.clone(),
@@ -1442,6 +1586,8 @@ mod tests {
         let PhenixValue::Callable(listen) = state.get("listen").unwrap() else {
             panic!("listen is callable");
         };
+        assert_eq!(listen.owner(), &CapabilityOwnerId::Runtime(runtime));
+        assert_eq!(listen.generation(), &generation);
         let listener = CallableRef::new(
             ContractId::parse(OBSERVABLE_DELIVERY_CONTRACT).unwrap(),
             CapabilityOwnerId::Client(ClientConnectionId::parse("test-client").unwrap()),
@@ -1468,33 +1614,7 @@ mod tests {
         let stop = capabilities
             .invoke(crate::CapabilityInvokeInput {
                 callable: listen.clone(),
-                input: PhenixValue::Table(BTreeMap::from([
-                    (
-                        Key::parse("listener").unwrap(),
-                        PhenixValue::Callable(listener),
-                    ),
-                    (
-                        Key::parse("scope").unwrap(),
-                        PhenixValue::Variant {
-                            tag: Key::parse("recursive").unwrap(),
-                            value: Box::new(PhenixValue::Unit),
-                        },
-                    ),
-                    (
-                        Key::parse("mode").unwrap(),
-                        PhenixValue::Variant {
-                            tag: Key::parse("diff").unwrap(),
-                            value: Box::new(PhenixValue::Unit),
-                        },
-                    ),
-                    (
-                        Key::parse("initial").unwrap(),
-                        PhenixValue::Variant {
-                            tag: Key::parse("full").unwrap(),
-                            value: Box::new(PhenixValue::Unit),
-                        },
-                    ),
-                ])),
+                input: listen_input(listener, &ValuePath::root()),
             })
             .unwrap();
         let PhenixValue::Callable(stop) = stop.output else {
@@ -1509,9 +1629,8 @@ mod tests {
         {
             let deliveries = deliveries.lock().unwrap();
             assert_eq!(deliveries.len(), 2);
-            for delivery in deliveries.iter() {
-                observable_delivery_schema().parse(delivery).unwrap();
-            }
+            observable_delivery_schema().parse(&deliveries[0]).unwrap();
+            observable_delivery_schema().parse(&deliveries[1]).unwrap();
             let PhenixValue::Table(initial) = &deliveries[0] else {
                 panic!("initial delivery is a table");
             };
@@ -1602,5 +1721,130 @@ mod tests {
             }),
             Err(CapabilityError::UnknownReference(_))
         ));
+    }
+
+    #[test]
+    fn listen_path_is_relative_to_the_resource_base_and_malformed_paths_do_not_subscribe() {
+        let plugins = [plugin("testing", PluginExecution::ResourceOnly)];
+        let value_id = ValueId::parse("testing.nested@1").unwrap();
+        let outer = Key::parse("outer").unwrap();
+        let inner = Key::parse("inner").unwrap();
+        let root_schema = Type::Table(BTreeMap::from([(
+            outer.clone(),
+            Type::Table(BTreeMap::from([(inner.clone(), Type::U64)])),
+        )]));
+        let outer_schema = Type::Table(BTreeMap::from([(inner.clone(), Type::U64)]));
+        let mut testing = contribution("testing", "testing");
+        testing.insert_observable(SdkObservableResource::new(
+            SdkResourceId::parse("sdk/testing/nested").unwrap(),
+            ["nested"],
+            value_id.clone(),
+            ValuePath::new([ValuePathSegment::Field(outer.clone())]),
+            outer_schema,
+        ));
+        let resolved = ResolvedSdkContributions::resolve(&plugins, &[], [testing]).unwrap();
+        let store = ObservableStore::default();
+        store
+            .register(ObservableRegistration {
+                id: value_id.clone(),
+                owner: PluginId::parse("testing").unwrap(),
+                schema: root_schema,
+                snapshot_policy: SnapshotPolicy::CopyOnChange,
+                initial: PhenixValue::Table(BTreeMap::from([(
+                    outer.clone(),
+                    PhenixValue::Table(BTreeMap::from([(inner.clone(), PhenixValue::U64(1))])),
+                )])),
+            })
+            .unwrap();
+        let capabilities = SharedCapabilityRegistry::default();
+        let runtime = RuntimeId::parse("phenix.sdk-runtime").unwrap();
+        let sdk = resolved
+            .value_with_observables(
+                &store,
+                &capabilities,
+                &runtime,
+                CapabilityGenerationId::parse("nested-generation").unwrap(),
+            )
+            .unwrap();
+        let PhenixValue::Table(namespaces) = sdk.value else {
+            panic!("SDK root is a table");
+        };
+        let PhenixValue::Table(resources) = namespaces.get("testing").unwrap() else {
+            panic!("namespace is a table");
+        };
+        let PhenixValue::Table(nested) = resources.get("nested").unwrap() else {
+            panic!("resource is a table");
+        };
+        let PhenixValue::Callable(listen) = nested.get("listen").unwrap() else {
+            panic!("listen is callable");
+        };
+        let listener = CallableRef::new(
+            contract(OBSERVABLE_DELIVERY_CONTRACT),
+            CapabilityOwnerId::Client(ClientConnectionId::parse("test-client").unwrap()),
+            CapabilityGenerationId::parse("connection-1").unwrap(),
+            ReferenceId::parse("nested-listener").unwrap(),
+        );
+        let deliveries = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&deliveries);
+        capabilities
+            .register(
+                listener.clone(),
+                Type::Callable {
+                    contract: contract(OBSERVABLE_DELIVERY_CONTRACT),
+                    input: Box::new(observable_delivery_schema()),
+                    output: Box::new(Type::Unit),
+                },
+                move |input| {
+                    recorded.lock().unwrap().push(input);
+                    Ok(PhenixValue::Unit)
+                },
+            )
+            .unwrap();
+
+        let mut malformed = match listen_input(listener.clone(), &ValuePath::root()) {
+            PhenixValue::Table(fields) => fields,
+            _ => unreachable!(),
+        };
+        malformed.insert(key("path"), PhenixValue::String("not-a-path".to_owned()));
+        assert!(matches!(
+            capabilities.invoke(crate::CapabilityInvokeInput {
+                callable: listen.clone(),
+                input: PhenixValue::Table(malformed),
+            }),
+            Err(CapabilityError::SchemaMismatch { .. })
+        ));
+        let absolute = ValuePath::new([
+            ValuePathSegment::Field(outer.clone()),
+            ValuePathSegment::Field(inner.clone()),
+        ]);
+        store
+            .transaction([&value_id], |transaction| {
+                transaction.replace(&value_id, absolute.clone(), PhenixValue::U64(2))
+            })
+            .unwrap();
+        assert!(deliveries.lock().unwrap().is_empty());
+
+        let relative = ValuePath::new([ValuePathSegment::Field(inner)]);
+        let _stop = capabilities
+            .invoke(crate::CapabilityInvokeInput {
+                callable: listen,
+                input: listen_input(listener, &relative),
+            })
+            .unwrap();
+        store
+            .transaction([&value_id], |transaction| {
+                transaction.replace(&value_id, absolute.clone(), PhenixValue::U64(3))
+            })
+            .unwrap();
+        let deliveries = deliveries.lock().unwrap();
+        assert_eq!(deliveries.len(), 1);
+        observable_delivery_schema().parse(&deliveries[0]).unwrap();
+        let PhenixValue::Table(delivery) = &deliveries[0] else {
+            panic!("delivery is a table");
+        };
+        let PhenixValue::Table(address) = delivery.get("address").unwrap() else {
+            panic!("delivery address is a table");
+        };
+        assert_eq!(address.get("path"), Some(&observable_path_value(&absolute)));
     }
 }

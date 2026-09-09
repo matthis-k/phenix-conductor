@@ -7,8 +7,19 @@
 
 use agent_client_protocol::{schema::v1::*, Agent, Error, Stdio};
 use phenix_adapter_acp::ApplicationAdapter;
-use phenix_application_interface::{types::ApplicationError, ApplicationTransport};
-use phenix_core::{ContractId, PhenixValue};
+use phenix_application_interface::{
+    types::{
+        ApplicationError, CapabilityInvokeInput as ApplicationCapabilityInvokeInput,
+        CapabilityInvokeResult as ApplicationCapabilityInvokeResult, Empty,
+        SdkValue as ApplicationSdkValue,
+    },
+    ApplicationTransport, GetSdk, InvokeCapability, Operation,
+};
+use phenix_core::{
+    CapabilityGenerationId, CapabilityInvokeInput as CoreCapabilityInvokeInput, ContractId,
+    ObservableStore, PhenixValue, ResolvedSdkContributions, RuntimeId, SharedCapabilityRegistry,
+    ValueCodec,
+};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -63,6 +74,91 @@ impl ApplicationTransport for ChannelTransport {
                 .map_err(|_| ApplicationError::Disconnected)?;
             receive.await.map_err(|_| ApplicationError::Disconnected)?
         }
+    }
+}
+
+/// Live application handler for the value SDK operations owned by #503.
+///
+/// SDK materialization and generic invocation share one capability registry.
+/// The service materializes the SDK once so repeated `GetSdk` calls return the
+/// same callable identities instead of re-registering them.
+#[derive(Clone)]
+pub struct SdkApplicationService {
+    sdk: ApplicationSdkValue,
+    capabilities: SharedCapabilityRegistry,
+}
+
+impl SdkApplicationService {
+    pub fn new(
+        sdk: &ResolvedSdkContributions,
+        store: &ObservableStore,
+        capabilities: SharedCapabilityRegistry,
+        runtime: RuntimeId,
+        generation: CapabilityGenerationId,
+    ) -> Result<Self, phenix_core::SdkResolutionError> {
+        let sdk = sdk.value_with_observables(store, &capabilities, &runtime, generation)?;
+        Ok(Self {
+            sdk: ApplicationSdkValue {
+                schema: sdk.schema,
+                value: sdk.value,
+            },
+            capabilities,
+        })
+    }
+
+    #[must_use]
+    pub fn capabilities(&self) -> &SharedCapabilityRegistry {
+        &self.capabilities
+    }
+
+    pub fn invoke(
+        &self,
+        operation: &ContractId,
+        input: PhenixValue,
+    ) -> Result<PhenixValue, ApplicationError> {
+        if operation.as_str() == GetSdk::ID {
+            Empty::from_value(&input).map_err(|error| ApplicationError::InvalidInput {
+                message: error.to_string(),
+            })?;
+            return Ok(self.sdk.to_value());
+        }
+        if operation.as_str() == InvokeCapability::ID {
+            let request = ApplicationCapabilityInvokeInput::from_value(&input).map_err(|error| {
+                ApplicationError::InvalidInput {
+                    message: error.to_string(),
+                }
+            })?;
+            let PhenixValue::Callable(callable) = request.callable else {
+                return Err(ApplicationError::InvalidInput {
+                    message: "capability invocation requires a callable reference".to_owned(),
+                });
+            };
+            let result = self.capabilities.invoke(CoreCapabilityInvokeInput {
+                callable,
+                input: request.input,
+            })?;
+            return Ok(ApplicationCapabilityInvokeResult {
+                output: result.output,
+            }
+            .to_value());
+        }
+        Err(ApplicationError::InvalidInput {
+            message: format!("unsupported SDK application operation {operation}"),
+        })
+    }
+
+    pub fn handle(&self, invocation: ApplicationInvocation) {
+        let response = self.invoke(&invocation.operation, invocation.input.clone());
+        invocation.respond(response);
+    }
+}
+
+pub async fn serve_sdk_application(
+    service: SdkApplicationService,
+    mut receiver: mpsc::Receiver<ApplicationInvocation>,
+) {
+    while let Some(invocation) = receiver.recv().await {
+        service.handle(invocation);
     }
 }
 
@@ -266,6 +362,11 @@ fn application_error_details(error: &ApplicationError) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phenix_core::{
+        Authority, CapabilityOwnerId, Key, ObservableRegistration, PhenixValue, PluginExecution,
+        PluginId, PluginManifest, SdkContribution, SdkNamespace, SdkObservableResource,
+        SdkResourceId, SnapshotPolicy, Type, ValueId, ValuePath,
+    };
 
     #[tokio::test]
     async fn channel_transport_preserves_typed_operation_and_response() {
@@ -284,6 +385,101 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(output, PhenixValue::String("output".to_owned()));
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sdk_get_and_capability_invoke_share_the_live_production_registry() {
+        let manifest = PluginManifest {
+            id: PluginId::parse("testing").unwrap(),
+            version: 1,
+            execution: PluginExecution::ResourceOnly,
+            dependencies: Vec::new(),
+            services: Vec::new(),
+            resource_namespaces: Vec::new(),
+            maximum_authority: Authority::default(),
+        };
+        let value_id = ValueId::parse("testing.state@1").unwrap();
+        let mut contribution = SdkContribution::new(
+            manifest.id.clone(),
+            SdkNamespace::parse("testing").unwrap(),
+        );
+        contribution.insert_observable(SdkObservableResource::new(
+            SdkResourceId::parse("sdk/testing/state").unwrap(),
+            ["state"],
+            value_id.clone(),
+            ValuePath::root(),
+            Type::U64,
+        ));
+        let resolved = ResolvedSdkContributions::resolve(&[manifest], &[], [contribution]).unwrap();
+        let store = ObservableStore::default();
+        store
+            .register(ObservableRegistration {
+                id: value_id,
+                owner: PluginId::parse("testing").unwrap(),
+                schema: Type::U64,
+                snapshot_policy: SnapshotPolicy::CopyOnChange,
+                initial: PhenixValue::U64(7),
+            })
+            .unwrap();
+        let capabilities = SharedCapabilityRegistry::default();
+        let runtime = RuntimeId::parse("phenix.application-runtime").unwrap();
+        let generation = CapabilityGenerationId::parse("application-generation-1").unwrap();
+        let service = SdkApplicationService::new(
+            &resolved,
+            &store,
+            capabilities,
+            runtime.clone(),
+            generation.clone(),
+        )
+        .unwrap();
+        let (transport, receiver) = ChannelTransport::new(2);
+        let worker = tokio::spawn(serve_sdk_application(service, receiver));
+
+        let sdk = transport
+            .invoke(
+                &ContractId::parse(GetSdk::ID).unwrap(),
+                Empty {}.to_value(),
+            )
+            .await
+            .unwrap();
+        let sdk = ApplicationSdkValue::from_value(&sdk).unwrap();
+        let PhenixValue::Table(namespaces) = sdk.value else {
+            panic!("SDK root is a table");
+        };
+        let PhenixValue::Table(resources) = namespaces.get("testing").unwrap() else {
+            panic!("namespace is a table");
+        };
+        let PhenixValue::Table(state) = resources.get("state").unwrap() else {
+            panic!("state resource is a table");
+        };
+        let PhenixValue::Callable(get) = state.get("get").unwrap() else {
+            panic!("get is callable");
+        };
+        assert_eq!(get.owner(), &CapabilityOwnerId::Runtime(runtime));
+        assert_eq!(get.generation(), &generation);
+
+        let result = transport
+            .invoke(
+                &ContractId::parse(InvokeCapability::ID).unwrap(),
+                ApplicationCapabilityInvokeInput {
+                    callable: PhenixValue::Callable(get.clone()),
+                    input: PhenixValue::Unit,
+                }
+                .to_value(),
+            )
+            .await
+            .unwrap();
+        let result = ApplicationCapabilityInvokeResult::from_value(&result).unwrap();
+        assert_eq!(
+            result.output,
+            PhenixValue::Table(std::collections::BTreeMap::from([
+                (Key::parse("value").unwrap(), PhenixValue::U64(7)),
+                (Key::parse("version").unwrap(), PhenixValue::U64(0)),
+            ]))
+        );
+
+        drop(transport);
         worker.await.unwrap();
     }
 
