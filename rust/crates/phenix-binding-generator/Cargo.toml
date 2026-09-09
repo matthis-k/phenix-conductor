@@ -1,19 +1,12 @@
 [package]
-name = "phenix-acp-stdio"
+name = "phenix-binding-generator"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [package.metadata.phenix]
-role = "application"
-
-[lib]
-path = "src/lib.rs"
+role = "passive-library"
 
 [dependencies]
-agent-client-protocol.workspace = true
-phenix-adapter-acp = { path = "../phenix-adapter-acp" }
 phenix-application-interface = { path = "../phenix-application-interface" }
 phenix-core = { path = "../phenix-core" }
-serde_json.workspace = true
-tokio.workspace = true

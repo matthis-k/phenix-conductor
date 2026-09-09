@@ -44,13 +44,3 @@ record!(ElicitationRequest, "phenix.application.type.elicitation-request@1", {
 variants!(ElicitationResponse, "phenix.application.type.elicitation-response@1", {
     Accepted { value: PhenixValue }, Declined, Cancelled,
 });
-record!(ClientCallableRequest, "phenix.application.type.client-callable-request@1", {
-    session_id: SessionId,
-    execution_id: String,
-    call_id: String,
-    callable_id: CallableId,
-    input: PhenixValue,
-});
-variants!(ClientCallableResponse, "phenix.application.type.client-callable-response@1", {
-    Completed { output: PhenixValue }, Failed { error: ApplicationError },
-});

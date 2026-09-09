@@ -37,6 +37,12 @@
       "error": "phenix.application.error@1",
       "capability": "phenix.application.capability.discovery@1"
     },
+    "phenix.application.capability-invoke@1": {
+      "input": "phenix.application.type.capability-invoke-input@1",
+      "output": "phenix.application.type.capability-invoke-result@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.capabilities@1"
+    },
     "phenix.application.diagnostics@1": {
       "input": "phenix.application.type.empty@1",
       "output": "phenix.application.type.diagnostics@1",
@@ -67,6 +73,30 @@
       "error": "phenix.application.error@1",
       "capability": "phenix.application.capability.models@1"
     },
+    "phenix.application.observable-get@1": {
+      "input": "phenix.application.type.observable-get-input@1",
+      "output": "phenix.application.type.observable-value@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.observables@1"
+    },
+    "phenix.application.observable-list@1": {
+      "input": "phenix.application.type.empty@1",
+      "output": "phenix.application.type.observable-list@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.observables@1"
+    },
+    "phenix.application.observable-subscribe@1": {
+      "input": "phenix.application.type.observable-subscribe-input@1",
+      "output": "phenix.application.type.observable-subscription-result@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.observables@1"
+    },
+    "phenix.application.observable-unsubscribe@1": {
+      "input": "phenix.application.type.observable-unsubscribe-input@1",
+      "output": "phenix.application.type.acknowledged@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.observables@1"
+    },
     "phenix.application.prompt@1": {
       "input": "phenix.application.type.prompt-input@1",
       "output": "phenix.application.type.prompt-result@1",
@@ -84,6 +114,12 @@
       "output": "phenix.application.type.routing-profiles@1",
       "error": "phenix.application.error@1",
       "capability": "phenix.application.capability.routing@1"
+    },
+    "phenix.application.sdk-get@1": {
+      "input": "phenix.application.type.empty@1",
+      "output": "phenix.application.type.sdk-value@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.sdk@1"
     },
     "phenix.application.session-close@1": {
       "input": "phenix.application.type.session-input@1",
@@ -140,6 +176,11 @@
       "ordering": "execution",
       "capability": "phenix.application.capability.prompt@1"
     },
+    "phenix.application.observable-update@1": {
+      "payload": "phenix.application.type.observable-delivery@1",
+      "ordering": "commit",
+      "capability": "phenix.application.capability.observables@1"
+    },
     "phenix.application.session-update@1": {
       "payload": "phenix.application.type.session-update@1",
       "ordering": "session",
@@ -147,11 +188,11 @@
     }
   },
   "callbacks": {
-    "phenix.application.client-callable@1": {
-      "request": "phenix.application.type.client-callable-request@1",
-      "response": "phenix.application.type.client-callable-response@1",
-      "capability": "phenix.application.capability.client-callables@1",
-      "semantics": "invocation_consent"
+    "phenix.application.capability-call@1": {
+      "request": "phenix.application.type.capability-invoke-input@1",
+      "response": "phenix.application.type.capability-invoke-result@1",
+      "capability": "phenix.application.capability.capabilities@1",
+      "semantics": "data"
     },
     "phenix.application.elicitation@1": {
       "request": "phenix.application.type.elicitation-request@1",
@@ -177,9 +218,9 @@
         "phenix.application.capability.sessions@1"
       ]
     },
-    "phenix.application.capability.client-callables@1": {
+    "phenix.application.capability.capabilities@1": {
       "dependencies": [
-        "phenix.application.capability.callables@1"
+        "phenix.application.capability.discovery@1"
       ]
     },
     "phenix.application.capability.diagnostics@1": {
@@ -210,6 +251,11 @@
         "phenix.application.capability.sessions@1"
       ]
     },
+    "phenix.application.capability.observables@1": {
+      "dependencies": [
+        "phenix.application.capability.discovery@1"
+      ]
+    },
     "phenix.application.capability.permission@1": {
       "dependencies": [
         "phenix.application.capability.prompt@1"
@@ -223,6 +269,11 @@
     "phenix.application.capability.routing@1": {
       "dependencies": [
         "phenix.application.capability.sessions@1"
+      ]
+    },
+    "phenix.application.capability.sdk@1": {
+      "dependencies": [
+        "phenix.application.capability.discovery@1"
       ]
     },
     "phenix.application.capability.session-list@1": {
@@ -258,6 +309,9 @@
         "Cancelled": {
           "type": "unit"
         },
+        "Closed": {
+          "type": "unit"
+        },
         "Conflict": {
           "type": "table",
           "value": {
@@ -278,6 +332,14 @@
           }
         },
         "InvalidInput": {
+          "type": "table",
+          "value": {
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "InvalidPath": {
           "type": "table",
           "value": {
             "message": {
@@ -309,6 +371,33 @@
             }
           }
         },
+        "SchemaMismatch": {
+          "type": "table",
+          "value": {
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "StaleReference": {
+          "type": "table",
+          "value": {
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        "SubscriptionCapacity": {
+          "type": "unit"
+        },
+        "TransactionConflict": {
+          "type": "table",
+          "value": {
+            "message": {
+              "type": "string"
+            }
+          }
+        },
         "Unauthenticated": {
           "type": "table",
           "value": {
@@ -317,10 +406,26 @@
             }
           }
         },
+        "UnknownValue": {
+          "type": "table",
+          "value": {
+            "value": {
+              "type": "string"
+            }
+          }
+        },
         "UnsupportedCapability": {
           "type": "table",
           "value": {
             "capability": {
+              "type": "string"
+            }
+          }
+        },
+        "UnsupportedSnapshotPolicy": {
+          "type": "table",
+          "value": {
+            "message": {
               "type": "string"
             }
           }
@@ -467,6 +572,25 @@
         }
       }
     },
+    "phenix.application.type.capability-invoke-input@1": {
+      "type": "table",
+      "value": {
+        "callable": {
+          "type": "any"
+        },
+        "input": {
+          "type": "any"
+        }
+      }
+    },
+    "phenix.application.type.capability-invoke-result@1": {
+      "type": "table",
+      "value": {
+        "output": {
+          "type": "any"
+        }
+      }
+    },
     "phenix.application.type.capability-list@1": {
       "type": "table",
       "value": {
@@ -478,119 +602,6 @@
         },
         "interface": {
           "type": "string"
-        }
-      }
-    },
-    "phenix.application.type.client-callable-request@1": {
-      "type": "table",
-      "value": {
-        "call_id": {
-          "type": "string"
-        },
-        "callable_id": {
-          "type": "string"
-        },
-        "execution_id": {
-          "type": "string"
-        },
-        "input": {
-          "type": "any"
-        },
-        "session_id": {
-          "type": "string"
-        }
-      }
-    },
-    "phenix.application.type.client-callable-response@1": {
-      "type": "variant",
-      "value": {
-        "Completed": {
-          "type": "table",
-          "value": {
-            "output": {
-              "type": "any"
-            }
-          }
-        },
-        "Failed": {
-          "type": "table",
-          "value": {
-            "error": {
-              "type": "variant",
-              "value": {
-                "Cancelled": {
-                  "type": "unit"
-                },
-                "Conflict": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "Disconnected": {
-                  "type": "unit"
-                },
-                "Failed": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "InvalidInput": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "InvalidResponse": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "NotFound": {
-                  "type": "table",
-                  "value": {
-                    "resource": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "PermissionDenied": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "Unauthenticated": {
-                  "type": "table",
-                  "value": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "UnsupportedCapability": {
-                  "type": "table",
-                  "value": {
-                    "capability": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          }
         }
       }
     },
@@ -783,6 +794,9 @@
                         "Cancelled": {
                           "type": "unit"
                         },
+                        "Closed": {
+                          "type": "unit"
+                        },
                         "Conflict": {
                           "type": "table",
                           "value": {
@@ -803,6 +817,14 @@
                           }
                         },
                         "InvalidInput": {
+                          "type": "table",
+                          "value": {
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "InvalidPath": {
                           "type": "table",
                           "value": {
                             "message": {
@@ -834,6 +856,33 @@
                             }
                           }
                         },
+                        "SchemaMismatch": {
+                          "type": "table",
+                          "value": {
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "StaleReference": {
+                          "type": "table",
+                          "value": {
+                            "value": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "SubscriptionCapacity": {
+                          "type": "unit"
+                        },
+                        "TransactionConflict": {
+                          "type": "table",
+                          "value": {
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
                         "Unauthenticated": {
                           "type": "table",
                           "value": {
@@ -842,10 +891,26 @@
                             }
                           }
                         },
+                        "UnknownValue": {
+                          "type": "table",
+                          "value": {
+                            "value": {
+                              "type": "string"
+                            }
+                          }
+                        },
                         "UnsupportedCapability": {
                           "type": "table",
                           "value": {
                             "capability": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "UnsupportedSnapshotPolicy": {
+                          "type": "table",
+                          "value": {
+                            "message": {
                               "type": "string"
                             }
                           }
@@ -890,6 +955,9 @@
                 "Cancelled": {
                   "type": "unit"
                 },
+                "Closed": {
+                  "type": "unit"
+                },
                 "Conflict": {
                   "type": "table",
                   "value": {
@@ -910,6 +978,14 @@
                   }
                 },
                 "InvalidInput": {
+                  "type": "table",
+                  "value": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "InvalidPath": {
                   "type": "table",
                   "value": {
                     "message": {
@@ -941,6 +1017,33 @@
                     }
                   }
                 },
+                "SchemaMismatch": {
+                  "type": "table",
+                  "value": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "StaleReference": {
+                  "type": "table",
+                  "value": {
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "SubscriptionCapacity": {
+                  "type": "unit"
+                },
+                "TransactionConflict": {
+                  "type": "table",
+                  "value": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
                 "Unauthenticated": {
                   "type": "table",
                   "value": {
@@ -949,10 +1052,26 @@
                     }
                   }
                 },
+                "UnknownValue": {
+                  "type": "table",
+                  "value": {
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                },
                 "UnsupportedCapability": {
                   "type": "table",
                   "value": {
                     "capability": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "UnsupportedSnapshotPolicy": {
+                  "type": "table",
+                  "value": {
+                    "message": {
                       "type": "string"
                     }
                   }
@@ -1004,6 +1123,9 @@
                     "Cancelled": {
                       "type": "unit"
                     },
+                    "Closed": {
+                      "type": "unit"
+                    },
                     "Conflict": {
                       "type": "table",
                       "value": {
@@ -1024,6 +1146,14 @@
                       }
                     },
                     "InvalidInput": {
+                      "type": "table",
+                      "value": {
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "InvalidPath": {
                       "type": "table",
                       "value": {
                         "message": {
@@ -1055,6 +1185,33 @@
                         }
                       }
                     },
+                    "SchemaMismatch": {
+                      "type": "table",
+                      "value": {
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "StaleReference": {
+                      "type": "table",
+                      "value": {
+                        "value": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "SubscriptionCapacity": {
+                      "type": "unit"
+                    },
+                    "TransactionConflict": {
+                      "type": "table",
+                      "value": {
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
                     "Unauthenticated": {
                       "type": "table",
                       "value": {
@@ -1063,10 +1220,26 @@
                         }
                       }
                     },
+                    "UnknownValue": {
+                      "type": "table",
+                      "value": {
+                        "value": {
+                          "type": "string"
+                        }
+                      }
+                    },
                     "UnsupportedCapability": {
                       "type": "table",
                       "value": {
                         "capability": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "UnsupportedSnapshotPolicy": {
+                      "type": "table",
+                      "value": {
+                        "message": {
                           "type": "string"
                         }
                       }
@@ -1114,6 +1287,9 @@
                 "Cancelled": {
                   "type": "unit"
                 },
+                "Closed": {
+                  "type": "unit"
+                },
                 "Conflict": {
                   "type": "table",
                   "value": {
@@ -1134,6 +1310,14 @@
                   }
                 },
                 "InvalidInput": {
+                  "type": "table",
+                  "value": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "InvalidPath": {
                   "type": "table",
                   "value": {
                     "message": {
@@ -1165,6 +1349,33 @@
                     }
                   }
                 },
+                "SchemaMismatch": {
+                  "type": "table",
+                  "value": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "StaleReference": {
+                  "type": "table",
+                  "value": {
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "SubscriptionCapacity": {
+                  "type": "unit"
+                },
+                "TransactionConflict": {
+                  "type": "table",
+                  "value": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
                 "Unauthenticated": {
                   "type": "table",
                   "value": {
@@ -1173,10 +1384,26 @@
                     }
                   }
                 },
+                "UnknownValue": {
+                  "type": "table",
+                  "value": {
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                },
                 "UnsupportedCapability": {
                   "type": "table",
                   "value": {
                     "capability": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "UnsupportedSnapshotPolicy": {
+                  "type": "table",
+                  "value": {
+                    "message": {
                       "type": "string"
                     }
                   }
@@ -1228,6 +1455,9 @@
                           "Cancelled": {
                             "type": "unit"
                           },
+                          "Closed": {
+                            "type": "unit"
+                          },
                           "Conflict": {
                             "type": "table",
                             "value": {
@@ -1248,6 +1478,14 @@
                             }
                           },
                           "InvalidInput": {
+                            "type": "table",
+                            "value": {
+                              "message": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "InvalidPath": {
                             "type": "table",
                             "value": {
                               "message": {
@@ -1279,6 +1517,33 @@
                               }
                             }
                           },
+                          "SchemaMismatch": {
+                            "type": "table",
+                            "value": {
+                              "message": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "StaleReference": {
+                            "type": "table",
+                            "value": {
+                              "value": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "SubscriptionCapacity": {
+                            "type": "unit"
+                          },
+                          "TransactionConflict": {
+                            "type": "table",
+                            "value": {
+                              "message": {
+                                "type": "string"
+                              }
+                            }
+                          },
                           "Unauthenticated": {
                             "type": "table",
                             "value": {
@@ -1287,10 +1552,26 @@
                               }
                             }
                           },
+                          "UnknownValue": {
+                            "type": "table",
+                            "value": {
+                              "value": {
+                                "type": "string"
+                              }
+                            }
+                          },
                           "UnsupportedCapability": {
                             "type": "table",
                             "value": {
                               "capability": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "UnsupportedSnapshotPolicy": {
+                            "type": "table",
+                            "value": {
+                              "message": {
                                 "type": "string"
                               }
                             }
@@ -1365,6 +1646,9 @@
                             "Cancelled": {
                               "type": "unit"
                             },
+                            "Closed": {
+                              "type": "unit"
+                            },
                             "Conflict": {
                               "type": "table",
                               "value": {
@@ -1385,6 +1669,14 @@
                               }
                             },
                             "InvalidInput": {
+                              "type": "table",
+                              "value": {
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "InvalidPath": {
                               "type": "table",
                               "value": {
                                 "message": {
@@ -1416,6 +1708,33 @@
                                 }
                               }
                             },
+                            "SchemaMismatch": {
+                              "type": "table",
+                              "value": {
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "StaleReference": {
+                              "type": "table",
+                              "value": {
+                                "value": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "SubscriptionCapacity": {
+                              "type": "unit"
+                            },
+                            "TransactionConflict": {
+                              "type": "table",
+                              "value": {
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            },
                             "Unauthenticated": {
                               "type": "table",
                               "value": {
@@ -1424,10 +1743,26 @@
                                 }
                               }
                             },
+                            "UnknownValue": {
+                              "type": "table",
+                              "value": {
+                                "value": {
+                                  "type": "string"
+                                }
+                              }
+                            },
                             "UnsupportedCapability": {
                               "type": "table",
                               "value": {
                                 "capability": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "UnsupportedSnapshotPolicy": {
+                              "type": "table",
+                              "value": {
+                                "message": {
                                   "type": "string"
                                 }
                               }
@@ -1472,6 +1807,9 @@
                     "Cancelled": {
                       "type": "unit"
                     },
+                    "Closed": {
+                      "type": "unit"
+                    },
                     "Conflict": {
                       "type": "table",
                       "value": {
@@ -1492,6 +1830,14 @@
                       }
                     },
                     "InvalidInput": {
+                      "type": "table",
+                      "value": {
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "InvalidPath": {
                       "type": "table",
                       "value": {
                         "message": {
@@ -1523,6 +1869,33 @@
                         }
                       }
                     },
+                    "SchemaMismatch": {
+                      "type": "table",
+                      "value": {
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "StaleReference": {
+                      "type": "table",
+                      "value": {
+                        "value": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "SubscriptionCapacity": {
+                      "type": "unit"
+                    },
+                    "TransactionConflict": {
+                      "type": "table",
+                      "value": {
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
                     "Unauthenticated": {
                       "type": "table",
                       "value": {
@@ -1531,10 +1904,26 @@
                         }
                       }
                     },
+                    "UnknownValue": {
+                      "type": "table",
+                      "value": {
+                        "value": {
+                          "type": "string"
+                        }
+                      }
+                    },
                     "UnsupportedCapability": {
                       "type": "table",
                       "value": {
                         "capability": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "UnsupportedSnapshotPolicy": {
+                      "type": "table",
+                      "value": {
+                        "message": {
                           "type": "string"
                         }
                       }
@@ -1688,6 +2077,1631 @@
           "value": {
             "type": "string"
           }
+        }
+      }
+    },
+    "phenix.application.type.observable-address@1": {
+      "type": "table",
+      "value": {
+        "path": {
+          "type": "table",
+          "value": {
+            "segments": {
+              "type": "list",
+              "value": {
+                "type": "variant",
+                "value": {
+                  "Field": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "Index": {
+                    "type": "table",
+                    "value": {
+                      "index": {
+                        "type": "u64"
+                      }
+                    }
+                  },
+                  "MapKey": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "OptionPayload": {
+                    "type": "unit"
+                  },
+                  "VariantPayload": {
+                    "type": "unit"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "value_id": {
+          "type": "string"
+        }
+      }
+    },
+    "phenix.application.type.observable-change@1": {
+      "type": "variant",
+      "value": {
+        "Remove": {
+          "type": "table",
+          "value": {
+            "change": {
+              "type": "table",
+              "value": {
+                "path": {
+                  "type": "table",
+                  "value": {
+                    "segments": {
+                      "type": "list",
+                      "value": {
+                        "type": "variant",
+                        "value": {
+                          "Field": {
+                            "type": "table",
+                            "value": {
+                              "key": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "Index": {
+                            "type": "table",
+                            "value": {
+                              "index": {
+                                "type": "u64"
+                              }
+                            }
+                          },
+                          "MapKey": {
+                            "type": "table",
+                            "value": {
+                              "key": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "OptionPayload": {
+                            "type": "unit"
+                          },
+                          "VariantPayload": {
+                            "type": "unit"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "Replace": {
+          "type": "table",
+          "value": {
+            "change": {
+              "type": "table",
+              "value": {
+                "path": {
+                  "type": "table",
+                  "value": {
+                    "segments": {
+                      "type": "list",
+                      "value": {
+                        "type": "variant",
+                        "value": {
+                          "Field": {
+                            "type": "table",
+                            "value": {
+                              "key": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "Index": {
+                            "type": "table",
+                            "value": {
+                              "index": {
+                                "type": "u64"
+                              }
+                            }
+                          },
+                          "MapKey": {
+                            "type": "table",
+                            "value": {
+                              "key": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "OptionPayload": {
+                            "type": "unit"
+                          },
+                          "VariantPayload": {
+                            "type": "unit"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "value": {
+                  "type": "any"
+                }
+              }
+            }
+          }
+        },
+        "Splice": {
+          "type": "table",
+          "value": {
+            "change": {
+              "type": "table",
+              "value": {
+                "delete_count": {
+                  "type": "u64"
+                },
+                "inserted": {
+                  "type": "list",
+                  "value": {
+                    "type": "any"
+                  }
+                },
+                "path": {
+                  "type": "table",
+                  "value": {
+                    "segments": {
+                      "type": "list",
+                      "value": {
+                        "type": "variant",
+                        "value": {
+                          "Field": {
+                            "type": "table",
+                            "value": {
+                              "key": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "Index": {
+                            "type": "table",
+                            "value": {
+                              "index": {
+                                "type": "u64"
+                              }
+                            }
+                          },
+                          "MapKey": {
+                            "type": "table",
+                            "value": {
+                              "key": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "OptionPayload": {
+                            "type": "unit"
+                          },
+                          "VariantPayload": {
+                            "type": "unit"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "start": {
+                  "type": "u64"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "phenix.application.type.observable-delivery@1": {
+      "type": "table",
+      "value": {
+        "address": {
+          "type": "table",
+          "value": {
+            "path": {
+              "type": "table",
+              "value": {
+                "segments": {
+                  "type": "list",
+                  "value": {
+                    "type": "variant",
+                    "value": {
+                      "Field": {
+                        "type": "table",
+                        "value": {
+                          "key": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "Index": {
+                        "type": "table",
+                        "value": {
+                          "index": {
+                            "type": "u64"
+                          }
+                        }
+                      },
+                      "MapKey": {
+                        "type": "table",
+                        "value": {
+                          "key": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "OptionPayload": {
+                        "type": "unit"
+                      },
+                      "VariantPayload": {
+                        "type": "unit"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "value_id": {
+              "type": "string"
+            }
+          }
+        },
+        "commit_id": {
+          "type": "option",
+          "value": {
+            "type": "u64"
+          }
+        },
+        "from_version": {
+          "type": "u64"
+        },
+        "generation": {
+          "type": "u64"
+        },
+        "payload": {
+          "type": "variant",
+          "value": {
+            "Diff": {
+              "type": "table",
+              "value": {
+                "changes": {
+                  "type": "list",
+                  "value": {
+                    "type": "variant",
+                    "value": {
+                      "Remove": {
+                        "type": "table",
+                        "value": {
+                          "change": {
+                            "type": "table",
+                            "value": {
+                              "path": {
+                                "type": "table",
+                                "value": {
+                                  "segments": {
+                                    "type": "list",
+                                    "value": {
+                                      "type": "variant",
+                                      "value": {
+                                        "Field": {
+                                          "type": "table",
+                                          "value": {
+                                            "key": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "Index": {
+                                          "type": "table",
+                                          "value": {
+                                            "index": {
+                                              "type": "u64"
+                                            }
+                                          }
+                                        },
+                                        "MapKey": {
+                                          "type": "table",
+                                          "value": {
+                                            "key": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "OptionPayload": {
+                                          "type": "unit"
+                                        },
+                                        "VariantPayload": {
+                                          "type": "unit"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "Replace": {
+                        "type": "table",
+                        "value": {
+                          "change": {
+                            "type": "table",
+                            "value": {
+                              "path": {
+                                "type": "table",
+                                "value": {
+                                  "segments": {
+                                    "type": "list",
+                                    "value": {
+                                      "type": "variant",
+                                      "value": {
+                                        "Field": {
+                                          "type": "table",
+                                          "value": {
+                                            "key": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "Index": {
+                                          "type": "table",
+                                          "value": {
+                                            "index": {
+                                              "type": "u64"
+                                            }
+                                          }
+                                        },
+                                        "MapKey": {
+                                          "type": "table",
+                                          "value": {
+                                            "key": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "OptionPayload": {
+                                          "type": "unit"
+                                        },
+                                        "VariantPayload": {
+                                          "type": "unit"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "value": {
+                                "type": "any"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "Splice": {
+                        "type": "table",
+                        "value": {
+                          "change": {
+                            "type": "table",
+                            "value": {
+                              "delete_count": {
+                                "type": "u64"
+                              },
+                              "inserted": {
+                                "type": "list",
+                                "value": {
+                                  "type": "any"
+                                }
+                              },
+                              "path": {
+                                "type": "table",
+                                "value": {
+                                  "segments": {
+                                    "type": "list",
+                                    "value": {
+                                      "type": "variant",
+                                      "value": {
+                                        "Field": {
+                                          "type": "table",
+                                          "value": {
+                                            "key": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "Index": {
+                                          "type": "table",
+                                          "value": {
+                                            "index": {
+                                              "type": "u64"
+                                            }
+                                          }
+                                        },
+                                        "MapKey": {
+                                          "type": "table",
+                                          "value": {
+                                            "key": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "OptionPayload": {
+                                          "type": "unit"
+                                        },
+                                        "VariantPayload": {
+                                          "type": "unit"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "start": {
+                                "type": "u64"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "Full": {
+              "type": "table",
+              "value": {
+                "value": {
+                  "type": "any"
+                }
+              }
+            }
+          }
+        },
+        "subscription_id": {
+          "type": "u64"
+        },
+        "value_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "u64"
+        }
+      }
+    },
+    "phenix.application.type.observable-get-input@1": {
+      "type": "table",
+      "value": {
+        "path": {
+          "type": "table",
+          "value": {
+            "segments": {
+              "type": "list",
+              "value": {
+                "type": "variant",
+                "value": {
+                  "Field": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "Index": {
+                    "type": "table",
+                    "value": {
+                      "index": {
+                        "type": "u64"
+                      }
+                    }
+                  },
+                  "MapKey": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "OptionPayload": {
+                    "type": "unit"
+                  },
+                  "VariantPayload": {
+                    "type": "unit"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "reference": {
+          "type": "object",
+          "value": {
+            "contract": "phenix.observable@1"
+          }
+        }
+      }
+    },
+    "phenix.application.type.observable-initial@1": {
+      "type": "variant",
+      "value": {
+        "Full": {
+          "type": "unit"
+        },
+        "None": {
+          "type": "unit"
+        }
+      }
+    },
+    "phenix.application.type.observable-list@1": {
+      "type": "table",
+      "value": {
+        "resources": {
+          "type": "list",
+          "value": {
+            "type": "table",
+            "value": {
+              "binding_path": {
+                "type": "list",
+                "value": {
+                  "type": "string"
+                }
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "path": {
+                "type": "table",
+                "value": {
+                  "segments": {
+                    "type": "list",
+                    "value": {
+                      "type": "variant",
+                      "value": {
+                        "Field": {
+                          "type": "table",
+                          "value": {
+                            "key": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "Index": {
+                          "type": "table",
+                          "value": {
+                            "index": {
+                              "type": "u64"
+                            }
+                          }
+                        },
+                        "MapKey": {
+                          "type": "table",
+                          "value": {
+                            "key": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "OptionPayload": {
+                          "type": "unit"
+                        },
+                        "VariantPayload": {
+                          "type": "unit"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "reference": {
+                "type": "object",
+                "value": {
+                  "contract": "phenix.observable@1"
+                }
+              },
+              "resource": {
+                "type": "string"
+              },
+              "schema": {
+                "type": "any"
+              },
+              "snapshot_policy": {
+                "type": "variant",
+                "value": {
+                  "CopyOnChange": {
+                    "type": "unit"
+                  },
+                  "CurrentOnly": {
+                    "type": "unit"
+                  }
+                }
+              },
+              "value_id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "u64"
+              }
+            }
+          }
+        }
+      }
+    },
+    "phenix.application.type.observable-mode@1": {
+      "type": "variant",
+      "value": {
+        "Diff": {
+          "type": "unit"
+        },
+        "Full": {
+          "type": "unit"
+        }
+      }
+    },
+    "phenix.application.type.observable-path-segment@1": {
+      "type": "variant",
+      "value": {
+        "Field": {
+          "type": "table",
+          "value": {
+            "key": {
+              "type": "string"
+            }
+          }
+        },
+        "Index": {
+          "type": "table",
+          "value": {
+            "index": {
+              "type": "u64"
+            }
+          }
+        },
+        "MapKey": {
+          "type": "table",
+          "value": {
+            "key": {
+              "type": "string"
+            }
+          }
+        },
+        "OptionPayload": {
+          "type": "unit"
+        },
+        "VariantPayload": {
+          "type": "unit"
+        }
+      }
+    },
+    "phenix.application.type.observable-path@1": {
+      "type": "table",
+      "value": {
+        "segments": {
+          "type": "list",
+          "value": {
+            "type": "variant",
+            "value": {
+              "Field": {
+                "type": "table",
+                "value": {
+                  "key": {
+                    "type": "string"
+                  }
+                }
+              },
+              "Index": {
+                "type": "table",
+                "value": {
+                  "index": {
+                    "type": "u64"
+                  }
+                }
+              },
+              "MapKey": {
+                "type": "table",
+                "value": {
+                  "key": {
+                    "type": "string"
+                  }
+                }
+              },
+              "OptionPayload": {
+                "type": "unit"
+              },
+              "VariantPayload": {
+                "type": "unit"
+              }
+            }
+          }
+        }
+      }
+    },
+    "phenix.application.type.observable-payload@1": {
+      "type": "variant",
+      "value": {
+        "Diff": {
+          "type": "table",
+          "value": {
+            "changes": {
+              "type": "list",
+              "value": {
+                "type": "variant",
+                "value": {
+                  "Remove": {
+                    "type": "table",
+                    "value": {
+                      "change": {
+                        "type": "table",
+                        "value": {
+                          "path": {
+                            "type": "table",
+                            "value": {
+                              "segments": {
+                                "type": "list",
+                                "value": {
+                                  "type": "variant",
+                                  "value": {
+                                    "Field": {
+                                      "type": "table",
+                                      "value": {
+                                        "key": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "Index": {
+                                      "type": "table",
+                                      "value": {
+                                        "index": {
+                                          "type": "u64"
+                                        }
+                                      }
+                                    },
+                                    "MapKey": {
+                                      "type": "table",
+                                      "value": {
+                                        "key": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "OptionPayload": {
+                                      "type": "unit"
+                                    },
+                                    "VariantPayload": {
+                                      "type": "unit"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "Replace": {
+                    "type": "table",
+                    "value": {
+                      "change": {
+                        "type": "table",
+                        "value": {
+                          "path": {
+                            "type": "table",
+                            "value": {
+                              "segments": {
+                                "type": "list",
+                                "value": {
+                                  "type": "variant",
+                                  "value": {
+                                    "Field": {
+                                      "type": "table",
+                                      "value": {
+                                        "key": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "Index": {
+                                      "type": "table",
+                                      "value": {
+                                        "index": {
+                                          "type": "u64"
+                                        }
+                                      }
+                                    },
+                                    "MapKey": {
+                                      "type": "table",
+                                      "value": {
+                                        "key": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "OptionPayload": {
+                                      "type": "unit"
+                                    },
+                                    "VariantPayload": {
+                                      "type": "unit"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "value": {
+                            "type": "any"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "Splice": {
+                    "type": "table",
+                    "value": {
+                      "change": {
+                        "type": "table",
+                        "value": {
+                          "delete_count": {
+                            "type": "u64"
+                          },
+                          "inserted": {
+                            "type": "list",
+                            "value": {
+                              "type": "any"
+                            }
+                          },
+                          "path": {
+                            "type": "table",
+                            "value": {
+                              "segments": {
+                                "type": "list",
+                                "value": {
+                                  "type": "variant",
+                                  "value": {
+                                    "Field": {
+                                      "type": "table",
+                                      "value": {
+                                        "key": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "Index": {
+                                      "type": "table",
+                                      "value": {
+                                        "index": {
+                                          "type": "u64"
+                                        }
+                                      }
+                                    },
+                                    "MapKey": {
+                                      "type": "table",
+                                      "value": {
+                                        "key": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "OptionPayload": {
+                                      "type": "unit"
+                                    },
+                                    "VariantPayload": {
+                                      "type": "unit"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "start": {
+                            "type": "u64"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "Full": {
+          "type": "table",
+          "value": {
+            "value": {
+              "type": "any"
+            }
+          }
+        }
+      }
+    },
+    "phenix.application.type.observable-remove@1": {
+      "type": "table",
+      "value": {
+        "path": {
+          "type": "table",
+          "value": {
+            "segments": {
+              "type": "list",
+              "value": {
+                "type": "variant",
+                "value": {
+                  "Field": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "Index": {
+                    "type": "table",
+                    "value": {
+                      "index": {
+                        "type": "u64"
+                      }
+                    }
+                  },
+                  "MapKey": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "OptionPayload": {
+                    "type": "unit"
+                  },
+                  "VariantPayload": {
+                    "type": "unit"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "phenix.application.type.observable-replace@1": {
+      "type": "table",
+      "value": {
+        "path": {
+          "type": "table",
+          "value": {
+            "segments": {
+              "type": "list",
+              "value": {
+                "type": "variant",
+                "value": {
+                  "Field": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "Index": {
+                    "type": "table",
+                    "value": {
+                      "index": {
+                        "type": "u64"
+                      }
+                    }
+                  },
+                  "MapKey": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "OptionPayload": {
+                    "type": "unit"
+                  },
+                  "VariantPayload": {
+                    "type": "unit"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "value": {
+          "type": "any"
+        }
+      }
+    },
+    "phenix.application.type.observable-resource@1": {
+      "type": "table",
+      "value": {
+        "binding_path": {
+          "type": "list",
+          "value": {
+            "type": "string"
+          }
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "path": {
+          "type": "table",
+          "value": {
+            "segments": {
+              "type": "list",
+              "value": {
+                "type": "variant",
+                "value": {
+                  "Field": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "Index": {
+                    "type": "table",
+                    "value": {
+                      "index": {
+                        "type": "u64"
+                      }
+                    }
+                  },
+                  "MapKey": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "OptionPayload": {
+                    "type": "unit"
+                  },
+                  "VariantPayload": {
+                    "type": "unit"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "reference": {
+          "type": "object",
+          "value": {
+            "contract": "phenix.observable@1"
+          }
+        },
+        "resource": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "any"
+        },
+        "snapshot_policy": {
+          "type": "variant",
+          "value": {
+            "CopyOnChange": {
+              "type": "unit"
+            },
+            "CurrentOnly": {
+              "type": "unit"
+            }
+          }
+        },
+        "value_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "u64"
+        }
+      }
+    },
+    "phenix.application.type.observable-scope@1": {
+      "type": "variant",
+      "value": {
+        "Exact": {
+          "type": "unit"
+        },
+        "Recursive": {
+          "type": "unit"
+        }
+      }
+    },
+    "phenix.application.type.observable-snapshot-policy@1": {
+      "type": "variant",
+      "value": {
+        "CopyOnChange": {
+          "type": "unit"
+        },
+        "CurrentOnly": {
+          "type": "unit"
+        }
+      }
+    },
+    "phenix.application.type.observable-splice@1": {
+      "type": "table",
+      "value": {
+        "delete_count": {
+          "type": "u64"
+        },
+        "inserted": {
+          "type": "list",
+          "value": {
+            "type": "any"
+          }
+        },
+        "path": {
+          "type": "table",
+          "value": {
+            "segments": {
+              "type": "list",
+              "value": {
+                "type": "variant",
+                "value": {
+                  "Field": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "Index": {
+                    "type": "table",
+                    "value": {
+                      "index": {
+                        "type": "u64"
+                      }
+                    }
+                  },
+                  "MapKey": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "OptionPayload": {
+                    "type": "unit"
+                  },
+                  "VariantPayload": {
+                    "type": "unit"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "start": {
+          "type": "u64"
+        }
+      }
+    },
+    "phenix.application.type.observable-subscribe-input@1": {
+      "type": "table",
+      "value": {
+        "initial": {
+          "type": "variant",
+          "value": {
+            "Full": {
+              "type": "unit"
+            },
+            "None": {
+              "type": "unit"
+            }
+          }
+        },
+        "mode": {
+          "type": "variant",
+          "value": {
+            "Diff": {
+              "type": "unit"
+            },
+            "Full": {
+              "type": "unit"
+            }
+          }
+        },
+        "path": {
+          "type": "table",
+          "value": {
+            "segments": {
+              "type": "list",
+              "value": {
+                "type": "variant",
+                "value": {
+                  "Field": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "Index": {
+                    "type": "table",
+                    "value": {
+                      "index": {
+                        "type": "u64"
+                      }
+                    }
+                  },
+                  "MapKey": {
+                    "type": "table",
+                    "value": {
+                      "key": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "OptionPayload": {
+                    "type": "unit"
+                  },
+                  "VariantPayload": {
+                    "type": "unit"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "reference": {
+          "type": "object",
+          "value": {
+            "contract": "phenix.observable@1"
+          }
+        },
+        "scope": {
+          "type": "variant",
+          "value": {
+            "Exact": {
+              "type": "unit"
+            },
+            "Recursive": {
+              "type": "unit"
+            }
+          }
+        }
+      }
+    },
+    "phenix.application.type.observable-subscription-result@1": {
+      "type": "table",
+      "value": {
+        "generation": {
+          "type": "u64"
+        },
+        "initial": {
+          "type": "option",
+          "value": {
+            "type": "table",
+            "value": {
+              "address": {
+                "type": "table",
+                "value": {
+                  "path": {
+                    "type": "table",
+                    "value": {
+                      "segments": {
+                        "type": "list",
+                        "value": {
+                          "type": "variant",
+                          "value": {
+                            "Field": {
+                              "type": "table",
+                              "value": {
+                                "key": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "Index": {
+                              "type": "table",
+                              "value": {
+                                "index": {
+                                  "type": "u64"
+                                }
+                              }
+                            },
+                            "MapKey": {
+                              "type": "table",
+                              "value": {
+                                "key": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "OptionPayload": {
+                              "type": "unit"
+                            },
+                            "VariantPayload": {
+                              "type": "unit"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "value_id": {
+                    "type": "string"
+                  }
+                }
+              },
+              "commit_id": {
+                "type": "option",
+                "value": {
+                  "type": "u64"
+                }
+              },
+              "from_version": {
+                "type": "u64"
+              },
+              "generation": {
+                "type": "u64"
+              },
+              "payload": {
+                "type": "variant",
+                "value": {
+                  "Diff": {
+                    "type": "table",
+                    "value": {
+                      "changes": {
+                        "type": "list",
+                        "value": {
+                          "type": "variant",
+                          "value": {
+                            "Remove": {
+                              "type": "table",
+                              "value": {
+                                "change": {
+                                  "type": "table",
+                                  "value": {
+                                    "path": {
+                                      "type": "table",
+                                      "value": {
+                                        "segments": {
+                                          "type": "list",
+                                          "value": {
+                                            "type": "variant",
+                                            "value": {
+                                              "Field": {
+                                                "type": "table",
+                                                "value": {
+                                                  "key": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              },
+                                              "Index": {
+                                                "type": "table",
+                                                "value": {
+                                                  "index": {
+                                                    "type": "u64"
+                                                  }
+                                                }
+                                              },
+                                              "MapKey": {
+                                                "type": "table",
+                                                "value": {
+                                                  "key": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              },
+                                              "OptionPayload": {
+                                                "type": "unit"
+                                              },
+                                              "VariantPayload": {
+                                                "type": "unit"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "Replace": {
+                              "type": "table",
+                              "value": {
+                                "change": {
+                                  "type": "table",
+                                  "value": {
+                                    "path": {
+                                      "type": "table",
+                                      "value": {
+                                        "segments": {
+                                          "type": "list",
+                                          "value": {
+                                            "type": "variant",
+                                            "value": {
+                                              "Field": {
+                                                "type": "table",
+                                                "value": {
+                                                  "key": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              },
+                                              "Index": {
+                                                "type": "table",
+                                                "value": {
+                                                  "index": {
+                                                    "type": "u64"
+                                                  }
+                                                }
+                                              },
+                                              "MapKey": {
+                                                "type": "table",
+                                                "value": {
+                                                  "key": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              },
+                                              "OptionPayload": {
+                                                "type": "unit"
+                                              },
+                                              "VariantPayload": {
+                                                "type": "unit"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "value": {
+                                      "type": "any"
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "Splice": {
+                              "type": "table",
+                              "value": {
+                                "change": {
+                                  "type": "table",
+                                  "value": {
+                                    "delete_count": {
+                                      "type": "u64"
+                                    },
+                                    "inserted": {
+                                      "type": "list",
+                                      "value": {
+                                        "type": "any"
+                                      }
+                                    },
+                                    "path": {
+                                      "type": "table",
+                                      "value": {
+                                        "segments": {
+                                          "type": "list",
+                                          "value": {
+                                            "type": "variant",
+                                            "value": {
+                                              "Field": {
+                                                "type": "table",
+                                                "value": {
+                                                  "key": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              },
+                                              "Index": {
+                                                "type": "table",
+                                                "value": {
+                                                  "index": {
+                                                    "type": "u64"
+                                                  }
+                                                }
+                                              },
+                                              "MapKey": {
+                                                "type": "table",
+                                                "value": {
+                                                  "key": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              },
+                                              "OptionPayload": {
+                                                "type": "unit"
+                                              },
+                                              "VariantPayload": {
+                                                "type": "unit"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "start": {
+                                      "type": "u64"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "Full": {
+                    "type": "table",
+                    "value": {
+                      "value": {
+                        "type": "any"
+                      }
+                    }
+                  }
+                }
+              },
+              "subscription_id": {
+                "type": "u64"
+              },
+              "value_id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "u64"
+              }
+            }
+          }
+        },
+        "subscription_id": {
+          "type": "u64"
+        }
+      }
+    },
+    "phenix.application.type.observable-unsubscribe-input@1": {
+      "type": "table",
+      "value": {
+        "generation": {
+          "type": "u64"
+        },
+        "subscription_id": {
+          "type": "u64"
+        }
+      }
+    },
+    "phenix.application.type.observable-value@1": {
+      "type": "table",
+      "value": {
+        "value": {
+          "type": "any"
+        },
+        "value_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "u64"
         }
       }
     },
@@ -1892,6 +3906,17 @@
         }
       }
     },
+    "phenix.application.type.sdk-value@1": {
+      "type": "table",
+      "value": {
+        "schema": {
+          "type": "any"
+        },
+        "value": {
+          "type": "any"
+        }
+      }
+    },
     "phenix.application.type.session-change@1": {
       "type": "variant",
       "value": {
@@ -1978,6 +4003,9 @@
                                 "Cancelled": {
                                   "type": "unit"
                                 },
+                                "Closed": {
+                                  "type": "unit"
+                                },
                                 "Conflict": {
                                   "type": "table",
                                   "value": {
@@ -1998,6 +4026,14 @@
                                   }
                                 },
                                 "InvalidInput": {
+                                  "type": "table",
+                                  "value": {
+                                    "message": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "InvalidPath": {
                                   "type": "table",
                                   "value": {
                                     "message": {
@@ -2029,6 +4065,33 @@
                                     }
                                   }
                                 },
+                                "SchemaMismatch": {
+                                  "type": "table",
+                                  "value": {
+                                    "message": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "StaleReference": {
+                                  "type": "table",
+                                  "value": {
+                                    "value": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "SubscriptionCapacity": {
+                                  "type": "unit"
+                                },
+                                "TransactionConflict": {
+                                  "type": "table",
+                                  "value": {
+                                    "message": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
                                 "Unauthenticated": {
                                   "type": "table",
                                   "value": {
@@ -2037,10 +4100,26 @@
                                     }
                                   }
                                 },
+                                "UnknownValue": {
+                                  "type": "table",
+                                  "value": {
+                                    "value": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
                                 "UnsupportedCapability": {
                                   "type": "table",
                                   "value": {
                                     "capability": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "UnsupportedSnapshotPolicy": {
+                                  "type": "table",
+                                  "value": {
+                                    "message": {
                                       "type": "string"
                                     }
                                   }
@@ -2085,6 +4164,9 @@
                         "Cancelled": {
                           "type": "unit"
                         },
+                        "Closed": {
+                          "type": "unit"
+                        },
                         "Conflict": {
                           "type": "table",
                           "value": {
@@ -2105,6 +4187,14 @@
                           }
                         },
                         "InvalidInput": {
+                          "type": "table",
+                          "value": {
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "InvalidPath": {
                           "type": "table",
                           "value": {
                             "message": {
@@ -2136,6 +4226,33 @@
                             }
                           }
                         },
+                        "SchemaMismatch": {
+                          "type": "table",
+                          "value": {
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "StaleReference": {
+                          "type": "table",
+                          "value": {
+                            "value": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "SubscriptionCapacity": {
+                          "type": "unit"
+                        },
+                        "TransactionConflict": {
+                          "type": "table",
+                          "value": {
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        },
                         "Unauthenticated": {
                           "type": "table",
                           "value": {
@@ -2144,10 +4261,26 @@
                             }
                           }
                         },
+                        "UnknownValue": {
+                          "type": "table",
+                          "value": {
+                            "value": {
+                              "type": "string"
+                            }
+                          }
+                        },
                         "UnsupportedCapability": {
                           "type": "table",
                           "value": {
                             "capability": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "UnsupportedSnapshotPolicy": {
+                          "type": "table",
+                          "value": {
+                            "message": {
                               "type": "string"
                             }
                           }
@@ -2495,6 +4628,9 @@
                                           "Cancelled": {
                                             "type": "unit"
                                           },
+                                          "Closed": {
+                                            "type": "unit"
+                                          },
                                           "Conflict": {
                                             "type": "table",
                                             "value": {
@@ -2515,6 +4651,14 @@
                                             }
                                           },
                                           "InvalidInput": {
+                                            "type": "table",
+                                            "value": {
+                                              "message": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          },
+                                          "InvalidPath": {
                                             "type": "table",
                                             "value": {
                                               "message": {
@@ -2546,6 +4690,33 @@
                                               }
                                             }
                                           },
+                                          "SchemaMismatch": {
+                                            "type": "table",
+                                            "value": {
+                                              "message": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          },
+                                          "StaleReference": {
+                                            "type": "table",
+                                            "value": {
+                                              "value": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          },
+                                          "SubscriptionCapacity": {
+                                            "type": "unit"
+                                          },
+                                          "TransactionConflict": {
+                                            "type": "table",
+                                            "value": {
+                                              "message": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          },
                                           "Unauthenticated": {
                                             "type": "table",
                                             "value": {
@@ -2554,10 +4725,26 @@
                                               }
                                             }
                                           },
+                                          "UnknownValue": {
+                                            "type": "table",
+                                            "value": {
+                                              "value": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          },
                                           "UnsupportedCapability": {
                                             "type": "table",
                                             "value": {
                                               "capability": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          },
+                                          "UnsupportedSnapshotPolicy": {
+                                            "type": "table",
+                                            "value": {
+                                              "message": {
                                                 "type": "string"
                                               }
                                             }
@@ -2602,6 +4789,9 @@
                                   "Cancelled": {
                                     "type": "unit"
                                   },
+                                  "Closed": {
+                                    "type": "unit"
+                                  },
                                   "Conflict": {
                                     "type": "table",
                                     "value": {
@@ -2622,6 +4812,14 @@
                                     }
                                   },
                                   "InvalidInput": {
+                                    "type": "table",
+                                    "value": {
+                                      "message": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "InvalidPath": {
                                     "type": "table",
                                     "value": {
                                       "message": {
@@ -2653,6 +4851,33 @@
                                       }
                                     }
                                   },
+                                  "SchemaMismatch": {
+                                    "type": "table",
+                                    "value": {
+                                      "message": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "StaleReference": {
+                                    "type": "table",
+                                    "value": {
+                                      "value": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "SubscriptionCapacity": {
+                                    "type": "unit"
+                                  },
+                                  "TransactionConflict": {
+                                    "type": "table",
+                                    "value": {
+                                      "message": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
                                   "Unauthenticated": {
                                     "type": "table",
                                     "value": {
@@ -2661,10 +4886,26 @@
                                       }
                                     }
                                   },
+                                  "UnknownValue": {
+                                    "type": "table",
+                                    "value": {
+                                      "value": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
                                   "UnsupportedCapability": {
                                     "type": "table",
                                     "value": {
                                       "capability": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "UnsupportedSnapshotPolicy": {
+                                    "type": "table",
+                                    "value": {
+                                      "message": {
                                         "type": "string"
                                       }
                                     }
@@ -2877,6 +5118,9 @@
                                     "Cancelled": {
                                       "type": "unit"
                                     },
+                                    "Closed": {
+                                      "type": "unit"
+                                    },
                                     "Conflict": {
                                       "type": "table",
                                       "value": {
@@ -2897,6 +5141,14 @@
                                       }
                                     },
                                     "InvalidInput": {
+                                      "type": "table",
+                                      "value": {
+                                        "message": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "InvalidPath": {
                                       "type": "table",
                                       "value": {
                                         "message": {
@@ -2928,6 +5180,33 @@
                                         }
                                       }
                                     },
+                                    "SchemaMismatch": {
+                                      "type": "table",
+                                      "value": {
+                                        "message": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "StaleReference": {
+                                      "type": "table",
+                                      "value": {
+                                        "value": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "SubscriptionCapacity": {
+                                      "type": "unit"
+                                    },
+                                    "TransactionConflict": {
+                                      "type": "table",
+                                      "value": {
+                                        "message": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
                                     "Unauthenticated": {
                                       "type": "table",
                                       "value": {
@@ -2936,10 +5215,26 @@
                                         }
                                       }
                                     },
+                                    "UnknownValue": {
+                                      "type": "table",
+                                      "value": {
+                                        "value": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
                                     "UnsupportedCapability": {
                                       "type": "table",
                                       "value": {
                                         "capability": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "UnsupportedSnapshotPolicy": {
+                                      "type": "table",
+                                      "value": {
+                                        "message": {
                                           "type": "string"
                                         }
                                       }
@@ -2984,6 +5279,9 @@
                             "Cancelled": {
                               "type": "unit"
                             },
+                            "Closed": {
+                              "type": "unit"
+                            },
                             "Conflict": {
                               "type": "table",
                               "value": {
@@ -3004,6 +5302,14 @@
                               }
                             },
                             "InvalidInput": {
+                              "type": "table",
+                              "value": {
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "InvalidPath": {
                               "type": "table",
                               "value": {
                                 "message": {
@@ -3035,6 +5341,33 @@
                                 }
                               }
                             },
+                            "SchemaMismatch": {
+                              "type": "table",
+                              "value": {
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "StaleReference": {
+                              "type": "table",
+                              "value": {
+                                "value": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "SubscriptionCapacity": {
+                              "type": "unit"
+                            },
+                            "TransactionConflict": {
+                              "type": "table",
+                              "value": {
+                                "message": {
+                                  "type": "string"
+                                }
+                              }
+                            },
                             "Unauthenticated": {
                               "type": "table",
                               "value": {
@@ -3043,10 +5376,26 @@
                                 }
                               }
                             },
+                            "UnknownValue": {
+                              "type": "table",
+                              "value": {
+                                "value": {
+                                  "type": "string"
+                                }
+                              }
+                            },
                             "UnsupportedCapability": {
                               "type": "table",
                               "value": {
                                 "capability": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "UnsupportedSnapshotPolicy": {
+                              "type": "table",
+                              "value": {
+                                "message": {
                                   "type": "string"
                                 }
                               }
