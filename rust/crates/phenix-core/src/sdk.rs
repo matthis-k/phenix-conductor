@@ -3,8 +3,8 @@ use crate::{
     ComponentManifest, ContractId, InitialObservation, InterfaceId, ObservableError,
     ObservableStore, ObservationDelivery, ObservationMode, ObservationScope, ObservationSpec,
     PhenixSchema, PhenixValue, PluginId, PluginManifest, ReferenceId, ResolvedHarness, RuntimeId,
-    SdkNamespace, SdkResourceId, SharedCapabilityRegistry, Type, ValueAddress, ValueChange, ValueId,
-    ValuePath, ValuePathSegment,
+    SdkNamespace, SdkResourceId, SharedCapabilityRegistry, Type, ValueAddress, ValueChange,
+    ValueId, ValuePath, ValuePathSegment,
 };
 use serde::{Deserialize, Serialize};
 use std::{

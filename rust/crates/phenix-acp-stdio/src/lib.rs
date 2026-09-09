@@ -123,11 +123,12 @@ impl SdkApplicationService {
             return Ok(self.sdk.to_value());
         }
         if operation.as_str() == InvokeCapability::ID {
-            let request = ApplicationCapabilityInvokeInput::from_value(&input).map_err(|error| {
-                ApplicationError::InvalidInput {
-                    message: error.to_string(),
-                }
-            })?;
+            let request =
+                ApplicationCapabilityInvokeInput::from_value(&input).map_err(|error| {
+                    ApplicationError::InvalidInput {
+                        message: error.to_string(),
+                    }
+                })?;
             let PhenixValue::Callable(callable) = request.callable else {
                 return Err(ApplicationError::InvalidInput {
                     message: "capability invocation requires a callable reference".to_owned(),
@@ -400,10 +401,8 @@ mod tests {
             maximum_authority: Authority::default(),
         };
         let value_id = ValueId::parse("testing.state@1").unwrap();
-        let mut contribution = SdkContribution::new(
-            manifest.id.clone(),
-            SdkNamespace::parse("testing").unwrap(),
-        );
+        let mut contribution =
+            SdkContribution::new(manifest.id.clone(), SdkNamespace::parse("testing").unwrap());
         contribution.insert_observable(SdkObservableResource::new(
             SdkResourceId::parse("sdk/testing/state").unwrap(),
             ["state"],
@@ -437,10 +436,7 @@ mod tests {
         let worker = tokio::spawn(serve_sdk_application(service, receiver));
 
         let sdk = transport
-            .invoke(
-                &ContractId::parse(GetSdk::ID).unwrap(),
-                Empty {}.to_value(),
-            )
+            .invoke(&ContractId::parse(GetSdk::ID).unwrap(), Empty {}.to_value())
             .await
             .unwrap();
         let sdk = ApplicationSdkValue::from_value(&sdk).unwrap();
