@@ -448,24 +448,23 @@ impl ExtensionCallbacks {
 fn callback_error_to_acp(error: CallbackError) -> agent_client_protocol::Error {
     match error {
         CallbackError::Application(error) => callback_application_error_to_acp(error),
-        CallbackError::QueueFull => agent_client_protocol::Error::internal_error().data(
-            serde_json::json!({
+        CallbackError::QueueFull => {
+            agent_client_protocol::Error::internal_error().data(serde_json::json!({
                 "phenix.class": "queue_full",
                 "phenix.details": null,
-            }),
-        ),
-        CallbackError::Disconnected(message) => agent_client_protocol::Error::internal_error().data(
-            serde_json::json!({
+            }))
+        }
+        CallbackError::Disconnected(message) => agent_client_protocol::Error::internal_error()
+            .data(serde_json::json!({
                 "phenix.class": "disconnected",
                 "phenix.details": { "message": message },
-            }),
-        ),
-        CallbackError::Protocol(message) => agent_client_protocol::Error::invalid_params().data(
-            serde_json::json!({
+            })),
+        CallbackError::Protocol(message) => {
+            agent_client_protocol::Error::invalid_params().data(serde_json::json!({
                 "phenix.class": "schema_mismatch",
                 "phenix.details": { "message": message },
-            }),
-        ),
+            }))
+        }
     }
 }
 
@@ -475,7 +474,9 @@ fn callback_application_error_to_acp(error: ApplicationError) -> agent_client_pr
         "phenix.details": callback_application_error_details(&error),
     });
     let error = match &error {
-        ApplicationError::UnsupportedCapability { .. } => agent_client_protocol::Error::method_not_found(),
+        ApplicationError::UnsupportedCapability { .. } => {
+            agent_client_protocol::Error::method_not_found()
+        }
         ApplicationError::InvalidInput { .. } => agent_client_protocol::Error::invalid_params(),
         ApplicationError::InvalidResponse { .. }
         | ApplicationError::PermissionDenied { .. }
@@ -1350,7 +1351,8 @@ mod tests {
 
     #[test]
     fn callback_errors_preserve_capability_classes() {
-        let cancelled = callback_error_to_acp(CallbackError::Application(ApplicationError::Cancelled));
+        let cancelled =
+            callback_error_to_acp(CallbackError::Application(ApplicationError::Cancelled));
         assert_eq!(cancelled.code, ErrorCode::RequestCancelled);
         assert_eq!(
             cancelled.data.as_ref().unwrap()["phenix.class"],
