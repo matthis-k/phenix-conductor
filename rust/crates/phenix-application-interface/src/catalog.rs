@@ -45,6 +45,8 @@ operations! {
     ActivateSkill: "skill-activate", "skills", SkillActivateInput => Skills;
     ListCallables: "callable-list", "callables", SessionInput => Callables;
     InvokeCallable: "callable-invoke", "callables", CallableInvokeInput => CallableResult;
+    GetSdk: "sdk-get", "sdk", Empty => SdkValue;
+    InvokeCapability: "capability-invoke", "capabilities", CapabilityInvokeInput => CapabilityInvokeResult;
     GetExecutionTree: "execution-tree", "inspection", SessionInput => ExecutionTree;
     GetProvenance: "execution-provenance", "inspection", ExecutionInput => Provenance;
     GetDiagnostics: "diagnostics", "diagnostics", Empty => Diagnostics;
@@ -101,6 +103,9 @@ pub fn application_descriptor() -> ApplicationDescriptor {
         ObservableChange,
         ObservablePayload,
         ObservableDelivery,
+        CapabilityInvokeInput,
+        CapabilityInvokeResult,
+        SdkValue,
     );
     for (name, dependencies) in [
         ("discovery", vec![]),
@@ -120,7 +125,8 @@ pub fn application_descriptor() -> ApplicationDescriptor {
         ("observables", vec!["discovery"]),
         ("permission", vec!["prompt"]),
         ("elicitation", vec!["sessions"]),
-        ("client-callables", vec!["callables"]),
+        ("sdk", vec!["discovery"]),
+        ("capabilities", vec!["discovery"]),
     ] {
         descriptor.capabilities.insert(
             capability(name),
@@ -189,11 +195,11 @@ pub fn application_descriptor() -> ApplicationDescriptor {
         Data
     );
     callback!(
-        "client-callable",
-        "client-callables",
-        ClientCallableRequest,
-        ClientCallableResponse,
-        InvocationConsent
+        "capability-call",
+        "capabilities",
+        CapabilityInvokeInput,
+        CapabilityInvokeResult,
+        Data
     );
     descriptor
 }

@@ -2,8 +2,8 @@ use crate::{extension_name, wire, ApplicationAdapter};
 use phenix_application_interface::types::ApplicationError;
 use phenix_application_interface::{
     application_descriptor, ActivateSkill, ApplicationTransport, Authenticate,
-    DiscoverAuthentication, GetDiagnostics, GetExecutionTree, GetLineage, GetObservable,
-    GetProvenance, InvokeCallable, ListCallables, ListObservables, ListSkills, Operation,
+    DiscoverAuthentication, GetDiagnostics, GetExecutionTree, GetLineage, GetObservable, GetSdk,
+    GetProvenance, InvokeCallable, InvokeCapability, ListCallables, ListObservables, ListSkills, Operation,
     RenameSession, SubscribeObservable, UnsubscribeObservable,
 };
 use phenix_core::{ContractId, PhenixValue, ValueCodec};
@@ -34,6 +34,8 @@ impl<T: ApplicationTransport> ApplicationAdapter<T> {
             ActivateSkill,
             ListCallables,
             InvokeCallable,
+            GetSdk,
+            InvokeCapability,
             GetExecutionTree,
             GetProvenance,
             GetDiagnostics,

@@ -1,6 +1,7 @@
 use crate::{
-    ComponentManifest, InterfaceId, ObservableStore, PhenixSchema, PluginId, PluginManifest,
-    ResolvedHarness, SdkNamespace, SdkResourceId, Type, ValueAddress, ValueId, ValuePath,
+    CapabilityOwnerId, ComponentManifest, InterfaceId, ObservableStore, PhenixSchema,
+    PhenixValue, PluginId, PluginManifest, ResolvedHarness, SdkNamespace, SdkResourceId, Type,
+    ValueAddress, ValueId, ValuePath,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -216,6 +217,11 @@ impl ResolvedSdkContributions {
                     });
                 }
             }
+            if let Some(value) = &contribution.value {
+                validate_capability_owners(&contribution.provider, &value.value).map_err(
+                    |message| SdkResolutionError::InvalidValue { message },
+                )?;
+            }
             let namespace = contribution.namespace.clone();
             if namespaces.insert(namespace.clone(), contribution).is_some() {
                 return Err(SdkResolutionError::DuplicateNamespace(namespace));
@@ -299,6 +305,50 @@ impl ResolvedSdkContributions {
     }
 }
 
+fn validate_capability_owners(provider: &PluginId, value: &PhenixValue) -> Result<(), String> {
+    match value {
+        PhenixValue::Callable(reference) => match reference.owner() {
+            CapabilityOwnerId::Plugin(owner) if owner == provider => Ok(()),
+            CapabilityOwnerId::Plugin(owner) => Err(format!(
+                "callable {} belongs to plugin {owner}, not contribution provider {provider}",
+                reference.id()
+            )),
+            owner => Err(format!(
+                "SDK contribution provider {provider} cannot publish {owner:?}-owned callable {}",
+                reference.id()
+            )),
+        },
+        PhenixValue::Object(reference) => match reference.owner() {
+            CapabilityOwnerId::Plugin(owner) if owner == provider => Ok(()),
+            CapabilityOwnerId::Plugin(owner) => Err(format!(
+                "object {} belongs to plugin {owner}, not contribution provider {provider}",
+                reference.id()
+            )),
+            owner => Err(format!(
+                "SDK contribution provider {provider} cannot publish {owner:?}-owned object {}",
+                reference.id()
+            )),
+        },
+        PhenixValue::Option(Some(value)) | PhenixValue::Variant { value, .. } => {
+            validate_capability_owners(provider, value)
+        }
+        PhenixValue::List(values) => values
+            .iter()
+            .try_for_each(|value| validate_capability_owners(provider, value)),
+        PhenixValue::Map(values) | PhenixValue::Table(values) => values
+            .values()
+            .try_for_each(|value| validate_capability_owners(provider, value)),
+        PhenixValue::Unit
+        | PhenixValue::Bool(_)
+        | PhenixValue::I64(_)
+        | PhenixValue::U64(_)
+        | PhenixValue::F64(_)
+        | PhenixValue::String(_)
+        | PhenixValue::Bytes(_)
+        | PhenixValue::Option(None) => Ok(()),
+    }
+}
+
 impl ResolvedHarness {
     pub fn resolve_sdk_contributions(
         &self,
@@ -312,8 +362,9 @@ impl ResolvedHarness {
 mod tests {
     use super::*;
     use crate::{
-        Authority, ComponentExport, ComponentId, Key, ObservableRegistration, PhenixValue,
-        PluginExecution, SnapshotPolicy, Type,
+        Authority, CallableRef, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId,
+        ComponentExport, ComponentId, ContractId, Key, ObservableRegistration, PhenixValue,
+        PluginExecution, ReferenceId, SnapshotPolicy, Type,
     };
 
     fn plugin(value: &str, execution: PluginExecution) -> PluginManifest {
@@ -485,6 +536,32 @@ mod tests {
         assert!(matches!(
             SdkValue::new(Type::U64, PhenixValue::String("wrong".to_owned())),
             Err(SdkResolutionError::InvalidValue { .. })
+        ));
+    }
+
+    #[test]
+    fn contributions_cannot_publish_other_owner_capabilities() {
+        let plugins = [plugin("testing", PluginExecution::ResourceOnly)];
+        let reference = CallableRef::new(
+            ContractId::parse("testing.callback@1").unwrap(),
+            CapabilityOwnerId::Client(ClientConnectionId::parse("nvim").unwrap()),
+            CapabilityGenerationId::parse("connection-1").unwrap(),
+            ReferenceId::parse("callback-1").unwrap(),
+        );
+        let schema = Type::Callable {
+            contract: reference.contract().clone(),
+            input: Box::new(Type::Unit),
+            output: Box::new(Type::Unit),
+        };
+        let mut testing = contribution("testing", "testing");
+        testing.publish(
+            SdkValue::new(schema, PhenixValue::Callable(reference)).expect("matching value"),
+        );
+
+        assert!(matches!(
+            ResolvedSdkContributions::resolve(&plugins, &[], [testing]),
+            Err(SdkResolutionError::InvalidValue { message })
+                if message.contains("cannot publish")
         ));
     }
 

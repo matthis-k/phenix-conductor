@@ -151,7 +151,7 @@ impl<'de> Deserialize<'de> for ReferenceId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum CapabilityOwnerId {
     Plugin(PluginId),

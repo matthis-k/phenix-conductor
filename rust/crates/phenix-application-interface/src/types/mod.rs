@@ -127,6 +127,27 @@ impl From<phenix_core::ObservableError> for ApplicationError {
     }
 }
 
+impl From<phenix_core::CapabilityError> for ApplicationError {
+    fn from(error: phenix_core::CapabilityError) -> Self {
+        use phenix_core::CapabilityError;
+        match error {
+            CapabilityError::UnknownReference(reference) => Self::NotFound {
+                resource: reference.id().to_string(),
+            },
+            CapabilityError::StaleReference(reference) => Self::StaleReference {
+                value: reference.id().to_string(),
+            },
+            CapabilityError::SchemaMismatch { message } => Self::SchemaMismatch { message },
+            CapabilityError::ProviderFailed { message } => Self::Failed { message },
+            CapabilityError::Cancelled => Self::Cancelled,
+            CapabilityError::Disconnected => Self::Disconnected,
+            CapabilityError::QueueFull => Self::Conflict {
+                message: "capability provider queue is full".to_owned(),
+            },
+        }
+    }
+}
+
 impl std::fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

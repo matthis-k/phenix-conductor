@@ -99,7 +99,10 @@ pub use agent::{
 };
 pub use artifact::{ArtifactRevision, ArtifactRevisionParseError};
 pub use authority::Authority;
-pub use capability::{CapabilityInvokeInput, CapabilityInvokeResult};
+pub use capability::{
+    CapabilityError, CapabilityHandler, CapabilityInvokeInput, CapabilityInvokeResult,
+    CapabilityRegistry,
+};
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
     ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan,

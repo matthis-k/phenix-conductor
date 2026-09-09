@@ -433,7 +433,7 @@ mod tests {
         assert!(first.contains("name = \"session_update\""));
         assert!(first.contains("_phenix/session-update@1"));
         assert!(first.contains("name = \"client_callable\""));
-        assert!(first.contains("_phenix/client-callable@1"));
+        assert!(first.contains("_phenix/capability-call@1"));
         assert!(first.contains("descriptor.has_capability"));
         assert!(first.contains("descriptor.operations_by_extension"));
         assert!(first.contains("descriptor.events_by_extension"));
