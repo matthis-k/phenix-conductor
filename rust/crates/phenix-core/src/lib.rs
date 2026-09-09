@@ -101,7 +101,7 @@ pub use artifact::{ArtifactRevision, ArtifactRevisionParseError};
 pub use authority::Authority;
 pub use capability::{
     CapabilityError, CapabilityHandler, CapabilityInvokeInput, CapabilityInvokeResult,
-    CapabilityRegistry,
+    CapabilityRegistry, SharedCapabilityRegistry,
 };
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,

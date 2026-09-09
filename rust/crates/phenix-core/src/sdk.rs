@@ -1,14 +1,23 @@
 use crate::{
-    CapabilityOwnerId, ComponentManifest, InterfaceId, ObservableStore, PhenixSchema, PhenixValue,
-    PluginId, PluginManifest, ResolvedHarness, SdkNamespace, SdkResourceId, Type, ValueAddress,
-    ValueId, ValuePath,
+    CallableRef, CapabilityError, CapabilityGenerationId, CapabilityInvokeInput,
+    CapabilityOwnerId, ComponentManifest, ContractId, InitialObservation, InterfaceId,
+    ObservableError, ObservableStore, ObservationDelivery, ObservationMode, ObservationScope,
+    ObservationSpec, PhenixSchema, PhenixValue, PluginId, PluginManifest, ReferenceId,
+    ResolvedHarness, SdkNamespace, SdkResourceId, SharedCapabilityRegistry, Type, ValueAddress,
+    ValueChange, ValueId, ValuePath,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
+    sync::{Arc, Mutex},
 };
+
+const OBSERVABLE_GET_CONTRACT: &str = "phenix.observable-get@1";
+const OBSERVABLE_LISTEN_CONTRACT: &str = "phenix.observable-listen@1";
+const OBSERVABLE_DELIVERY_CONTRACT: &str = "phenix.observable-delivery@1";
+const OBSERVABLE_STOP_CONTRACT: &str = "phenix.observable-stop@1";
 
 /// A language-facing SDK is always published as one authoritative schema/value pair.
 ///
@@ -127,6 +136,11 @@ pub enum SdkResolutionError {
         namespace: SdkNamespace,
         path: Vec<String>,
     },
+    CapabilityRegistration {
+        namespace: SdkNamespace,
+        resource: SdkResourceId,
+        message: String,
+    },
 }
 
 impl Display for SdkResolutionError {
@@ -164,6 +178,15 @@ impl Display for SdkResolutionError {
                 f,
                 "SDK namespace {namespace} publishes multiple resources at binding path {}",
                 path.join(".")
+            ),
+            Self::CapabilityRegistration {
+                namespace,
+                resource,
+                message,
+            } => write!(
+                f,
+                "SDK namespace {namespace} could not register observable resource \
+                 {resource}: {message}"
             ),
         }
     }
@@ -279,6 +302,69 @@ impl ResolvedSdkContributions {
         SdkValue::new(Type::Table(schema), crate::PhenixValue::Table(value))
     }
 
+    /// Materializes SDK observable resources as ordinary callable values.
+    ///
+    /// The resulting graph is safe to pass to any language binding: `get`,
+    /// `listen`, and the returned `stop` capability all use the same generic
+    /// capability invocation contract as every other SDK callable.
+    pub fn value_with_observables(
+        &self,
+        store: &ObservableStore,
+        capabilities: &SharedCapabilityRegistry,
+        generation: CapabilityGenerationId,
+    ) -> Result<SdkValue, SdkResolutionError> {
+        self.validate_observables(store)?;
+
+        let mut schema = BTreeMap::new();
+        let mut value = BTreeMap::new();
+        for (namespace, contribution) in &self.namespaces {
+            let (mut namespace_schema, mut namespace_value) = contribution
+                .value
+                .as_ref()
+                .map_or_else(empty_sdk_table, |entry| (entry.schema.clone(), entry.value.clone()));
+            for observable in contribution.observables.values() {
+                let (resource_schema, resource_value) = observable_resource_value(
+                    &contribution.provider,
+                    &generation,
+                    observable,
+                );
+                insert_binding(
+                    namespace,
+                    &mut namespace_schema,
+                    &mut namespace_value,
+                    &observable.binding_path,
+                    resource_schema,
+                    resource_value,
+                )?;
+            }
+            schema.insert(
+                crate::Key::parse(namespace.as_str().to_owned())
+                    .expect("SDK namespaces are structural keys"),
+                namespace_schema,
+            );
+            value.insert(
+                crate::Key::parse(namespace.as_str().to_owned())
+                    .expect("SDK namespaces are structural keys"),
+                namespace_value,
+            );
+        }
+        let sdk = SdkValue::new(Type::Table(schema), PhenixValue::Table(value))?;
+
+        for (namespace, contribution) in &self.namespaces {
+            for observable in contribution.observables.values() {
+                register_observable_resource(
+                    namespace,
+                    &contribution.provider,
+                    &generation,
+                    observable,
+                    store,
+                    capabilities,
+                )?;
+            }
+        }
+        Ok(sdk)
+    }
+
     pub fn validate_observables(&self, store: &ObservableStore) -> Result<(), SdkResolutionError> {
         for (namespace, contribution) in &self.namespaces {
             for (resource, observable) in &contribution.observables {
@@ -318,6 +404,435 @@ impl ResolvedSdkContributions {
         }
         Ok(())
     }
+}
+
+fn empty_sdk_table() -> (PhenixSchema, PhenixValue) {
+    (Type::Table(BTreeMap::new()), PhenixValue::Table(BTreeMap::new()))
+}
+
+fn observable_resource_value(
+    provider: &PluginId,
+    generation: &CapabilityGenerationId,
+    observable: &SdkObservableResource,
+) -> (PhenixSchema, PhenixValue) {
+    let get_schema = observable_get_schema(&observable.schema);
+    let listen_schema = observable_listen_schema();
+    let get = observable_callable(
+        provider,
+        generation,
+        observable,
+        "get",
+        OBSERVABLE_GET_CONTRACT,
+    );
+    let listen = observable_callable(
+        provider,
+        generation,
+        observable,
+        "listen",
+        OBSERVABLE_LISTEN_CONTRACT,
+    );
+    (
+        Type::Table(BTreeMap::from([
+            (key("get"), get_schema),
+            (key("listen"), listen_schema),
+        ])),
+        PhenixValue::Table(BTreeMap::from([
+            (key("get"), PhenixValue::Callable(get)),
+            (key("listen"), PhenixValue::Callable(listen)),
+        ])),
+    )
+}
+
+fn observable_get_schema(value: &PhenixSchema) -> Type {
+    Type::Callable {
+        contract: contract(OBSERVABLE_GET_CONTRACT),
+        input: Box::new(Type::Unit),
+        output: Box::new(Type::Table(BTreeMap::from([
+            (key("value"), value.clone()),
+            (key("version"), Type::U64),
+        ]))),
+    }
+}
+
+fn observable_listen_schema() -> Type {
+    Type::Callable {
+        contract: contract(OBSERVABLE_LISTEN_CONTRACT),
+        input: Box::new(Type::Table(BTreeMap::from([
+            (
+                key("initial"),
+                Type::Variant(BTreeMap::from([
+                    (key("none"), Type::Unit),
+                    (key("full"), Type::Unit),
+                ])),
+            ),
+            (
+                key("listener"),
+                Type::Callable {
+                    contract: contract(OBSERVABLE_DELIVERY_CONTRACT),
+                    input: Box::new(Type::Any),
+                    output: Box::new(Type::Unit),
+                },
+            ),
+            (
+                key("mode"),
+                Type::Variant(BTreeMap::from([
+                    (key("diff"), Type::Unit),
+                    (key("full"), Type::Unit),
+                ])),
+            ),
+            (
+                key("scope"),
+                Type::Variant(BTreeMap::from([
+                    (key("exact"), Type::Unit),
+                    (key("recursive"), Type::Unit),
+                ])),
+            ),
+        ])),
+        output: Box::new(Type::Callable {
+            contract: contract(OBSERVABLE_STOP_CONTRACT),
+            input: Box::new(Type::Unit),
+            output: Box::new(Type::Unit),
+        }),
+    }
+}
+
+fn observable_callable(
+    provider: &PluginId,
+    generation: &CapabilityGenerationId,
+    observable: &SdkObservableResource,
+    method: &str,
+    contract_id: &str,
+) -> CallableRef {
+    CallableRef::new(
+        contract(contract_id),
+        CapabilityOwnerId::Plugin(provider.clone()),
+        generation.clone(),
+        ReferenceId::parse(format!("sdk/observable/{}/{method}", observable.id.as_str()))
+            .expect("SDK resource ids are valid capability reference segments"),
+    )
+}
+
+fn register_observable_resource(
+    namespace: &SdkNamespace,
+    provider: &PluginId,
+    generation: &CapabilityGenerationId,
+    observable: &SdkObservableResource,
+    store: &ObservableStore,
+    capabilities: &SharedCapabilityRegistry,
+) -> Result<(), SdkResolutionError> {
+    let get = observable_callable(
+        provider,
+        generation,
+        observable,
+        "get",
+        OBSERVABLE_GET_CONTRACT,
+    );
+    let address = observable.address();
+    let get_store = store.clone();
+    register_capability(
+        namespace,
+        observable,
+        capabilities,
+        get,
+        observable_get_schema(&observable.schema),
+        move |_| {
+            let (version, value) = get_store
+                .get(&address)
+                .map_err(observable_provider_error)?;
+            Ok(PhenixValue::Table(BTreeMap::from([
+                (key("value"), value),
+                (key("version"), PhenixValue::U64(version.get())),
+            ])))
+        },
+    )?;
+
+    let listen = observable_callable(
+        provider,
+        generation,
+        observable,
+        "listen",
+        OBSERVABLE_LISTEN_CONTRACT,
+    );
+    let listen_store = store.clone();
+    let listen_capabilities = capabilities.clone();
+    let address = observable.address();
+    let resource = observable.id.clone();
+    let stop_provider = provider.clone();
+    let stop_generation = generation.clone();
+    register_capability(
+        namespace,
+        observable,
+        capabilities,
+        listen,
+        observable_listen_schema(),
+        move |input| {
+            let (listener, scope, mode, initial) = parse_listen_input(input)?;
+            let callback_capabilities = listen_capabilities.clone();
+            let callback = Arc::new(move |delivery: ObservationDelivery<'_>| {
+                let _ = callback_capabilities.invoke(CapabilityInvokeInput {
+                    callable: listener.clone(),
+                    input: observation_delivery_value(delivery),
+                });
+            });
+            let subscription = listen_store
+                .subscribe(
+                    ObservationSpec {
+                        address: address.clone(),
+                        scope,
+                        mode,
+                        initial,
+                    },
+                    callback,
+                )
+                .map_err(observable_provider_error)?;
+            let stop = CallableRef::new(
+                contract(OBSERVABLE_STOP_CONTRACT),
+                CapabilityOwnerId::Plugin(stop_provider.clone()),
+                stop_generation.clone(),
+                ReferenceId::parse(format!(
+                    "sdk/observable/{}/subscription/{}-{}",
+                    resource.as_str(),
+                    subscription.id.get(),
+                    subscription.generation.get()
+                ))
+                .expect("subscription references use valid SDK resource ids"),
+            );
+            let stop_reference = Arc::new(Mutex::new(None));
+            let handler_reference = Arc::clone(&stop_reference);
+            let stop_store = listen_store.clone();
+            let stop_capabilities = listen_capabilities.clone();
+            let stop_registry = stop_capabilities.clone();
+            let stop_for_handler = stop.clone();
+            stop_capabilities
+                .register(
+                    stop.clone(),
+                    Type::Callable {
+                        contract: contract(OBSERVABLE_STOP_CONTRACT),
+                        input: Box::new(Type::Unit),
+                        output: Box::new(Type::Unit),
+                    },
+                    move |_| {
+                        stop_store
+                            .unsubscribe(&subscription)
+                            .map_err(observable_provider_error)?;
+                        if let Some(reference) = handler_reference
+                            .lock()
+                            .expect("stop capability lock poisoned")
+                            .take()
+                        {
+                            stop_registry.unregister(&reference);
+                        }
+                        Ok(PhenixValue::Unit)
+                    },
+                )
+                ?;
+            *stop_reference
+                .lock()
+                .expect("stop capability lock poisoned") = Some(stop_for_handler);
+            Ok(PhenixValue::Callable(stop))
+        },
+    )
+}
+
+fn register_capability(
+    namespace: &SdkNamespace,
+    observable: &SdkObservableResource,
+    capabilities: &SharedCapabilityRegistry,
+    reference: CallableRef,
+    schema: Type,
+    handler: impl crate::CapabilityHandler + 'static,
+) -> Result<(), SdkResolutionError> {
+    capabilities
+        .register(reference, schema, handler)
+        .map_err(|error| SdkResolutionError::CapabilityRegistration {
+            namespace: namespace.clone(),
+            resource: observable.id.clone(),
+            message: error.to_string(),
+        })
+}
+
+fn parse_listen_input(
+    input: PhenixValue,
+) -> Result<(CallableRef, ObservationScope, ObservationMode, InitialObservation), CapabilityError> {
+    let PhenixValue::Table(fields) = input else {
+        return Err(CapabilityError::SchemaMismatch {
+            message: "observable listen input must be a table".to_owned(),
+        });
+    };
+    let listener = match fields.get("listener") {
+        Some(PhenixValue::Callable(listener)) => listener.clone(),
+        _ => return Err(CapabilityError::SchemaMismatch {
+            message: "observable listen input is missing listener".to_owned(),
+        }),
+    };
+    Ok((
+        listener,
+        parse_scope(fields.get("scope"))?,
+        parse_mode(fields.get("mode"))?,
+        parse_initial(fields.get("initial"))?,
+    ))
+}
+
+fn parse_scope(value: Option<&PhenixValue>) -> Result<ObservationScope, CapabilityError> {
+    match variant_tag(value)? {
+        "exact" => Ok(ObservationScope::Exact),
+        "recursive" => Ok(ObservationScope::Recursive),
+        _ => Err(CapabilityError::SchemaMismatch {
+            message: "observable listen scope is invalid".to_owned(),
+        }),
+    }
+}
+
+fn parse_mode(value: Option<&PhenixValue>) -> Result<ObservationMode, CapabilityError> {
+    match variant_tag(value)? {
+        "diff" => Ok(ObservationMode::Diff),
+        "full" => Ok(ObservationMode::Full),
+        _ => Err(CapabilityError::SchemaMismatch {
+            message: "observable listen mode is invalid".to_owned(),
+        }),
+    }
+}
+
+fn parse_initial(value: Option<&PhenixValue>) -> Result<InitialObservation, CapabilityError> {
+    match variant_tag(value)? {
+        "none" => Ok(InitialObservation::None),
+        "full" => Ok(InitialObservation::Full),
+        _ => Err(CapabilityError::SchemaMismatch {
+            message: "observable listen initial value is invalid".to_owned(),
+        }),
+    }
+}
+
+fn variant_tag(value: Option<&PhenixValue>) -> Result<&str, CapabilityError> {
+    match value {
+        Some(PhenixValue::Variant { tag, value })
+            if matches!(value.as_ref(), PhenixValue::Unit) =>
+        {
+            Ok(tag.as_str())
+        }
+        _ => Err(CapabilityError::SchemaMismatch {
+            message: "observable listen option must be a unit variant".to_owned(),
+        }),
+    }
+}
+
+fn observation_delivery_value(delivery: ObservationDelivery<'_>) -> PhenixValue {
+    let full = delivery.full_value().ok().flatten().cloned();
+    let changes = delivery
+        .changes
+        .iter()
+        .map(observation_change_value)
+        .collect();
+    PhenixValue::Table(BTreeMap::from([
+        (
+            key("commit"),
+            PhenixValue::Option(
+                delivery
+                    .commit
+                    .map(|commit| Box::new(PhenixValue::U64(commit.get()))),
+            ),
+        ),
+        (key("changes"), PhenixValue::List(changes)),
+        (key("from_version"), PhenixValue::U64(delivery.from_version.get())),
+        (key("value_id"), PhenixValue::String(delivery.value.as_str().to_owned())),
+        (key("version"), PhenixValue::U64(delivery.version.get())),
+        (
+            key("value"),
+            PhenixValue::Option(full.map(Box::new)),
+        ),
+    ]))
+}
+
+fn observation_change_value(change: &ValueChange) -> PhenixValue {
+    let kind = match change {
+        ValueChange::Replace { .. } => "replace",
+        ValueChange::Remove { .. } => "remove",
+        ValueChange::Splice { .. } => "splice",
+    };
+    PhenixValue::Table(BTreeMap::from([
+        (key("kind"), PhenixValue::String(kind.to_owned())),
+        (key("path"), PhenixValue::String(format!("{:?}", change.path()))),
+    ]))
+}
+
+fn observable_provider_error(error: ObservableError) -> CapabilityError {
+    CapabilityError::ProviderFailed {
+        message: error.to_string(),
+    }
+}
+
+fn insert_binding(
+    namespace: &SdkNamespace,
+    schema: &mut PhenixSchema,
+    value: &mut PhenixValue,
+    path: &[String],
+    resource_schema: PhenixSchema,
+    resource_value: PhenixValue,
+) -> Result<(), SdkResolutionError> {
+    let Some((head, tail)) = path.split_first() else {
+        return Err(SdkResolutionError::ConflictingBindingPath {
+            namespace: namespace.clone(),
+            path: path.to_vec(),
+        });
+    };
+    let Type::Table(schema_fields) = schema else {
+        return Err(SdkResolutionError::ConflictingBindingPath {
+            namespace: namespace.clone(),
+            path: path.to_vec(),
+        });
+    };
+    let PhenixValue::Table(value_fields) = value else {
+        return Err(SdkResolutionError::ConflictingBindingPath {
+            namespace: namespace.clone(),
+            path: path.to_vec(),
+        });
+    };
+    let head = key(head);
+    if tail.is_empty() {
+        if schema_fields.contains_key(&head) || value_fields.contains_key(&head) {
+            return Err(SdkResolutionError::ConflictingBindingPath {
+                namespace: namespace.clone(),
+                path: path.to_vec(),
+            });
+        }
+        schema_fields.insert(head.clone(), resource_schema);
+        value_fields.insert(head, resource_value);
+        return Ok(());
+    }
+    let (child_schema, child_value) = match (
+        schema_fields.get_mut(&head),
+        value_fields.get_mut(&head),
+    ) {
+        (Some(child_schema), Some(child_value)) => (child_schema, child_value),
+        (None, None) => {
+            schema_fields.insert(head.clone(), Type::Table(BTreeMap::new()));
+            value_fields.insert(head.clone(), PhenixValue::Table(BTreeMap::new()));
+            (
+                schema_fields.get_mut(&head).expect("inserted schema field"),
+                value_fields.get_mut(&head).expect("inserted value field"),
+            )
+        }
+        _ => return Err(SdkResolutionError::ConflictingBindingPath {
+            namespace: namespace.clone(),
+            path: path.to_vec(),
+        }),
+    };
+    insert_binding(
+        namespace,
+        child_schema,
+        child_value,
+        tail,
+        resource_schema,
+        resource_value,
+    )
+}
+
+fn key(value: &str) -> crate::Key {
+    crate::Key::parse(value.to_owned()).expect("static SDK key is valid")
+}
+
+fn contract(value: &str) -> ContractId {
+    ContractId::parse(value).expect("static observable contract is valid")
 }
 
 fn validate_capability_owners(provider: &PluginId, value: &PhenixValue) -> Result<(), String> {
@@ -382,8 +897,9 @@ mod tests {
     use crate::{
         Authority, CallableRef, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId,
         ComponentExport, ComponentId, ContractId, Key, ObservableRegistration, PhenixValue,
-        PluginExecution, ReferenceId, SnapshotPolicy, Type,
+        PluginExecution, ReferenceId, SharedCapabilityRegistry, SnapshotPolicy, Type,
     };
+    use std::sync::{Arc, Mutex};
 
     fn plugin(value: &str, execution: PluginExecution) -> PluginManifest {
         PluginManifest {
@@ -639,5 +1155,147 @@ mod tests {
                 ),
             ]))
         );
+    }
+
+    #[test]
+    fn observable_resources_materialize_as_generic_callable_values() {
+        let plugins = [plugin("testing", PluginExecution::ResourceOnly)];
+        let value_id = ValueId::parse("testing.state@1").unwrap();
+        let mut testing = contribution("testing", "testing");
+        testing.insert_observable(SdkObservableResource::new(
+            SdkResourceId::parse("sdk/testing/state").unwrap(),
+            ["state"],
+            value_id.clone(),
+            ValuePath::root(),
+            Type::U64,
+        ));
+        let resolved = ResolvedSdkContributions::resolve(&plugins, &[], [testing]).unwrap();
+        let store = ObservableStore::default();
+        store
+            .register(ObservableRegistration {
+                id: value_id.clone(),
+                owner: PluginId::parse("testing").unwrap(),
+                schema: Type::U64,
+                snapshot_policy: SnapshotPolicy::CopyOnChange,
+                initial: PhenixValue::U64(1),
+            })
+            .unwrap();
+        let capabilities = SharedCapabilityRegistry::default();
+        let sdk = resolved
+            .value_with_observables(
+                &store,
+                &capabilities,
+                CapabilityGenerationId::parse("testing-generation").unwrap(),
+            )
+            .unwrap();
+        let PhenixValue::Table(namespaces) = sdk.value else {
+            panic!("SDK root is a table");
+        };
+        let PhenixValue::Table(resources) = namespaces.get("testing").unwrap() else {
+            panic!("namespace is a table");
+        };
+        let PhenixValue::Table(state) = resources.get("state").unwrap() else {
+            panic!("resource is a table");
+        };
+        let PhenixValue::Callable(get) = state.get("get").unwrap() else {
+            panic!("get is callable");
+        };
+        let get = capabilities
+            .invoke(crate::CapabilityInvokeInput {
+                callable: get.clone(),
+                input: PhenixValue::Unit,
+            })
+            .unwrap();
+        assert_eq!(
+            get.output,
+            PhenixValue::Table(BTreeMap::from([
+                (Key::parse("value").unwrap(), PhenixValue::U64(1)),
+                (Key::parse("version").unwrap(), PhenixValue::U64(0)),
+            ]))
+        );
+
+        let PhenixValue::Callable(listen) = state.get("listen").unwrap() else {
+            panic!("listen is callable");
+        };
+        let listener = CallableRef::new(
+            ContractId::parse(OBSERVABLE_DELIVERY_CONTRACT).unwrap(),
+            CapabilityOwnerId::Client(ClientConnectionId::parse("test-client").unwrap()),
+            CapabilityGenerationId::parse("connection-1").unwrap(),
+            ReferenceId::parse("listener-1").unwrap(),
+        );
+        let deliveries = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&deliveries);
+        capabilities
+            .register(
+                listener.clone(),
+                Type::Callable {
+                    contract: ContractId::parse(OBSERVABLE_DELIVERY_CONTRACT).unwrap(),
+                    input: Box::new(Type::Any),
+                    output: Box::new(Type::Unit),
+                },
+                move |input| {
+                    recorded.lock().unwrap().push(input);
+                    Ok(PhenixValue::Unit)
+                },
+            )
+            .unwrap();
+        let stop = capabilities
+            .invoke(crate::CapabilityInvokeInput {
+                callable: listen.clone(),
+                input: PhenixValue::Table(BTreeMap::from([
+                    (Key::parse("listener").unwrap(), PhenixValue::Callable(listener)),
+                    (
+                        Key::parse("scope").unwrap(),
+                        PhenixValue::Variant {
+                            tag: Key::parse("recursive").unwrap(),
+                            value: Box::new(PhenixValue::Unit),
+                        },
+                    ),
+                    (
+                        Key::parse("mode").unwrap(),
+                        PhenixValue::Variant {
+                            tag: Key::parse("full").unwrap(),
+                            value: Box::new(PhenixValue::Unit),
+                        },
+                    ),
+                    (
+                        Key::parse("initial").unwrap(),
+                        PhenixValue::Variant {
+                            tag: Key::parse("full").unwrap(),
+                            value: Box::new(PhenixValue::Unit),
+                        },
+                    ),
+                ])),
+            })
+            .unwrap();
+        let PhenixValue::Callable(stop) = stop.output else {
+            panic!("listen returns a callable stop handle");
+        };
+        assert_eq!(deliveries.lock().unwrap().len(), 1);
+        store
+            .transaction([&value_id], |transaction| {
+                transaction.replace(&value_id, ValuePath::root(), PhenixValue::U64(2))
+            })
+            .unwrap();
+        assert_eq!(deliveries.lock().unwrap().len(), 2);
+        capabilities
+            .invoke(crate::CapabilityInvokeInput {
+                callable: stop.clone(),
+                input: PhenixValue::Unit,
+            })
+            .unwrap();
+        store
+            .transaction([&value_id], |transaction| {
+                transaction.replace(&value_id, ValuePath::root(), PhenixValue::U64(3))
+            })
+            .unwrap();
+        assert_eq!(deliveries.lock().unwrap().len(), 2);
+        assert!(matches!(
+            capabilities.invoke(crate::CapabilityInvokeInput {
+                callable: stop,
+                input: PhenixValue::Unit,
+            }),
+            Err(CapabilityError::UnknownReference(_))
+        ));
     }
 }

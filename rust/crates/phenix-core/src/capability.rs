@@ -6,7 +6,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 /// The transport-neutral input to a capability invocation.
@@ -90,10 +90,17 @@ pub struct CapabilityRegistry {
     retired: BTreeSet<(CapabilityOwnerId, CapabilityGenerationId)>,
 }
 
+/// A synchronization wrapper for dispatch that permits a capability handler to
+/// invoke another capability. The registry lock is released before provider
+/// code runs, so callbacks can safely re-enter through the same dispatcher.
+#[derive(Clone, Default)]
+pub struct SharedCapabilityRegistry(Arc<Mutex<CapabilityRegistry>>);
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CapabilityError {
     UnknownReference(CallableRef),
     StaleReference(CallableRef),
+    DuplicateReference(CallableRef),
     SchemaMismatch { message: String },
     ProviderFailed { message: String },
     Cancelled,
@@ -109,6 +116,9 @@ impl Display for CapabilityError {
             }
             Self::StaleReference(reference) => {
                 write!(formatter, "stale capability reference {}", reference.id())
+            }
+            Self::DuplicateReference(reference) => {
+                write!(formatter, "duplicate capability reference {}", reference.id())
             }
             Self::SchemaMismatch { message } => {
                 write!(formatter, "capability schema mismatch: {message}")
@@ -154,6 +164,9 @@ impl CapabilityRegistry {
         if self.retired.contains(&(key.0.clone(), key.1.clone())) {
             return Err(CapabilityError::StaleReference(reference));
         }
+        if self.entries.contains_key(&key) {
+            return Err(CapabilityError::DuplicateReference(reference));
+        }
         self.entries.insert(
             key,
             RegisteredCapability {
@@ -197,6 +210,13 @@ impl CapabilityRegistry {
         &self,
         invocation: CapabilityInvokeInput,
     ) -> Result<CapabilityInvokeResult, CapabilityError> {
+        self.prepare(invocation)?.invoke()
+    }
+
+    fn prepare(
+        &self,
+        invocation: CapabilityInvokeInput,
+    ) -> Result<PreparedCapabilityInvocation, CapabilityError> {
         let reference = &invocation.callable;
         let owner_generation = (reference.owner().clone(), reference.generation().clone());
         if self.retired.contains(&owner_generation) {
@@ -216,15 +236,71 @@ impl CapabilityRegistry {
             .map_err(|error| CapabilityError::SchemaMismatch {
                 message: error.to_string(),
             })?;
+        Ok(PreparedCapabilityInvocation {
+            schema: entry.schema.clone(),
+            handler: Arc::clone(&entry.handler),
+            input: invocation.input,
+        })
+    }
+}
+
+struct PreparedCapabilityInvocation {
+    schema: Type,
+    handler: Arc<dyn CapabilityHandler>,
+    input: PhenixValue,
+}
+
+impl PreparedCapabilityInvocation {
+    fn invoke(self) -> Result<CapabilityInvokeResult, CapabilityError> {
         let result = CapabilityInvokeResult {
-            output: entry.handler.invoke(invocation.input)?,
+            output: self.handler.invoke(self.input)?,
         };
         result
-            .validate(&entry.schema)
+            .validate(&self.schema)
             .map_err(|error| CapabilityError::SchemaMismatch {
                 message: error.to_string(),
             })?;
         Ok(result)
+    }
+}
+
+impl SharedCapabilityRegistry {
+    pub fn register(
+        &self,
+        reference: CallableRef,
+        schema: Type,
+        handler: impl CapabilityHandler + 'static,
+    ) -> Result<(), CapabilityError> {
+        self.0
+            .lock()
+            .expect("capability registry lock poisoned")
+            .register(reference, schema, handler)
+    }
+
+    pub fn retire(&self, owner: CapabilityOwnerId, generation: CapabilityGenerationId) {
+        self.0
+            .lock()
+            .expect("capability registry lock poisoned")
+            .retire(owner, generation);
+    }
+
+    pub fn unregister(&self, reference: &CallableRef) -> bool {
+        self.0
+            .lock()
+            .expect("capability registry lock poisoned")
+            .unregister(reference)
+    }
+
+    pub fn invoke(
+        &self,
+        invocation: CapabilityInvokeInput,
+    ) -> Result<CapabilityInvokeResult, CapabilityError> {
+        let prepared = self
+            .0
+            .lock()
+            .expect("capability registry lock poisoned")
+            .prepare(invocation)?;
+        prepared.invoke()
     }
 }
 
