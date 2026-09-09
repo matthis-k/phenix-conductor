@@ -45,9 +45,15 @@ operations! {
     ActivateSkill: "skill-activate", "skills", SkillActivateInput => Skills;
     ListCallables: "callable-list", "callables", SessionInput => Callables;
     InvokeCallable: "callable-invoke", "callables", CallableInvokeInput => CallableResult;
+    GetSdk: "sdk-get", "sdk", Empty => SdkValue;
+    InvokeCapability: "capability-invoke", "capabilities", CapabilityInvokeInput => CapabilityInvokeResult;
     GetExecutionTree: "execution-tree", "inspection", SessionInput => ExecutionTree;
     GetProvenance: "execution-provenance", "inspection", ExecutionInput => Provenance;
     GetDiagnostics: "diagnostics", "diagnostics", Empty => Diagnostics;
+    ListObservables: "observable-list", "observables", Empty => ObservableList;
+    GetObservable: "observable-get", "observables", ObservableGetInput => ObservableValue;
+    SubscribeObservable: "observable-subscribe", "observables", ObservableSubscribeInput => ObservableSubscriptionResult;
+    UnsubscribeObservable: "observable-unsubscribe", "observables", ObservableUnsubscribeInput => Acknowledged;
 }
 
 /// Describes all application features. Connected runtimes advertise only implemented features.
@@ -83,6 +89,23 @@ pub fn application_descriptor() -> ApplicationDescriptor {
         ExecutionInfo,
         SessionChange,
         ExecutionChange,
+        ObservablePathSegment,
+        ObservablePath,
+        ObservableAddress,
+        ObservableScope,
+        ObservableMode,
+        ObservableInitial,
+        ObservableSnapshotPolicy,
+        ObservableResource,
+        ObservableReplace,
+        ObservableRemove,
+        ObservableSplice,
+        ObservableChange,
+        ObservablePayload,
+        ObservableDelivery,
+        CapabilityInvokeInput,
+        CapabilityInvokeResult,
+        SdkValue,
     );
     for (name, dependencies) in [
         ("discovery", vec![]),
@@ -99,9 +122,11 @@ pub fn application_descriptor() -> ApplicationDescriptor {
         ("callables", vec!["sessions"]),
         ("inspection", vec!["sessions"]),
         ("diagnostics", vec!["discovery"]),
+        ("observables", vec!["discovery"]),
         ("permission", vec!["prompt"]),
         ("elicitation", vec!["sessions"]),
-        ("client-callables", vec!["callables"]),
+        ("sdk", vec!["discovery"]),
+        ("capabilities", vec!["discovery"]),
     ] {
         descriptor.capabilities.insert(
             capability(name),
@@ -129,6 +154,15 @@ pub fn application_descriptor() -> ApplicationDescriptor {
             payload,
             ordering: OrderingScope::Execution,
             capability: capability("prompt"),
+        },
+    );
+    let payload = descriptor.register::<ObservableDelivery>();
+    descriptor.events.insert(
+        id("phenix.application.observable-update@1"),
+        EventDescriptor {
+            payload,
+            ordering: OrderingScope::Commit,
+            capability: capability("observables"),
         },
     );
     macro_rules! callback {
@@ -161,11 +195,11 @@ pub fn application_descriptor() -> ApplicationDescriptor {
         Data
     );
     callback!(
-        "client-callable",
-        "client-callables",
-        ClientCallableRequest,
-        ClientCallableResponse,
-        InvocationConsent
+        "capability-call",
+        "capabilities",
+        CapabilityInvokeInput,
+        CapabilityInvokeResult,
+        Data
     );
     descriptor
 }

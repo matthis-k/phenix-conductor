@@ -24,6 +24,14 @@ fn descriptor_and_compiled_rust_regenerate_from_the_same_snapshot() {
 }
 
 #[test]
+fn observable_delivery_schema_matches_the_core_listener_schema() {
+    assert_eq!(
+        ObservableDelivery::phenix_type(),
+        phenix_core::observable_delivery_schema()
+    );
+}
+
+#[test]
 fn broken_descriptor_references_and_unsupported_shapes_fail_generation() {
     let mut descriptor = application_descriptor();
     descriptor

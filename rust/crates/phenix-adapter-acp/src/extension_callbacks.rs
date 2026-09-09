@@ -125,9 +125,12 @@ fn callback_projection_with_descriptor<T: ApplicationTransport>(
 mod tests {
     use super::*;
     use phenix_application_interface::types::{
-        ClientCallableRequest, ClientCallableResponse, Empty, PermissionRequest,
+        CapabilityInvokeInput, CapabilityInvokeResult, Empty, PermissionRequest,
     };
-    use phenix_core::{CallableId, SessionId};
+    use phenix_core::{
+        CallableRef, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId, ReferenceId,
+        SessionId,
+    };
     use std::future::ready;
 
     struct NoopTransport;
@@ -162,21 +165,23 @@ mod tests {
     }
 
     fn callback_id() -> ContractId {
-        contract("phenix.application.client-callable@1")
+        contract("phenix.application.capability-call@1")
     }
 
-    fn request() -> ClientCallableRequest {
-        ClientCallableRequest {
-            session_id: SessionId::parse("session-1").expect("session id"),
-            execution_id: "execution-1".to_owned(),
-            call_id: "call-1".to_owned(),
-            callable_id: CallableId::parse("client.confirm").expect("callable id"),
+    fn request() -> CapabilityInvokeInput {
+        CapabilityInvokeInput {
+            callable: PhenixValue::Callable(CallableRef::new(
+                ContractId::parse("fixture.callback@1").expect("callable contract"),
+                CapabilityOwnerId::Client(ClientConnectionId::parse("fixture-client").unwrap()),
+                CapabilityGenerationId::parse("generation-1").unwrap(),
+                ReferenceId::parse("callback-1").unwrap(),
+            )),
             input: PhenixValue::String("continue?".to_owned()),
         }
     }
 
-    fn response() -> ClientCallableResponse {
-        ClientCallableResponse::Completed {
+    fn response() -> CapabilityInvokeResult {
+        CapabilityInvokeResult {
             output: PhenixValue::String("yes".to_owned()),
         }
     }
@@ -188,17 +193,14 @@ mod tests {
 
     #[test]
     fn callback_request_resolves_descriptor_identity_and_schema() {
-        let adapter = adapter(&[
-            "phenix.application.capability.callables@1",
-            "phenix.application.capability.client-callables@1",
-        ]);
+        let adapter = adapter(&["phenix.application.capability.capabilities@1"]);
         let request = request();
         let (callback, translated) = adapter
             .extension_callback_request(&request)
             .expect("extension callback request");
 
         assert_eq!(callback, callback_id());
-        assert_eq!(translated.method.as_ref(), "_phenix/client-callable@1");
+        assert_eq!(translated.method.as_ref(), "_phenix/capability-call@1");
         let params: PhenixValue =
             serde_json::from_str(translated.params.get()).expect("callback params");
         assert_eq!(params, request.to_value());
@@ -206,12 +208,9 @@ mod tests {
 
     #[test]
     fn callback_response_round_trips_typed_application_value() {
-        let adapter = adapter(&[
-            "phenix.application.capability.callables@1",
-            "phenix.application.capability.client-callables@1",
-        ]);
+        let adapter = adapter(&["phenix.application.capability.capabilities@1"]);
         let expected = response();
-        let translated: ClientCallableResponse = adapter
+        let translated: CapabilityInvokeResult = adapter
             .extension_callback_response(&callback_id(), &encoded_response(&expected))
             .expect("typed callback response");
         assert_eq!(translated, expected);
@@ -227,18 +226,15 @@ mod tests {
         assert_eq!(
             error,
             ApplicationError::UnsupportedCapability {
-                capability: contract("phenix.application.capability.client-callables@1"),
+                capability: contract("phenix.application.capability.capabilities@1"),
             }
         );
     }
 
     #[test]
     fn callback_response_rejects_the_wrong_descriptor_shape() {
-        let adapter = adapter(&[
-            "phenix.application.capability.callables@1",
-            "phenix.application.capability.client-callables@1",
-        ]);
-        let result = adapter.extension_callback_response::<ClientCallableResponse>(
+        let adapter = adapter(&["phenix.application.capability.capabilities@1"]);
+        let result = adapter.extension_callback_response::<CapabilityInvokeResult>(
             &callback_id(),
             &encoded_response(&Empty {}),
         );
@@ -250,10 +246,7 @@ mod tests {
 
     #[test]
     fn callback_response_rejects_the_wrong_typed_contract() {
-        let adapter = adapter(&[
-            "phenix.application.capability.callables@1",
-            "phenix.application.capability.client-callables@1",
-        ]);
+        let adapter = adapter(&["phenix.application.capability.capabilities@1"]);
         let result = adapter
             .extension_callback_response::<Empty>(&callback_id(), &encoded_response(&response()));
         assert!(matches!(

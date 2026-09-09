@@ -7,6 +7,7 @@ mod activation;
 mod agent;
 mod artifact;
 mod authority;
+mod capability;
 mod component;
 mod composition_metadata;
 mod configuration;
@@ -26,6 +27,7 @@ mod manifest;
 mod metadata_input;
 mod metadata_inspection;
 mod metadata_reconciliation;
+mod observable;
 mod persistence;
 mod persistence_bootstrap;
 mod persistence_provider;
@@ -97,6 +99,10 @@ pub use agent::{
 };
 pub use artifact::{ArtifactRevision, ArtifactRevisionParseError};
 pub use authority::Authority;
+pub use capability::{
+    CapabilityError, CapabilityHandler, CapabilityInvokeInput, CapabilityInvokeResult,
+    CapabilityRegistry, SharedCapabilityRegistry,
+};
 pub use component::{
     ComponentGraphError, ResolvedComponent, ResolvedComponentGraph, ResolvedImport,
     ResolvedImportHandle, ResolvedListener, ResolvedProviderPlan,
@@ -112,9 +118,10 @@ pub use configuration::{
     FrontendConfigError, ResolvedConfigContribution, ResolvedConfigContributions,
 };
 pub use contract::{
-    Bytes, CallableRef, Contract, ContractId, ContractValue, Exact, HasPhenixSchema, Key,
-    ObjectRef, PhenixContract, PhenixSchema, PhenixValue, Project, ReferenceId,
-    SchemaCompatibility, SchemaMismatch, Type, TypeKind, ValueCodec, ValueError, ValueMatch,
+    Bytes, CallableRef, CapabilityOwnerId, Contract, ContractId, ContractValue, Exact,
+    HasPhenixSchema, Key, ObjectRef, PhenixContract, PhenixSchema, PhenixValue, Project,
+    ReferenceId, SchemaCompatibility, SchemaMismatch, Type, TypeKind, ValueCodec, ValueError,
+    ValueMatch,
 };
 pub use events::{
     EventAdmissionReceipt, EventBus, EventDeliveryCancellation, EventDeliveryStatus,
@@ -123,10 +130,10 @@ pub use events::{
 };
 pub use frontend_metadata::FrontendMetadataResolutionError;
 pub use identity::{
-    CallableId, CapabilityId, ComponentId, ConfigurationFrontendId, ContextResourceId,
-    ContextRevisionId, EventTypeId, InterfaceId, ModelId, PluginId, ResourceNamespace,
-    RoutingProfileId, RuntimeId, SdkNamespace, SdkResourceId, ServiceId, SessionId, SkillId,
-    SubscriptionId,
+    CallableId, CapabilityGenerationId, CapabilityId, ClientConnectionId, ComponentId,
+    ConfigurationFrontendId, ContextResourceId, ContextRevisionId, EventTypeId, InterfaceId,
+    ModelId, PluginId, ResourceNamespace, RoutingProfileId, RuntimeId, SdkNamespace, SdkResourceId,
+    ServiceId, SessionId, SkillId, SubscriptionId,
 };
 pub use inspection::{ResolvedHarnessInspection, ResolvedListenerInspection};
 pub use invocation::{
@@ -148,6 +155,13 @@ pub use metadata_reconciliation::{
     ComponentMetadataChange, CompositionMetadataDiff, FrontendMetadataChange, MetadataChangeKind,
     MetadataReconciliationError, MetadataReconciliationPreview, PackageMetadataChange,
     ResourceMetadataChange,
+};
+pub use observable::{
+    CommitId, InitialObservation, ObservableError, ObservableMetadata, ObservableRef,
+    ObservableRegistration, ObservableSnapshot, ObservableStore, ObservableTransaction,
+    ObservationDelivery, ObservationGeneration, ObservationHandler, ObservationId, ObservationMode,
+    ObservationScope, ObservationSpec, ObservationSubscription, SnapshotPolicy, ValueAddress,
+    ValueChange, ValueId, ValuePath, ValuePathSegment, ValueVersion, OBSERVABLE_CONTRACT,
 };
 pub use persistence::{
     BackendFeature, DurableSchema, LocalPersistence, NamespaceTransaction, PersistenceBackend,
@@ -197,7 +211,10 @@ pub use runtime::{
     ServiceInvocationProvenance, ServiceParticipantOutcome, ServiceParticipantProvenance,
     SharedPluginInvocation,
 };
-pub use sdk::{ResolvedSdkContributions, SdkContribution, SdkResolutionError};
+pub use sdk::{
+    observable_delivery_schema, ResolvedSdkContributions, SdkContribution, SdkObservableResource,
+    SdkResolutionError, SdkValue,
+};
 pub use tasks::{CallCancellationToken, CancellationToken, TaskHandle, TaskRuntime, TaskScope};
 pub use typed_component::{
     ComponentInterface, ComponentInvocationError, InterfaceCompatibility, InterfaceSchema,

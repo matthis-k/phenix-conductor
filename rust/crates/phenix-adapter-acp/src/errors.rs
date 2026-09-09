@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 /// Present one typed application failure as ACP without collapsing its Phenix class.
 #[must_use]
 pub fn application_error_to_acp(error: ApplicationError) -> agent_client_protocol::Error {
+    let class = error.class();
     match error {
         ApplicationError::UnsupportedCapability { capability } => {
             agent_client_protocol::Error::method_not_found().data(error_data(
@@ -43,6 +44,23 @@ pub fn application_error_to_acp(error: ApplicationError) -> agent_client_protoco
             .data(error_data("disconnected", Value::Null)),
         ApplicationError::Failed { message } => agent_client_protocol::Error::internal_error()
             .data(error_data("failed", json!({ "message": message }))),
+        ApplicationError::UnknownValue { value } | ApplicationError::StaleReference { value } => {
+            agent_client_protocol::Error::resource_not_found(Some(value.clone()))
+                .data(error_data(class, json!({ "value": value })))
+        }
+        ApplicationError::InvalidPath { message }
+        | ApplicationError::SchemaMismatch { message } => {
+            agent_client_protocol::Error::invalid_params()
+                .data(error_data(class, json!({ "message": message })))
+        }
+        ApplicationError::UnsupportedSnapshotPolicy { message }
+        | ApplicationError::TransactionConflict { message } => {
+            agent_client_protocol::Error::internal_error()
+                .data(error_data(class, json!({ "message": message })))
+        }
+        ApplicationError::SubscriptionCapacity | ApplicationError::Closed => {
+            agent_client_protocol::Error::internal_error().data(error_data(class, Value::Null))
+        }
     }
 }
 

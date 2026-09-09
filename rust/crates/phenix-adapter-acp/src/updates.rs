@@ -46,6 +46,42 @@ pub fn translate_execution_update(
     )
 }
 
+pub fn translate_extension_event(
+    event: &phenix_core::ContractId,
+    payload: &PhenixValue,
+) -> Result<ExtNotification, ApplicationError> {
+    let descriptor = application_descriptor();
+    let declaration =
+        descriptor
+            .events
+            .get(event)
+            .ok_or_else(|| ApplicationError::InvalidResponse {
+                message: format!("application descriptor is missing event {event}"),
+            })?;
+    let schema = descriptor.types.get(&declaration.payload).ok_or_else(|| {
+        ApplicationError::InvalidResponse {
+            message: format!(
+                "application descriptor is missing event payload type {}",
+                declaration.payload
+            ),
+        }
+    })?;
+    schema
+        .parse(payload)
+        .map_err(|error| ApplicationError::InvalidResponse {
+            message: format!("application event violates descriptor schema: {error}"),
+        })?;
+    let params = serde_json::value::to_raw_value(payload).map_err(|error| {
+        ApplicationError::InvalidResponse {
+            message: format!("cannot encode application event for ACP: {error}"),
+        }
+    })?;
+    Ok(ExtNotification::new(
+        extension_name(event),
+        Arc::from(params),
+    ))
+}
+
 fn translate_session_with_descriptor(
     descriptor: &ApplicationDescriptor,
     update: &ApplicationSessionUpdate,
@@ -182,36 +218,15 @@ fn extension_fallback<T: ValueCodec>(
     event_id: &str,
     update: &T,
 ) -> Result<TranslatedSessionUpdate, ApplicationError> {
-    let (event, declaration) = descriptor
+    let (event, _) = descriptor
         .events
         .iter()
         .find(|(event, _)| event.as_str() == event_id)
         .ok_or_else(|| ApplicationError::InvalidResponse {
             message: format!("application descriptor is missing event {event_id}"),
         })?;
-    let schema = descriptor.types.get(&declaration.payload).ok_or_else(|| {
-        ApplicationError::InvalidResponse {
-            message: format!(
-                "application descriptor is missing event payload type {}",
-                declaration.payload
-            ),
-        }
-    })?;
     let value = update.to_value();
-    schema
-        .parse(&value)
-        .map_err(|error| ApplicationError::InvalidResponse {
-            message: format!("application update violates descriptor event schema: {error}"),
-        })?;
-    let params = serde_json::value::to_raw_value(&value).map_err(|error| {
-        ApplicationError::InvalidResponse {
-            message: format!("cannot encode application update for ACP: {error}"),
-        }
-    })?;
-    Ok(TranslatedSessionUpdate::Extension(ExtNotification::new(
-        extension_name(event),
-        Arc::from(params),
-    )))
+    translate_extension_event(event, &value).map(TranslatedSessionUpdate::Extension)
 }
 
 fn encode_json(value: &PhenixValue) -> Result<Value, ApplicationError> {
@@ -408,5 +423,25 @@ mod tests {
             assert_eq!(event.event, expected_id);
             assert_eq!(event.payload, descriptor.types[&expected.payload]);
         }
+    }
+
+    #[test]
+    fn descriptor_extension_events_encode_application_payloads() {
+        let update = SessionUpdate {
+            session_id: session_id(),
+            sequence: 11,
+            update: SessionChange::Renamed {
+                title: "Renamed".to_owned(),
+            },
+        };
+        let event = ContractId::parse("phenix.application.session-update@1")
+            .expect("static event id is valid");
+        let notification = translate_extension_event(&event, &update.to_value())
+            .expect("descriptor event is encodable");
+
+        assert_eq!(notification.method.as_ref(), "_phenix/session-update@1");
+        let payload: Value =
+            serde_json::from_str(notification.params.get()).expect("extension event JSON");
+        assert_eq!(payload, serde_json::to_value(update.to_value()).unwrap());
     }
 }

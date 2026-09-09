@@ -18,6 +18,7 @@ agent-client-protocol.workspace = true
 futures.workspace = true
 mlua = { workspace = true, features = ["lua51", "module", "serde"] }
 phenix-binding-generator = { path = "../phenix-binding-generator" }
+phenix-application-interface = { path = "../phenix-application-interface" }
 phenix-client-acp = { path = "../phenix-client-acp" }
 phenix-core = { path = "../phenix-core" }
 serde_json.workspace = true

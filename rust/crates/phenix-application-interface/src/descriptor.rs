@@ -36,6 +36,7 @@ pub struct EventDescriptor {
 pub enum OrderingScope {
     Session,
     Execution,
+    Commit,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
