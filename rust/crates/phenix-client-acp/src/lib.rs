@@ -4,9 +4,8 @@ use agent_client_protocol::schema::{
     v1::{
         AgentNotification, AgentRequest, CancelNotification, ClientResponse, CloseSessionRequest,
         CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse, InitializeRequest,
-        ListSessionsRequest,
-        ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
-        NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
+        ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+        NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
         ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
         SetSessionConfigOptionResponse,
     },
