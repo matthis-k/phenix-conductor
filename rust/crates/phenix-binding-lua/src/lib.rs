@@ -381,6 +381,13 @@ struct Request {
     receiver: Option<oneshot::Receiver<CommandResult>>,
     result: Option<CommandResult>,
     local_callables: Option<Rc<RefCell<LocalCallables>>>,
+    listener_lifecycle: Option<ListenerLifecycle>,
+}
+
+#[derive(Clone)]
+enum ListenerLifecycle {
+    ProjectStop(ReferenceId),
+    RemoveOnSuccess(ReferenceId),
 }
 
 impl Request {
@@ -394,7 +401,13 @@ impl Request {
             receiver: Some(receiver),
             result: None,
             local_callables,
+            listener_lifecycle: None,
         }
+    }
+
+    fn with_listener_lifecycle(mut self, listener_lifecycle: ListenerLifecycle) -> Self {
+        self.listener_lifecycle = Some(listener_lifecycle);
+        self
     }
 
     fn poll(&mut self) -> Option<CommandResult> {
@@ -668,7 +681,23 @@ impl UserData for Request {
         methods.add_method_mut("poll", |lua, this, ()| match this.poll() {
             None => Ok(MultiValue::new()),
             Some(Ok(response)) => {
-                response_values(lua, &this.state, this.local_callables.as_ref(), response)
+                let listener_to_remove = match &this.listener_lifecycle {
+                    Some(ListenerLifecycle::RemoveOnSuccess(listener)) => {
+                        if let Some(local_callables) = &this.local_callables {
+                            local_callables.borrow_mut().entries.remove(listener);
+                        }
+                        None
+                    }
+                    Some(ListenerLifecycle::ProjectStop(listener)) => Some(listener),
+                    None => None,
+                };
+                response_values(
+                    lua,
+                    &this.state,
+                    this.local_callables.as_ref(),
+                    listener_to_remove,
+                    response,
+                )
             }
             Some(Err(error)) => error_values(lua, &error),
         });
@@ -693,6 +722,7 @@ fn response_values(
     lua: &Lua,
     state: &Arc<ClientState>,
     local_callables: Option<&Rc<RefCell<LocalCallables>>>,
+    listener_to_remove: Option<&ReferenceId>,
     response: Response,
 ) -> LuaResult<MultiValue> {
     let value = match response {
@@ -741,6 +771,30 @@ fn response_values(
                 .map_err(lua_error)?
         }
         Response::Projected { schema, value } => {
+            if let (
+                Some(listener),
+                Type::Callable {
+                    contract,
+                    input,
+                    output,
+                },
+                PhenixValue::Callable(stop),
+            ) = (listener_to_remove, &schema, &value)
+            {
+                if contract.as_str() == "phenix.observable-stop@1" {
+                    return remote_callable(
+                        lua,
+                        Some(state),
+                        local_callables,
+                        stop.clone(),
+                        (**input).clone(),
+                        (**output).clone(),
+                        Some(listener.clone()),
+                    )
+                    .map(|value| MultiValue::from_vec(vec![value]))
+                    .map_err(lua_error);
+                }
+            }
             phenix_to_lua_with_state(lua, Some(state), local_callables, &schema, &value)
                 .map_err(lua_error)?
         }
@@ -1658,6 +1712,7 @@ fn phenix_to_lua_with_state(
                 reference.clone(),
                 (**input).clone(),
                 (**output).clone(),
+                None,
             )
         }
         (Type::Object { .. }, PhenixValue::Object(reference)) => lua
@@ -1772,6 +1827,7 @@ fn remote_callable(
     callable: CallableRef,
     input_schema: PhenixSchema,
     output_schema: PhenixSchema,
+    listener_to_remove: Option<ReferenceId>,
 ) -> Result<Value, BindingError> {
     let state = state.ok_or_else(|| {
         BindingError::conversion("callable projection requires a live Phenix client connection")
@@ -1787,6 +1843,11 @@ fn remote_callable(
                 lua_to_phenix(lua, &input_schema, input)
             }
             .map_err(lua_error)?;
+            let lifted_listener = if callable.contract().as_str() == "phenix.observable-listen@1" {
+                observable_listener(&input)
+            } else {
+                None
+            };
             let request = request_for(&state, local_callables.clone(), |reply| {
                 Command::InvokeCapability {
                     input: CapabilityInvokeInput {
@@ -1797,10 +1858,27 @@ fn remote_callable(
                     reply,
                 }
             })?;
+            let request = match listener_to_remove.clone() {
+                Some(listener) => request.with_listener_lifecycle(ListenerLifecycle::RemoveOnSuccess(listener)),
+                None => match lifted_listener {
+                    Some(listener) => request.with_listener_lifecycle(ListenerLifecycle::ProjectStop(listener)),
+                    None => request,
+                },
+            };
             lua.create_userdata(request)
         })
         .map_err(|error| BindingError::conversion(error.to_string()))?;
     Ok(Value::Function(proxy))
+}
+
+fn observable_listener(input: &PhenixValue) -> Option<ReferenceId> {
+    let PhenixValue::Table(fields) = input else {
+        return None;
+    };
+    let PhenixValue::Callable(listener) = fields.get("listener")? else {
+        return None;
+    };
+    Some(listener.id().clone())
 }
 
 fn callable_input(
@@ -2138,6 +2216,7 @@ mod tests {
             &lua,
             &state,
             None,
+            None,
             Response::Application {
                 operation: ContractId::parse(GetSdk::ID).unwrap(),
                 value: sdk.to_value(),
@@ -2162,6 +2241,86 @@ mod tests {
         assert_eq!(input.callable, PhenixValue::Callable(reference));
         assert_eq!(input.input, PhenixValue::U64(7));
         assert_eq!(output_schema, Type::String);
+    }
+
+    #[test]
+    fn observable_stop_drops_queued_listener_before_lua_dispatch() {
+        let lua = Lua::new();
+        let (commands, mut receiver) = mpsc::unbounded();
+        let (_updates_sender, updates) = std_mpsc::channel();
+        let (_extension_sender, extension_updates) = std_mpsc::channel();
+        let (_callback_sender, callbacks) = std_mpsc::channel();
+        let state = Arc::new(ClientState {
+            commands,
+            updates: Mutex::new(updates),
+            extension_updates: Mutex::new(extension_updates),
+            callbacks: Mutex::new(callbacks),
+            capabilities: Mutex::new(BTreeSet::new()),
+            extensions: Mutex::new(BTreeSet::new()),
+            terminal_error: Mutex::new(None),
+            owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            generation: CapabilityGenerationId::parse("generation-1").unwrap(),
+        });
+        let local_callables = Rc::new(RefCell::new(LocalCallables::default()));
+        let listener_schema = Type::Callable {
+            contract: ContractId::parse("phenix.observable-delivery@1").unwrap(),
+            input: Box::new(Type::Unit),
+            output: Box::new(Type::Unit),
+        };
+        let listener = local_callables
+            .borrow_mut()
+            .lift(
+                &lua,
+                &state,
+                listener_schema,
+                lua.load("return function(_delivery) return nil end")
+                    .eval()
+                    .unwrap(),
+            )
+            .unwrap();
+        let stop = CallableRef::new(
+            ContractId::parse("phenix.observable-stop@1").unwrap(),
+            CapabilityOwnerId::Runtime(phenix_core::RuntimeId::parse("fixture-runtime").unwrap()),
+            CapabilityGenerationId::parse("runtime-generation").unwrap(),
+            ReferenceId::parse("stop").unwrap(),
+        );
+        let stop_schema = Type::Callable {
+            contract: stop.contract().clone(),
+            input: Box::new(Type::Unit),
+            output: Box::new(Type::Unit),
+        };
+        let response = response_values(
+            &lua,
+            &state,
+            Some(&local_callables),
+            Some(listener.id()),
+            Response::Projected {
+                schema: stop_schema,
+                value: PhenixValue::Callable(stop.clone()),
+            },
+        )
+        .unwrap();
+        let Value::Function(stop_proxy) = response.into_iter().next().unwrap() else {
+            panic!("observable stop must project as a callable");
+        };
+
+        let stop_request: mlua::AnyUserData = stop_proxy.call(()).unwrap();
+        let command = futures::executor::block_on(receiver.next()).unwrap();
+        let Command::InvokeCapability { input, reply, .. } = command else {
+            panic!("observable stop must use generic capability invocation");
+        };
+        assert_eq!(input.callable, PhenixValue::Callable(stop));
+        reply
+            .send(Ok(Response::Projected {
+                schema: Type::Unit,
+                value: PhenixValue::Unit,
+            }))
+            .unwrap();
+        lua.globals().set("stop_request", stop_request).unwrap();
+        lua.load("return stop_request:poll()")
+            .eval::<Value>()
+            .unwrap();
+        assert!(!local_callables.borrow().entries.contains_key(listener.id()));
     }
 
     #[test]

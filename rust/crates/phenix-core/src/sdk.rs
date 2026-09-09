@@ -1837,9 +1837,9 @@ mod tests {
             })
             .unwrap();
         let deliveries = deliveries.lock().unwrap();
-        assert_eq!(deliveries.len(), 1);
-        observable_delivery_schema().parse(&deliveries[0]).unwrap();
-        let PhenixValue::Table(delivery) = &deliveries[0] else {
+        assert_eq!(deliveries.len(), 2);
+        observable_delivery_schema().parse(&deliveries[1]).unwrap();
+        let PhenixValue::Table(delivery) = &deliveries[1] else {
             panic!("delivery is a table");
         };
         let PhenixValue::Table(address) = delivery.get("address").unwrap() else {
