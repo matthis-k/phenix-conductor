@@ -52,6 +52,28 @@ let
       '';
     };
 
+  mkLuaBindingPackage =
+    pkgs:
+    pkgs.rustPlatform.buildRustPackage {
+      pname = "phenix-binding-lua";
+      version = "0";
+      src = pkgs.lib.cleanSource ../rust;
+      cargoLock.lockFile = ../rust/Cargo.lock;
+      cargoBuildFlags = [
+        "--package"
+        "phenix-binding-lua"
+      ];
+      doCheck = false;
+      installPhase = ''
+        runHook preInstall
+        module="$(find target -path '*/release/libphenix.so' -type f -print -quit)"
+        test -n "$module"
+        mkdir -p "$out/lib/lua/5.1"
+        cp "$module" "$out/lib/lua/5.1/phenix.so"
+        runHook postInstall
+      '';
+    };
+
   pluginIds = {
     adapter-acp = "phenix.adapter.acp";
     api = "phenix.api";
@@ -164,6 +186,7 @@ in
   perSystem =
     { pkgs, system, ... }:
     let
+      luaBinding = mkLuaBindingPackage pkgs;
       pluginPackageChecks = pkgs.lib.mapAttrs' (name: package: {
         name = "phenix-plugin-${name}-package";
         value = package;
@@ -182,9 +205,36 @@ in
                   > "$out/share/phenix/interfaces/phenix.application@1.json"
               '';
             });
+        phenix-binding-lua = luaBinding;
         phenix-conductor = mkBinaryPackage pkgs "phenix-conductor" "phenix-conductor";
       };
 
-      checks = pluginPackageChecks;
+      checks = pluginPackageChecks // {
+        phenix-binding-lua-load =
+          pkgs.runCommand "phenix-binding-lua-load-check"
+            {
+              nativeBuildInputs = [
+                pkgs.luajit
+                luaBinding
+              ];
+            }
+            ''
+              export LUA_CPATH="${luaBinding}/lib/lua/5.1/?.so;;"
+              luajit -e '
+                local phenix = require("phenix")
+                assert(phenix.interface_id == "phenix.application@1")
+                assert(type(phenix.connect) == "function")
+                assert(type(phenix.descriptor) == "table")
+                assert(type(phenix.descriptor.operations) == "table")
+                local bindings = phenix.descriptor.bind({
+                  _invoke_application = function(_, operation, _) return operation end,
+                })
+                for operation, metadata in pairs(phenix.descriptor.operations) do
+                  assert(bindings[metadata.name](nil) == operation)
+                end
+              '
+              touch "$out"
+            '';
+      };
     };
 }

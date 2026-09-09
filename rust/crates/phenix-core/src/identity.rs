@@ -125,6 +125,8 @@ identifier!(RuntimeId);
 identifier!(SessionId);
 identifier!(ContextResourceId);
 identifier!(ContextRevisionId);
+identifier!(ClientConnectionId);
+identifier!(CapabilityGenerationId);
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(try_from = "String")]

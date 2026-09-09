@@ -193,7 +193,8 @@ impl Emitter {
                 self.define(&name, schema)?;
                 name
             }
-            PhenixSchema::Never | PhenixSchema::Callable { .. } | PhenixSchema::Object { .. } => {
+            PhenixSchema::Object { contract } => self.object(contract)?,
+            PhenixSchema::Never | PhenixSchema::Callable { .. } => {
                 return Err(GenerationError::UnsupportedSchema(schema.clone()));
             }
         };
@@ -227,5 +228,27 @@ impl Emitter {
         self.line("#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]");
         self.line(&declaration);
         Ok(())
+    }
+
+    fn object(&mut self, contract: &ContractId) -> Result<String, GenerationError> {
+        let name = format!("Object{}", self.next);
+        self.next += 1;
+        self.reserve(&name)?;
+        self.line("#[derive(Clone, Debug, PartialEq)]");
+        self.line(&format!("pub struct {name}(pub phenix_core::ObjectRef);"));
+        self.line(&format!(
+            "impl phenix_core::ValueCodec for {name} {{ fn phenix_type() -> phenix_core::PhenixSchema {{ phenix_core::PhenixSchema::Object {{ contract: phenix_core::ContractId::parse({:?}).expect(\"generated object contract is valid\") }} }} fn to_value(&self) -> phenix_core::PhenixValue {{ phenix_core::PhenixValue::Object(self.0.clone()) }} fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> {{ <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value {{ phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!(\"validated object value\"), }} }} }}",
+            contract.as_str()
+        ));
+        self.line(&format!(
+            "impl From<&{name}> for phenix_core::PhenixValue {{ fn from(value: &{name}) -> Self {{ <{name} as phenix_core::ValueCodec>::to_value(value) }} }}"
+        ));
+        self.line(&format!(
+            "impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for {name} {{ type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> {{ <Self as phenix_core::ValueCodec>::from_value(value.0) }} }}"
+        ));
+        self.line(&format!(
+            "impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for {name} {{ type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> {{ <Self as phenix_core::ValueCodec>::project_from_value(value.0) }} }}"
+        ));
+        Ok(name)
     }
 }

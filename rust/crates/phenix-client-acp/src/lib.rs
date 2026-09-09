@@ -2,7 +2,8 @@
 
 use agent_client_protocol::schema::{
     v1::{
-        CancelNotification, CloseSessionRequest, CloseSessionResponse, InitializeRequest,
+        AgentNotification, AgentRequest, CancelNotification, CloseSessionRequest,
+        CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse, InitializeRequest,
         ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
         NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
         ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
@@ -11,15 +12,17 @@ use agent_client_protocol::schema::{
     ProtocolVersion,
 };
 use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, Agent, Client as AcpRole, ConnectTo, ConnectionTo,
+    AcpAgent, AcpAgentConfig, Agent, Client as AcpRole, ConnectTo, ConnectionTo, ErrorCode,
 };
+use futures::channel::oneshot;
 use phenix_application_interface::{
     ApplicationClient, ApplicationTransport, Capabilities, Operation,
 };
-use phenix_core::{ContractId, PhenixSchema};
+use phenix_core::{ContractId, PhenixSchema, PhenixValue};
 use std::{
     collections::{BTreeMap, BTreeSet},
     future::Future,
+    num::NonZeroUsize,
     path::PathBuf,
     sync::{mpsc, Arc, Mutex},
 };
@@ -96,9 +99,22 @@ impl StdioConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequestRejection {
+    pub code: ErrorCode,
+    pub class: Option<String>,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientError {
     Transport(String),
     Protocol(String),
+    Cancelled {
+        message: String,
+        details: Box<Option<serde_json::Value>>,
+    },
+    Rejected(Box<RequestRejection>),
     UnsupportedCapability {
         operation: ContractId,
         capability: ContractId,
@@ -108,6 +124,7 @@ pub enum ClientError {
         expected: u64,
         received: u64,
     },
+    UpdateQueueFull,
 }
 
 impl std::fmt::Display for ClientError {
@@ -115,6 +132,22 @@ impl std::fmt::Display for ClientError {
         match self {
             Self::Transport(message) => write!(formatter, "ACP transport failure: {message}"),
             Self::Protocol(message) => write!(formatter, "ACP protocol failure: {message}"),
+            Self::Cancelled { message, .. } => write!(formatter, "ACP request cancelled: {message}"),
+            Self::Rejected(rejection) => {
+                if let Some(class) = &rejection.class {
+                    write!(
+                        formatter,
+                        "ACP peer rejected request ({class}, {}): {}",
+                        rejection.code, rejection.message
+                    )
+                } else {
+                    write!(
+                        formatter,
+                        "ACP peer rejected request ({}): {}",
+                        rejection.code, rejection.message
+                    )
+                }
+            }
             Self::UnsupportedCapability {
                 operation,
                 capability,
@@ -130,11 +163,45 @@ impl std::fmt::Display for ClientError {
                 formatter,
                 "ACP session {session_id} update sequence is {received}; expected {expected}"
             ),
+            Self::UpdateQueueFull => write!(formatter, "ACP update queue is full"),
         }
     }
 }
 
 impl std::error::Error for ClientError {}
+
+fn request_error(error: agent_client_protocol::Error) -> ClientError {
+    let message = error.to_string();
+    let class = error.data.as_ref().and_then(application_error_class);
+    let details = error.data.as_ref().and_then(application_error_details);
+    let code = error.code;
+    if code == ErrorCode::RequestCancelled || class.as_deref() == Some("cancelled") {
+        ClientError::Cancelled {
+            message,
+            details: Box::new(details),
+        }
+    } else {
+        ClientError::Rejected(Box::new(RequestRejection {
+            code,
+            class,
+            message,
+            details,
+        }))
+    }
+}
+
+fn application_error_class(data: &serde_json::Value) -> Option<String> {
+    data.get("phenix.class")
+        .or_else(|| data.get("phenix").and_then(|phenix| phenix.get("class")))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+fn application_error_details(data: &serde_json::Value) -> Option<serde_json::Value> {
+    data.get("phenix.details")
+        .or_else(|| data.get("phenix").and_then(|phenix| phenix.get("detail")))
+        .cloned()
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExtensionMethod {
@@ -147,9 +214,34 @@ pub struct ExtensionMethod {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExtensionEvent {
+    pub event: ContractId,
+    pub capability: ContractId,
+    pub method: String,
+    pub payload: PhenixSchema,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExtensionCallback {
+    pub callback: ContractId,
+    pub capability: ContractId,
+    pub method: String,
+    pub request: PhenixSchema,
+    pub response: PhenixSchema,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ApplicationEvent {
+    pub event: ContractId,
+    pub payload: PhenixValue,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DescriptorExtensions {
     interface: ContractId,
     methods: BTreeMap<ContractId, ExtensionMethod>,
+    events: BTreeMap<String, ExtensionEvent>,
+    callbacks: BTreeMap<String, ExtensionCallback>,
     advertised_capabilities: BTreeSet<ContractId>,
 }
 
@@ -176,10 +268,47 @@ impl DescriptorExtensions {
                 )
             })
             .collect();
+        let events = descriptor
+            .events
+            .iter()
+            .filter(|(_, event)| advertised_capabilities.contains(&event.capability))
+            .map(|(event, definition)| {
+                let method = extension_name(event);
+                (
+                    method.clone(),
+                    ExtensionEvent {
+                        event: event.clone(),
+                        capability: definition.capability.clone(),
+                        method,
+                        payload: schema(&descriptor, &definition.payload),
+                    },
+                )
+            })
+            .collect();
+        let callbacks = descriptor
+            .callbacks
+            .iter()
+            .filter(|(_, callback)| advertised_capabilities.contains(&callback.capability))
+            .map(|(callback, definition)| {
+                let method = extension_name(callback);
+                (
+                    method.clone(),
+                    ExtensionCallback {
+                        callback: callback.clone(),
+                        capability: definition.capability.clone(),
+                        method,
+                        request: schema(&descriptor, &definition.request),
+                        response: schema(&descriptor, &definition.response),
+                    },
+                )
+            })
+            .collect();
 
         Self {
             interface: descriptor.id,
             methods,
+            events,
+            callbacks,
             advertised_capabilities,
         }
     }
@@ -210,8 +339,273 @@ impl DescriptorExtensions {
     }
 
     #[must_use]
+    pub fn event(&self, method: &str) -> Option<&ExtensionEvent> {
+        self.events.get(method)
+    }
+
+    #[must_use]
+    pub fn callback(&self, method: &str) -> Option<&ExtensionCallback> {
+        self.callbacks
+            .get(method)
+            .or_else(|| self.callbacks.get(&format!("_{method}")))
+    }
+
+    #[must_use]
     pub fn supports(&self, capability: &ContractId) -> bool {
         self.advertised_capabilities.contains(capability)
+    }
+}
+
+/// One runtime-to-client callback admitted to a bounded host queue.
+pub struct ExtensionCallbackRequest {
+    pub callback: ContractId,
+    pub input: PhenixValue,
+    response: oneshot::Sender<Result<PhenixValue, ApplicationError>>,
+}
+
+impl ExtensionCallbackRequest {
+    pub fn respond(self, response: Result<PhenixValue, ApplicationError>) {
+        let _ = self.response.send(response);
+    }
+}
+
+#[derive(Clone)]
+pub struct ExtensionCallbacks {
+    sender: mpsc::SyncSender<ExtensionCallbackRequest>,
+}
+
+#[derive(Debug)]
+enum CallbackError {
+    Protocol(String),
+    Disconnected(String),
+    QueueFull,
+    Application(ApplicationError),
+}
+
+impl ExtensionCallbacks {
+    #[must_use]
+    pub fn bounded(capacity: NonZeroUsize) -> (Self, mpsc::Receiver<ExtensionCallbackRequest>) {
+        let (sender, receiver) = mpsc::sync_channel(capacity.get());
+        (Self { sender }, receiver)
+    }
+
+    async fn receive(
+        &self,
+        request: ExtRequest,
+        extensions: &DescriptorExtensions,
+    ) -> Result<ExtResponse, CallbackError> {
+        let callback = extensions
+            .callback(request.method.as_ref())
+            .ok_or_else(|| {
+                CallbackError::Protocol(format!(
+                    "ACP peer sent an unadvertised Phenix extension callback {}",
+                    request.method
+                ))
+            })?;
+        let input = serde_json::from_str::<PhenixValue>(request.params.get()).map_err(|error| {
+            CallbackError::Protocol(format!(
+                "cannot decode ACP extension callback {}: {error}",
+                request.method
+            ))
+        })?;
+        callback.request.parse(&input).map_err(|error| {
+            CallbackError::Protocol(format!(
+                "ACP extension callback {} violates the application descriptor: {error}",
+                request.method
+            ))
+        })?;
+        let (response, received) = oneshot::channel();
+        self.sender
+            .try_send(ExtensionCallbackRequest {
+                callback: callback.callback.clone(),
+                input,
+                response,
+            })
+            .map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => CallbackError::QueueFull,
+                mpsc::TrySendError::Disconnected(_) => CallbackError::Disconnected(
+                    "ACP extension callback receiver disconnected".to_owned(),
+                ),
+            })?;
+        let output = received
+            .await
+            .map_err(|_| {
+                CallbackError::Disconnected("ACP extension callback response dropped".to_owned())
+            })?
+            .map_err(CallbackError::Application)?;
+        callback.response.parse(&output).map_err(|error| {
+            CallbackError::Protocol(format!(
+                "ACP extension callback {} returned an invalid response: {error}",
+                callback.callback
+            ))
+        })?;
+        let raw = serde_json::value::to_raw_value(&output)
+            .map_err(|error| CallbackError::Protocol(error.to_string()))?;
+        Ok(ExtResponse::new(Arc::from(raw)))
+    }
+}
+
+fn callback_error_to_acp(error: CallbackError) -> agent_client_protocol::Error {
+    match error {
+        CallbackError::Application(error) => callback_application_error_to_acp(error),
+        CallbackError::QueueFull => {
+            agent_client_protocol::Error::internal_error().data(serde_json::json!({
+                "phenix.class": "queue_full",
+                "phenix.details": null,
+            }))
+        }
+        CallbackError::Disconnected(message) => agent_client_protocol::Error::internal_error()
+            .data(serde_json::json!({
+                "phenix.class": "disconnected",
+                "phenix.details": { "message": message },
+            })),
+        CallbackError::Protocol(message) => {
+            agent_client_protocol::Error::invalid_params().data(serde_json::json!({
+                "phenix.class": "schema_mismatch",
+                "phenix.details": { "message": message },
+            }))
+        }
+    }
+}
+
+fn callback_application_error_to_acp(error: ApplicationError) -> agent_client_protocol::Error {
+    let data = serde_json::json!({
+        "phenix.class": error.class(),
+        "phenix.details": callback_application_error_details(&error),
+    });
+    let error = match &error {
+        ApplicationError::UnsupportedCapability { .. } => {
+            agent_client_protocol::Error::method_not_found()
+        }
+        ApplicationError::InvalidInput { .. } => agent_client_protocol::Error::invalid_params(),
+        ApplicationError::InvalidResponse { .. }
+        | ApplicationError::PermissionDenied { .. }
+        | ApplicationError::Conflict { .. }
+        | ApplicationError::Failed { .. }
+        | ApplicationError::Disconnected => agent_client_protocol::Error::internal_error(),
+        ApplicationError::NotFound { resource } => {
+            agent_client_protocol::Error::resource_not_found(Some(resource.clone()))
+        }
+        ApplicationError::UnknownValue { value } | ApplicationError::StaleReference { value } => {
+            agent_client_protocol::Error::resource_not_found(Some(value.clone()))
+        }
+        ApplicationError::InvalidPath { .. } | ApplicationError::SchemaMismatch { .. } => {
+            agent_client_protocol::Error::invalid_params()
+        }
+        ApplicationError::UnsupportedSnapshotPolicy { .. }
+        | ApplicationError::TransactionConflict { .. }
+        | ApplicationError::SubscriptionCapacity
+        | ApplicationError::Closed => agent_client_protocol::Error::internal_error(),
+        ApplicationError::Unauthenticated { .. } => agent_client_protocol::Error::auth_required(),
+        ApplicationError::Cancelled => agent_client_protocol::Error::request_cancelled(),
+    };
+    error.data(data)
+}
+
+fn callback_application_error_details(error: &ApplicationError) -> serde_json::Value {
+    match error {
+        ApplicationError::UnsupportedCapability { capability } => {
+            serde_json::json!({ "capability": capability.as_str() })
+        }
+        ApplicationError::InvalidInput { message }
+        | ApplicationError::InvalidResponse { message }
+        | ApplicationError::Unauthenticated { message }
+        | ApplicationError::PermissionDenied { message }
+        | ApplicationError::Conflict { message }
+        | ApplicationError::Failed { message }
+        | ApplicationError::InvalidPath { message }
+        | ApplicationError::SchemaMismatch { message }
+        | ApplicationError::UnsupportedSnapshotPolicy { message }
+        | ApplicationError::TransactionConflict { message } => {
+            serde_json::json!({ "message": message })
+        }
+        ApplicationError::NotFound { resource } => serde_json::json!({ "resource": resource }),
+        ApplicationError::UnknownValue { value } | ApplicationError::StaleReference { value } => {
+            serde_json::json!({ "value": value })
+        }
+        ApplicationError::Cancelled
+        | ApplicationError::Disconnected
+        | ApplicationError::SubscriptionCapacity
+        | ApplicationError::Closed => serde_json::Value::Null,
+    }
+}
+
+#[derive(Clone)]
+pub struct ExtensionUpdates {
+    sender: UpdateSender<ApplicationEvent>,
+}
+
+#[derive(Clone)]
+enum UpdateSender<T> {
+    Unbounded(mpsc::Sender<T>),
+    Bounded(mpsc::SyncSender<T>),
+}
+
+impl ExtensionUpdates {
+    #[must_use]
+    pub fn channel() -> (Self, mpsc::Receiver<ApplicationEvent>) {
+        let (sender, receiver) = mpsc::channel();
+        (
+            Self {
+                sender: UpdateSender::Unbounded(sender),
+            },
+            receiver,
+        )
+    }
+
+    #[must_use]
+    pub fn bounded(capacity: NonZeroUsize) -> (Self, mpsc::Receiver<ApplicationEvent>) {
+        let (sender, receiver) = mpsc::sync_channel(capacity.get());
+        (
+            Self {
+                sender: UpdateSender::Bounded(sender),
+            },
+            receiver,
+        )
+    }
+
+    fn receive(
+        &self,
+        notification: ExtNotification,
+        extensions: &DescriptorExtensions,
+    ) -> Result<(), ClientError> {
+        let event = extensions
+            .event(notification.method.as_ref())
+            .or_else(|| extensions.event(&format!("_{}", notification.method)))
+            .ok_or_else(|| {
+                ClientError::Protocol(format!(
+                    "ACP peer sent an unadvertised Phenix extension event {}",
+                    notification.method
+                ))
+            })?;
+        let payload =
+            serde_json::from_str::<PhenixValue>(notification.params.get()).map_err(|error| {
+                ClientError::Protocol(format!(
+                    "cannot decode ACP extension event {}: {error}",
+                    notification.method
+                ))
+            })?;
+        event.payload.parse(&payload).map_err(|error| {
+            ClientError::Protocol(format!(
+                "ACP extension event {} violates the application descriptor: {error}",
+                notification.method
+            ))
+        })?;
+        let update = ApplicationEvent {
+            event: event.event.clone(),
+            payload,
+        };
+        match &self.sender {
+            UpdateSender::Unbounded(sender) => sender.send(update).map_err(|_| {
+                ClientError::Transport("ACP extension event receiver disconnected".to_owned())
+            }),
+            UpdateSender::Bounded(sender) => sender.try_send(update).map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => ClientError::UpdateQueueFull,
+                mpsc::TrySendError::Disconnected(_) => {
+                    ClientError::Transport("ACP extension event receiver disconnected".to_owned())
+                }
+            }),
+        }
     }
 }
 
@@ -266,7 +660,7 @@ impl OrderedUpdates {
 #[derive(Clone)]
 pub struct SessionUpdates {
     ordered: Arc<Mutex<OrderedUpdates>>,
-    sender: mpsc::Sender<SessionNotification>,
+    sender: UpdateSender<SessionNotification>,
 }
 
 impl SessionUpdates {
@@ -276,7 +670,20 @@ impl SessionUpdates {
         (
             Self {
                 ordered: Arc::new(Mutex::new(OrderedUpdates::default())),
-                sender,
+                sender: UpdateSender::Unbounded(sender),
+            },
+            receiver,
+        )
+    }
+
+    /// Creates a bounded update queue for hosts that must control local memory use.
+    #[must_use]
+    pub fn bounded(capacity: NonZeroUsize) -> (Self, mpsc::Receiver<SessionNotification>) {
+        let (sender, receiver) = mpsc::sync_channel(capacity.get());
+        (
+            Self {
+                ordered: Arc::new(Mutex::new(OrderedUpdates::default())),
+                sender: UpdateSender::Bounded(sender),
             },
             receiver,
         )
@@ -306,9 +713,19 @@ impl SessionUpdates {
                 .map_err(|_| ClientError::Protocol("ACP update order lock poisoned".to_owned()))?
                 .accept(notification.session_id.to_string(), sequence)?;
         }
-        self.sender
-            .send(notification)
-            .map_err(|_| ClientError::Transport("ACP update receiver disconnected".to_owned()))
+        match &self.sender {
+            UpdateSender::Unbounded(sender) => sender
+                .send(notification)
+                .map_err(|_| ClientError::Transport("ACP update receiver disconnected".to_owned())),
+            UpdateSender::Bounded(sender) => {
+                sender.try_send(notification).map_err(|error| match error {
+                    mpsc::TrySendError::Full(_) => ClientError::UpdateQueueFull,
+                    mpsc::TrySendError::Disconnected(_) => {
+                        ClientError::Transport("ACP update receiver disconnected".to_owned())
+                    }
+                })
+            }
+        }
     }
 }
 
@@ -398,6 +815,177 @@ impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
             .await
             .map_err(|error| ClientError::Transport(error.to_string()))
     }
+
+    pub async fn connect_with_updates_and_extensions<F, Fut, R>(
+        self,
+        updates: SessionUpdates,
+        extension_updates: ExtensionUpdates,
+        use_connection: F,
+    ) -> Result<R, ClientError>
+    where
+        F: FnOnce(AcpConnection) -> Fut,
+        Fut: Future<Output = Result<R, ClientError>>,
+    {
+        let negotiated = Arc::new(Mutex::new(None::<DescriptorExtensions>));
+        let notifications = Arc::clone(&negotiated);
+        agent_client_protocol::Client
+            .builder()
+            .on_receive_notification(
+                async move |notification: AgentNotification, _connection| {
+                    let result = match notification {
+                        AgentNotification::SessionNotification(notification) => {
+                            updates.receive(notification)
+                        }
+                        AgentNotification::ExtNotification(notification) => notifications
+                            .lock()
+                            .map_err(|_| {
+                                ClientError::Protocol(
+                                    "ACP extension metadata lock poisoned".to_owned(),
+                                )
+                            })
+                            .and_then(|extensions| {
+                                let extensions = extensions.as_ref().ok_or_else(|| {
+                                    ClientError::Protocol(
+                                        "ACP peer sent an extension event before initialize completed"
+                                            .to_owned(),
+                                    )
+                                })?;
+                                extension_updates.receive(notification, extensions)
+                            }),
+                        _ => Ok(()),
+                    };
+                    result.map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })
+                },
+                agent_client_protocol::on_receive_notification!(),
+            )
+            .connect_with(
+                self.transport,
+                move |connection: ConnectionTo<Agent>| async move {
+                    let initialized = connection
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
+                    let extensions = descriptor_extensions(&initialized)?;
+                    *negotiated.lock().map_err(|_| {
+                        agent_client_protocol::Error::internal_error()
+                            .data("ACP extension metadata lock poisoned")
+                    })? = Some(extensions.clone());
+                    use_connection(AcpConnection {
+                        connection,
+                        extensions,
+                    })
+                    .await
+                    .map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })
+                },
+            )
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))
+    }
+
+    pub async fn connect_with_updates_extensions_and_callbacks<F, Fut, R>(
+        self,
+        updates: SessionUpdates,
+        extension_updates: ExtensionUpdates,
+        callbacks: ExtensionCallbacks,
+        use_connection: F,
+    ) -> Result<R, ClientError>
+    where
+        F: FnOnce(AcpConnection) -> Fut,
+        Fut: Future<Output = Result<R, ClientError>>,
+    {
+        let negotiated = Arc::new(Mutex::new(None::<DescriptorExtensions>));
+        let notifications = Arc::clone(&negotiated);
+        let callback_metadata = Arc::clone(&negotiated);
+        agent_client_protocol::Client
+            .builder()
+            .on_receive_notification(
+                async move |notification: AgentNotification, _connection| {
+                    let result = match notification {
+                        AgentNotification::SessionNotification(notification) => {
+                            updates.receive(notification)
+                        }
+                        AgentNotification::ExtNotification(notification) => notifications
+                            .lock()
+                            .map_err(|_| {
+                                ClientError::Protocol(
+                                    "ACP extension metadata lock poisoned".to_owned(),
+                                )
+                            })
+                            .and_then(|extensions| {
+                                let extensions = extensions.as_ref().ok_or_else(|| {
+                                    ClientError::Protocol(
+                                        "ACP peer sent an extension event before initialize completed"
+                                            .to_owned(),
+                                    )
+                                })?;
+                                extension_updates.receive(notification, extensions)
+                            }),
+                        _ => Ok(()),
+                    };
+                    result.map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })
+                },
+                agent_client_protocol::on_receive_notification!(),
+            )
+            .on_receive_request(
+                async move |request: AgentRequest, responder, _connection| {
+                    let AgentRequest::ExtMethodRequest(request) = request else {
+                        return Err(agent_client_protocol::Error::invalid_params().data(
+                            "ACP peer sent a non-extension request to the Phenix callback handler",
+                        ));
+                    };
+                    let extensions = callback_metadata
+                        .lock()
+                        .map_err(|_| {
+                            agent_client_protocol::Error::internal_error()
+                                .data("ACP extension metadata lock poisoned")
+                        })?
+                        .clone()
+                        .ok_or_else(|| {
+                            agent_client_protocol::Error::invalid_params()
+                                .data("ACP peer sent an extension callback before initialize completed")
+                        })?;
+                    let response = callbacks
+                        .receive(request, &extensions)
+                        .await
+                        .map_err(callback_error_to_acp)?;
+                    let response = serde_json::to_value(response).map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })?;
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .connect_with(
+                self.transport,
+                move |connection: ConnectionTo<Agent>| async move {
+                    let initialized = connection
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
+                    let extensions = descriptor_extensions(&initialized)?;
+                    *negotiated.lock().map_err(|_| {
+                        agent_client_protocol::Error::internal_error()
+                            .data("ACP extension metadata lock poisoned")
+                    })? = Some(extensions.clone());
+                    use_connection(AcpConnection {
+                        connection,
+                        extensions,
+                    })
+                    .await
+                    .map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })
+                },
+            )
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))
+    }
 }
 
 #[derive(Clone)]
@@ -423,6 +1011,56 @@ impl AcpClient {
     {
         StreamClient::new(self.config.agent())
             .connect_with(use_connection)
+            .await
+    }
+
+    pub async fn connect_with_updates<F, Fut, R>(
+        &self,
+        updates: SessionUpdates,
+        use_connection: F,
+    ) -> Result<R, ClientError>
+    where
+        F: FnOnce(AcpConnection) -> Fut,
+        Fut: Future<Output = Result<R, ClientError>>,
+    {
+        StreamClient::new(self.config.agent())
+            .connect_with_updates(updates, use_connection)
+            .await
+    }
+
+    pub async fn connect_with_updates_and_extensions<F, Fut, R>(
+        &self,
+        updates: SessionUpdates,
+        extension_updates: ExtensionUpdates,
+        use_connection: F,
+    ) -> Result<R, ClientError>
+    where
+        F: FnOnce(AcpConnection) -> Fut,
+        Fut: Future<Output = Result<R, ClientError>>,
+    {
+        StreamClient::new(self.config.agent())
+            .connect_with_updates_and_extensions(updates, extension_updates, use_connection)
+            .await
+    }
+
+    pub async fn connect_with_updates_extensions_and_callbacks<F, Fut, R>(
+        &self,
+        updates: SessionUpdates,
+        extension_updates: ExtensionUpdates,
+        callbacks: ExtensionCallbacks,
+        use_connection: F,
+    ) -> Result<R, ClientError>
+    where
+        F: FnOnce(AcpConnection) -> Fut,
+        Fut: Future<Output = Result<R, ClientError>>,
+    {
+        StreamClient::new(self.config.agent())
+            .connect_with_updates_extensions_and_callbacks(
+                updates,
+                extension_updates,
+                callbacks,
+                use_connection,
+            )
             .await
     }
 
@@ -459,12 +1097,16 @@ fn descriptor_extensions(
             "ACP peer advertises application interface {interface}; expected {INTERFACE_ID}"
         )));
     }
-    let capabilities = extension
-        .get("methods")
-        .and_then(serde_json::Value::as_array)
+    let capabilities = ["methods", "events", "callbacks"]
         .into_iter()
-        .flatten()
-        .filter_map(|method| method.get("capability"))
+        .flat_map(|kind| {
+            extension
+                .get(kind)
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(|entry| entry.get("capability"))
         .filter_map(serde_json::Value::as_str)
         .map(ContractId::parse)
         .collect::<Result<Vec<_>, _>>()
@@ -495,7 +1137,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn list_sessions(
@@ -506,7 +1148,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn resume_session(
@@ -517,7 +1159,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn load_session(
@@ -528,7 +1170,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn close_session(
@@ -539,7 +1181,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn prompt(&self, request: PromptRequest) -> Result<PromptResponse, ClientError> {
@@ -547,7 +1189,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub async fn set_session_config_option(
@@ -558,7 +1200,7 @@ impl AcpConnection {
             .send_request(request)
             .block_task()
             .await
-            .map_err(|error| ClientError::Transport(error.to_string()))
+            .map_err(request_error)
     }
 
     pub fn cancel(&self, notification: CancelNotification) {
@@ -570,7 +1212,8 @@ impl AcpConnection {
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::InitializeResponse;
-    use phenix_core::{PhenixContract, PhenixValue};
+    use phenix_application_interface::types::{SessionChange, SessionUpdate};
+    use phenix_core::{PhenixContract, PhenixValue, ValueCodec};
 
     #[derive(phenix_sdk_macros::PhenixValue)]
     struct Request;
@@ -660,6 +1303,73 @@ mod tests {
     }
 
     #[test]
+    fn request_errors_distinguish_cancellation_from_peer_rejection() {
+        let cancelled = request_error(agent_client_protocol::Error::request_cancelled().data(
+            serde_json::json!({
+                "phenix.class": "cancelled",
+                "phenix.details": null,
+            }),
+        ));
+        assert!(matches!(cancelled, ClientError::Cancelled { .. }));
+
+        let rejected = request_error(agent_client_protocol::Error::internal_error().data(
+            serde_json::json!({
+                "phenix.class": "permission_denied",
+                "phenix.details": { "message": "same display text" },
+            }),
+        ));
+        assert!(matches!(
+            rejected,
+            ClientError::Rejected(ref rejection)
+                if rejection.code == ErrorCode::InternalError
+                    && rejection.class.as_deref() == Some("permission_denied")
+                    && rejection.details.as_ref().is_some_and(
+                        |details| details["message"] == "same display text"
+                    )
+        ));
+    }
+
+    #[test]
+    fn request_errors_accept_the_adapter_error_data_shape() {
+        let rejected = request_error(agent_client_protocol::Error::internal_error().data(
+            serde_json::json!({
+                "phenix": {
+                    "class": "conflict",
+                    "detail": { "message": "same display text" },
+                }
+            }),
+        ));
+        assert!(matches!(
+            rejected,
+            ClientError::Rejected(ref rejection)
+                if rejection.class.as_deref() == Some("conflict")
+                    && rejection.details.as_ref().is_some_and(
+                        |details| details["message"] == "same display text"
+                    )
+        ));
+    }
+
+    #[test]
+    fn callback_errors_preserve_capability_classes() {
+        let cancelled =
+            callback_error_to_acp(CallbackError::Application(ApplicationError::Cancelled));
+        assert_eq!(cancelled.code, ErrorCode::RequestCancelled);
+        assert_eq!(
+            cancelled.data.as_ref().unwrap()["phenix.class"],
+            "cancelled"
+        );
+
+        let full = callback_error_to_acp(CallbackError::QueueFull);
+        assert_eq!(full.data.as_ref().unwrap()["phenix.class"], "queue_full");
+
+        let disconnected = callback_error_to_acp(CallbackError::Disconnected("gone".to_owned()));
+        assert_eq!(
+            disconnected.data.as_ref().unwrap()["phenix.class"],
+            "disconnected"
+        );
+    }
+
+    #[test]
     fn descriptor_extensions_use_the_fixed_operation_and_schema_ids() {
         let capability = ContractId::parse("phenix.application.capability.skills@1")
             .expect("static capability id is valid");
@@ -722,6 +1432,87 @@ mod tests {
             futures::executor::block_on(async { futures::join!(server, client) });
         client_result.expect("client completes the ACP session request");
         server_result.expect("server completes after the client disconnects");
+    }
+
+    #[test]
+    fn stream_client_delivers_negotiated_extension_events() {
+        let (client_transport, server_transport) = agent_client_protocol::Channel::duplex();
+        let server = Agent
+            .builder()
+            .on_receive_request(
+                async move |request: InitializeRequest, responder, _connection| {
+                    let mut meta = serde_json::Map::new();
+                    meta.insert(
+                        "phenix.extensions".to_owned(),
+                        serde_json::json!({
+                            "interface": INTERFACE_ID,
+                            "methods": [],
+                            "events": [{
+                                "event": "phenix.application.session-update@1",
+                                "capability": "phenix.application.capability.sessions@1",
+                            }],
+                        }),
+                    );
+                    responder.respond(InitializeResponse::new(request.protocol_version).meta(meta))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |_request: NewSessionRequest, responder, connection| {
+                    let update = SessionUpdate {
+                        session_id: phenix_core::SessionId::parse("session-1")
+                            .expect("static session id is valid"),
+                        sequence: 0,
+                        update: SessionChange::Renamed {
+                            title: "Renamed".to_owned(),
+                        },
+                    };
+                    let raw = serde_json::value::to_raw_value(&update.to_value())
+                        .expect("application event is JSON");
+                    connection
+                        .send_notification(AgentNotification::ExtNotification(
+                            ExtNotification::new("_phenix/session-update@1", Arc::from(raw)),
+                        ))
+                        .expect("extension event is sent");
+                    let _ = responder.respond(NewSessionResponse::new("session-1"));
+                    Ok::<_, agent_client_protocol::Error>(())
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .connect_to(server_transport);
+        let (sessions, _session_receiver) = SessionUpdates::channel();
+        let (events, receiver) = ExtensionUpdates::channel();
+        let client = StreamClient::new(client_transport).connect_with_updates_and_extensions(
+            sessions,
+            events,
+            |connection| async move {
+                connection
+                    .new_session(NewSessionRequest::new("/workspace"))
+                    .await?;
+                Ok(())
+            },
+        );
+
+        let (server_result, client_result) =
+            futures::executor::block_on(async { futures::join!(server, client) });
+        client_result.expect("client completes the ACP session request");
+        server_result.expect("server completes after the client disconnects");
+        let event = receiver
+            .try_recv()
+            .expect("negotiated extension event is delivered");
+        assert_eq!(event.event.as_str(), "phenix.application.session-update@1");
+        assert_eq!(
+            event.payload,
+            SessionUpdate {
+                session_id: phenix_core::SessionId::parse("session-1")
+                    .expect("static session id is valid"),
+                sequence: 0,
+                update: SessionChange::Renamed {
+                    title: "Renamed".to_owned(),
+                },
+            }
+            .to_value()
+        );
     }
 
     #[test]
@@ -794,5 +1585,30 @@ mod tests {
         updates
             .accept("session-1", 7)
             .expect("resumed update is ordered");
+    }
+
+    #[test]
+    fn bounded_session_updates_reject_overflow() {
+        let (updates, receiver) =
+            SessionUpdates::bounded(std::num::NonZeroUsize::new(1).expect("one is non-zero"));
+        let notification = || {
+            SessionNotification::new(
+                "session-1",
+                agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(
+                    agent_client_protocol::schema::v1::ContentChunk::new(
+                        agent_client_protocol::schema::v1::ContentBlock::Text(
+                            agent_client_protocol::schema::v1::TextContent::new("hello"),
+                        ),
+                    ),
+                ),
+            )
+        };
+
+        updates.receive(notification()).expect("first update fits");
+        assert!(matches!(
+            updates.receive(notification()),
+            Err(ClientError::UpdateQueueFull)
+        ));
+        drop(receiver);
     }
 }

@@ -1,21 +1,24 @@
 [package]
-name = "phenix-client-acp"
+name = "phenix-binding-lua"
 version = "0.1.0"
 edition = "2021"
 publish = false
-build = "build.rs"
 
 [package.metadata.phenix]
 role = "passive-library"
 
+[lib]
+name = "phenix"
+crate-type = ["cdylib", "rlib"]
+test = false
+doctest = false
+
 [dependencies]
 agent-client-protocol.workspace = true
 futures.workspace = true
+mlua = { workspace = true, features = ["lua51", "module", "serde"] }
+phenix-binding-generator = { path = "../phenix-binding-generator" }
 phenix-application-interface = { path = "../phenix-application-interface" }
+phenix-client-acp = { path = "../phenix-client-acp" }
 phenix-core = { path = "../phenix-core" }
-phenix-sdk-macros = { path = "../phenix-sdk-macros" }
 serde_json.workspace = true
-
-[build-dependencies]
-phenix-application-interface = { path = "../phenix-application-interface" }
-sha2.workspace = true
