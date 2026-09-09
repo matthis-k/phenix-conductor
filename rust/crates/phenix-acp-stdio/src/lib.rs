@@ -5,7 +5,7 @@
 //! Protocol translation stays in `phenix-adapter-acp`. This crate owns only
 //! process transport and the channel boundary used by the configured runtime.
 
-use agent_client_protocol::{schema::v1::*, Agent, Error, Stdio};
+use agent_client_protocol::{schema::v1::*, Agent, Error, ErrorCode, Stdio};
 use phenix_adapter_acp::ApplicationAdapter;
 use phenix_application_interface::{
     types::{
@@ -39,7 +39,7 @@ pub struct ApplicationEvent {
 /// One generic runtime-to-client capability invocation waiting for its ACP response.
 pub struct ClientCapabilityInvocation {
     request: ApplicationCapabilityInvokeInput,
-    response: oneshot::Sender<Result<ApplicationCapabilityInvokeResult, ApplicationError>>,
+    response: oneshot::Sender<Result<ApplicationCapabilityInvokeResult, CapabilityError>>,
 }
 
 impl ClientCapabilityInvocation {
@@ -48,7 +48,7 @@ impl ClientCapabilityInvocation {
         &self.request
     }
 
-    pub fn respond(self, response: Result<ApplicationCapabilityInvokeResult, ApplicationError>) {
+    pub fn respond(self, response: Result<ApplicationCapabilityInvokeResult, CapabilityError>) {
         let _ = self.response.send(response);
     }
 }
@@ -75,7 +75,7 @@ impl ClientCapabilityCallbacks {
         self.sender
             .try_send(ClientCapabilityInvocation {
                 request: ApplicationCapabilityInvokeInput {
-                    callable: PhenixValue::Callable(callable.clone()),
+                    callable: PhenixValue::Callable(callable),
                     input,
                 },
                 response,
@@ -88,7 +88,6 @@ impl ClientCapabilityCallbacks {
             .blocking_recv()
             .map_err(|_| CapabilityError::Disconnected)?
             .map(|response| response.output)
-            .map_err(|error| application_error_to_capability(error, callable))
     }
 }
 
@@ -466,26 +465,50 @@ pub async fn serve_stdio_with_events_and_callbacks(
                     },
                     callback = callbacks.recv() => match callback {
                         Some(callback) => {
-                            let (callback_id, request) = callback_adapter
+                            let callable = match &callback.request().callable {
+                                PhenixValue::Callable(callable) => callable.clone(),
+                                _ => {
+                                    callback.respond(Err(CapabilityError::SchemaMismatch {
+                                        message: "client capability callback requires a callable reference".to_owned(),
+                                    }));
+                                    continue;
+                                }
+                            };
+                            let (callback_id, request) = match callback_adapter
                                 .extension_callback_request(callback.request())
-                                .map_err(application_error_to_acp)?;
-                            let response = connection
+                            {
+                                Ok(request) => request,
+                                Err(error) => {
+                                    callback.respond(Err(application_error_to_capability(error, callable)));
+                                    continue;
+                                }
+                            };
+                            let response = match connection
                                 .send_request(AgentRequest::ExtMethodRequest(request))
                                 .block_task()
                                 .await
-                                .map_err(|error| application_error_to_acp(ApplicationError::Failed {
-                                    message: error.to_string(),
-                                }))?;
-                            let response = serde_json::from_value(response).map_err(|error| {
-                                application_error_to_acp(ApplicationError::InvalidResponse {
-                                    message: format!(
-                                        "cannot decode ACP extension callback response: {error}"
-                                    ),
-                                })
-                            })?;
+                            {
+                                Ok(response) => response,
+                                Err(error) => {
+                                    callback.respond(Err(acp_error_to_capability(error, callable)));
+                                    continue;
+                                }
+                            };
+                            let response = match serde_json::from_value(response) {
+                                Ok(response) => response,
+                                Err(error) => {
+                                    callback.respond(Err(CapabilityError::SchemaMismatch {
+                                        message: format!(
+                                            "cannot decode ACP extension callback response: {error}"
+                                        ),
+                                    }));
+                                    continue;
+                                }
+                            };
                             callback.respond(
                                 callback_adapter
-                                    .extension_callback_response(&callback_id, &response),
+                                    .extension_callback_response(&callback_id, &response)
+                                    .map_err(|error| application_error_to_capability(error, callable)),
                             );
                         }
                         None => return Ok(()),
@@ -576,6 +599,31 @@ fn application_error_to_capability(
     }
 }
 
+fn acp_error_to_capability(error: Error, callable: CallableRef) -> CapabilityError {
+    let class = error
+        .data
+        .as_ref()
+        .and_then(|data| data.get("phenix.class"))
+        .and_then(serde_json::Value::as_str);
+    if error.code == ErrorCode::RequestCancelled || class == Some("cancelled") {
+        return CapabilityError::Cancelled;
+    }
+    match class {
+        Some("disconnected") => CapabilityError::Disconnected,
+        Some("queue_full") => CapabilityError::QueueFull,
+        Some("stale_reference") => CapabilityError::StaleReference(callable),
+        Some("not_found") => CapabilityError::UnknownReference(callable),
+        Some("schema_mismatch") | Some("invalid_input") | Some("invalid_response") => {
+            CapabilityError::SchemaMismatch {
+                message: error.to_string(),
+            }
+        }
+        _ => CapabilityError::ProviderFailed {
+            message: error.to_string(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,6 +632,15 @@ mod tests {
         PluginExecution, PluginId, PluginManifest, ReferenceId, SdkContribution, SdkNamespace,
         SdkObservableResource, SdkResourceId, SnapshotPolicy, Type, ValueId, ValuePath,
     };
+
+    fn client_callable() -> CallableRef {
+        CallableRef::new(
+            ContractId::parse("fixture.client-callback@1").unwrap(),
+            CapabilityOwnerId::Client(ClientConnectionId::parse("fixture-client").unwrap()),
+            CapabilityGenerationId::parse("fixture-generation").unwrap(),
+            ReferenceId::parse("callback").unwrap(),
+        )
+    }
 
     #[tokio::test]
     async fn channel_transport_preserves_typed_operation_and_response() {
@@ -608,12 +665,7 @@ mod tests {
     #[tokio::test]
     async fn client_capability_bridge_forwards_the_canonical_invocation() {
         let (callbacks, mut receiver) = ClientCapabilityCallbacks::bounded(1);
-        let callable = CallableRef::new(
-            ContractId::parse("fixture.client-callback@1").unwrap(),
-            CapabilityOwnerId::Client(ClientConnectionId::parse("fixture-client").unwrap()),
-            CapabilityGenerationId::parse("fixture-generation").unwrap(),
-            ReferenceId::parse("callback").unwrap(),
-        );
+        let callable = client_callable();
         let expected = callable.clone();
         let worker =
             tokio::task::spawn_blocking(move || callbacks.invoke(callable, PhenixValue::U64(7)));
@@ -634,6 +686,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn client_capability_bridge_preserves_structural_failures() {
+        let cases = [
+            CapabilityError::Cancelled,
+            CapabilityError::Disconnected,
+            CapabilityError::QueueFull,
+        ];
+        for expected in cases {
+            let (callbacks, mut receiver) = ClientCapabilityCallbacks::bounded(1);
+            let callable = client_callable();
+            let worker = tokio::task::spawn_blocking(move || {
+                callbacks.invoke(callable, PhenixValue::U64(7))
+            });
+            receiver.recv().await.unwrap().respond(Err(expected.clone()));
+            assert_eq!(worker.await.unwrap().unwrap_err(), expected);
+        }
+    }
+
+    #[tokio::test]
     async fn generic_callable_input_admits_a_client_owned_reference() {
         let capabilities = SharedCapabilityRegistry::default();
         let (callbacks, mut receiver) = ClientCapabilityCallbacks::bounded(1);
@@ -645,12 +715,7 @@ mod tests {
             capabilities: capabilities.clone(),
             client_callbacks: callbacks,
         };
-        let callable = CallableRef::new(
-            ContractId::parse("fixture.client-callback@1").unwrap(),
-            CapabilityOwnerId::Client(ClientConnectionId::parse("fixture-client").unwrap()),
-            CapabilityGenerationId::parse("fixture-generation").unwrap(),
-            ReferenceId::parse("callback").unwrap(),
-        );
+        let callable = client_callable();
         let schema = Type::Callable {
             contract: callable.contract().clone(),
             input: Box::new(Type::U64),
@@ -784,5 +849,36 @@ mod tests {
         let data = error.data.expect("structured ACP error data");
         assert_eq!(data["phenix.class"], "cancelled");
         assert!(data["phenix.details"].is_null());
+    }
+
+    #[test]
+    fn callback_request_errors_keep_capability_classes() {
+        let callable = client_callable();
+        let cancelled = Error::request_cancelled().data(json!({
+            "phenix.class": "cancelled",
+            "phenix.details": null,
+        }));
+        assert_eq!(
+            acp_error_to_capability(cancelled, callable.clone()),
+            CapabilityError::Cancelled
+        );
+
+        let full = Error::internal_error().data(json!({
+            "phenix.class": "queue_full",
+            "phenix.details": null,
+        }));
+        assert_eq!(
+            acp_error_to_capability(full, callable.clone()),
+            CapabilityError::QueueFull
+        );
+
+        let disconnected = Error::internal_error().data(json!({
+            "phenix.class": "disconnected",
+            "phenix.details": null,
+        }));
+        assert_eq!(
+            acp_error_to_capability(disconnected, callable),
+            CapabilityError::Disconnected
+        );
     }
 }
