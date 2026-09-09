@@ -4,7 +4,7 @@ use crate::{
     ObservableStore, ObservationDelivery, ObservationMode, ObservationScope, ObservationSpec,
     PhenixSchema, PhenixValue, PluginId, PluginManifest, ReferenceId, ResolvedHarness,
     SdkNamespace, SdkResourceId, SharedCapabilityRegistry, Type, ValueAddress, ValueChange,
-    ValueId, ValuePath,
+    ValueId, ValuePath, ValuePathSegment,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -471,7 +471,7 @@ fn observable_listen_schema() -> Type {
                 key("listener"),
                 Type::Callable {
                     contract: contract(OBSERVABLE_DELIVERY_CONTRACT),
-                    input: Box::new(Type::Any),
+                    input: Box::new(observable_delivery_schema()),
                     output: Box::new(Type::Unit),
                 },
             ),
@@ -496,6 +496,107 @@ fn observable_listen_schema() -> Type {
             output: Box::new(Type::Unit),
         }),
     }
+}
+
+/// Canonical structural schema for observable listener deliveries.
+///
+/// The application interface uses the same field and variant shape. Keeping the
+/// schema here lets runtime-owned listener capabilities validate deliveries
+/// before invoking a provider without depending on the application crate.
+#[must_use]
+pub fn observable_delivery_schema() -> Type {
+    Type::Table(BTreeMap::from([
+        (key("address"), observable_address_schema()),
+        (key("commit_id"), Type::Option(Box::new(Type::U64))),
+        (key("from_version"), Type::U64),
+        (key("generation"), Type::U64),
+        (key("payload"), observable_payload_schema()),
+        (key("subscription_id"), Type::U64),
+        (key("value_id"), Type::String),
+        (key("version"), Type::U64),
+    ]))
+}
+
+fn observable_address_schema() -> Type {
+    Type::Table(BTreeMap::from([
+        (key("path"), observable_path_schema()),
+        (key("value_id"), Type::String),
+    ]))
+}
+
+fn observable_path_schema() -> Type {
+    Type::Table(BTreeMap::from([(
+        key("segments"),
+        Type::List(Box::new(Type::Variant(BTreeMap::from([
+            (
+                key("Field"),
+                Type::Table(BTreeMap::from([(key("key"), Type::String)])),
+            ),
+            (
+                key("Index"),
+                Type::Table(BTreeMap::from([(key("index"), Type::U64)])),
+            ),
+            (
+                key("MapKey"),
+                Type::Table(BTreeMap::from([(key("key"), Type::String)])),
+            ),
+            (key("OptionPayload"), Type::Unit),
+            (key("VariantPayload"), Type::Unit),
+        ])))),
+    )]))
+}
+
+fn observable_payload_schema() -> Type {
+    Type::Variant(BTreeMap::from([
+        (
+            key("Diff"),
+            Type::Table(BTreeMap::from([(
+                key("changes"),
+                Type::List(Box::new(observable_change_schema())),
+            )])),
+        ),
+        (
+            key("Full"),
+            Type::Table(BTreeMap::from([(key("value"), Type::Any)])),
+        ),
+    ]))
+}
+
+fn observable_change_schema() -> Type {
+    Type::Variant(BTreeMap::from([
+        (
+            key("Remove"),
+            Type::Table(BTreeMap::from([(
+                key("change"),
+                Type::Table(BTreeMap::from([(
+                    key("path"),
+                    observable_path_schema(),
+                )])),
+            )])),
+        ),
+        (
+            key("Replace"),
+            Type::Table(BTreeMap::from([(
+                key("change"),
+                Type::Table(BTreeMap::from([
+                    (key("path"), observable_path_schema()),
+                    (key("value"), Type::Any),
+                ])),
+            )])),
+        ),
+        (
+            key("Splice"),
+            Type::Table(BTreeMap::from([(
+                key("change"),
+                Type::Table(BTreeMap::from([
+                    (key("delete_count"), Type::U64),
+                    (key("inserted"), Type::List(Box::new(Type::Any))),
+                    (key("path"), observable_path_schema()),
+                    (key("start"), Type::U64),
+                ])),
+            )])),
+        ),
+    ]))
 }
 
 fn observable_callable(
@@ -572,9 +673,11 @@ fn register_observable_resource(
             let (listener, scope, mode, initial) = parse_listen_input(input)?;
             let callback_capabilities = listen_capabilities.clone();
             let callback = Arc::new(move |delivery: ObservationDelivery<'_>| {
+                let input = observation_delivery_value(delivery);
+                debug_assert!(observable_delivery_schema().parse(&input).is_ok());
                 let _ = callback_capabilities.invoke(CapabilityInvokeInput {
                     callable: listener.clone(),
-                    input: observation_delivery_value(delivery),
+                    input,
                 });
             });
             let subscription = listen_store
@@ -728,48 +831,156 @@ fn variant_tag(value: Option<&PhenixValue>) -> Result<&str, CapabilityError> {
 }
 
 fn observation_delivery_value(delivery: ObservationDelivery<'_>) -> PhenixValue {
-    let full = delivery.full_value().ok().flatten().cloned();
-    let changes = delivery
-        .changes
-        .iter()
-        .map(observation_change_value)
-        .collect();
+    let payload = match delivery.full_value() {
+        Ok(Some(value)) => variant_value(
+            "Full",
+            PhenixValue::Table(BTreeMap::from([(key("value"), value.clone())])),
+        ),
+        Ok(None) | Err(_) => variant_value(
+            "Diff",
+            PhenixValue::Table(BTreeMap::from([(
+                key("changes"),
+                PhenixValue::List(
+                    delivery
+                        .changes
+                        .iter()
+                        .map(observation_change_value)
+                        .collect(),
+                ),
+            )])),
+        ),
+    };
     PhenixValue::Table(BTreeMap::from([
+        (key("address"), observable_address_value(delivery.address)),
         (
-            key("commit"),
+            key("commit_id"),
             PhenixValue::Option(
                 delivery
                     .commit
                     .map(|commit| Box::new(PhenixValue::U64(commit.get()))),
             ),
         ),
-        (key("changes"), PhenixValue::List(changes)),
         (
             key("from_version"),
             PhenixValue::U64(delivery.from_version.get()),
+        ),
+        (
+            key("generation"),
+            PhenixValue::U64(delivery.generation.get()),
+        ),
+        (key("payload"), payload),
+        (
+            key("subscription_id"),
+            PhenixValue::U64(delivery.observation.get()),
         ),
         (
             key("value_id"),
             PhenixValue::String(delivery.value.as_str().to_owned()),
         ),
         (key("version"), PhenixValue::U64(delivery.version.get())),
-        (key("value"), PhenixValue::Option(full.map(Box::new))),
     ]))
 }
 
-fn observation_change_value(change: &ValueChange) -> PhenixValue {
-    let kind = match change {
-        ValueChange::Replace { .. } => "replace",
-        ValueChange::Remove { .. } => "remove",
-        ValueChange::Splice { .. } => "splice",
-    };
+fn observable_address_value(address: &ValueAddress) -> PhenixValue {
     PhenixValue::Table(BTreeMap::from([
-        (key("kind"), PhenixValue::String(kind.to_owned())),
+        (key("path"), observable_path_value(&address.path)),
         (
-            key("path"),
-            PhenixValue::String(format!("{:?}", change.path())),
+            key("value_id"),
+            PhenixValue::String(address.value.as_str().to_owned()),
         ),
     ]))
+}
+
+fn observable_path_value(path: &ValuePath) -> PhenixValue {
+    PhenixValue::Table(BTreeMap::from([(
+        key("segments"),
+        PhenixValue::List(
+            path.segments()
+                .iter()
+                .map(observable_path_segment_value)
+                .collect(),
+        ),
+    )]))
+}
+
+fn observable_path_segment_value(segment: &ValuePathSegment) -> PhenixValue {
+    match segment {
+        ValuePathSegment::Field(field) => variant_value(
+            "Field",
+            PhenixValue::Table(BTreeMap::from([(
+                key("key"),
+                PhenixValue::String(field.as_str().to_owned()),
+            )])),
+        ),
+        ValuePathSegment::MapKey(map_key) => variant_value(
+            "MapKey",
+            PhenixValue::Table(BTreeMap::from([(
+                key("key"),
+                PhenixValue::String(map_key.clone()),
+            )])),
+        ),
+        ValuePathSegment::Index(index) => variant_value(
+            "Index",
+            PhenixValue::Table(BTreeMap::from([(
+                key("index"),
+                PhenixValue::U64(u64::from(*index)),
+            )])),
+        ),
+        ValuePathSegment::VariantPayload => variant_value("VariantPayload", PhenixValue::Unit),
+        ValuePathSegment::OptionPayload => variant_value("OptionPayload", PhenixValue::Unit),
+    }
+}
+
+fn observation_change_value(change: &ValueChange) -> PhenixValue {
+    match change {
+        ValueChange::Replace { path, value } => variant_value(
+            "Replace",
+            PhenixValue::Table(BTreeMap::from([(
+                key("change"),
+                PhenixValue::Table(BTreeMap::from([
+                    (key("path"), observable_path_value(path)),
+                    (key("value"), value.clone()),
+                ])),
+            )])),
+        ),
+        ValueChange::Remove { path } => variant_value(
+            "Remove",
+            PhenixValue::Table(BTreeMap::from([(
+                key("change"),
+                PhenixValue::Table(BTreeMap::from([(
+                    key("path"),
+                    observable_path_value(path),
+                )])),
+            )])),
+        ),
+        ValueChange::Splice {
+            path,
+            start,
+            delete_count,
+            inserted,
+        } => variant_value(
+            "Splice",
+            PhenixValue::Table(BTreeMap::from([(
+                key("change"),
+                PhenixValue::Table(BTreeMap::from([
+                    (key("delete_count"), PhenixValue::U64(u64::from(*delete_count))),
+                    (
+                        key("inserted"),
+                        PhenixValue::List(inserted.iter().cloned().collect()),
+                    ),
+                    (key("path"), observable_path_value(path)),
+                    (key("start"), PhenixValue::U64(u64::from(*start))),
+                ])),
+            )])),
+        ),
+    }
+}
+
+fn variant_value(tag: &str, value: PhenixValue) -> PhenixValue {
+    PhenixValue::Variant {
+        tag: key(tag),
+        value: Box::new(value),
+    }
 }
 
 fn observable_provider_error(error: ObservableError) -> CapabilityError {
@@ -1033,6 +1244,7 @@ mod tests {
             ),
             Err(SdkResolutionError::DuplicateNamespace(namespace))
                 if namespace == SdkNamespace::parse("testing").unwrap()
+                    && path == vec!["state".to_owned()]
         ));
     }
 
@@ -1247,10 +1459,11 @@ mod tests {
                 listener.clone(),
                 Type::Callable {
                     contract: ContractId::parse(OBSERVABLE_DELIVERY_CONTRACT).unwrap(),
-                    input: Box::new(Type::Any),
+                    input: Box::new(observable_delivery_schema()),
                     output: Box::new(Type::Unit),
                 },
                 move |input| {
+                    observable_delivery_schema().parse(&input).unwrap();
                     recorded.lock().unwrap().push(input);
                     Ok(PhenixValue::Unit)
                 },
@@ -1274,7 +1487,7 @@ mod tests {
                     (
                         Key::parse("mode").unwrap(),
                         PhenixValue::Variant {
-                            tag: Key::parse("full").unwrap(),
+                            tag: Key::parse("diff").unwrap(),
                             value: Box::new(PhenixValue::Unit),
                         },
                     ),
@@ -1297,7 +1510,80 @@ mod tests {
                 transaction.replace(&value_id, ValuePath::root(), PhenixValue::U64(2))
             })
             .unwrap();
-        assert_eq!(deliveries.lock().unwrap().len(), 2);
+        {
+            let deliveries = deliveries.lock().unwrap();
+            assert_eq!(deliveries.len(), 2);
+            for delivery in deliveries.iter() {
+                observable_delivery_schema().parse(delivery).unwrap();
+            }
+            let PhenixValue::Table(initial) = &deliveries[0] else {
+                panic!("initial delivery is a table");
+            };
+            assert_eq!(initial.get("commit_id"), Some(&PhenixValue::Option(None)));
+            let PhenixValue::Variant {
+                tag: initial_payload,
+                value: initial_payload_value,
+            } = initial.get("payload").unwrap()
+            else {
+                panic!("initial payload is a variant");
+            };
+            assert_eq!(initial_payload.as_str(), "Full");
+            assert_eq!(
+                initial_payload_value.get("value").unwrap(),
+                &PhenixValue::U64(1)
+            );
+
+            let PhenixValue::Table(update) = &deliveries[1] else {
+                panic!("update delivery is a table");
+            };
+            assert_eq!(
+                update.get("value_id"),
+                Some(&PhenixValue::String(value_id.as_str().to_owned()))
+            );
+            assert_eq!(update.get("from_version"), Some(&PhenixValue::U64(0)));
+            assert_eq!(update.get("version"), Some(&PhenixValue::U64(1)));
+            assert_eq!(update.get("subscription_id"), initial.get("subscription_id"));
+            assert_eq!(update.get("generation"), initial.get("generation"));
+            let PhenixValue::Table(address) = update.get("address").unwrap() else {
+                panic!("delivery address is a table");
+            };
+            assert_eq!(
+                address.get("value_id"),
+                Some(&PhenixValue::String(value_id.as_str().to_owned()))
+            );
+            assert_eq!(
+                address.get("path"),
+                Some(&observable_path_value(&ValuePath::root()))
+            );
+            let PhenixValue::Variant {
+                tag: update_payload,
+                value: update_payload_value,
+            } = update.get("payload").unwrap()
+            else {
+                panic!("update payload is a variant");
+            };
+            assert_eq!(update_payload.as_str(), "Diff");
+            let PhenixValue::List(changes) = update_payload_value.get("changes").unwrap() else {
+                panic!("diff payload changes are a list");
+            };
+            assert_eq!(changes.len(), 1);
+            let PhenixValue::Variant {
+                tag: change_kind,
+                value: change_value,
+            } = &changes[0]
+            else {
+                panic!("diff change is a variant");
+            };
+            assert_eq!(change_kind.as_str(), "Replace");
+            let PhenixValue::Table(change) = change_value.get("change").unwrap() else {
+                panic!("replace change is a table");
+            };
+            assert_eq!(
+                change.get("path"),
+                Some(&observable_path_value(&ValuePath::root()))
+            );
+            assert_eq!(change.get("value"), Some(&PhenixValue::U64(2)));
+        }
         capabilities
             .invoke(crate::CapabilityInvokeInput {
                 callable: stop.clone(),
