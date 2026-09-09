@@ -246,6 +246,21 @@ impl CapabilityRegistry {
             input: invocation.input,
         })
     }
+
+    fn schema(&self, reference: &CallableRef) -> Result<Type, CapabilityError> {
+        let owner_generation = (reference.owner().clone(), reference.generation().clone());
+        if self.retired.contains(&owner_generation) {
+            return Err(CapabilityError::StaleReference(reference.clone()));
+        }
+        self.entries
+            .get(&(
+                reference.owner().clone(),
+                reference.generation().clone(),
+                reference.id().clone(),
+            ))
+            .map(|entry| entry.schema.clone())
+            .ok_or_else(|| CapabilityError::UnknownReference(reference.clone()))
+    }
 }
 
 struct PreparedCapabilityInvocation {
@@ -305,6 +320,14 @@ impl SharedCapabilityRegistry {
             .expect("capability registry lock poisoned")
             .prepare(invocation)?;
         prepared.invoke()
+    }
+
+    /// Returns the authoritative callable schema for one live reference.
+    pub fn schema(&self, reference: &CallableRef) -> Result<Type, CapabilityError> {
+        self.0
+            .lock()
+            .expect("capability registry lock poisoned")
+            .schema(reference)
     }
 }
 
