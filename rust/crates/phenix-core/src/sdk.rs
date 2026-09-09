@@ -334,7 +334,10 @@ fn validate_capability_owners(provider: &PluginId, value: &PhenixValue) -> Resul
         PhenixValue::List(values) => values
             .iter()
             .try_for_each(|value| validate_capability_owners(provider, value)),
-        PhenixValue::Map(values) | PhenixValue::Table(values) => values
+        PhenixValue::Map(values) => values
+            .values()
+            .try_for_each(|value| validate_capability_owners(provider, value)),
+        PhenixValue::Table(values) => values
             .values()
             .try_for_each(|value| validate_capability_owners(provider, value)),
         PhenixValue::Unit
