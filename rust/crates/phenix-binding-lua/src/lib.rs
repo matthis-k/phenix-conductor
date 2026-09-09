@@ -16,8 +16,8 @@ use futures::{
     StreamExt,
 };
 use mlua::{
-    Error as LuaError, Lua, LuaSerdeExt, MultiValue, RegistryKey, Result as LuaResult, Table,
-    UserData, UserDataMethods, Value,
+    Error as LuaError, Lua, LuaSerdeExt, MetaMethod, MultiValue, RegistryKey, Result as LuaResult,
+    Table, UserData, UserDataMethods, Value,
 };
 use phenix_application_interface::{
     types::{CapabilityInvokeInput, CapabilityInvokeResult, Empty, SdkValue},
@@ -29,7 +29,7 @@ use phenix_client_acp::{
 };
 use phenix_core::{
     CallableRef, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId, ContractId, Key,
-    PhenixSchema, PhenixValue, ReferenceId, Type, ValueCodec,
+    ObjectRef, PhenixSchema, PhenixValue, ReferenceId, Type, ValueCodec,
 };
 use std::{
     cell::RefCell,
@@ -259,6 +259,24 @@ struct Client {
 struct LocalCallable {
     schema: Type,
     function: RegistryKey,
+}
+
+/// A language-owned handle for a remote object capability.
+///
+/// Objects have no generic method protocol yet. Keeping the reference in
+/// userdata preserves its identity without exposing it as a forgeable Lua
+/// table or inventing object-specific behavior.
+#[derive(Clone)]
+struct ObjectCapability {
+    reference: ObjectRef,
+}
+
+impl UserData for ObjectCapability {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::ToString, |_lua, this, ()| {
+            Ok(format!("<phenix object {}>", this.reference.id()))
+        });
+    }
 }
 
 #[derive(Default)]
@@ -1580,6 +1598,12 @@ fn phenix_to_lua_with_state(
                 (**output).clone(),
             )
         }
+        (Type::Object { .. }, PhenixValue::Object(reference)) => lua
+            .create_userdata(ObjectCapability {
+                reference: reference.clone(),
+            })
+            .map(Value::UserData)
+            .map_err(|error| BindingError::conversion(error.to_string())),
         (Type::Option(_), PhenixValue::Option(None)) => Ok(Value::Nil),
         (Type::Option(item), PhenixValue::Option(Some(value))) => {
             phenix_to_lua_with_state(lua, state, local_callables, item, value)
@@ -1937,6 +1961,34 @@ mod tests {
         assert_eq!(input.callable, PhenixValue::Callable(reference));
         assert_eq!(input.input, PhenixValue::U64(7));
         assert_eq!(output_schema, Type::String);
+    }
+
+    #[test]
+    fn paired_projection_keeps_object_capabilities_opaque() {
+        let lua = Lua::new();
+        let reference = ObjectRef::new(
+            ContractId::parse("fixture.object@1").unwrap(),
+            CapabilityOwnerId::Plugin(phenix_core::PluginId::parse("fixture").unwrap()),
+            CapabilityGenerationId::parse("plugin-generation").unwrap(),
+            ReferenceId::parse("object").unwrap(),
+        );
+        let value = phenix_to_lua_with_state(
+            &lua,
+            None,
+            None,
+            &Type::Object {
+                contract: reference.contract().clone(),
+            },
+            &PhenixValue::Object(reference.clone()),
+        )
+        .unwrap();
+        let Value::UserData(handle) = value else {
+            panic!("object capabilities must not become structural Lua tables");
+        };
+        assert_eq!(
+            handle.borrow::<ObjectCapability>().unwrap().reference,
+            reference
+        );
     }
 
     #[test]
