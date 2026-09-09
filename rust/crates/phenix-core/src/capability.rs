@@ -173,6 +173,25 @@ impl CapabilityRegistry {
         self.retired.insert((owner, generation));
     }
 
+    /// Removes one live capability without affecting other references from the
+    /// same owner generation. This is used for explicit stop handles and
+    /// session-scoped admissions whose owner remains connected.
+    pub fn unregister(&mut self, reference: &CallableRef) -> bool {
+        if self
+            .retired
+            .contains(&(reference.owner().clone(), reference.generation().clone()))
+        {
+            return false;
+        }
+        self.entries
+            .remove(&(
+                reference.owner().clone(),
+                reference.generation().clone(),
+                reference.id().clone(),
+            ))
+            .is_some()
+    }
+
     /// Invokes one reference after input validation and before output release.
     pub fn invoke(
         &self,
@@ -309,6 +328,45 @@ mod tests {
                 })
                 .unwrap_err(),
             CapabilityError::StaleReference(reference)
+        );
+    }
+
+    #[test]
+    fn unregister_removes_one_capability_without_retiring_its_generation() {
+        let reference = reference();
+        let retained = CallableRef::new(
+            ContractId::parse("fixture.callback@1").unwrap(),
+            reference.owner().clone(),
+            reference.generation().clone(),
+            ReferenceId::parse("fixture.retained").unwrap(),
+        );
+        let mut registry = CapabilityRegistry::default();
+        for callable in [&reference, &retained] {
+            registry
+                .register(callable.clone(), schema(), |_| {
+                    Ok(PhenixValue::String("ok".to_owned()))
+                })
+                .unwrap();
+        }
+
+        assert!(registry.unregister(&reference));
+        assert!(!registry.unregister(&reference));
+        assert!(matches!(
+            registry.invoke(CapabilityInvokeInput {
+                callable: reference,
+                input: PhenixValue::U64(1),
+            }),
+            Err(CapabilityError::UnknownReference(_))
+        ));
+        assert_eq!(
+            registry
+                .invoke(CapabilityInvokeInput {
+                    callable: retained,
+                    input: PhenixValue::U64(1),
+                })
+                .unwrap()
+                .output,
+            PhenixValue::String("ok".to_owned())
         );
     }
 
