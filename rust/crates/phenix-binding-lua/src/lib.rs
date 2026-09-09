@@ -639,8 +639,8 @@ fn response_values(
         })?),
         Response::Json(value) => lua.to_value(&value)?,
         Response::Application { operation, value } => {
-            let sdk_operation = ContractId::parse(GetSdk::ID)
-                .expect("static application operation id");
+            let sdk_operation =
+                ContractId::parse(GetSdk::ID).expect("static application operation id");
             if operation == sdk_operation {
                 let sdk = SdkValue::from_value(&value).map_err(|error| {
                     lua_error(BindingError::conversion(format!(
@@ -1979,7 +1979,10 @@ mod tests {
         let PhenixValue::Callable(reference) = value else {
             panic!("Lua callable conversion must mint a callable reference");
         };
-        assert_eq!(reference.contract(), &ContractId::parse("fixture.listener@1").unwrap());
+        assert_eq!(
+            reference.contract(),
+            &ContractId::parse("fixture.listener@1").unwrap()
+        );
         assert_eq!(
             reference.owner(),
             &CapabilityOwnerId::Client(ClientConnectionId::parse("fixture-client").unwrap())
@@ -1988,6 +1991,9 @@ mod tests {
             reference.generation(),
             &CapabilityGenerationId::parse("generation-1").unwrap()
         );
-        assert!(local_callables.borrow().entries.contains_key(reference.id()));
+        assert!(local_callables
+            .borrow()
+            .entries
+            .contains_key(reference.id()));
     }
 }
