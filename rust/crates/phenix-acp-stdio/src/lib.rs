@@ -698,7 +698,11 @@ mod tests {
             let worker = tokio::task::spawn_blocking(move || {
                 callbacks.invoke(callable, PhenixValue::U64(7))
             });
-            receiver.recv().await.unwrap().respond(Err(expected.clone()));
+            receiver
+                .recv()
+                .await
+                .unwrap()
+                .respond(Err(expected.clone()));
             assert_eq!(worker.await.unwrap().unwrap_err(), expected);
         }
     }
