@@ -1999,19 +1999,19 @@ mod tests {
         let Value::UserData(delivery) = observable_delivery_to_lua(&lua, delivery).unwrap() else {
             panic!("observable callback delivery must be native userdata");
         };
-        assert_eq!(
-            delivery.call_method::<String>("value_id", ()).unwrap(),
-            "fixture.state@1"
-        );
-        assert_eq!(delivery.call_method::<i64>("version", ()).unwrap(), 5);
-
-        let payload: Table = delivery.call_method("payload", ()).unwrap();
-        assert_eq!(payload.get::<String>("kind").unwrap(), "Full");
-        let value: Table = payload.get("value").unwrap();
-        assert_eq!(
-            value.get::<String>("large").unwrap(),
-            "only converted by payload()"
-        );
+        lua.globals().set("delivery", delivery).unwrap();
+        let (value_id, version): (String, i64) = lua
+            .load("return delivery:value_id(), delivery:version()")
+            .eval()
+            .unwrap();
+        assert_eq!(value_id, "fixture.state@1");
+        assert_eq!(version, 5);
+        let (kind, value): (String, String) = lua
+            .load("local payload = delivery:payload(); return payload.kind, payload.value.large")
+            .eval()
+            .unwrap();
+        assert_eq!(kind, "Full");
+        assert_eq!(value, "only converted by payload()");
     }
 
     #[test]

@@ -1827,7 +1827,7 @@ mod tests {
         let relative = ValuePath::new([ValuePathSegment::Field(inner)]);
         let _stop = capabilities
             .invoke(crate::CapabilityInvokeInput {
-                callable: listen,
+                callable: listen.clone(),
                 input: listen_input(listener, &relative),
             })
             .unwrap();
