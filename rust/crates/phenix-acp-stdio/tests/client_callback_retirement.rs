@@ -5,10 +5,10 @@ use phenix_application_interface::{
 };
 use phenix_core::{
     CallableRef, CapabilityError, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId,
-    ContractId, Key, ObservableRegistration, ObservableStore, PhenixValue, PluginId, PluginManifest,
-    ReferenceId, ResolvedSdkContributions, RuntimeId, SdkContribution, SdkNamespace,
-    SdkObservableResource, SdkResourceId, SharedCapabilityRegistry, SnapshotPolicy, Type, ValueCodec,
-    ValueId, ValuePath,
+    ContractId, Key, ObservableRegistration, ObservableStore, PhenixValue, PluginId,
+    PluginManifest, ReferenceId, ResolvedSdkContributions, RuntimeId, SdkContribution,
+    SdkNamespace, SdkObservableResource, SdkResourceId, SharedCapabilityRegistry, SnapshotPolicy,
+    Type, ValueCodec, ValueId, ValuePath,
 };
 use std::collections::BTreeMap;
 
@@ -87,7 +87,8 @@ fn disconnected_client_listener_retires_its_owner_generation() {
     let PhenixValue::Table(state) = resources.get(&key("state")).expect("state resource") else {
         panic!("state resource is a table");
     };
-    let PhenixValue::Callable(listen) = state.get(&key("listen")).expect("listen capability") else {
+    let PhenixValue::Callable(listen) = state.get(&key("listen")).expect("listen capability")
+    else {
         panic!("listen is callable");
     };
 
