@@ -279,6 +279,51 @@ impl UserData for ObjectCapability {
     }
 }
 
+/// A native, lazily projected observable delivery.
+///
+/// Observable snapshots and diffs may be much larger than the delivery
+/// identity. Retaining the canonical value here keeps the generic callable
+/// ABI intact while deferring Lua conversion until the listener reads a field.
+struct ObservableDeliveryCapability {
+    value: PhenixValue,
+}
+
+impl ObservableDeliveryCapability {
+    fn field(&self, lua: &Lua, name: &str) -> LuaResult<Value> {
+        let PhenixValue::Table(fields) = &self.value else {
+            return Err(lua_error(BindingError::conversion(
+                "observable delivery must be a structural table",
+            )));
+        };
+        let value = fields.get(name).ok_or_else(|| {
+            lua_error(BindingError::conversion(format!(
+                "observable delivery is missing field {name}"
+            )))
+        })?;
+        phenix_to_lua(lua, value).map_err(lua_error)
+    }
+}
+
+impl UserData for ObservableDeliveryCapability {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("commit_id", |lua, this, ()| this.field(lua, "commit_id"));
+        methods.add_method("value_id", |lua, this, ()| this.field(lua, "value_id"));
+        methods.add_method("from_version", |lua, this, ()| {
+            this.field(lua, "from_version")
+        });
+        methods.add_method("version", |lua, this, ()| this.field(lua, "version"));
+        methods.add_method("address", |lua, this, ()| this.field(lua, "address"));
+        methods.add_method("subscription_id", |lua, this, ()| {
+            this.field(lua, "subscription_id")
+        });
+        methods.add_method("generation", |lua, this, ()| this.field(lua, "generation"));
+        methods.add_method("payload", |lua, this, ()| this.field(lua, "payload"));
+        methods.add_meta_method(MetaMethod::ToString, |_lua, _this, ()| {
+            Ok("<phenix observable delivery>")
+        });
+    }
+}
+
 #[derive(Default)]
 struct LocalCallables {
     next: u64,
@@ -1097,7 +1142,11 @@ fn dispatch_local_callback(
         input
             .parse(&invocation.input)
             .map_err(|error| BindingError::conversion(error.to_string()))?;
-        let argument = phenix_to_lua(lua, &invocation.input)?;
+        let argument = if contract.as_str() == "phenix.observable-delivery@1" {
+            observable_delivery_to_lua(lua, invocation.input)?
+        } else {
+            phenix_to_lua(lua, &invocation.input)?
+        };
         let output_value: Value = function.call(argument).map_err(|error| {
             BindingError::local(ErrorKind::Rejected, format!("Lua callable failed: {error}"))
         })?;
@@ -1117,6 +1166,19 @@ fn dispatch_local_callback(
             Err(lua_error(error))
         }
     }
+}
+
+fn observable_delivery_to_lua(lua: &Lua, value: PhenixValue) -> Result<Value, BindingError> {
+    phenix_core::observable_delivery_schema()
+        .parse(&value)
+        .map_err(|error| {
+            BindingError::conversion(format!(
+                "observable delivery violates the canonical schema: {error}"
+            ))
+        })?;
+    lua.create_userdata(ObservableDeliveryCapability { value })
+        .map(Value::UserData)
+        .map_err(|error| BindingError::conversion(error.to_string()))
 }
 
 fn lua_to_phenix(
@@ -1717,7 +1779,8 @@ fn remote_callable(
     let state = Arc::clone(state);
     let local_callables = local_callables.cloned();
     let proxy = lua
-        .create_function(move |lua, input: Value| {
+        .create_function(move |lua, input: MultiValue| {
+            let input = callable_input(lua, &callable, &input_schema, input)?;
             let input = if let Some(local_callables) = &local_callables {
                 lua_to_phenix_with_host(lua, &input_schema, input, &state, local_callables)
             } else {
@@ -1738,6 +1801,57 @@ fn remote_callable(
         })
         .map_err(|error| BindingError::conversion(error.to_string()))?;
     Ok(Value::Function(proxy))
+}
+
+fn callable_input(
+    lua: &Lua,
+    callable: &CallableRef,
+    schema: &PhenixSchema,
+    arguments: MultiValue,
+) -> LuaResult<Value> {
+    let arguments = arguments.into_iter().collect::<Vec<_>>();
+    if callable.contract().as_str() == "phenix.observable-listen@1" {
+        return observable_listen_input(lua, arguments);
+    }
+    if callable.contract().as_str() == "phenix.observable-get@1"
+        && matches!(schema, Type::Unit)
+    {
+        return match arguments.as_slice() {
+            [] | [Value::Table(_)] => Ok(Value::Nil),
+            _ => Err(lua_error(BindingError::conversion(
+                "observable get does not accept input",
+            ))),
+        };
+    }
+    match arguments.as_slice() {
+        [input] => Ok(input.clone()),
+        [] if matches!(schema, Type::Unit) => Ok(Value::Nil),
+        _ => Err(lua_error(BindingError::conversion(
+            "capability callable accepts one input value",
+        ))),
+    }
+}
+
+fn observable_listen_input(lua: &Lua, arguments: Vec<Value>) -> LuaResult<Value> {
+    let (options, listener) = match arguments.as_slice() {
+        [Value::Table(options), Value::Function(listener)] => (options.clone(), listener.clone()),
+        [Value::Table(_resource), Value::Table(options), Value::Function(listener)] => {
+            (options.clone(), listener.clone())
+        }
+        [Value::Table(options)] => return Ok(Value::Table(options.clone())),
+        _ => {
+            return Err(lua_error(BindingError::conversion(
+                "observable listen expects options and a Lua listener function",
+            )))
+        }
+    };
+    let input = lua.create_table()?;
+    for pair in options.pairs::<Value, Value>() {
+        let (key, value) = pair?;
+        input.set(key, value)?;
+    }
+    input.set("listener", listener)?;
+    Ok(Value::Table(input))
 }
 
 fn type_error(expected: &str, value: &Value) -> BindingError {
@@ -1838,6 +1952,90 @@ mod tests {
             lua_to_phenix(&lua, schema, Value::Table(input)).expect_err("unknown fields must fail");
         assert_eq!(error.kind, ErrorKind::Conversion);
         assert!(error.message.contains("unexpected record field extra"));
+    }
+
+    #[test]
+    fn observable_callback_delivery_stays_native_until_lua_reads_it() {
+        let lua = Lua::new();
+        let delivery = PhenixValue::Table(BTreeMap::from([
+            (
+                Key::parse("address").unwrap(),
+                PhenixValue::Table(BTreeMap::from([
+                    (
+                        Key::parse("path").unwrap(),
+                        PhenixValue::Table(BTreeMap::from([(
+                            Key::parse("segments").unwrap(),
+                            PhenixValue::List(Vec::new()),
+                        )])),
+                    ),
+                    (
+                        Key::parse("value_id").unwrap(),
+                        PhenixValue::String("fixture.state@1".to_owned()),
+                    ),
+                ])),
+            ),
+            (Key::parse("commit_id").unwrap(), PhenixValue::Option(None)),
+            (Key::parse("from_version").unwrap(), PhenixValue::U64(4)),
+            (Key::parse("generation").unwrap(), PhenixValue::U64(8)),
+            (
+                Key::parse("payload").unwrap(),
+                PhenixValue::Variant {
+                    tag: Key::parse("Full").unwrap(),
+                    value: Box::new(PhenixValue::Table(BTreeMap::from([(
+                        Key::parse("value").unwrap(),
+                        PhenixValue::Table(BTreeMap::from([(
+                            Key::parse("large").unwrap(),
+                            PhenixValue::String("only converted by payload()".to_owned()),
+                        )])),
+                    )]))),
+                },
+            ),
+            (Key::parse("subscription_id").unwrap(), PhenixValue::U64(7)),
+            (
+                Key::parse("value_id").unwrap(),
+                PhenixValue::String("fixture.state@1".to_owned()),
+            ),
+            (Key::parse("version").unwrap(), PhenixValue::U64(5)),
+        ]));
+
+        let Value::UserData(delivery) = observable_delivery_to_lua(&lua, delivery).unwrap() else {
+            panic!("observable callback delivery must be native userdata");
+        };
+        assert_eq!(
+            delivery.call_method::<String>("value_id", ()).unwrap(),
+            "fixture.state@1"
+        );
+        assert_eq!(delivery.call_method::<i64>("version", ()).unwrap(), 5);
+
+        let payload: Table = delivery.call_method("payload", ()).unwrap();
+        assert_eq!(payload.get::<String>("kind").unwrap(), "Full");
+        let value: Table = payload.get("value").unwrap();
+        assert_eq!(
+            value.get::<String>("large").unwrap(),
+            "only converted by payload()"
+        );
+    }
+
+    #[test]
+    fn observable_listen_lifts_the_second_lua_argument_without_mutating_options() {
+        let lua = Lua::new();
+        let options = lua.create_table().unwrap();
+        options.set("path", lua.create_table().unwrap()).unwrap();
+        let listener = lua
+            .load("return function(_delivery) return nil end")
+            .eval::<mlua::Function>()
+            .unwrap();
+
+        let Value::Table(input) = observable_listen_input(
+            &lua,
+            vec![Value::Table(options.clone()), Value::Function(listener)],
+        )
+        .unwrap()
+        else {
+            panic!("observable listen input must remain a table");
+        };
+        assert!(matches!(input.get::<Value>("listener").unwrap(), Value::Function(_)));
+        assert!(matches!(options.get::<Value>("listener").unwrap(), Value::Nil));
     }
 
     #[test]
