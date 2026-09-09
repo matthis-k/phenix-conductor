@@ -2,7 +2,7 @@
 
 use agent_client_protocol::schema::{
     v1::{
-        AgentNotification, AgentRequest, CancelNotification, ClientResponse, CloseSessionRequest,
+        AgentNotification, AgentRequest, CancelNotification, CloseSessionRequest,
         CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse, InitializeRequest,
         ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
         NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
@@ -860,7 +860,10 @@ impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
                     let response = callbacks.receive(request, &extensions).await.map_err(|error| {
                         agent_client_protocol::Error::internal_error().data(error.to_string())
                     })?;
-                    responder.respond(ClientResponse::ExtMethodResponse(response))
+                    let response = serde_json::to_value(response).map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })?;
+                    responder.respond(response)
                 },
                 agent_client_protocol::on_receive_request!(),
             )
