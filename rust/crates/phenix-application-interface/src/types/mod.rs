@@ -138,7 +138,10 @@ impl From<phenix_core::CapabilityError> for ApplicationError {
                 value: reference.id().to_string(),
             },
             CapabilityError::DuplicateReference(reference) => Self::Conflict {
-                message: format!("capability reference {} is already registered", reference.id()),
+                message: format!(
+                    "capability reference {} is already registered",
+                    reference.id()
+                ),
             },
             CapabilityError::SchemaMismatch { message } => Self::SchemaMismatch { message },
             CapabilityError::ProviderFailed { message } => Self::Failed { message },

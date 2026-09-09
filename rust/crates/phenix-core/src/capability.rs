@@ -118,7 +118,11 @@ impl Display for CapabilityError {
                 write!(formatter, "stale capability reference {}", reference.id())
             }
             Self::DuplicateReference(reference) => {
-                write!(formatter, "duplicate capability reference {}", reference.id())
+                write!(
+                    formatter,
+                    "duplicate capability reference {}",
+                    reference.id()
+                )
             }
             Self::SchemaMismatch { message } => {
                 write!(formatter, "capability schema mismatch: {message}")
