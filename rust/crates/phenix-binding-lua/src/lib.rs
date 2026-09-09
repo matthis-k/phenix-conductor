@@ -1813,9 +1813,7 @@ fn callable_input(
     if callable.contract().as_str() == "phenix.observable-listen@1" {
         return observable_listen_input(lua, arguments);
     }
-    if callable.contract().as_str() == "phenix.observable-get@1"
-        && matches!(schema, Type::Unit)
-    {
+    if callable.contract().as_str() == "phenix.observable-get@1" && matches!(schema, Type::Unit) {
         return match arguments.as_slice() {
             [] | [Value::Table(_)] => Ok(Value::Nil),
             _ => Err(lua_error(BindingError::conversion(
@@ -2030,12 +2028,17 @@ mod tests {
             &lua,
             vec![Value::Table(options.clone()), Value::Function(listener)],
         )
-        .unwrap()
-        else {
+        .unwrap() else {
             panic!("observable listen input must remain a table");
         };
-        assert!(matches!(input.get::<Value>("listener").unwrap(), Value::Function(_)));
-        assert!(matches!(options.get::<Value>("listener").unwrap(), Value::Nil));
+        assert!(matches!(
+            input.get::<Value>("listener").unwrap(),
+            Value::Function(_)
+        ));
+        assert!(matches!(
+            options.get::<Value>("listener").unwrap(),
+            Value::Nil
+        ));
     }
 
     #[test]
