@@ -568,10 +568,7 @@ fn observable_change_schema() -> Type {
             key("Remove"),
             Type::Table(BTreeMap::from([(
                 key("change"),
-                Type::Table(BTreeMap::from([(
-                    key("path"),
-                    observable_path_schema(),
-                )])),
+                Type::Table(BTreeMap::from([(key("path"), observable_path_schema())])),
             )])),
         ),
         (
@@ -947,10 +944,7 @@ fn observation_change_value(change: &ValueChange) -> PhenixValue {
             "Remove",
             PhenixValue::Table(BTreeMap::from([(
                 key("change"),
-                PhenixValue::Table(BTreeMap::from([(
-                    key("path"),
-                    observable_path_value(path),
-                )])),
+                PhenixValue::Table(BTreeMap::from([(key("path"), observable_path_value(path))])),
             )])),
         ),
         ValueChange::Splice {
@@ -963,7 +957,10 @@ fn observation_change_value(change: &ValueChange) -> PhenixValue {
             PhenixValue::Table(BTreeMap::from([(
                 key("change"),
                 PhenixValue::Table(BTreeMap::from([
-                    (key("delete_count"), PhenixValue::U64(u64::from(*delete_count))),
+                    (
+                        key("delete_count"),
+                        PhenixValue::U64(u64::from(*delete_count)),
+                    ),
                     (
                         key("inserted"),
                         PhenixValue::List(inserted.iter().cloned().collect()),
@@ -1542,7 +1539,10 @@ mod tests {
             );
             assert_eq!(update.get("from_version"), Some(&PhenixValue::U64(0)));
             assert_eq!(update.get("version"), Some(&PhenixValue::U64(1)));
-            assert_eq!(update.get("subscription_id"), initial.get("subscription_id"));
+            assert_eq!(
+                update.get("subscription_id"),
+                initial.get("subscription_id")
+            );
             assert_eq!(update.get("generation"), initial.get("generation"));
             let PhenixValue::Table(address) = update.get("address").unwrap() else {
                 panic!("delivery address is a table");
