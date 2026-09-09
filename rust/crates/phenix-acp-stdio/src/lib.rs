@@ -249,16 +249,21 @@ impl SdkApplicationService {
             }
             (Type::Table(fields), PhenixValue::Table(values)) => {
                 for (key, schema) in fields {
-                    let value = values.get(key).ok_or_else(|| ApplicationError::SchemaMismatch {
-                        message: format!("capability input is missing field {key}"),
-                    })?;
+                    let value =
+                        values
+                            .get(key)
+                            .ok_or_else(|| ApplicationError::SchemaMismatch {
+                                message: format!("capability input is missing field {key}"),
+                            })?;
                     self.admit_client_callables(schema, value)?;
                 }
             }
             (Type::Variant(variants), PhenixValue::Variant { tag, value }) => {
-                let schema = variants.get(tag).ok_or_else(|| ApplicationError::SchemaMismatch {
-                    message: format!("capability input has unknown variant {tag}"),
-                })?;
+                let schema = variants
+                    .get(tag)
+                    .ok_or_else(|| ApplicationError::SchemaMismatch {
+                        message: format!("capability input has unknown variant {tag}"),
+                    })?;
                 self.admit_client_callables(schema, value)?;
             }
             _ => {}
@@ -276,13 +281,15 @@ impl SdkApplicationService {
         let registry = self.capabilities.clone();
         let owner = callable.owner().clone();
         let generation = callable.generation().clone();
-        match self.capabilities.register(reference.clone(), schema.clone(), move |input| {
-            let result = callbacks.invoke(reference.clone(), input);
-            if matches!(result, Err(CapabilityError::Disconnected)) {
-                registry.retire(owner.clone(), generation.clone());
-            }
-            result
-        }) {
+        match self
+            .capabilities
+            .register(reference.clone(), schema.clone(), move |input| {
+                let result = callbacks.invoke(reference.clone(), input);
+                if matches!(result, Err(CapabilityError::Disconnected)) {
+                    registry.retire(owner.clone(), generation.clone());
+                }
+                result
+            }) {
             Ok(()) => Ok(()),
             Err(CapabilityError::DuplicateReference(_)) => {
                 let registered = self.capabilities.schema(callable)?;
@@ -328,7 +335,8 @@ pub async fn serve_stdio_with_events(
     events: mpsc::Receiver<ApplicationEvent>,
 ) -> Result<(), Error> {
     let (keep_callbacks_open, callbacks) = ClientCapabilityCallbacks::bounded(1);
-    let result = serve_stdio_with_events_and_callbacks(transport, advertised, events, callbacks).await;
+    let result =
+        serve_stdio_with_events_and_callbacks(transport, advertised, events, callbacks).await;
     drop(keep_callbacks_open);
     result
 }
@@ -559,7 +567,9 @@ fn application_error_to_capability(
         ApplicationError::NotFound { .. } => CapabilityError::UnknownReference(callable),
         ApplicationError::SchemaMismatch { message }
         | ApplicationError::InvalidInput { message }
-        | ApplicationError::InvalidResponse { message } => CapabilityError::SchemaMismatch { message },
+        | ApplicationError::InvalidResponse { message } => {
+            CapabilityError::SchemaMismatch { message }
+        }
         other => CapabilityError::ProviderFailed {
             message: other.to_string(),
         },
@@ -570,10 +580,9 @@ fn application_error_to_capability(
 mod tests {
     use super::*;
     use phenix_core::{
-        Authority, CapabilityOwnerId, ClientConnectionId, Key, ObservableRegistration,
-        PhenixValue, PluginExecution, PluginId, PluginManifest, ReferenceId, SdkContribution,
-        SdkNamespace, SdkObservableResource, SdkResourceId, SnapshotPolicy, Type, ValueId,
-        ValuePath,
+        Authority, CapabilityOwnerId, ClientConnectionId, Key, ObservableRegistration, PhenixValue,
+        PluginExecution, PluginId, PluginManifest, ReferenceId, SdkContribution, SdkNamespace,
+        SdkObservableResource, SdkResourceId, SnapshotPolicy, Type, ValueId, ValuePath,
     };
 
     #[tokio::test]
@@ -606,9 +615,8 @@ mod tests {
             ReferenceId::parse("callback").unwrap(),
         );
         let expected = callable.clone();
-        let worker = tokio::task::spawn_blocking(move || {
-            callbacks.invoke(callable, PhenixValue::U64(7))
-        });
+        let worker =
+            tokio::task::spawn_blocking(move || callbacks.invoke(callable, PhenixValue::U64(7)));
 
         let invocation = receiver.recv().await.unwrap();
         assert_eq!(
@@ -619,7 +627,10 @@ mod tests {
         invocation.respond(Ok(ApplicationCapabilityInvokeResult {
             output: PhenixValue::String("ok".to_owned()),
         }));
-        assert_eq!(worker.await.unwrap().unwrap(), PhenixValue::String("ok".to_owned()));
+        assert_eq!(
+            worker.await.unwrap().unwrap(),
+            PhenixValue::String("ok".to_owned())
+        );
     }
 
     #[tokio::test]
