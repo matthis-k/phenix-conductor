@@ -2,8 +2,9 @@
 
 use agent_client_protocol::schema::{
     v1::{
-        AgentNotification, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-        ExtNotification, ExtRequest, ExtResponse, InitializeRequest, ListSessionsRequest,
+        AgentNotification, AgentRequest, CancelNotification, ClientResponse, CloseSessionRequest,
+        CloseSessionResponse, ExtNotification, ExtRequest, ExtResponse, InitializeRequest,
+        ListSessionsRequest,
         ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
         NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
         ResumeSessionResponse, SessionNotification, SetSessionConfigOptionRequest,
@@ -840,7 +841,12 @@ impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
                 agent_client_protocol::on_receive_notification!(),
             )
             .on_receive_request(
-                async move |request: ExtRequest, responder, _connection| {
+                async move |request: AgentRequest, responder, _connection| {
+                    let AgentRequest::ExtMethodRequest(request) = request else {
+                        return Err(agent_client_protocol::Error::invalid_params().data(
+                            "ACP peer sent a non-extension request to the Phenix callback handler",
+                        ));
+                    };
                     let extensions = callback_metadata
                         .lock()
                         .map_err(|_| {
@@ -855,7 +861,7 @@ impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
                     let response = callbacks.receive(request, &extensions).await.map_err(|error| {
                         agent_client_protocol::Error::internal_error().data(error.to_string())
                     })?;
-                    responder.respond(response)
+                    responder.respond(ClientResponse::ExtMethodResponse(response))
                 },
                 agent_client_protocol::on_receive_request!(),
             )

@@ -73,8 +73,8 @@ record!(CapabilityInvokeInput, "phenix.application.type.capability-invoke-input@
 record!(CapabilityInvokeResult, "phenix.application.type.capability-invoke-result@1", {
     output: PhenixValue,
 });
-/// The complete language-facing SDK. `schema` is authoritative for callable
-/// leaves because a raw `CallableRef` does not retain input/output types.
+// The complete language-facing SDK. `schema` is authoritative for callable
+// leaves because a raw `CallableRef` does not retain input/output types.
 record!(SdkValue, "phenix.application.type.sdk-value@1", {
     schema: PhenixSchema,
     value: PhenixValue,
