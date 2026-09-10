@@ -401,9 +401,12 @@ impl SdkApplicationService {
             }
         })?;
         let (admission, callable_is_still_admitted) = {
-            let mut admissions = self.admissions.lock().map_err(|_| ApplicationError::Failed {
-                message: "client tool admission registry lock is poisoned".to_owned(),
-            })?;
+            let mut admissions = self
+                .admissions
+                .lock()
+                .map_err(|_| ApplicationError::Failed {
+                    message: "client tool admission registry lock is poisoned".to_owned(),
+                })?;
             let admission = admissions
                 .remove_from_session(&session_id, &admission_id)
                 .map_err(|error| ApplicationError::StaleReference {
@@ -1076,8 +1079,8 @@ mod tests {
                     admission_id: admission.admission_id,
                 }
                 .to_value(),
-        )
-        .unwrap();
+            )
+            .unwrap();
         assert!(service.client_tool_descriptors(&session).is_empty());
         assert!(matches!(
             service.capabilities.invoke(CoreCapabilityInvokeInput {
