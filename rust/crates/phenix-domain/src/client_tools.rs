@@ -172,6 +172,21 @@ impl ClientToolAdmissions {
         }
     }
 
+    /// Finds the currently admitted client tool for one session. Callers use
+    /// the returned callable reference only through the generic capability
+    /// dispatcher, so removing an admission also removes its execution route.
+    #[must_use]
+    pub fn admitted(
+        &self,
+        session_id: &SessionId,
+        callable: &CallableId,
+    ) -> Option<&ClientToolAdmission> {
+        let id = self
+            .by_session_callable
+            .get(&(session_id.clone(), callable.clone()))?;
+        self.by_id.get(id)
+    }
+
     #[must_use]
     pub fn descriptors(&self, session_id: &SessionId) -> Vec<CallableDescriptor> {
         self.by_id
@@ -250,5 +265,22 @@ mod tests {
             admissions.descriptors(&session),
             vec![second.tool.descriptor]
         );
+    }
+
+    #[test]
+    fn admitted_tool_lookup_tracks_explicit_removal() {
+        let mut admissions = ClientToolAdmissions::default();
+        let session = SessionId::parse("session-a").unwrap();
+        let admitted = admissions
+            .admit(session.clone(), definition("fixture.echo", "generation-a"))
+            .unwrap();
+        let callable = admitted.tool.descriptor.id.clone();
+
+        assert_eq!(
+            admissions.admitted(&session, &callable).map(|tool| &tool.id),
+            Some(&admitted.id)
+        );
+        admissions.remove_from_session(&session, &admitted.id).unwrap();
+        assert!(admissions.admitted(&session, &callable).is_none());
     }
 }

@@ -11,13 +11,18 @@ use phenix_application_interface::{
     types::{
         ApplicationError, CapabilityInvokeInput as ApplicationCapabilityInvokeInput,
         CapabilityInvokeResult as ApplicationCapabilityInvokeResult,
+        CallableInfo as ApplicationCallableInfo,
+        CallableInvokeInput as ApplicationCallableInvokeInput,
+        CallableResult as ApplicationCallableResult,
+        Callables as ApplicationCallables,
         ClientToolAddInput as ApplicationClientToolAddInput,
         ClientToolAdmission as ApplicationClientToolAdmission,
         ClientToolDefinition as ApplicationClientToolDefinition,
-        ClientToolRemoveInput as ApplicationClientToolRemoveInput, Empty,
+        ClientToolRemoveInput as ApplicationClientToolRemoveInput, Empty, SessionInput,
         SdkValue as ApplicationSdkValue,
     },
-    AddClientTool, ApplicationTransport, GetSdk, InvokeCapability, Operation, RemoveClientTool,
+    AddClientTool, ApplicationTransport, GetSdk, InvokeCallable, InvokeCapability,
+    ListCallables, Operation, RemoveClientTool,
 };
 use phenix_core::{
     CallableRef, CapabilityError, CapabilityGenerationId,
@@ -254,6 +259,24 @@ impl SdkApplicationService {
             self.remove_client_tool(request)?;
             return Ok(phenix_application_interface::types::Acknowledged {}.to_value());
         }
+        if operation.as_str() == ListCallables::ID {
+            let request = SessionInput::from_value(&input).map_err(|error| {
+                ApplicationError::InvalidInput {
+                    message: error.to_string(),
+                }
+            })?;
+            return Ok(self.list_client_tools(&request.session_id).to_value());
+        }
+        if operation.as_str() == InvokeCallable::ID {
+            let request = ApplicationCallableInvokeInput::from_value(&input).map_err(|error| {
+                ApplicationError::InvalidInput {
+                    message: error.to_string(),
+                }
+            })?;
+            return self
+                .invoke_client_tool(request)
+                .map(|result| result.to_value());
+        }
         if operation.as_str() == InvokeCapability::ID {
             let request =
                 ApplicationCapabilityInvokeInput::from_value(&input).map_err(|error| {
@@ -388,6 +411,59 @@ impl SdkApplicationService {
                 value: error.to_string(),
             })?;
         Ok(())
+    }
+
+    fn list_client_tools(&self, session_id: &phenix_core::SessionId) -> ApplicationCallables {
+        ApplicationCallables {
+            callables: self
+                .client_tool_descriptors(session_id)
+                .into_iter()
+                .map(|descriptor| ApplicationCallableInfo {
+                    id: descriptor.id,
+                    description: descriptor.description,
+                    input: descriptor.input_schema,
+                    output: descriptor.output_schema,
+                })
+                .collect(),
+        }
+    }
+
+    fn invoke_client_tool(
+        &self,
+        request: ApplicationCallableInvokeInput,
+    ) -> Result<ApplicationCallableResult, ApplicationError> {
+        let session_id = SessionId::parse(request.session_id.as_str()).map_err(|error| {
+            ApplicationError::InvalidInput {
+                message: error.to_string(),
+            }
+        })?;
+        let admission = self
+            .admissions
+            .lock()
+            .map_err(|_| ApplicationError::Failed {
+                message: "client tool admission registry lock is poisoned".to_owned(),
+            })?
+            .admitted(&session_id, &request.callable_id)
+            .cloned()
+            .ok_or_else(|| ApplicationError::NotFound {
+                resource: request.callable_id.to_string(),
+            })?;
+        let schema = Type::Callable {
+            contract: admission.tool.invoke.contract().clone(),
+            input: Box::new(admission.tool.descriptor.input_schema),
+            output: Box::new(admission.tool.descriptor.output_schema),
+        };
+        let invocation = CoreCapabilityInvokeInput {
+            callable: admission.tool.invoke,
+            input: request.input,
+        };
+        invocation
+            .validate(&schema)
+            .map_err(|error| ApplicationError::SchemaMismatch {
+                message: error.to_string(),
+            })?;
+        let output = self.capabilities.invoke(invocation)?.output;
+        Ok(ApplicationCallableResult { output })
     }
 
     fn admit_client_callables(
@@ -968,6 +1044,19 @@ mod tests {
         let admission = ApplicationClientToolAdmission::from_value(&value).unwrap();
         assert_eq!(admission.callable_id.as_str(), "fixture.client.echo");
         assert_eq!(service.client_tool_descriptors(&session).len(), 1);
+        let listed = service
+            .invoke(
+                &ContractId::parse(ListCallables::ID).unwrap(),
+                SessionInput {
+                    session_id: session.clone(),
+                }
+                .to_value(),
+            )
+            .unwrap();
+        assert_eq!(
+            ApplicationCallables::from_value(&listed).unwrap().callables.len(),
+            1
+        );
 
         service
             .invoke(
@@ -980,6 +1069,92 @@ mod tests {
             )
             .unwrap();
         assert!(service.client_tool_descriptors(&session).is_empty());
+    }
+
+    #[tokio::test]
+    async fn client_tool_invocation_uses_the_generic_capability_dispatcher() {
+        let capabilities = SharedCapabilityRegistry::default();
+        let (callbacks, mut receiver) = ClientCapabilityCallbacks::bounded(1);
+        let service = SdkApplicationService {
+            sdk: ApplicationSdkValue {
+                schema: Type::Table(Default::default()),
+                value: PhenixValue::Table(Default::default()),
+            },
+            capabilities,
+            client_callbacks: callbacks,
+            client_owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            client_generation: CapabilityGenerationId::parse("fixture-generation").unwrap(),
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
+        };
+        let session = phenix_core::SessionId::parse("session-a").unwrap();
+        let callable_id = phenix_core::CallableId::parse("fixture.client.echo").unwrap();
+        let definition = ApplicationClientToolAddInput {
+            session_id: session.clone(),
+            tool: ApplicationClientToolDefinition {
+                id: callable_id.clone(),
+                description: "Echo a client value".to_owned(),
+                input: Type::U64,
+                output: Type::String,
+                capabilities: Vec::new(),
+                requires_permission: false,
+                invoke: PhenixValue::Callable(client_callable()),
+            },
+        };
+        let admission = service
+            .invoke(
+                &ContractId::parse(AddClientTool::ID).unwrap(),
+                definition.to_value(),
+            )
+            .unwrap();
+        let admission = ApplicationClientToolAdmission::from_value(&admission).unwrap();
+
+        let service_for_call = service.clone();
+        let session_for_call = session.clone();
+        let callable_for_call = callable_id.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            service_for_call.invoke(
+                &ContractId::parse(InvokeCallable::ID).unwrap(),
+                ApplicationCallableInvokeInput {
+                    session_id: session_for_call,
+                    callable_id: callable_for_call,
+                    input: PhenixValue::U64(7),
+                }
+                .to_value(),
+            )
+        });
+        let callback = receiver.recv().await.unwrap();
+        assert_eq!(callback.request().input, PhenixValue::U64(7));
+        callback.respond(Ok(ApplicationCapabilityInvokeResult {
+            output: PhenixValue::String("ok".to_owned()),
+        }));
+        let output = worker.await.unwrap().unwrap();
+        assert_eq!(
+            ApplicationCallableResult::from_value(&output).unwrap().output,
+            PhenixValue::String("ok".to_owned())
+        );
+
+        service
+            .invoke(
+                &ContractId::parse(RemoveClientTool::ID).unwrap(),
+                ApplicationClientToolRemoveInput {
+                    session_id: session.clone(),
+                    admission_id: admission.admission_id,
+                }
+                .to_value(),
+            )
+            .unwrap();
+        assert!(matches!(
+            service.invoke(
+                &ContractId::parse(InvokeCallable::ID).unwrap(),
+                ApplicationCallableInvokeInput {
+                    session_id: session,
+                    callable_id,
+                    input: PhenixValue::U64(7),
+                }
+                .to_value(),
+            ),
+            Err(ApplicationError::NotFound { .. })
+        ));
     }
 
     #[tokio::test]
