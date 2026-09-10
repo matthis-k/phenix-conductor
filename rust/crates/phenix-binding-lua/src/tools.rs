@@ -30,8 +30,13 @@ pub(super) fn bind(lua: &Lua, client: Client) -> LuaResult<Table> {
 }
 
 fn operation(client: &Client, id: &str) -> LuaResult<ContractId> {
-    let operation = ContractId::parse(id).map_err(|error| lua_error(BindingError::conversion(error)))?;
-    if !client.state.supports_extension(&operation).map_err(lua_error)? {
+    let operation =
+        ContractId::parse(id).map_err(|error| lua_error(BindingError::conversion(error)))?;
+    if !client
+        .state
+        .supports_extension(&operation)
+        .map_err(lua_error)?
+    {
         return Err(lua_error(BindingError::unsupported(&operation)));
     }
     Ok(operation)
@@ -49,8 +54,14 @@ fn register(
         let (key, _) = pair?;
         if !matches!(
             key.as_str(),
-            "client" | "session_id" | "id" | "description" | "input" | "output"
-                | "capabilities" | "requires_permission"
+            "client"
+                | "session_id"
+                | "id"
+                | "description"
+                | "input"
+                | "output"
+                | "capabilities"
+                | "requires_permission"
         ) {
             return Err(lua_error(BindingError::conversion(format!(
                 "unexpected tool definition field {key}"
@@ -63,44 +74,75 @@ fn register(
         .map_err(|error| lua_error(BindingError::conversion(error)))?;
     let description: String = definition.get("description")?;
     if description.trim().is_empty() {
-        return Err(lua_error(BindingError::conversion("tool description must not be empty")));
+        return Err(lua_error(BindingError::conversion(
+            "tool description must not be empty",
+        )));
     }
     let input: Type = lua.from_value(definition.get("input")?)?;
     let output: Type = lua.from_value(definition.get("output")?)?;
-    let capabilities = definition.get::<Option<Vec<String>>>("capabilities")?.unwrap_or_default();
-    let requires_permission = definition.get::<Option<bool>>("requires_permission")?.unwrap_or(false);
+    let capabilities = definition
+        .get::<Option<Vec<String>>>("capabilities")?
+        .unwrap_or_default();
+    let requires_permission = definition
+        .get::<Option<bool>>("requires_permission")?
+        .unwrap_or(false);
     let schema = Type::Callable {
         contract: ContractId::parse("phenix.client-tool-handler@1").expect("static contract id"),
         input: Box::new(input.clone()),
         output: Box::new(output.clone()),
     };
     let invoke = lua_to_phenix_with_host(
-        lua, &schema, Value::Function(handler), &client.state, &client.local_callables,
-    ).map_err(lua_error)?;
+        lua,
+        &schema,
+        Value::Function(handler),
+        &client.state,
+        &client.local_callables,
+    )
+    .map_err(lua_error)?;
     let PhenixValue::Callable(reference) = &invoke else {
-        return Err(lua_error(BindingError::conversion("function lifting must return a callable")));
+        return Err(lua_error(BindingError::conversion(
+            "function lifting must return a callable",
+        )));
     };
     let reference = reference.id().clone();
     let input = ClientToolAddInput {
         session_id: session_id.clone(),
         tool: ClientToolDefinition {
-            id, description, input, output, capabilities, requires_permission, invoke,
+            id,
+            description,
+            input,
+            output,
+            capabilities,
+            requires_permission,
+            invoke,
         },
-    }.to_value();
+    }
+    .to_value();
     let request = request_for(
         &client.state,
         Some(Rc::clone(&client.local_callables)),
-        |reply| Command::Application { operation, input, reply },
+        |reply| Command::Application {
+            operation,
+            input,
+            reply,
+        },
     );
     match request {
         Ok(mut request) => {
             request.tool_registration = Some(Registration {
-                client: client.clone(), session_id, reference, stop: None,
+                client: client.clone(),
+                session_id,
+                reference,
+                stop: None,
             });
             Ok(request)
         }
         Err(error) => {
-            client.local_callables.borrow_mut().entries.remove(&reference);
+            client
+                .local_callables
+                .borrow_mut()
+                .entries
+                .remove(&reference);
             Err(error)
         }
     }
@@ -115,7 +157,11 @@ pub(super) struct Registration {
 
 impl Registration {
     pub(super) fn release(&self) {
-        self.client.local_callables.borrow_mut().entries.remove(&self.reference);
+        self.client
+            .local_callables
+            .borrow_mut()
+            .entries
+            .remove(&self.reference);
     }
 
     pub(super) fn project(&mut self, lua: &Lua, response: Response) -> LuaResult<MultiValue> {
@@ -123,7 +169,9 @@ impl Registration {
             return Ok(MultiValue::from_vec(vec![Value::Function(stop.clone())]));
         }
         let Response::Application { value, .. } = response else {
-            return Err(lua_error(BindingError::conversion("expected tool admission response")));
+            return Err(lua_error(BindingError::conversion(
+                "expected tool admission response",
+            )));
         };
         let admission = ClientToolAdmission::from_value(&value)
             .map_err(|error| lua_error(BindingError::conversion(error.to_string())))?;
@@ -141,12 +189,18 @@ impl Registration {
             let input = ClientToolRemoveInput {
                 session_id: session_id.clone(),
                 admission_id: admission.admission_id.clone(),
-            }.to_value();
+            }
+            .to_value();
             let request = request_for(
                 &client.state,
                 Some(Rc::clone(&client.local_callables)),
-                |reply| Command::Application { operation, input, reply },
-            )?.with_listener_lifecycle(ListenerLifecycle::RemoveOnSuccess(reference.clone()));
+                |reply| Command::Application {
+                    operation,
+                    input,
+                    reply,
+                },
+            )?
+            .with_listener_lifecycle(ListenerLifecycle::RemoveOnSuccess(reference.clone()));
             let request = lua.create_userdata(request)?;
             *pending.borrow_mut() = Some(request.clone());
             Ok(request)
