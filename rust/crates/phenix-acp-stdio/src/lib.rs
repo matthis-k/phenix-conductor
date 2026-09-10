@@ -22,9 +22,8 @@ use phenix_application_interface::{
 use phenix_core::{
     CallableRef, CapabilityError, CapabilityGenerationId,
     CapabilityInvokeInput as CoreCapabilityInvokeInput, CapabilityOwnerId, ClientConnectionId,
-    ContractId,
-    ObservableStore, PhenixValue, ResolvedSdkContributions, RuntimeId, SharedCapabilityRegistry,
-    Type, ValueCodec,
+    ContractId, ObservableStore, PhenixValue, ResolvedSdkContributions, RuntimeId,
+    SharedCapabilityRegistry, Type, ValueCodec,
 };
 use phenix_domain::{
     CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet, ClientToolAdmissionId,
@@ -198,7 +197,8 @@ impl SdkApplicationService {
     /// Retire this ACP connection's ephemeral callables and session tool admissions.
     pub fn retire_client(&self) {
         let owner = CapabilityOwnerId::Client(self.client_owner.clone());
-        self.capabilities.retire(owner.clone(), self.client_generation.clone());
+        self.capabilities
+            .retire(owner.clone(), self.client_generation.clone());
         if let Ok(mut admissions) = self.admissions.lock() {
             admissions.retire(&owner, &self.client_generation);
         }
@@ -295,7 +295,8 @@ impl SdkApplicationService {
         };
         if !self.is_current_client_callable(&invoke) {
             return Err(ApplicationError::SchemaMismatch {
-                message: "client tool invoke must belong to the connected client generation".to_owned(),
+                message: "client tool invoke must belong to the connected client generation"
+                    .to_owned(),
             });
         }
         let callable_schema = Type::Callable {
@@ -413,7 +414,8 @@ impl SdkApplicationService {
     ) -> Result<(), ApplicationError> {
         if !self.is_current_client_callable(callable) {
             return Err(ApplicationError::SchemaMismatch {
-                message: "client callable must belong to the connected client generation".to_owned(),
+                message: "client callable must belong to the connected client generation"
+                    .to_owned(),
             });
         }
         let callbacks = self.client_callbacks.clone();

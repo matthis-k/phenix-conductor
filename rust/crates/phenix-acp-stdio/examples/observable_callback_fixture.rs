@@ -4,11 +4,10 @@ use phenix_acp_stdio::{
 };
 use phenix_application_interface::{GetSdk, InvokeCapability, Operation};
 use phenix_core::{
-    CapabilityGenerationId, ClientConnectionId, ContractId, ObservableRegistration, ObservableStore,
-    PhenixValue,
-    PluginId, PluginManifest, ResolvedSdkContributions, RuntimeId, SdkContribution, SdkNamespace,
-    SdkObservableResource, SdkResourceId, SharedCapabilityRegistry, SnapshotPolicy, Type, ValueId,
-    ValuePath,
+    CapabilityGenerationId, ClientConnectionId, ContractId, ObservableRegistration,
+    ObservableStore, PhenixValue, PluginId, PluginManifest, ResolvedSdkContributions, RuntimeId,
+    SdkContribution, SdkNamespace, SdkObservableResource, SdkResourceId, SharedCapabilityRegistry,
+    SnapshotPolicy, Type, ValueId, ValuePath,
 };
 use tokio::sync::mpsc;
 
