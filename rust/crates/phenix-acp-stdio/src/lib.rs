@@ -9,20 +9,19 @@ use agent_client_protocol::{schema::v1::*, Agent, Error, ErrorCode, Stdio};
 use phenix_adapter_acp::ApplicationAdapter;
 use phenix_application_interface::{
     types::{
-        ApplicationError, CapabilityInvokeInput as ApplicationCapabilityInvokeInput,
-        CapabilityInvokeResult as ApplicationCapabilityInvokeResult,
-        CallableInfo as ApplicationCallableInfo,
+        ApplicationError, CallableInfo as ApplicationCallableInfo,
         CallableInvokeInput as ApplicationCallableInvokeInput,
-        CallableResult as ApplicationCallableResult,
-        Callables as ApplicationCallables,
+        CallableResult as ApplicationCallableResult, Callables as ApplicationCallables,
+        CapabilityInvokeInput as ApplicationCapabilityInvokeInput,
+        CapabilityInvokeResult as ApplicationCapabilityInvokeResult,
         ClientToolAddInput as ApplicationClientToolAddInput,
         ClientToolAdmission as ApplicationClientToolAdmission,
         ClientToolDefinition as ApplicationClientToolDefinition,
-        ClientToolRemoveInput as ApplicationClientToolRemoveInput, Empty, SessionInput,
-        SdkValue as ApplicationSdkValue,
+        ClientToolRemoveInput as ApplicationClientToolRemoveInput, Empty,
+        SdkValue as ApplicationSdkValue, SessionInput,
     },
-    AddClientTool, ApplicationTransport, GetSdk, InvokeCallable, InvokeCapability,
-    ListCallables, Operation, RemoveClientTool,
+    AddClientTool, ApplicationTransport, GetSdk, InvokeCallable, InvokeCapability, ListCallables,
+    Operation, RemoveClientTool,
 };
 use phenix_core::{
     CallableRef, CapabilityError, CapabilityGenerationId,
@@ -1054,7 +1053,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            ApplicationCallables::from_value(&listed).unwrap().callables.len(),
+            ApplicationCallables::from_value(&listed)
+                .unwrap()
+                .callables
+                .len(),
             1
         );
 
@@ -1129,7 +1131,9 @@ mod tests {
         }));
         let output = worker.await.unwrap().unwrap();
         assert_eq!(
-            ApplicationCallableResult::from_value(&output).unwrap().output,
+            ApplicationCallableResult::from_value(&output)
+                .unwrap()
+                .output,
             PhenixValue::String("ok".to_owned())
         );
 

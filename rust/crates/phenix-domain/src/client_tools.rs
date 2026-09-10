@@ -277,10 +277,14 @@ mod tests {
         let callable = admitted.tool.descriptor.id.clone();
 
         assert_eq!(
-            admissions.admitted(&session, &callable).map(|tool| &tool.id),
+            admissions
+                .admitted(&session, &callable)
+                .map(|tool| &tool.id),
             Some(&admitted.id)
         );
-        admissions.remove_from_session(&session, &admitted.id).unwrap();
+        admissions
+            .remove_from_session(&session, &admitted.id)
+            .unwrap();
         assert!(admissions.admitted(&session, &callable).is_none());
     }
 }
