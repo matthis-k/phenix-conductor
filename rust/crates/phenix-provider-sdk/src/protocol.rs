@@ -280,7 +280,10 @@ fn parse_callable_id(name: &str) -> Result<CallableId, ProviderError> {
     })
 }
 
-fn parse_arguments(value: &Value, provider: &str) -> Result<phenix_core::PhenixValue, ProviderError> {
+fn parse_arguments(
+    value: &Value,
+    provider: &str,
+) -> Result<phenix_core::PhenixValue, ProviderError> {
     let value = if let Some(arguments) = value.as_str() {
         serde_json::from_str(arguments).map_err(|error| ProviderError::Protocol {
             message: format!("{provider} returned invalid tool arguments JSON: {error}"),
@@ -348,15 +351,16 @@ fn openai_responses_response(
                 .ok_or_else(|| ProviderError::Protocol {
                     message: "OpenAI responses tool call contained no call id".to_owned(),
                 })?;
-            let name = item
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| ProviderError::Protocol {
+            let name = item.get("name").and_then(Value::as_str).ok_or_else(|| {
+                ProviderError::Protocol {
                     message: "OpenAI responses tool call contained no function name".to_owned(),
-                })?;
-            let arguments = item.get("arguments").ok_or_else(|| ProviderError::Protocol {
-                message: "OpenAI responses tool call contained no arguments".to_owned(),
+                }
             })?;
+            let arguments = item
+                .get("arguments")
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "OpenAI responses tool call contained no arguments".to_owned(),
+                })?;
             Ok(ModelToolCall {
                 call_id: call_id.to_owned(),
                 callable_id: parse_callable_id(name)?,
@@ -402,12 +406,12 @@ fn openai_chat_response(
         .unwrap_or_default()
         .iter()
         .map(|call| {
-            let call_id = call
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| ProviderError::Protocol {
-                    message: "OpenAI chat tool call contained no call id".to_owned(),
-                })?;
+            let call_id =
+                call.get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ProviderError::Protocol {
+                        message: "OpenAI chat tool call contained no call id".to_owned(),
+                    })?;
             let function = call
                 .get("function")
                 .and_then(Value::as_object)
@@ -462,18 +466,17 @@ fn anthropic_response(
         .iter()
         .filter(|part| part.get("type").and_then(Value::as_str) == Some("tool_use"))
         .map(|part| {
-            let call_id = part
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| ProviderError::Protocol {
-                    message: "Anthropic tool use contained no call id".to_owned(),
-                })?;
-            let name = part
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| ProviderError::Protocol {
+            let call_id =
+                part.get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ProviderError::Protocol {
+                        message: "Anthropic tool use contained no call id".to_owned(),
+                    })?;
+            let name = part.get("name").and_then(Value::as_str).ok_or_else(|| {
+                ProviderError::Protocol {
                     message: "Anthropic tool use contained no tool name".to_owned(),
-                })?;
+                }
+            })?;
             let input = part.get("input").ok_or_else(|| ProviderError::Protocol {
                 message: "Anthropic tool use contained no input".to_owned(),
             })?;
@@ -722,10 +725,9 @@ mod tests {
     fn non_json_options_stop_at_protocol_adapter() {
         let endpoint = Endpoint::parse("https://example.com/v1").unwrap();
         let mut request = request();
-        request.options.insert(
-            "binary".into(),
-            PhenixValue::Bytes(vec![1, 2, 3]),
-        );
+        request
+            .options
+            .insert("binary".into(), PhenixValue::Bytes(vec![1, 2, 3]));
 
         let error = Protocol::OpenAiResponses
             .encode(&endpoint, &request)
