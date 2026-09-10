@@ -1,5 +1,8 @@
 use crate::{Endpoint, ProviderError, ProviderRequest, ProviderResponse, RateLimits};
-use phenix_core::{ModelInferenceRequest, ModelInferenceResponse, ValueCodec};
+use phenix_core::{
+    CallableId, ModelInferenceRequest, ModelInferenceResponse, ModelToolCall, ModelToolDescriptor,
+    PhenixSchema, ValueCodec,
+};
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -106,16 +109,115 @@ fn request_object(
     Ok((body, text))
 }
 
+fn json_schema(schema: &PhenixSchema) -> Result<Value, ProviderError> {
+    let schema = match schema {
+        PhenixSchema::Any => serde_json::json!({}),
+        PhenixSchema::Never => serde_json::json!({"not": {}}),
+        PhenixSchema::Unit => serde_json::json!({"type": "null"}),
+        PhenixSchema::Bool => serde_json::json!({"type": "boolean"}),
+        PhenixSchema::I64 => serde_json::json!({"type": "integer"}),
+        PhenixSchema::U64 => serde_json::json!({"type": "integer", "minimum": 0}),
+        PhenixSchema::F64 => serde_json::json!({"type": "number"}),
+        PhenixSchema::String => serde_json::json!({"type": "string"}),
+        PhenixSchema::Bytes => {
+            serde_json::json!({"type": "string", "contentEncoding": "base64"})
+        }
+        PhenixSchema::Option(item) => {
+            serde_json::json!({"anyOf": [json_schema(item)?, {"type": "null"}]})
+        }
+        PhenixSchema::Array { item, len } => serde_json::json!({
+            "type": "array",
+            "items": json_schema(item)?,
+            "minItems": len,
+            "maxItems": len,
+        }),
+        PhenixSchema::List(item) => {
+            serde_json::json!({"type": "array", "items": json_schema(item)?})
+        }
+        PhenixSchema::Map(item) => {
+            serde_json::json!({"type": "object", "additionalProperties": json_schema(item)?})
+        }
+        PhenixSchema::Table(fields) => {
+            let properties = fields
+                .iter()
+                .map(|(key, schema)| Ok((key.as_str().to_owned(), json_schema(schema)?)))
+                .collect::<Result<Map<String, Value>, ProviderError>>()?;
+            let required = fields
+                .keys()
+                .map(|key| key.as_str().to_owned())
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": false,
+            })
+        }
+        PhenixSchema::Variant(_) | PhenixSchema::Callable { .. } | PhenixSchema::Object { .. } => {
+            return Err(ProviderError::InvalidRequest {
+                message: "model tool input schema cannot be represented as provider JSON Schema"
+                    .to_owned(),
+            });
+        }
+    };
+    Ok(schema)
+}
+
+fn openai_tool(tool: &ModelToolDescriptor) -> Result<Value, ProviderError> {
+    Ok(serde_json::json!({
+        "type": "function",
+        "name": tool.id.as_str(),
+        "description": tool.description,
+        "parameters": json_schema(&tool.input_schema)?,
+    }))
+}
+
+fn openai_chat_tool(tool: &ModelToolDescriptor) -> Result<Value, ProviderError> {
+    Ok(serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": tool.id.as_str(),
+            "description": tool.description,
+            "parameters": json_schema(&tool.input_schema)?,
+        },
+    }))
+}
+
+fn anthropic_tool(tool: &ModelToolDescriptor) -> Result<Value, ProviderError> {
+    Ok(serde_json::json!({
+        "name": tool.id.as_str(),
+        "description": tool.description,
+        "input_schema": json_schema(&tool.input_schema)?,
+    }))
+}
+
+fn encode_tools(
+    tools: &[ModelToolDescriptor],
+    encode: fn(&ModelToolDescriptor) -> Result<Value, ProviderError>,
+) -> Result<Option<Value>, ProviderError> {
+    if tools.is_empty() {
+        return Ok(None);
+    }
+    tools
+        .iter()
+        .map(encode)
+        .collect::<Result<Vec<_>, _>>()
+        .map(|tools| Some(Value::Array(tools)))
+}
+
 fn openai_responses_request(
     endpoint: &Endpoint,
     request: &ModelInferenceRequest,
 ) -> Result<ProviderRequest, ProviderError> {
-    let (mut body, text) = request_object(request, &["model", "input"])?;
+    let (mut body, text) = request_object(request, &["model", "input", "tools"])?;
     body.insert(
         "model".to_owned(),
         Value::String(request.model.as_str().to_owned()),
     );
     body.insert("input".to_owned(), Value::String(text));
+    if let Some(tools) = encode_tools(&request.tools, openai_tool)? {
+        body.insert("tools".to_owned(), tools);
+    }
     base_request(endpoint, "responses", Value::Object(body), json_headers())
 }
 
@@ -123,7 +225,7 @@ fn openai_chat_request(
     endpoint: &Endpoint,
     request: &ModelInferenceRequest,
 ) -> Result<ProviderRequest, ProviderError> {
-    let (mut body, text) = request_object(request, &["model", "messages"])?;
+    let (mut body, text) = request_object(request, &["model", "messages", "tools"])?;
     body.insert(
         "model".to_owned(),
         Value::String(request.model.as_str().to_owned()),
@@ -132,6 +234,9 @@ fn openai_chat_request(
         "messages".to_owned(),
         serde_json::json!([{"role":"user","content":text}]),
     );
+    if let Some(tools) = encode_tools(&request.tools, openai_chat_tool)? {
+        body.insert("tools".to_owned(), tools);
+    }
     base_request(
         endpoint,
         "chat/completions",
@@ -144,7 +249,7 @@ fn anthropic_request(
     endpoint: &Endpoint,
     request: &ModelInferenceRequest,
 ) -> Result<ProviderRequest, ProviderError> {
-    let (mut body, text) = request_object(request, &["model", "messages"])?;
+    let (mut body, text) = request_object(request, &["model", "messages", "tools"])?;
     body.insert(
         "model".to_owned(),
         Value::String(request.model.as_str().to_owned()),
@@ -153,6 +258,9 @@ fn anthropic_request(
         "messages".to_owned(),
         serde_json::json!([{"role":"user","content":text}]),
     );
+    if let Some(tools) = encode_tools(&request.tools, anthropic_tool)? {
+        body.insert("tools".to_owned(), tools);
+    }
     body.entry("max_tokens".to_owned())
         .or_insert_with(|| Value::from(4096_u64));
     let mut headers = json_headers();
@@ -166,7 +274,28 @@ fn parse_json(response: &ProviderResponse) -> Result<Value, ProviderError> {
     })
 }
 
-fn response_with_text(value: &Value, text: String) -> ModelInferenceResponse {
+fn parse_callable_id(name: &str) -> Result<CallableId, ProviderError> {
+    CallableId::parse(name).map_err(|error| ProviderError::Protocol {
+        message: format!("provider returned invalid tool name {name:?}: {error}"),
+    })
+}
+
+fn parse_arguments(value: &Value, provider: &str) -> Result<phenix_core::PhenixValue, ProviderError> {
+    let value = if let Some(arguments) = value.as_str() {
+        serde_json::from_str(arguments).map_err(|error| ProviderError::Protocol {
+            message: format!("{provider} returned invalid tool arguments JSON: {error}"),
+        })?
+    } else {
+        value.clone()
+    };
+    Ok(value.into())
+}
+
+fn response_with_content(
+    value: &Value,
+    text: String,
+    tool_calls: Vec<ModelToolCall>,
+) -> ModelInferenceResponse {
     let mut provider_metadata = BTreeMap::new();
     if let Some(id) = value.get("id").cloned() {
         provider_metadata.insert("id".to_owned(), id.into());
@@ -177,7 +306,7 @@ fn response_with_text(value: &Value, text: String) -> ModelInferenceResponse {
     ModelInferenceResponse {
         output: text.into_bytes().into(),
         provider_metadata,
-        tool_calls: Vec::new(),
+        tool_calls,
     }
 }
 
@@ -185,41 +314,76 @@ fn openai_responses_response(
     response: &ProviderResponse,
 ) -> Result<ModelInferenceResponse, ProviderError> {
     let value = parse_json(response)?;
-    if let Some(text) = value.get("output_text").and_then(Value::as_str) {
-        return Ok(response_with_text(&value, text.to_owned()));
-    }
-    let text = value
+    let output = value
         .get("output")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.get("content").and_then(Value::as_array))
-        .flatten()
-        .filter_map(|part| {
-            part.get("text")
-                .and_then(Value::as_str)
-                .or_else(|| part.get("output_text").and_then(Value::as_str))
-        })
-        .collect::<Vec<_>>()
-        .join("");
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut text = value
+        .get("output_text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     if text.is_empty() {
+        text = output
+            .iter()
+            .filter_map(|item| item.get("content").and_then(Value::as_array))
+            .flatten()
+            .filter_map(|part| {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| part.get("output_text").and_then(Value::as_str))
+            })
+            .collect::<Vec<_>>()
+            .join("");
+    }
+    let tool_calls = output
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
+        .map(|item| {
+            let call_id = item
+                .get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "OpenAI responses tool call contained no call id".to_owned(),
+                })?;
+            let name = item
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "OpenAI responses tool call contained no function name".to_owned(),
+                })?;
+            let arguments = item.get("arguments").ok_or_else(|| ProviderError::Protocol {
+                message: "OpenAI responses tool call contained no arguments".to_owned(),
+            })?;
+            Ok(ModelToolCall {
+                call_id: call_id.to_owned(),
+                callable_id: parse_callable_id(name)?,
+                input: parse_arguments(arguments, "OpenAI responses")?,
+            })
+        })
+        .collect::<Result<Vec<_>, ProviderError>>()?;
+    if text.is_empty() && tool_calls.is_empty() {
         return Err(ProviderError::Protocol {
-            message: "OpenAI responses payload contained no output text".to_owned(),
+            message: "OpenAI responses payload contained neither output text nor tool calls"
+                .to_owned(),
         });
     }
-    Ok(response_with_text(&value, text))
+    Ok(response_with_content(&value, text, tool_calls))
 }
 
 fn openai_chat_response(
     response: &ProviderResponse,
 ) -> Result<ModelInferenceResponse, ProviderError> {
     let value = parse_json(response)?;
-    let content =
-        value
-            .pointer("/choices/0/message/content")
-            .ok_or_else(|| ProviderError::Protocol {
-                message: "OpenAI chat payload contained no first choice content".to_owned(),
-            })?;
+    let message = value
+        .pointer("/choices/0/message")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ProviderError::Protocol {
+            message: "OpenAI chat payload contained no first choice message".to_owned(),
+        })?;
+    let content = message.get("content").unwrap_or(&Value::Null);
     let text = if let Some(text) = content.as_str() {
         text.to_owned()
     } else {
@@ -231,32 +395,102 @@ fn openai_chat_response(
             .collect::<Vec<_>>()
             .join("")
     };
-    if text.is_empty() {
+    let tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .map(|call| {
+            let call_id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "OpenAI chat tool call contained no call id".to_owned(),
+                })?;
+            let function = call
+                .get("function")
+                .and_then(Value::as_object)
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "OpenAI chat tool call contained no function".to_owned(),
+                })?;
+            let name = function
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "OpenAI chat tool call contained no function name".to_owned(),
+                })?;
+            let arguments = function
+                .get("arguments")
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "OpenAI chat tool call contained no arguments".to_owned(),
+                })?;
+            Ok(ModelToolCall {
+                call_id: call_id.to_owned(),
+                callable_id: parse_callable_id(name)?,
+                input: parse_arguments(arguments, "OpenAI chat")?,
+            })
+        })
+        .collect::<Result<Vec<_>, ProviderError>>()?;
+    if text.is_empty() && tool_calls.is_empty() {
         return Err(ProviderError::Protocol {
-            message: "OpenAI chat payload contained empty content".to_owned(),
+            message: "OpenAI chat payload contained neither content nor tool calls".to_owned(),
         });
     }
-    Ok(response_with_text(&value, text))
+    Ok(response_with_content(&value, text, tool_calls))
 }
 
 fn anthropic_response(
     response: &ProviderResponse,
 ) -> Result<ModelInferenceResponse, ProviderError> {
     let value = parse_json(response)?;
-    let text = value
+    let content = value
         .get("content")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let text = content
+        .iter()
+        .filter_map(|part| {
+            (part.get("type").and_then(Value::as_str) == Some("text"))
+                .then(|| part.get("text").and_then(Value::as_str))
+                .flatten()
+        })
         .collect::<Vec<_>>()
         .join("");
-    if text.is_empty() {
+    let tool_calls = content
+        .iter()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .map(|part| {
+            let call_id = part
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "Anthropic tool use contained no call id".to_owned(),
+                })?;
+            let name = part
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ProviderError::Protocol {
+                    message: "Anthropic tool use contained no tool name".to_owned(),
+                })?;
+            let input = part.get("input").ok_or_else(|| ProviderError::Protocol {
+                message: "Anthropic tool use contained no input".to_owned(),
+            })?;
+            Ok(ModelToolCall {
+                call_id: call_id.to_owned(),
+                callable_id: parse_callable_id(name)?,
+                input: parse_arguments(input, "Anthropic")?,
+            })
+        })
+        .collect::<Result<Vec<_>, ProviderError>>()?;
+    if text.is_empty() && tool_calls.is_empty() {
         return Err(ProviderError::Protocol {
-            message: "Anthropic messages payload contained no text content".to_owned(),
+            message: "Anthropic messages payload contained neither text content nor tool use"
+                .to_owned(),
         });
     }
-    Ok(response_with_text(&value, text))
+    Ok(response_with_content(&value, text, tool_calls))
 }
 
 pub fn normalize_http_error(response: &ProviderResponse) -> ProviderError {
@@ -315,6 +549,7 @@ fn error_message(body: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::{DurationMs, ProviderResponse};
+    use phenix_core::{Key, PhenixValue};
     use std::collections::BTreeMap;
 
     fn request() -> ModelInferenceRequest {
@@ -324,6 +559,24 @@ mod tests {
             options: BTreeMap::new(),
             tools: Vec::new(),
         }
+    }
+
+    fn tool() -> ModelToolDescriptor {
+        ModelToolDescriptor {
+            id: CallableId::parse("fixture.echo").unwrap(),
+            description: "Echo a value".to_owned(),
+            input_schema: PhenixSchema::Table(BTreeMap::from([(
+                Key::parse("value").unwrap(),
+                PhenixSchema::String,
+            )])),
+            output_schema: PhenixSchema::String,
+        }
+    }
+
+    fn request_with_tool() -> ModelInferenceRequest {
+        let mut request = request();
+        request.tools.push(tool());
+        request
     }
 
     fn response(status: u16, headers: &[(&str, &str)], body: Value) -> ProviderResponse {
@@ -362,8 +615,107 @@ mod tests {
         assert_eq!(decoded.output.as_ref(), b"world");
         assert_eq!(
             decoded.provider_metadata["id"],
-            phenix_core::PhenixValue::String("response-1".into())
+            PhenixValue::String("response-1".into())
         );
+    }
+
+    #[test]
+    fn provider_protocols_encode_the_same_model_tool_surface() {
+        let endpoint = Endpoint::parse("https://example.com/v1").unwrap();
+
+        let responses = Protocol::OpenAiResponses
+            .encode(&endpoint, &request_with_tool())
+            .unwrap();
+        let responses: Value = serde_json::from_slice(&responses.body).unwrap();
+        assert_eq!(responses["tools"][0]["type"], "function");
+        assert_eq!(responses["tools"][0]["name"], "fixture.echo");
+        assert_eq!(
+            responses["tools"][0]["parameters"]["properties"]["value"]["type"],
+            "string"
+        );
+
+        let chat = Protocol::OpenAiChatCompletions
+            .encode(&endpoint, &request_with_tool())
+            .unwrap();
+        let chat: Value = serde_json::from_slice(&chat.body).unwrap();
+        assert_eq!(chat["tools"][0]["type"], "function");
+        assert_eq!(chat["tools"][0]["function"]["name"], "fixture.echo");
+
+        let anthropic = Protocol::AnthropicMessages
+            .encode(&endpoint, &request_with_tool())
+            .unwrap();
+        let anthropic: Value = serde_json::from_slice(&anthropic.body).unwrap();
+        assert_eq!(anthropic["tools"][0]["name"], "fixture.echo");
+        assert_eq!(anthropic["tools"][0]["input_schema"]["type"], "object");
+    }
+
+    #[test]
+    fn provider_protocols_decode_structured_tool_calls() {
+        let responses = Protocol::OpenAiResponses
+            .decode(&response(
+                200,
+                &[],
+                serde_json::json!({
+                    "output":[{
+                        "type":"function_call",
+                        "call_id":"call-responses",
+                        "name":"fixture.echo",
+                        "arguments":"{\"value\":\"responses\"}"
+                    }]
+                }),
+            ))
+            .unwrap();
+        assert!(responses.output.is_empty());
+        assert_eq!(responses.tool_calls[0].call_id, "call-responses");
+        assert_eq!(responses.tool_calls[0].callable_id.as_str(), "fixture.echo");
+        assert_eq!(
+            responses.tool_calls[0].input,
+            PhenixValue::Map(BTreeMap::from([(
+                "value".to_owned(),
+                PhenixValue::String("responses".to_owned())
+            )]))
+        );
+
+        let chat = Protocol::OpenAiChatCompletions
+            .decode(&response(
+                200,
+                &[],
+                serde_json::json!({
+                    "choices":[{"message":{
+                        "content":null,
+                        "tool_calls":[{
+                            "id":"call-chat",
+                            "type":"function",
+                            "function":{
+                                "name":"fixture.echo",
+                                "arguments":"{\"value\":\"chat\"}"
+                            }
+                        }]
+                    }}]
+                }),
+            ))
+            .unwrap();
+        assert!(chat.output.is_empty());
+        assert_eq!(chat.tool_calls[0].call_id, "call-chat");
+        assert_eq!(chat.tool_calls[0].callable_id.as_str(), "fixture.echo");
+
+        let anthropic = Protocol::AnthropicMessages
+            .decode(&response(
+                200,
+                &[],
+                serde_json::json!({
+                    "content":[{
+                        "type":"tool_use",
+                        "id":"call-anthropic",
+                        "name":"fixture.echo",
+                        "input":{"value":"anthropic"}
+                    }]
+                }),
+            ))
+            .unwrap();
+        assert!(anthropic.output.is_empty());
+        assert_eq!(anthropic.tool_calls[0].call_id, "call-anthropic");
+        assert_eq!(anthropic.tool_calls[0].callable_id.as_str(), "fixture.echo");
     }
 
     #[test]
@@ -372,7 +724,7 @@ mod tests {
         let mut request = request();
         request.options.insert(
             "binary".into(),
-            phenix_core::PhenixValue::Bytes(vec![1, 2, 3]),
+            PhenixValue::Bytes(vec![1, 2, 3]),
         );
 
         let error = Protocol::OpenAiResponses
