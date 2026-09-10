@@ -67,6 +67,20 @@ pub struct ClientCapabilityCallbacks {
     sender: mpsc::Sender<ClientCapabilityInvocation>,
 }
 
+/// The authenticated identity represented by one ACP callback queue.
+#[derive(Clone)]
+pub struct ClientCapabilityIdentity {
+    owner: ClientConnectionId,
+    generation: CapabilityGenerationId,
+}
+
+impl ClientCapabilityIdentity {
+    #[must_use]
+    pub fn new(owner: ClientConnectionId, generation: CapabilityGenerationId) -> Self {
+        Self { owner, generation }
+    }
+}
+
 impl ClientCapabilityCallbacks {
     #[must_use]
     pub fn bounded(capacity: usize) -> (Self, mpsc::Receiver<ClientCapabilityInvocation>) {
@@ -164,8 +178,7 @@ impl SdkApplicationService {
         runtime: RuntimeId,
         generation: CapabilityGenerationId,
         client_callbacks: ClientCapabilityCallbacks,
-        client_owner: ClientConnectionId,
-        client_generation: CapabilityGenerationId,
+        client: ClientCapabilityIdentity,
     ) -> Result<Self, phenix_core::SdkResolutionError> {
         let sdk = sdk.value_with_observables(store, &capabilities, &runtime, generation)?;
         Ok(Self {
@@ -175,8 +188,8 @@ impl SdkApplicationService {
             },
             capabilities,
             client_callbacks,
-            client_owner,
-            client_generation,
+            client_owner: client.owner,
+            client_generation: client.generation,
             admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
         })
     }
@@ -1012,8 +1025,10 @@ mod tests {
             runtime.clone(),
             generation.clone(),
             client_callbacks,
-            ClientConnectionId::parse("fixture-client").unwrap(),
-            CapabilityGenerationId::parse("fixture-generation").unwrap(),
+            ClientCapabilityIdentity::new(
+                ClientConnectionId::parse("fixture-client").unwrap(),
+                CapabilityGenerationId::parse("fixture-generation").unwrap(),
+            ),
         )
         .unwrap();
         let (transport, receiver) = ChannelTransport::new(2);
