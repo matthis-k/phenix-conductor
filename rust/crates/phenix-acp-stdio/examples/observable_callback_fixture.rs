@@ -2,10 +2,6 @@ use phenix_acp_stdio::{
     serve_sdk_application, serve_stdio_with_events_and_callbacks, ChannelTransport,
     ClientCapabilityCallbacks, ClientCapabilityIdentity, SdkApplicationService,
 };
-use phenix_application_interface::{
-    AddClientTool, GetSdk, InvokeCallable, InvokeCapability, ListCallables, Operation,
-    RemoveClientTool,
-};
 use phenix_core::{
     CapabilityGenerationId, ClientConnectionId, ContractId, ObservableRegistration,
     ObservableStore, PhenixValue, PluginId, PluginManifest, ResolvedSdkContributions, RuntimeId,
@@ -71,14 +67,18 @@ async fn main() {
     serve_stdio_with_events_and_callbacks(
         transport,
         [
-            ContractId::parse(GetSdk::ID).expect("SDK get operation id is valid"),
-            ContractId::parse(InvokeCapability::ID)
-                .expect("capability invoke operation id is valid"),
-            ContractId::parse(AddClientTool::ID).expect("tool add operation id is valid"),
-            ContractId::parse(RemoveClientTool::ID).expect("tool remove operation id is valid"),
-            ContractId::parse(ListCallables::ID).expect("tool list operation id is valid"),
-            ContractId::parse(InvokeCallable::ID).expect("tool invoke operation id is valid"),
-        ],
+            "discovery",
+            "sessions",
+            "prompt",
+            "sdk",
+            "capabilities",
+            "callables",
+            "client-tools",
+        ]
+        .map(|name| {
+            ContractId::parse(format!("phenix.application.capability.{name}@1"))
+                .expect("fixture capability id is valid")
+        }),
         event_receiver,
         callback_receiver,
     )
