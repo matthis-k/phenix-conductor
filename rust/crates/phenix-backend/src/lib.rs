@@ -2,7 +2,7 @@
 
 use phenix_domain::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId,
-    ClientToolAdmissions, ExecutionId, ModelTarget, SessionId,
+    ExecutionId, ModelTarget, SessionId,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -87,20 +87,22 @@ impl PreparedToolSurface {
 }
 
 impl ToolProvision {
-    /// Add the session's ephemeral client-provided tools to the ordinary backend
-    /// tool provision. Duplicate ids are rejected before a backend observes an
-    /// ambiguous tool surface.
-    pub fn with_client_admissions(
+    /// Merge ordinary callable descriptors before backend presentation is
+    /// selected. Descriptor origin is deliberately absent from this boundary.
+    pub fn merge_callables(
         mut self,
-        admissions: &ClientToolAdmissions,
-        session_id: &SessionId,
+        callables: impl IntoIterator<Item = CallableDescriptor>,
     ) -> Result<Self, BackendError> {
-        let mut ids = self
-            .callables
-            .iter()
-            .map(|callable| callable.id.clone())
-            .collect::<BTreeSet<_>>();
-        for callable in admissions.descriptors(session_id) {
+        let mut ids = BTreeSet::new();
+        for callable in &self.callables {
+            if !ids.insert(callable.id.clone()) {
+                return Err(BackendError::Protocol(format!(
+                    "duplicate provisioned callable {}",
+                    callable.id
+                )));
+            }
+        }
+        for callable in callables {
             if !ids.insert(callable.id.clone()) {
                 return Err(BackendError::Protocol(format!(
                     "duplicate provisioned callable {}",
@@ -231,7 +233,7 @@ pub trait Backend: Send {
         ))
     }
 
-    /// Dispose any persistent native conversation associated with a stable
+    /// Dispose any persistent native conversation associated with one stable
     /// Phenix session. This operation is deliberately idempotent so the
     /// conductor can fan a terminal session close out to every registered
     /// backend without tracking which fixed targets the session previously
@@ -264,7 +266,10 @@ impl Error for BackendError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use phenix_domain::{BackendId, InferenceOptions, ModelId, ProviderId};
+    use phenix_domain::{
+        BackendId, CallableKind, CallablePolicy, CapabilitySet, InferenceOptions, ModelId,
+        PhenixSchema, ProviderId,
+    };
 
     fn capabilities(
         presentations: impl IntoIterator<Item = ToolPresentation>,
@@ -282,6 +287,18 @@ mod tests {
             provider: ProviderId::parse("mock-provider").unwrap(),
             model: ModelId::parse("mock-model").unwrap(),
             inference: InferenceOptions::default(),
+        }
+    }
+
+    fn tool(id: &str) -> CallableDescriptor {
+        CallableDescriptor {
+            id: CallableId::parse(id).unwrap(),
+            kind: CallableKind::Tool,
+            description: format!("{id} fixture"),
+            input_schema: PhenixSchema::String,
+            output_schema: PhenixSchema::String,
+            capabilities: CapabilitySet::default(),
+            policy: CallablePolicy::default(),
         }
     }
 
@@ -312,6 +329,40 @@ mod tests {
         assert_eq!(surface.presentation(), None);
         assert!(surface.is_empty());
         assert!(surface.callables().is_empty());
+    }
+
+    #[test]
+    fn ordinary_callable_sources_merge_before_backend_presentation() {
+        let runtime_tool = tool("fixture.runtime");
+        let client_tool = tool("fixture.client");
+        let provision = ToolProvision {
+            callables: vec![runtime_tool.clone()],
+        }
+        .merge_callables([client_tool.clone()])
+        .unwrap();
+        let surface = provision
+            .prepare(&capabilities([ToolPresentation::Native]))
+            .unwrap();
+
+        assert_eq!(surface.presentation(), Some(ToolPresentation::Native));
+        assert_eq!(surface.callables(), &[client_tool, runtime_tool]);
+    }
+
+    #[test]
+    fn ordinary_callable_merge_rejects_duplicate_ids_before_backend_observes_them() {
+        let duplicate = tool("fixture.duplicate");
+        let error = ToolProvision {
+            callables: vec![duplicate.clone()],
+        }
+        .merge_callables([duplicate])
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            BackendError::Protocol(
+                "duplicate provisioned callable fixture.duplicate".to_owned()
+            )
+        );
     }
 
     #[test]
