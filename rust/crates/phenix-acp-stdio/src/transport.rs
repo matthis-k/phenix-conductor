@@ -352,7 +352,11 @@ impl SdkApplicationService {
             input: Box::new(input.clone()),
             output: Box::new(output.clone()),
         };
-        self.admit_client_callable(&invoke, callable_schema)?;
+        if description.trim().is_empty() {
+            return Err(ApplicationError::InvalidInput {
+                message: "client tool description must not be empty".to_owned(),
+            });
+        }
         let tool = ClientToolDefinition::new(
             CallableDescriptor {
                 id,
@@ -370,12 +374,18 @@ impl SdkApplicationService {
         .map_err(|error| ApplicationError::InvalidInput {
             message: error.to_string(),
         })?;
-        let admission = self
-            .admissions
-            .lock()
-            .map_err(|_| ApplicationError::Failed {
-                message: "client tool admission registry lock is poisoned".to_owned(),
-            })?
+        let mut admissions = self.admissions.lock().map_err(|_| ApplicationError::Failed {
+            message: "client tool admission registry lock is poisoned".to_owned(),
+        })?;
+        if admissions.admitted(&session_id, &tool.descriptor.id).is_some() {
+            return Err(ApplicationError::Conflict {
+                message: format!("session {session_id} already admits callable {}", tool.descriptor.id),
+            });
+        }
+        // Keep admission and capability registration atomic with explicit removal.
+        // Registry registration never calls provider code.
+        self.admit_client_callable(&tool.invoke, callable_schema)?;
+        let admission = admissions
             .admit(session_id, tool)
             .map_err(|error| ApplicationError::Conflict {
                 message: error.to_string(),
@@ -400,22 +410,15 @@ impl SdkApplicationService {
                 message: error.to_string(),
             }
         })?;
-        let (admission, callable_is_still_admitted) = {
-            let mut admissions = self
-                .admissions
-                .lock()
-                .map_err(|_| ApplicationError::Failed {
-                    message: "client tool admission registry lock is poisoned".to_owned(),
-                })?;
-            let admission = admissions
-                .remove_from_session(&session_id, &admission_id)
-                .map_err(|error| ApplicationError::StaleReference {
-                    value: error.to_string(),
-                })?;
-            let callable_is_still_admitted = admissions.contains_invoke(&admission.tool.invoke);
-            (admission, callable_is_still_admitted)
-        };
-        if !callable_is_still_admitted {
+        let mut admissions = self.admissions.lock().map_err(|_| ApplicationError::Failed {
+            message: "client tool admission registry lock is poisoned".to_owned(),
+        })?;
+        let admission = admissions
+            .remove_from_session(&session_id, &admission_id)
+            .map_err(|error| ApplicationError::StaleReference {
+                value: error.to_string(),
+            })?;
+        if !admissions.contains_invoke(&admission.tool.invoke) {
             self.capabilities.unregister(&admission.tool.invoke);
         }
         Ok(())
@@ -627,6 +630,7 @@ pub async fn serve_stdio_with_events_and_callbacks(
     let cancel = Arc::clone(&adapter);
     let set_config = Arc::clone(&adapter);
     let event_adapter = Arc::clone(&adapter);
+    let extension_adapter = Arc::clone(&adapter);
     let callback_adapter = Arc::clone(&adapter);
 
     Agent
@@ -704,6 +708,21 @@ pub async fn serve_stdio_with_events_and_callbacks(
                     .set_session_config_option(request)
                     .await
                     .map_err(application_error_to_acp)?;
+                responder.respond(response)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: ClientRequest, responder, _cx| {
+                let ClientRequest::ExtMethodRequest(request) = request else {
+                    return Err(Error::method_not_found());
+                };
+                let response = extension_adapter
+                    .extension_request(request)
+                    .await
+                    .map_err(application_error_to_acp)?;
+                let response = serde_json::to_value(response)
+                    .map_err(|error| Error::internal_error().data(error.to_string()))?;
                 responder.respond(response)
             },
             agent_client_protocol::on_receive_request!(),
@@ -1054,6 +1073,31 @@ mod tests {
         let admission = ApplicationClientToolAdmission::from_value(&value).unwrap();
         assert_eq!(admission.callable_id.as_str(), "fixture.client.echo");
         assert_eq!(service.client_tool_descriptors(&session).len(), 1);
+        let rejected = CallableRef::new(
+            callable.contract().clone(),
+            callable.owner().clone(),
+            callable.generation().clone(),
+            ReferenceId::parse("rejected-handler").unwrap(),
+        );
+        let mut duplicate = input.clone();
+        duplicate.tool.invoke = PhenixValue::Callable(rejected.clone());
+        assert!(matches!(
+            service.admit_client_tool(duplicate.clone()),
+            Err(ApplicationError::Conflict { .. })
+        ));
+        assert!(matches!(
+            service.capabilities.schema(&rejected),
+            Err(CapabilityError::UnknownReference(_))
+        ));
+        duplicate.tool.description.clear();
+        assert!(matches!(
+            service.admit_client_tool(duplicate),
+            Err(ApplicationError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            service.capabilities.schema(&rejected),
+            Err(CapabilityError::UnknownReference(_))
+        ));
         let listed = service
             .invoke(
                 &ContractId::parse(ListCallables::ID).unwrap(),

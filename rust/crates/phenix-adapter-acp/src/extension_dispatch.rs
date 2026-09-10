@@ -1,10 +1,10 @@
 use crate::{extension_name, wire, ApplicationAdapter};
 use phenix_application_interface::types::ApplicationError;
 use phenix_application_interface::{
-    application_descriptor, ActivateSkill, ApplicationTransport, Authenticate,
+    application_descriptor, ActivateSkill, AddClientTool, ApplicationTransport, Authenticate,
     DiscoverAuthentication, GetDiagnostics, GetExecutionTree, GetLineage, GetObservable,
     GetProvenance, GetSdk, InvokeCallable, InvokeCapability, ListCallables, ListObservables,
-    ListSkills, Operation, RenameSession, SubscribeObservable, UnsubscribeObservable,
+    ListSkills, Operation, RemoveClientTool, RenameSession, SubscribeObservable, UnsubscribeObservable,
 };
 use phenix_core::{ContractId, PhenixValue, ValueCodec};
 use std::sync::Arc;
@@ -34,6 +34,8 @@ impl<T: ApplicationTransport> ApplicationAdapter<T> {
             ActivateSkill,
             ListCallables,
             InvokeCallable,
+            AddClientTool,
+            RemoveClientTool,
             GetSdk,
             InvokeCapability,
             GetExecutionTree,
@@ -253,4 +255,52 @@ mod tests {
         assert!(matches!(error, ApplicationError::InvalidInput { .. }));
         assert!(calls.borrow().is_empty());
     }
+    #[tokio::test]
+    async fn client_tool_extensions_dispatch_add_and_remove() {
+        use phenix_application_interface::types::{
+            Acknowledged, ClientToolAddInput, ClientToolAdmission, ClientToolDefinition,
+            ClientToolRemoveInput,
+        };
+        use phenix_core::{
+            CallableId, CallableRef, CapabilityGenerationId, CapabilityOwnerId,
+            ClientConnectionId, ReferenceId, Type,
+        };
+        let input = ClientToolAddInput {
+            session_id: SessionId::parse("session-1").unwrap(),
+            tool: ClientToolDefinition {
+                id: CallableId::parse("fixture.echo").unwrap(),
+                description: "Echo a value".to_owned(),
+                input: Type::String,
+                output: Type::String,
+                capabilities: Vec::new(),
+                requires_permission: false,
+                invoke: PhenixValue::Callable(CallableRef::new(
+                    contract("fixture.echo@1"),
+                    CapabilityOwnerId::Client(ClientConnectionId::parse("client-1").unwrap()),
+                    CapabilityGenerationId::parse("generation-1").unwrap(),
+                    ReferenceId::parse("handler-1").unwrap(),
+                )),
+            },
+        };
+        let output = ClientToolAdmission {
+            admission_id: "admission-1".to_owned(),
+            callable_id: input.tool.id.clone(),
+        };
+        let extra = [InvokeCapability::CAPABILITY, AddClientTool::CAPABILITY];
+        let (add, calls) = adapter(output.to_value(), &extra);
+        add.extension_request(request("_phenix/client-tool-add@1", input.to_value()))
+            .await
+            .unwrap();
+        assert_eq!(calls.borrow()[0], (contract(AddClientTool::ID), input.to_value()));
+        let removal = ClientToolRemoveInput {
+            session_id: input.session_id,
+            admission_id: output.admission_id,
+        };
+        let (remove, calls) = adapter(Acknowledged {}.to_value(), &extra);
+        remove.extension_request(request("_phenix/client-tool-remove@1", removal.to_value()))
+            .await
+            .unwrap();
+        assert_eq!(calls.borrow()[0], (contract(RemoveClientTool::ID), removal.to_value()));
+    }
+
 }
