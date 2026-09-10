@@ -37,7 +37,10 @@ impl PluginInstance for ModelProvider {
         let ModelCommand::Invoke { tools, .. } = context
             .kernel
             .decode_projected::<ModelCommand>(&ModelRoutingInterface::interface_id(), input)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?
+        else {
+            return Err("fixture model provider received a non-inference command".into());
+        };
         context
             .kernel
             .encode_value(&ModelResponse::Inference {
