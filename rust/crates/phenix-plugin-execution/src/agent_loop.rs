@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 pub const AGENT_LOOP_SERVICE: &str = "phenix.agent-loop@1";
 pub const DEFAULT_MAX_PARALLEL_TOOL_CALLS: u32 = 10;
-pub(crate) const MODEL_ROUTING_SERVICE: &str = "phenix.models.routing@1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AgentLoopPolicy {

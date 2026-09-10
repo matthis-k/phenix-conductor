@@ -1,6 +1,6 @@
 use crate::{
     agent_loop_service, execution_component_id, execution_component_manifest, execution_factory,
-    execution_manifest, AgentLoopCommand, AgentLoopResponse, AgentLoopUsage, MODEL_ROUTING_SERVICE,
+    execution_manifest, AgentLoopCommand, AgentLoopResponse, AgentLoopUsage,
 };
 use phenix_core::{
     Authority, Bytes, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, Kernel,
@@ -9,7 +9,9 @@ use phenix_core::{
     PluginManifest, Project, ResolvedHarness, ResolvedHarnessActivation, RoutingProfileId,
     ServiceContribution, ServiceId, ServiceRole,
 };
-use phenix_sdk::{ModelCommand, ModelResponse, ModelRoutingInterface, ModelTarget};
+use phenix_sdk::{
+    ModelCommand, ModelResponse, ModelRoutingInterface, ModelTarget, MODEL_ROUTING_SERVICE,
+};
 use std::collections::BTreeMap;
 
 const MODEL_PROVIDER: &str = "fixture.agent-loop-model";
