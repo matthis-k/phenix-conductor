@@ -21,13 +21,14 @@ use phenix_application_interface::{
 };
 use phenix_core::{
     CallableRef, CapabilityError, CapabilityGenerationId,
-    CapabilityInvokeInput as CoreCapabilityInvokeInput, CapabilityOwnerId, ContractId,
+    CapabilityInvokeInput as CoreCapabilityInvokeInput, CapabilityOwnerId, ClientConnectionId,
+    ContractId,
     ObservableStore, PhenixValue, ResolvedSdkContributions, RuntimeId, SharedCapabilityRegistry,
     Type, ValueCodec,
 };
 use phenix_domain::{
     CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet, ClientToolAdmissionId,
-    ClientToolAdmissions, ClientToolDefinition,
+    ClientToolAdmissions, ClientToolDefinition, SessionId,
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -151,6 +152,8 @@ pub struct SdkApplicationService {
     sdk: ApplicationSdkValue,
     capabilities: SharedCapabilityRegistry,
     client_callbacks: ClientCapabilityCallbacks,
+    client_owner: ClientConnectionId,
+    client_generation: CapabilityGenerationId,
     admissions: Arc<Mutex<ClientToolAdmissions>>,
 }
 
@@ -162,6 +165,8 @@ impl SdkApplicationService {
         runtime: RuntimeId,
         generation: CapabilityGenerationId,
         client_callbacks: ClientCapabilityCallbacks,
+        client_owner: ClientConnectionId,
+        client_generation: CapabilityGenerationId,
     ) -> Result<Self, phenix_core::SdkResolutionError> {
         let sdk = sdk.value_with_observables(store, &capabilities, &runtime, generation)?;
         Ok(Self {
@@ -171,6 +176,8 @@ impl SdkApplicationService {
             },
             capabilities,
             client_callbacks,
+            client_owner,
+            client_generation,
             admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
         })
     }
@@ -178,6 +185,23 @@ impl SdkApplicationService {
     #[must_use]
     pub fn capabilities(&self) -> &SharedCapabilityRegistry {
         &self.capabilities
+    }
+
+    #[must_use]
+    pub fn client_tool_descriptors(&self, session_id: &SessionId) -> Vec<CallableDescriptor> {
+        self.admissions
+            .lock()
+            .map(|admissions| admissions.descriptors(session_id))
+            .unwrap_or_default()
+    }
+
+    /// Retire this ACP connection's ephemeral callables and session tool admissions.
+    pub fn retire_client(&self) {
+        let owner = CapabilityOwnerId::Client(self.client_owner.clone());
+        self.capabilities.retire(owner.clone(), self.client_generation.clone());
+        if let Ok(mut admissions) = self.admissions.lock() {
+            admissions.retire(&owner, &self.client_generation);
+        }
     }
 
     pub fn invoke(
@@ -269,9 +293,9 @@ impl SdkApplicationService {
                 message: "client tool invoke must be a callable capability".to_owned(),
             });
         };
-        if !matches!(invoke.owner(), CapabilityOwnerId::Client(_)) {
+        if !self.is_current_client_callable(&invoke) {
             return Err(ApplicationError::SchemaMismatch {
-                message: "client tool invoke must be owned by the connected client".to_owned(),
+                message: "client tool invoke must belong to the connected client generation".to_owned(),
             });
         }
         let callable_schema = Type::Callable {
@@ -387,9 +411,15 @@ impl SdkApplicationService {
         callable: &CallableRef,
         schema: Type,
     ) -> Result<(), ApplicationError> {
+        if !self.is_current_client_callable(callable) {
+            return Err(ApplicationError::SchemaMismatch {
+                message: "client callable must belong to the connected client generation".to_owned(),
+            });
+        }
         let callbacks = self.client_callbacks.clone();
         let reference = callable.clone();
         let registry = self.capabilities.clone();
+        let admissions = Arc::clone(&self.admissions);
         let owner = callable.owner().clone();
         let generation = callable.generation().clone();
         match self
@@ -398,6 +428,9 @@ impl SdkApplicationService {
                 let result = callbacks.invoke(reference.clone(), input);
                 if matches!(result, Err(CapabilityError::Disconnected)) {
                     registry.retire(owner.clone(), generation.clone());
+                    if let Ok(mut admissions) = admissions.lock() {
+                        admissions.retire(&owner, &generation);
+                    }
                 }
                 result
             }) {
@@ -417,6 +450,11 @@ impl SdkApplicationService {
             }
             Err(error) => Err(error.into()),
         }
+    }
+
+    fn is_current_client_callable(&self, callable: &CallableRef) -> bool {
+        callable.owner() == &CapabilityOwnerId::Client(self.client_owner.clone())
+            && callable.generation() == &self.client_generation
     }
 }
 
@@ -830,6 +868,8 @@ mod tests {
             },
             capabilities: capabilities.clone(),
             client_callbacks: callbacks,
+            client_owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            client_generation: CapabilityGenerationId::parse("fixture-generation").unwrap(),
             admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
         };
         let callable = client_callable();
@@ -869,6 +909,8 @@ mod tests {
             },
             capabilities,
             client_callbacks: callbacks,
+            client_owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            client_generation: CapabilityGenerationId::parse("fixture-generation").unwrap(),
             admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
         };
         let session = phenix_core::SessionId::parse("session-a").unwrap();
@@ -963,6 +1005,8 @@ mod tests {
             runtime.clone(),
             generation.clone(),
             client_callbacks,
+            ClientConnectionId::parse("fixture-client").unwrap(),
+            CapabilityGenerationId::parse("fixture-generation").unwrap(),
         )
         .unwrap();
         let (transport, receiver) = ChannelTransport::new(2);

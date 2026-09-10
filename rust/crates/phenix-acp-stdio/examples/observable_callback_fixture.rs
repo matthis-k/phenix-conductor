@@ -4,7 +4,8 @@ use phenix_acp_stdio::{
 };
 use phenix_application_interface::{GetSdk, InvokeCapability, Operation};
 use phenix_core::{
-    CapabilityGenerationId, ContractId, ObservableRegistration, ObservableStore, PhenixValue,
+    CapabilityGenerationId, ClientConnectionId, ContractId, ObservableRegistration, ObservableStore,
+    PhenixValue,
     PluginId, PluginManifest, ResolvedSdkContributions, RuntimeId, SdkContribution, SdkNamespace,
     SdkObservableResource, SdkResourceId, SharedCapabilityRegistry, SnapshotPolicy, Type, ValueId,
     ValuePath,
@@ -54,6 +55,9 @@ async fn main() {
         CapabilityGenerationId::parse("fixture-generation")
             .expect("fixture generation id is valid"),
         client_callbacks,
+        ClientConnectionId::parse("fixture-client").expect("fixture client id is valid"),
+        CapabilityGenerationId::parse("fixture-client-generation")
+            .expect("fixture client generation is valid"),
     )
     .expect("fixture SDK service builds");
     let (transport, application_receiver) = ChannelTransport::new(8);

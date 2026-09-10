@@ -59,6 +59,9 @@ fn disconnected_client_listener_retires_its_owner_generation() {
     let capabilities = SharedCapabilityRegistry::default();
     let (callbacks, callback_receiver) = ClientCapabilityCallbacks::bounded(1);
     drop(callback_receiver);
+    let client_owner = ClientConnectionId::parse("fixture-client").expect("client owner is valid");
+    let client_generation = CapabilityGenerationId::parse("fixture-client-generation")
+        .expect("client generation is valid");
     let service = SdkApplicationService::new(
         &sdk,
         &store,
@@ -67,6 +70,8 @@ fn disconnected_client_listener_retires_its_owner_generation() {
         CapabilityGenerationId::parse("fixture-runtime-generation")
             .expect("fixture runtime generation is valid"),
         callbacks,
+        client_owner.clone(),
+        client_generation.clone(),
     )
     .expect("fixture SDK service builds");
 
@@ -92,9 +97,6 @@ fn disconnected_client_listener_retires_its_owner_generation() {
         panic!("listen is callable");
     };
 
-    let client_owner = ClientConnectionId::parse("fixture-client").expect("client owner is valid");
-    let client_generation = CapabilityGenerationId::parse("fixture-client-generation")
-        .expect("client generation is valid");
     let listener = CallableRef::new(
         ContractId::parse("phenix.observable-delivery@1").expect("listener contract is valid"),
         CapabilityOwnerId::Client(client_owner),
