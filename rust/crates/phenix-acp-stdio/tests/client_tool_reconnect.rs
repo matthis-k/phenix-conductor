@@ -33,12 +33,7 @@ fn service(
     owner: ClientConnectionId,
     generation: CapabilityGenerationId,
 ) -> SdkApplicationService {
-    let sdk = ResolvedSdkContributions::resolve(
-        &[],
-        &[],
-        Vec::<SdkContribution>::new(),
-    )
-    .unwrap();
+    let sdk = ResolvedSdkContributions::resolve(&[], &[], Vec::<SdkContribution>::new()).unwrap();
     SdkApplicationService::new(
         &sdk,
         &ObservableStore::default(),
@@ -101,12 +96,7 @@ async fn reconnect_requires_a_new_callable_generation_and_allows_readmission() {
     let second_generation = CapabilityGenerationId::parse("fixture-generation-2").unwrap();
     let second_callable = client_callable(&owner, &second_generation, "echo-2");
     let (second_callbacks, mut second_receiver) = ClientCapabilityCallbacks::bounded(1);
-    let second = service(
-        capabilities,
-        second_callbacks,
-        owner,
-        second_generation,
-    );
+    let second = service(capabilities, second_callbacks, owner, second_generation);
 
     assert!(second.client_tool_descriptors(&session).is_empty());
     let second_admission = second
@@ -138,11 +128,16 @@ async fn reconnect_requires_a_new_callable_generation_and_allows_readmission() {
     });
 
     let invocation = second_receiver.recv().await.unwrap();
-    assert_eq!(invocation.request().callable, PhenixValue::Callable(second_callable));
+    assert_eq!(
+        invocation.request().callable,
+        PhenixValue::Callable(second_callable)
+    );
     assert_eq!(invocation.request().input, PhenixValue::U64(7));
-    invocation.respond(Ok(phenix_application_interface::types::CapabilityInvokeResult {
-        output: PhenixValue::String("ok".to_owned()),
-    }));
+    invocation.respond(Ok(
+        phenix_application_interface::types::CapabilityInvokeResult {
+            output: PhenixValue::String("ok".to_owned()),
+        },
+    ));
 
     let result = worker.await.unwrap().unwrap();
     assert_eq!(
