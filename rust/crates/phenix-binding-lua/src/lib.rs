@@ -6,6 +6,8 @@
 //! background thread. Lua applications poll request handles to receive results
 //! and ordered updates, so the binding never invokes a host event loop itself.
 
+mod tools;
+
 use agent_client_protocol::schema::v1::{
     CancelNotification, CloseSessionRequest, ContentBlock, ListSessionsRequest, LoadSessionRequest,
     NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest,
@@ -382,6 +384,7 @@ struct Request {
     result: Option<CommandResult>,
     local_callables: Option<Rc<RefCell<LocalCallables>>>,
     listener_lifecycle: Option<ListenerLifecycle>,
+    tool_registration: Option<tools::Registration>,
 }
 
 #[derive(Clone)]
@@ -402,6 +405,7 @@ impl Request {
             result: None,
             local_callables,
             listener_lifecycle: None,
+            tool_registration: None,
         }
     }
 
@@ -434,6 +438,7 @@ impl Request {
 
 impl UserData for Client {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("tools", |lua, this, ()| tools::bind(lua, this.clone()));
         methods.add_method("capabilities", |lua, this, ()| {
             capabilities(lua, &this.state)
         });
@@ -681,6 +686,9 @@ impl UserData for Request {
         methods.add_method_mut("poll", |lua, this, ()| match this.poll() {
             None => Ok(MultiValue::new()),
             Some(Ok(response)) => {
+                if let Some(registration) = &mut this.tool_registration {
+                    return registration.project(lua, response);
+                }
                 let listener_to_remove = match &this.listener_lifecycle {
                     Some(ListenerLifecycle::RemoveOnSuccess(listener)) => {
                         if let Some(local_callables) = &this.local_callables {
@@ -699,7 +707,12 @@ impl UserData for Request {
                     response,
                 )
             }
-            Some(Err(error)) => error_values(lua, &error),
+            Some(Err(error)) => {
+                if let Some(registration) = &this.tool_registration {
+                    registration.release();
+                }
+                error_values(lua, &error)
+            }
         });
     }
 }
@@ -1942,6 +1955,7 @@ fn phenix(lua: &Lua) -> LuaResult<Table> {
     let exports = lua.create_table()?;
     exports.set("interface_id", INTERFACE_ID)?;
     exports.set("descriptor", descriptor(lua)?)?;
+    exports.set("tools", tools::exports(lua)?)?;
     exports.set(
         "connect",
         lua.create_function(|_lua, options: Table| connect(options))?,

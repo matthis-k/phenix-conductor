@@ -2,7 +2,10 @@ use phenix_acp_stdio::{
     serve_sdk_application, serve_stdio_with_events_and_callbacks, ChannelTransport,
     ClientCapabilityCallbacks, ClientCapabilityIdentity, SdkApplicationService,
 };
-use phenix_application_interface::{GetSdk, InvokeCapability, Operation};
+use phenix_application_interface::{
+    AddClientTool, GetSdk, InvokeCallable, InvokeCapability, ListCallables, Operation,
+    RemoveClientTool,
+};
 use phenix_core::{
     CapabilityGenerationId, ClientConnectionId, ContractId, ObservableRegistration,
     ObservableStore, PhenixValue, PluginId, PluginManifest, ResolvedSdkContributions, RuntimeId,
@@ -55,8 +58,8 @@ async fn main() {
             .expect("fixture generation id is valid"),
         client_callbacks,
         ClientCapabilityIdentity::new(
-            ClientConnectionId::parse("fixture-client").expect("fixture client id is valid"),
-            CapabilityGenerationId::parse("fixture-client-generation")
+            ClientConnectionId::parse("lua-client-1").expect("fixture client id is valid"),
+            CapabilityGenerationId::parse("connection-1")
                 .expect("fixture client generation is valid"),
         ),
     )
@@ -71,6 +74,10 @@ async fn main() {
             ContractId::parse(GetSdk::ID).expect("SDK get operation id is valid"),
             ContractId::parse(InvokeCapability::ID)
                 .expect("capability invoke operation id is valid"),
+            ContractId::parse(AddClientTool::ID).expect("tool add operation id is valid"),
+            ContractId::parse(RemoveClientTool::ID).expect("tool remove operation id is valid"),
+            ContractId::parse(ListCallables::ID).expect("tool list operation id is valid"),
+            ContractId::parse(InvokeCallable::ID).expect("tool invoke operation id is valid"),
         ],
         event_receiver,
         callback_receiver,
