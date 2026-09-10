@@ -95,9 +95,7 @@ mod tests {
     use super::*;
     use crate::transport::{ClientCapabilityCallbacks, ClientCapabilityIdentity};
     use phenix_application_interface::{
-        types::{
-            CapabilityInvokeResult, ClientToolAddInput, ClientToolDefinition,
-        },
+        types::{CapabilityInvokeResult, ClientToolAddInput, ClientToolDefinition},
         AddClientTool,
     };
     use phenix_core::{
@@ -238,9 +236,13 @@ mod tests {
             )
         });
 
-        callbacks.recv().await.unwrap().respond(Ok(CapabilityInvokeResult {
-            output: PhenixValue::String("ok".to_owned()),
-        }));
+        callbacks
+            .recv()
+            .await
+            .unwrap()
+            .respond(Ok(CapabilityInvokeResult {
+                output: PhenixValue::String("ok".to_owned()),
+            }));
         assert!(matches!(
             worker.await.unwrap(),
             ExecutionChange::ToolResult { call_id, .. } if call_id == "call-1"
