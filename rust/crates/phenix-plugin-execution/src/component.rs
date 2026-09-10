@@ -1,7 +1,5 @@
 use crate::configuration::ExecutionConfigurationInterface;
-use crate::{
-    execution_manifest, AgentLoopCommand, AgentLoopResponse, AGENT_LOOP_SERVICE,
-};
+use crate::{execution_manifest, AgentLoopCommand, AgentLoopResponse, AGENT_LOOP_SERVICE};
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, PluginId,

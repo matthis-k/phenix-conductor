@@ -4,10 +4,10 @@ use crate::{
 };
 use phenix_core::{
     Authority, Bytes, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, Kernel,
-    KernelError, ModelId, ModelInferenceResponse, ModelToolCall, ModelToolDescriptor,
-    PhenixSchema, PhenixValue, PluginContext, PluginExecution, PluginHost, PluginId,
-    PluginInstance, PluginManifest, Project, ResolvedHarness, ResolvedHarnessActivation,
-    RoutingProfileId, ServiceContribution, ServiceId, ServiceRole,
+    KernelError, ModelId, ModelInferenceResponse, ModelToolCall, ModelToolDescriptor, PhenixSchema,
+    PhenixValue, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, Project, ResolvedHarness, ResolvedHarnessActivation, RoutingProfileId,
+    ServiceContribution, ServiceId, ServiceRole,
 };
 use phenix_sdk::{ModelCommand, ModelResponse, ModelRoutingInterface, ModelTarget};
 use std::collections::BTreeMap;
