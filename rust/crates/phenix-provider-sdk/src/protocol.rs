@@ -668,7 +668,7 @@ mod tests {
                 }),
             ))
             .unwrap();
-        assert!(responses.output.is_empty());
+        assert_eq!(responses.output.as_ref(), b"");
         assert_eq!(responses.tool_calls[0].call_id, "call-responses");
         assert_eq!(responses.tool_calls[0].callable_id.as_str(), "fixture.echo");
         assert_eq!(
@@ -698,7 +698,7 @@ mod tests {
                 }),
             ))
             .unwrap();
-        assert!(chat.output.is_empty());
+        assert_eq!(chat.output.as_ref(), b"");
         assert_eq!(chat.tool_calls[0].call_id, "call-chat");
         assert_eq!(chat.tool_calls[0].callable_id.as_str(), "fixture.echo");
 
@@ -716,7 +716,7 @@ mod tests {
                 }),
             ))
             .unwrap();
-        assert!(anthropic.output.is_empty());
+        assert_eq!(anthropic.output.as_ref(), b"");
         assert_eq!(anthropic.tool_calls[0].call_id, "call-anthropic");
         assert_eq!(anthropic.tool_calls[0].callable_id.as_str(), "fixture.echo");
     }
