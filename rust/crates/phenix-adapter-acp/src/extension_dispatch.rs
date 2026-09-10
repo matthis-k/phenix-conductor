@@ -4,7 +4,8 @@ use phenix_application_interface::{
     application_descriptor, ActivateSkill, AddClientTool, ApplicationTransport, Authenticate,
     DiscoverAuthentication, GetDiagnostics, GetExecutionTree, GetLineage, GetObservable,
     GetProvenance, GetSdk, InvokeCallable, InvokeCapability, ListCallables, ListObservables,
-    ListSkills, Operation, RemoveClientTool, RenameSession, SubscribeObservable, UnsubscribeObservable,
+    ListSkills, Operation, RemoveClientTool, RenameSession, SubscribeObservable,
+    UnsubscribeObservable,
 };
 use phenix_core::{ContractId, PhenixValue, ValueCodec};
 use std::sync::Arc;
@@ -262,8 +263,8 @@ mod tests {
             ClientToolRemoveInput,
         };
         use phenix_core::{
-            CallableId, CallableRef, CapabilityGenerationId, CapabilityOwnerId,
-            ClientConnectionId, ReferenceId, Type,
+            CallableId, CallableRef, CapabilityGenerationId, CapabilityOwnerId, ClientConnectionId,
+            ReferenceId, Type,
         };
         let input = ClientToolAddInput {
             session_id: SessionId::parse("session-1").unwrap(),
@@ -291,16 +292,22 @@ mod tests {
         add.extension_request(request("_phenix/client-tool-add@1", input.to_value()))
             .await
             .unwrap();
-        assert_eq!(calls.borrow()[0], (contract(AddClientTool::ID), input.to_value()));
+        assert_eq!(
+            calls.borrow()[0],
+            (contract(AddClientTool::ID), input.to_value())
+        );
         let removal = ClientToolRemoveInput {
             session_id: input.session_id,
             admission_id: output.admission_id,
         };
         let (remove, calls) = adapter(Acknowledged {}.to_value(), &extra);
-        remove.extension_request(request("_phenix/client-tool-remove@1", removal.to_value()))
+        remove
+            .extension_request(request("_phenix/client-tool-remove@1", removal.to_value()))
             .await
             .unwrap();
-        assert_eq!(calls.borrow()[0], (contract(RemoveClientTool::ID), removal.to_value()));
+        assert_eq!(
+            calls.borrow()[0],
+            (contract(RemoveClientTool::ID), removal.to_value())
+        );
     }
-
 }

@@ -374,22 +374,32 @@ impl SdkApplicationService {
         .map_err(|error| ApplicationError::InvalidInput {
             message: error.to_string(),
         })?;
-        let mut admissions = self.admissions.lock().map_err(|_| ApplicationError::Failed {
-            message: "client tool admission registry lock is poisoned".to_owned(),
-        })?;
-        if admissions.admitted(&session_id, &tool.descriptor.id).is_some() {
+        let mut admissions = self
+            .admissions
+            .lock()
+            .map_err(|_| ApplicationError::Failed {
+                message: "client tool admission registry lock is poisoned".to_owned(),
+            })?;
+        if admissions
+            .admitted(&session_id, &tool.descriptor.id)
+            .is_some()
+        {
             return Err(ApplicationError::Conflict {
-                message: format!("session {session_id} already admits callable {}", tool.descriptor.id),
+                message: format!(
+                    "session {session_id} already admits callable {}",
+                    tool.descriptor.id
+                ),
             });
         }
         // Keep admission and capability registration atomic with explicit removal.
         // Registry registration never calls provider code.
         self.admit_client_callable(&tool.invoke, callable_schema)?;
-        let admission = admissions
-            .admit(session_id, tool)
-            .map_err(|error| ApplicationError::Conflict {
-                message: error.to_string(),
-            })?;
+        let admission =
+            admissions
+                .admit(session_id, tool)
+                .map_err(|error| ApplicationError::Conflict {
+                    message: error.to_string(),
+                })?;
         Ok(ApplicationClientToolAdmission {
             admission_id: admission.id.to_string(),
             callable_id: admission.tool.descriptor.id,
@@ -410,9 +420,12 @@ impl SdkApplicationService {
                 message: error.to_string(),
             }
         })?;
-        let mut admissions = self.admissions.lock().map_err(|_| ApplicationError::Failed {
-            message: "client tool admission registry lock is poisoned".to_owned(),
-        })?;
+        let mut admissions = self
+            .admissions
+            .lock()
+            .map_err(|_| ApplicationError::Failed {
+                message: "client tool admission registry lock is poisoned".to_owned(),
+            })?;
         let admission = admissions
             .remove_from_session(&session_id, &admission_id)
             .map_err(|error| ApplicationError::StaleReference {
