@@ -1210,6 +1210,108 @@ mod tests {
         );
     }
 
+    #[test]
+    fn retired_client_references_are_rejected_during_admission() {
+        let capabilities = SharedCapabilityRegistry::default();
+        let (callbacks, _receiver) = ClientCapabilityCallbacks::bounded(1);
+        let service = SdkApplicationService {
+            sdk: ApplicationSdkValue {
+                schema: Type::Table(Default::default()),
+                value: PhenixValue::Table(Default::default()),
+            },
+            capabilities,
+            client_callbacks: callbacks,
+            client_owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            client_generation: CapabilityGenerationId::parse("fixture-generation").unwrap(),
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
+        };
+        service.retire_client();
+
+        assert!(matches!(
+            service.invoke(
+                &ContractId::parse(AddClientTool::ID).unwrap(),
+                ApplicationClientToolAddInput {
+                    session_id: phenix_core::SessionId::parse("session-a").unwrap(),
+                    tool: ApplicationClientToolDefinition {
+                        id: phenix_core::CallableId::parse("fixture.client.echo").unwrap(),
+                        description: "Echo a client value".to_owned(),
+                        input: Type::U64,
+                        output: Type::String,
+                        capabilities: Vec::new(),
+                        requires_permission: false,
+                        invoke: PhenixValue::Callable(client_callable()),
+                    },
+                }
+                .to_value(),
+            ),
+            Err(ApplicationError::StaleReference { .. })
+        ));
+    }
+
+    #[test]
+    fn reconnect_starts_without_the_previous_generation_admissions() {
+        let capabilities = SharedCapabilityRegistry::default();
+        let (callbacks, _receiver) = ClientCapabilityCallbacks::bounded(1);
+        let first = SdkApplicationService {
+            sdk: ApplicationSdkValue {
+                schema: Type::Table(Default::default()),
+                value: PhenixValue::Table(Default::default()),
+            },
+            capabilities: capabilities.clone(),
+            client_callbacks: callbacks,
+            client_owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            client_generation: CapabilityGenerationId::parse("fixture-generation").unwrap(),
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
+        };
+        let session = phenix_core::SessionId::parse("session-a").unwrap();
+        first
+            .invoke(
+                &ContractId::parse(AddClientTool::ID).unwrap(),
+                ApplicationClientToolAddInput {
+                    session_id: session.clone(),
+                    tool: ApplicationClientToolDefinition {
+                        id: phenix_core::CallableId::parse("fixture.client.echo").unwrap(),
+                        description: "Echo a client value".to_owned(),
+                        input: Type::U64,
+                        output: Type::String,
+                        capabilities: Vec::new(),
+                        requires_permission: false,
+                        invoke: PhenixValue::Callable(client_callable()),
+                    },
+                }
+                .to_value(),
+            )
+            .unwrap();
+        first.retire_client();
+
+        let (callbacks, _receiver) = ClientCapabilityCallbacks::bounded(1);
+        let reconnected = SdkApplicationService {
+            sdk: ApplicationSdkValue {
+                schema: Type::Table(Default::default()),
+                value: PhenixValue::Table(Default::default()),
+            },
+            capabilities,
+            client_callbacks: callbacks,
+            client_owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            client_generation: CapabilityGenerationId::parse("fixture-generation-2").unwrap(),
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
+        };
+
+        assert!(reconnected.client_tool_descriptors(&session).is_empty());
+        assert!(matches!(
+            reconnected.invoke(
+                &ContractId::parse(InvokeCallable::ID).unwrap(),
+                ApplicationCallableInvokeInput {
+                    session_id: session,
+                    callable_id: phenix_core::CallableId::parse("fixture.client.echo").unwrap(),
+                    input: PhenixValue::U64(7),
+                }
+                .to_value(),
+            ),
+            Err(ApplicationError::NotFound { .. })
+        ));
+    }
+
     #[tokio::test]
     async fn sdk_get_and_capability_invoke_share_the_live_production_registry() {
         let manifest = PluginManifest {
