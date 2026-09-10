@@ -359,9 +359,7 @@ mod tests {
 
         assert_eq!(
             error,
-            BackendError::Protocol(
-                "duplicate provisioned callable fixture.duplicate".to_owned()
-            )
+            BackendError::Protocol("duplicate provisioned callable fixture.duplicate".to_owned())
         );
     }
 
