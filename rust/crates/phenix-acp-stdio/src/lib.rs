@@ -187,10 +187,16 @@ impl SdkApplicationService {
     }
 
     #[must_use]
-    pub fn client_tool_descriptors(&self, session_id: &SessionId) -> Vec<CallableDescriptor> {
+    pub fn client_tool_descriptors(
+        &self,
+        session_id: &phenix_core::SessionId,
+    ) -> Vec<CallableDescriptor> {
+        let Ok(session_id) = SessionId::parse(session_id.as_str()) else {
+            return Vec::new();
+        };
         self.admissions
             .lock()
-            .map(|admissions| admissions.descriptors(session_id))
+            .map(|admissions| admissions.descriptors(&session_id))
             .unwrap_or_default()
     }
 
@@ -221,7 +227,7 @@ impl SdkApplicationService {
                     message: error.to_string(),
                 }
             })?;
-            return self.admit_client_tool(request).map(ValueCodec::to_value);
+            return self.admit_client_tool(request).map(|admission| admission.to_value());
         }
         if operation.as_str() == RemoveClientTool::ID {
             let request =
@@ -279,6 +285,11 @@ impl SdkApplicationService {
         request: ApplicationClientToolAddInput,
     ) -> Result<ApplicationClientToolAdmission, ApplicationError> {
         let ApplicationClientToolAddInput { session_id, tool } = request;
+        let session_id = SessionId::parse(session_id.as_str()).map_err(|error| {
+            ApplicationError::InvalidInput {
+                message: error.to_string(),
+            }
+        })?;
         let ApplicationClientToolDefinition {
             id,
             description,
@@ -342,6 +353,11 @@ impl SdkApplicationService {
         &self,
         request: ApplicationClientToolRemoveInput,
     ) -> Result<(), ApplicationError> {
+        let session_id = SessionId::parse(request.session_id.as_str()).map_err(|error| {
+            ApplicationError::InvalidInput {
+                message: error.to_string(),
+            }
+        })?;
         let admission_id = ClientToolAdmissionId::parse(request.admission_id).map_err(|error| {
             ApplicationError::InvalidInput {
                 message: error.to_string(),
@@ -352,7 +368,7 @@ impl SdkApplicationService {
             .map_err(|_| ApplicationError::Failed {
                 message: "client tool admission registry lock is poisoned".to_owned(),
             })?
-            .remove_from_session(&request.session_id, &admission_id)
+            .remove_from_session(&session_id, &admission_id)
             .map_err(|error| ApplicationError::StaleReference {
                 value: error.to_string(),
             })?;
@@ -936,15 +952,7 @@ mod tests {
             .unwrap();
         let admission = ApplicationClientToolAdmission::from_value(&value).unwrap();
         assert_eq!(admission.callable_id.as_str(), "fixture.client.echo");
-        assert_eq!(
-            service
-                .admissions
-                .lock()
-                .unwrap()
-                .descriptors(&session)
-                .len(),
-            1
-        );
+        assert_eq!(service.client_tool_descriptors(&session).len(), 1);
 
         service
             .invoke(
@@ -956,12 +964,7 @@ mod tests {
                 .to_value(),
             )
             .unwrap();
-        assert!(service
-            .admissions
-            .lock()
-            .unwrap()
-            .descriptors(&session)
-            .is_empty());
+        assert!(service.client_tool_descriptors(&session).is_empty());
     }
 
     #[tokio::test]
