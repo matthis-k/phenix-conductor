@@ -324,16 +324,10 @@ mod tests {
         let mut admissions = ClientToolAdmissions::default();
         let session = SessionId::parse("session-a").unwrap();
         admissions
-            .admit(
-                session.clone(),
-                definition("fixture.zeta", "generation-a"),
-            )
+            .admit(session.clone(), definition("fixture.zeta", "generation-a"))
             .unwrap();
         admissions
-            .admit(
-                session.clone(),
-                definition("fixture.alpha", "generation-a"),
-            )
+            .admit(session.clone(), definition("fixture.alpha", "generation-a"))
             .unwrap();
 
         let ids = admissions
