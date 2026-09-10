@@ -189,11 +189,14 @@ impl ClientToolAdmissions {
 
     #[must_use]
     pub fn descriptors(&self, session_id: &SessionId) -> Vec<CallableDescriptor> {
-        self.by_id
+        let mut descriptors = self
+            .by_id
             .values()
             .filter(|admission| &admission.session_id == session_id)
             .map(|admission| admission.tool.descriptor.clone())
-            .collect()
+            .collect::<Vec<_>>();
+        descriptors.sort_by(|left, right| left.id.cmp(&right.id));
+        descriptors
     }
 }
 
@@ -314,5 +317,30 @@ mod tests {
             admissions.descriptors(&second_session),
             vec![second.tool.descriptor]
         );
+    }
+
+    #[test]
+    fn descriptor_projection_is_sorted_by_callable_id() {
+        let mut admissions = ClientToolAdmissions::default();
+        let session = SessionId::parse("session-a").unwrap();
+        admissions
+            .admit(
+                session.clone(),
+                definition("fixture.zeta", "generation-a"),
+            )
+            .unwrap();
+        admissions
+            .admit(
+                session.clone(),
+                definition("fixture.alpha", "generation-a"),
+            )
+            .unwrap();
+
+        let ids = admissions
+            .descriptors(&session)
+            .into_iter()
+            .map(|descriptor| descriptor.id.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["fixture.alpha", "fixture.zeta"]);
     }
 }
