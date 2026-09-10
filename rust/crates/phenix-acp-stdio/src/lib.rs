@@ -227,7 +227,9 @@ impl SdkApplicationService {
                     message: error.to_string(),
                 }
             })?;
-            return self.admit_client_tool(request).map(|admission| admission.to_value());
+            return self
+                .admit_client_tool(request)
+                .map(|admission| admission.to_value());
         }
         if operation.as_str() == RemoveClientTool::ID {
             let request =
