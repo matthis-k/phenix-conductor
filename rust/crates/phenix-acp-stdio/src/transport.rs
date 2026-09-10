@@ -400,15 +400,21 @@ impl SdkApplicationService {
                 message: error.to_string(),
             }
         })?;
-        self.admissions
-            .lock()
-            .map_err(|_| ApplicationError::Failed {
+        let (admission, callable_is_still_admitted) = {
+            let mut admissions = self.admissions.lock().map_err(|_| ApplicationError::Failed {
                 message: "client tool admission registry lock is poisoned".to_owned(),
-            })?
-            .remove_from_session(&session_id, &admission_id)
-            .map_err(|error| ApplicationError::StaleReference {
-                value: error.to_string(),
             })?;
+            let admission = admissions
+                .remove_from_session(&session_id, &admission_id)
+                .map_err(|error| ApplicationError::StaleReference {
+                    value: error.to_string(),
+                })?;
+            let callable_is_still_admitted = admissions.contains_invoke(&admission.tool.invoke);
+            (admission, callable_is_still_admitted)
+        };
+        if !callable_is_still_admitted {
+            self.capabilities.unregister(&admission.tool.invoke);
+        }
         Ok(())
     }
 
@@ -1023,6 +1029,7 @@ mod tests {
             admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
         };
         let session = phenix_core::SessionId::parse("session-a").unwrap();
+        let callable = client_callable();
         let input = ApplicationClientToolAddInput {
             session_id: session.clone(),
             tool: ApplicationClientToolDefinition {
@@ -1032,7 +1039,7 @@ mod tests {
                 output: Type::String,
                 capabilities: Vec::new(),
                 requires_permission: false,
-                invoke: PhenixValue::Callable(client_callable()),
+                invoke: PhenixValue::Callable(callable.clone()),
             },
         };
         let value = service
@@ -1069,9 +1076,16 @@ mod tests {
                     admission_id: admission.admission_id,
                 }
                 .to_value(),
-            )
-            .unwrap();
+        )
+        .unwrap();
         assert!(service.client_tool_descriptors(&session).is_empty());
+        assert!(matches!(
+            service.capabilities.invoke(CoreCapabilityInvokeInput {
+                callable: callable.clone(),
+                input: PhenixValue::U64(7),
+            }),
+            Err(CapabilityError::UnknownReference(reference)) if reference == callable
+        ));
     }
 
     #[tokio::test]

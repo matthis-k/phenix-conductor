@@ -187,6 +187,18 @@ impl ClientToolAdmissions {
         self.by_id.get(id)
     }
 
+    /// Reports whether an admitted tool still owns this callable reference.
+    ///
+    /// Explicit removal revokes a lifted client callable only after its last
+    /// session admission disappears. A client may deliberately admit one
+    /// callable into more than one session.
+    #[must_use]
+    pub fn contains_invoke(&self, invoke: &CallableRef) -> bool {
+        self.by_id
+            .values()
+            .any(|admission| &admission.tool.invoke == invoke)
+    }
+
     #[must_use]
     pub fn descriptors(&self, session_id: &SessionId) -> Vec<CallableDescriptor> {
         let mut descriptors = self
@@ -289,6 +301,42 @@ mod tests {
             .remove_from_session(&session, &admitted.id)
             .unwrap();
         assert!(admissions.admitted(&session, &callable).is_none());
+        assert!(!admissions.contains_invoke(&admitted.tool.invoke));
+    }
+
+    #[test]
+    fn callable_remains_owned_until_its_last_admission_is_removed() {
+        let mut admissions = ClientToolAdmissions::default();
+        let first_session = SessionId::parse("session-a").unwrap();
+        let second_session = SessionId::parse("session-b").unwrap();
+        let first = admissions
+            .admit(
+                first_session.clone(),
+                definition("fixture.first", "generation-a"),
+            )
+            .unwrap();
+        let second = admissions
+            .admit(
+                second_session.clone(),
+                ClientToolDefinition::new(
+                    CallableDescriptor {
+                        id: CallableId::parse("fixture.second").unwrap(),
+                        ..first.tool.descriptor.clone()
+                    },
+                    first.tool.invoke.clone(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        admissions
+            .remove_from_session(&first_session, &first.id)
+            .unwrap();
+        assert!(admissions.contains_invoke(&first.tool.invoke));
+        admissions
+            .remove_from_session(&second_session, &second.id)
+            .unwrap();
+        assert!(!admissions.contains_invoke(&first.tool.invoke));
     }
 
     #[test]
