@@ -311,6 +311,7 @@ mod tests {
                     model: phenix_core::ModelId::parse("model-a").unwrap(),
                     input: b"hello".to_vec().into(),
                     options: BTreeMap::new(),
+                    tools: Vec::new(),
                 }))
                 .unwrap(),
                 &network_authority(),

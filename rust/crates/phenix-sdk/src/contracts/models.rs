@@ -4,7 +4,7 @@ pub use phenix_core::{
 };
 use phenix_core::{
     Bytes, CallableId, ComponentInterface, InterfaceId, ModelId, PhenixValue, PluginId,
-    RoutingProfileId, ServiceId,
+    ModelToolDescriptor, RoutingProfileId, ServiceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -55,6 +55,8 @@ pub enum ModelCommand {
         profile_id: RoutingProfileId,
         callable_id: Option<CallableId>,
         input: Bytes,
+        #[serde(default)]
+        tools: Vec<ModelToolDescriptor>,
     },
 }
 

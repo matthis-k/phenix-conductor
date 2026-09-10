@@ -29,6 +29,7 @@ mod plugin {
                     serde_json::json!("deterministic-echo").into(),
                 ),
             ]),
+            tool_calls: Vec::new(),
         }
     }
 }

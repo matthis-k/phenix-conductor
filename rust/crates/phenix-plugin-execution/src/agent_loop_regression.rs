@@ -1,14 +1,15 @@
 use crate::{
     agent_loop_service, execution_component_id, execution_component_manifest, execution_factory,
-    execution_manifest, AgentLoopCommand, AgentLoopResponse, AgentLoopUsage, ModelInvokeCommand,
-    ModelInvokeResponse, ModelRoutingInterface, MODEL_ROUTING_SERVICE,
+    execution_manifest, AgentLoopCommand, AgentLoopResponse, AgentLoopUsage, MODEL_ROUTING_SERVICE,
 };
 use phenix_core::{
     Authority, Bytes, ComponentExport, ComponentId, ComponentInterface, ComponentManifest, Kernel,
-    KernelError, ModelInferenceResponse, PhenixValue, PluginContext, PluginExecution, PluginHost,
-    PluginId, PluginInstance, PluginManifest, Project, ResolvedHarness, ResolvedHarnessActivation,
+    KernelError, ModelId, ModelInferenceResponse, ModelToolCall, ModelToolDescriptor,
+    PhenixSchema, PhenixValue, PluginContext, PluginExecution, PluginHost, PluginId,
+    PluginInstance, PluginManifest, Project, ResolvedHarness, ResolvedHarnessActivation,
     RoutingProfileId, ServiceContribution, ServiceId, ServiceRole,
 };
+use phenix_sdk::{ModelCommand, ModelResponse, ModelRoutingInterface, ModelTarget};
 use std::collections::BTreeMap;
 
 const MODEL_PROVIDER: &str = "fixture.agent-loop-model";
@@ -31,16 +32,30 @@ impl PluginInstance for ModelProvider {
             return Err(format!("unsupported model routing service: {service}"));
         }
         let context = PluginContext::new(host, (), (), ());
-        context
+        let ModelCommand::Invoke { tools, .. } = context
             .kernel
-            .decode_projected::<ModelInvokeCommand>(&ModelRoutingInterface::interface_id(), input)
+            .decode_projected::<ModelCommand>(&ModelRoutingInterface::interface_id(), input)
             .map_err(|error| error.to_string())?;
         context
             .kernel
-            .encode_value(&ModelInvokeResponse::Inference {
+            .encode_value(&ModelResponse::Inference {
+                target: ModelTarget {
+                    provider_plugin: provider_id(),
+                    model: ModelId::parse("fixture").unwrap(),
+                    options: BTreeMap::new(),
+                },
                 response: ModelInferenceResponse {
                     output: Bytes::new(b"provider-output".to_vec()),
                     provider_metadata: BTreeMap::new(),
+                    tool_calls: tools
+                        .first()
+                        .map(|tool| ModelToolCall {
+                            call_id: "fixture-call".into(),
+                            callable_id: tool.id.clone(),
+                            input: PhenixValue::String("fixture-input".into()),
+                        })
+                        .into_iter()
+                        .collect(),
                 },
             })
             .map_err(|error| error.to_string())
@@ -122,6 +137,7 @@ fn invoke_agent_loop(kernel: &mut Kernel, execution: &PluginId) -> Result<Vec<u8
         profile_id: RoutingProfileId::parse("default").unwrap(),
         callable_id: None,
         input: Bytes::new(b"prompt".to_vec()),
+        tools: Vec::new(),
     };
     kernel.invoke_component(
         &execution_component_id(),
@@ -143,9 +159,53 @@ fn resolved_agent_loop_returns_model_output_with_usage() {
         response,
         AgentLoopResponse::Completed {
             output: Bytes::new(b"provider-output".to_vec()),
+            tool_calls: Vec::new(),
             usage: AgentLoopUsage {
                 model_calls: 1,
                 tool_calls: 0,
+            },
+        }
+    );
+}
+
+#[test]
+fn agent_loop_preserves_typed_model_tool_calls() {
+    let (mut kernel, execution) = kernel(true);
+    let command = AgentLoopCommand::Run {
+        profile_id: RoutingProfileId::parse("default").unwrap(),
+        callable_id: None,
+        input: Bytes::new(b"prompt".to_vec()),
+        tools: vec![ModelToolDescriptor {
+            id: phenix_core::CallableId::parse("fixture.client.echo").unwrap(),
+            description: "Echo fixture input".into(),
+            input_schema: PhenixSchema::Any,
+            output_schema: PhenixSchema::Any,
+        }],
+    };
+    let output = kernel
+        .invoke_component(
+            &execution_component_id(),
+            &agent_loop_service(),
+            &serde_json::to_vec(&PhenixValue::from(&command)).unwrap(),
+            &Authority::default(),
+            &execution,
+        )
+        .unwrap();
+    let output: PhenixValue = serde_json::from_slice(&output).unwrap();
+    let response = AgentLoopResponse::try_from(Project(&output)).unwrap();
+
+    assert_eq!(
+        response,
+        AgentLoopResponse::Completed {
+            output: Bytes::new(b"provider-output".to_vec()),
+            tool_calls: vec![ModelToolCall {
+                call_id: "fixture-call".into(),
+                callable_id: phenix_core::CallableId::parse("fixture.client.echo").unwrap(),
+                input: PhenixValue::String("fixture-input".into()),
+            }],
+            usage: AgentLoopUsage {
+                model_calls: 1,
+                tool_calls: 1,
             },
         }
     );

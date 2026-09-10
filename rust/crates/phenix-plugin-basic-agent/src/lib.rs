@@ -208,6 +208,7 @@ mod tests {
                 model: ModelId::parse("direct").unwrap(),
                 input: b"hello".to_vec().into(),
                 options: BTreeMap::new(),
+                tools: Vec::new(),
             },
         );
         assert_eq!(response.output.as_ref(), b"hello");

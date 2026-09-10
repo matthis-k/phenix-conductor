@@ -177,6 +177,7 @@ fn response_with_text(value: &Value, text: String) -> ModelInferenceResponse {
     ModelInferenceResponse {
         output: text.into_bytes().into(),
         provider_metadata,
+        tool_calls: Vec::new(),
     }
 }
 
@@ -321,6 +322,7 @@ mod tests {
             model: phenix_core::ModelId::parse("test-model").unwrap(),
             input: b"hello".to_vec().into(),
             options: BTreeMap::new(),
+            tools: Vec::new(),
         }
     }
 

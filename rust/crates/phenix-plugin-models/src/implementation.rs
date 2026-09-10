@@ -3,8 +3,9 @@ pub use phenix_core::{
 };
 use phenix_core::{
     Authority, Bytes, CallableId, CapabilityId, ComponentInterface, DurableSchema, ModelId,
-    PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance, PluginManifest,
-    ResourceNamespace, RoutingProfileId, ServiceContribution, ServiceId, TransactionOp,
+    ModelToolDescriptor, PluginContext, PluginExecution, PluginHost, PluginId, PluginInstance,
+    PluginManifest, ResourceNamespace, RoutingProfileId, ServiceContribution, ServiceId,
+    TransactionOp,
 };
 use phenix_sdk_macros::PhenixValue;
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,8 @@ pub enum ModelCommand {
         profile_id: RoutingProfileId,
         callable_id: Option<CallableId>,
         input: Bytes,
+        #[serde(default)]
+        tools: Vec<ModelToolDescriptor>,
     },
 }
 
@@ -224,6 +227,7 @@ fn handle(
             profile_id,
             callable_id,
             input,
+            tools,
         } => {
             let target = resolve_target(context, &profile_id, callable_id.as_ref())?;
             if !context.plugin.state.contains(&target.provider_plugin) {
@@ -236,6 +240,7 @@ fn handle(
                 model: target.model.clone(),
                 input,
                 options: target.options.clone(),
+                tools,
             };
             let input = context
                 .kernel
@@ -407,6 +412,7 @@ mod tests {
                     "provider".into(),
                     serde_json::json!("fixture.provider").into(),
                 )]),
+                tool_calls: Vec::new(),
             };
             context
                 .kernel
@@ -601,6 +607,7 @@ mod tests {
                 profile_id: profile.id,
                 callable_id: None,
                 input: b"hello".to_vec().into(),
+                tools: Vec::new(),
             },
         )
         .unwrap();

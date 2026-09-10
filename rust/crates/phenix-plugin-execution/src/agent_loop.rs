@@ -1,8 +1,9 @@
-use crate::{execution_component_id, AgentLoopInterface, ModelRoutingInterface};
+use crate::{execution_component_id, AgentLoopInterface};
 use phenix_core::{
-    Bytes, CallableId, ComponentInterface, ModelInferenceResponse, PluginContext, PluginHost,
-    PluginInstance, RoutingProfileId, SdkClient, ServiceId,
+    Bytes, CallableId, ComponentInterface, ModelToolCall, ModelToolDescriptor, PluginContext,
+    PluginHost, PluginInstance, RoutingProfileId, SdkClient, ServiceId,
 };
+use phenix_sdk::{ModelCommand, ModelResponse, ModelRoutingInterface};
 use serde::{Deserialize, Serialize};
 
 pub const AGENT_LOOP_SERVICE: &str = "phenix.agent-loop@1";
@@ -36,6 +37,8 @@ pub enum AgentLoopCommand {
         profile_id: RoutingProfileId,
         callable_id: Option<CallableId>,
         input: Bytes,
+        #[serde(default)]
+        tools: Vec<ModelToolDescriptor>,
     },
 }
 
@@ -50,26 +53,9 @@ pub struct AgentLoopUsage {
 pub enum AgentLoopResponse {
     Completed {
         output: Bytes,
+        tool_calls: Vec<ModelToolCall>,
         usage: AgentLoopUsage,
     },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub(crate) enum ModelInvokeCommand {
-    Invoke {
-        profile_id: RoutingProfileId,
-        callable_id: Option<CallableId>,
-        input: Bytes,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub(crate) enum ModelInvokeResponse {
-    Profile {},
-    Profiles {},
-    Authentication {},
-    Target {},
-    Inference { response: ModelInferenceResponse },
 }
 
 #[must_use]
@@ -140,26 +126,28 @@ fn handle(
             profile_id,
             callable_id,
             input,
+            tools,
         } => {
-            // The current model ABI has no typed tool-call envelope. Keep the prototype to one
-            // model step rather than creating a second, private tool-call protocol here.
             let response = context
                 .sdk
                 .models
-                .invoke_projected(&ModelInvokeCommand::Invoke {
+                .invoke_projected(&ModelCommand::Invoke {
                     profile_id,
                     callable_id,
                     input,
+                    tools,
                 })
                 .map_err(|error| error.to_string())?;
-            let ModelInvokeResponse::Inference { response } = response else {
+            let ModelResponse::Inference { response, .. } = response else {
                 return Err("model routing returned a non-inference response to invoke".into());
             };
             Ok(AgentLoopResponse::Completed {
                 output: response.output,
+                tool_calls: response.tool_calls.clone(),
                 usage: AgentLoopUsage {
                     model_calls: 1,
-                    tool_calls: 0,
+                    tool_calls: u32::try_from(response.tool_calls.len())
+                        .map_err(|_| "model returned too many tool calls".to_owned())?,
                 },
             })
         }

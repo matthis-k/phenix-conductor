@@ -618,6 +618,7 @@ fn routed_model_bytes(
             profile_id: profile_id.clone(),
             callable_id: Some(callable_id),
             input: Bytes::new(input),
+            tools: Vec::new(),
         })
         .map_err(|error| MemoryError::Provider(error.to_string()))?;
     let ModelResponse::Inference { response, .. } = response else {
