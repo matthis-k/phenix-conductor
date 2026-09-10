@@ -218,9 +218,7 @@ mod tests {
             admissions.admit(session.clone(), definition("fixture.echo", "generation-a")),
             Err(ClientToolAdmissionError::DuplicateCallable { .. })
         ));
-        admissions
-            .remove_from_session(&session, &first.id)
-            .unwrap();
+        admissions.remove_from_session(&session, &first.id).unwrap();
         let second = admissions
             .admit(session.clone(), definition("fixture.echo", "generation-b"))
             .unwrap();
