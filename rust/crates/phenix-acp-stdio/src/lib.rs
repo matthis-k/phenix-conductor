@@ -1249,6 +1249,56 @@ mod tests {
     }
 
     #[test]
+    fn client_tool_admission_rejects_malformed_and_foreign_references() {
+        let capabilities = SharedCapabilityRegistry::default();
+        let (callbacks, _receiver) = ClientCapabilityCallbacks::bounded(1);
+        let service = SdkApplicationService {
+            sdk: ApplicationSdkValue {
+                schema: Type::Table(Default::default()),
+                value: PhenixValue::Table(Default::default()),
+            },
+            capabilities,
+            client_callbacks: callbacks,
+            client_owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            client_generation: CapabilityGenerationId::parse("fixture-generation").unwrap(),
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
+        };
+        let definition = |invoke| ApplicationClientToolAddInput {
+            session_id: phenix_core::SessionId::parse("session-a").unwrap(),
+            tool: ApplicationClientToolDefinition {
+                id: phenix_core::CallableId::parse("fixture.client.echo").unwrap(),
+                description: "Echo a client value".to_owned(),
+                input: Type::U64,
+                output: Type::String,
+                capabilities: Vec::new(),
+                requires_permission: false,
+                invoke,
+            },
+        };
+
+        assert!(matches!(
+            service.invoke(
+                &ContractId::parse(AddClientTool::ID).unwrap(),
+                definition(PhenixValue::String("not-a-callable".to_owned())).to_value(),
+            ),
+            Err(ApplicationError::SchemaMismatch { .. })
+        ));
+        let foreign = CallableRef::new(
+            ContractId::parse("fixture.client-callback@1").unwrap(),
+            CapabilityOwnerId::Client(ClientConnectionId::parse("other-client").unwrap()),
+            CapabilityGenerationId::parse("other-generation").unwrap(),
+            ReferenceId::parse("callback").unwrap(),
+        );
+        assert!(matches!(
+            service.invoke(
+                &ContractId::parse(AddClientTool::ID).unwrap(),
+                definition(PhenixValue::Callable(foreign)).to_value(),
+            ),
+            Err(ApplicationError::SchemaMismatch { .. })
+        ));
+    }
+
+    #[test]
     fn reconnect_starts_without_the_previous_generation_admissions() {
         let capabilities = SharedCapabilityRegistry::default();
         let (callbacks, _receiver) = ClientCapabilityCallbacks::bounded(1);
