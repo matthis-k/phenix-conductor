@@ -47,6 +47,8 @@ operations! {
     InvokeCallable: "callable-invoke", "callables", CallableInvokeInput => CallableResult;
     GetSdk: "sdk-get", "sdk", Empty => SdkValue;
     InvokeCapability: "capability-invoke", "capabilities", CapabilityInvokeInput => CapabilityInvokeResult;
+    AddClientTool: "client-tool-add", "client-tools", ClientToolAddInput => ClientToolAdmission;
+    RemoveClientTool: "client-tool-remove", "client-tools", ClientToolRemoveInput => Acknowledged;
     GetExecutionTree: "execution-tree", "inspection", SessionInput => ExecutionTree;
     GetProvenance: "execution-provenance", "inspection", ExecutionInput => Provenance;
     GetDiagnostics: "diagnostics", "diagnostics", Empty => Diagnostics;
@@ -105,6 +107,10 @@ pub fn application_descriptor() -> ApplicationDescriptor {
         ObservableDelivery,
         CapabilityInvokeInput,
         CapabilityInvokeResult,
+        ClientToolDefinition,
+        ClientToolAddInput,
+        ClientToolAdmission,
+        ClientToolRemoveInput,
         SdkValue,
     );
     for (name, dependencies) in [
@@ -127,6 +133,7 @@ pub fn application_descriptor() -> ApplicationDescriptor {
         ("elicitation", vec!["sessions"]),
         ("sdk", vec!["discovery"]),
         ("capabilities", vec!["discovery"]),
+        ("client-tools", vec!["sessions", "capabilities"]),
     ] {
         descriptor.capabilities.insert(
             capability(name),

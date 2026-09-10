@@ -10,10 +10,18 @@ use phenix_adapter_acp::ApplicationAdapter;
 use phenix_application_interface::{
     types::{
         ApplicationError, CapabilityInvokeInput as ApplicationCapabilityInvokeInput,
-        CapabilityInvokeResult as ApplicationCapabilityInvokeResult, Empty,
+        CapabilityInvokeResult as ApplicationCapabilityInvokeResult,
+        ClientToolAddInput as ApplicationClientToolAddInput,
+        ClientToolAdmission as ApplicationClientToolAdmission,
+        ClientToolDefinition as ApplicationClientToolDefinition,
+        ClientToolRemoveInput as ApplicationClientToolRemoveInput, Empty,
         SdkValue as ApplicationSdkValue,
     },
-    ApplicationTransport, GetSdk, InvokeCapability, Operation,
+    AddClientTool, ApplicationTransport, GetSdk, InvokeCapability, Operation, RemoveClientTool,
+};
+use phenix_domain::{
+    CallableDescriptor, CallableKind, CallablePolicy, CapabilitySet,
+    ClientToolAdmissionId, ClientToolAdmissions, ClientToolDefinition,
 };
 use phenix_core::{
     CallableRef, CapabilityError, CapabilityGenerationId,
@@ -22,7 +30,7 @@ use phenix_core::{
     Type, ValueCodec,
 };
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
 pub struct ApplicationInvocation {
@@ -143,6 +151,7 @@ pub struct SdkApplicationService {
     sdk: ApplicationSdkValue,
     capabilities: SharedCapabilityRegistry,
     client_callbacks: ClientCapabilityCallbacks,
+    admissions: Arc<Mutex<ClientToolAdmissions>>,
 }
 
 impl SdkApplicationService {
@@ -162,6 +171,7 @@ impl SdkApplicationService {
             },
             capabilities,
             client_callbacks,
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
         })
     }
 
@@ -180,6 +190,24 @@ impl SdkApplicationService {
                 message: error.to_string(),
             })?;
             return Ok(self.sdk.to_value());
+        }
+        if operation.as_str() == AddClientTool::ID {
+            let request = ApplicationClientToolAddInput::from_value(&input).map_err(|error| {
+                ApplicationError::InvalidInput {
+                    message: error.to_string(),
+                }
+            })?;
+            return self.admit_client_tool(request).map(ValueCodec::to_value);
+        }
+        if operation.as_str() == RemoveClientTool::ID {
+            let request =
+                ApplicationClientToolRemoveInput::from_value(&input).map_err(|error| {
+                    ApplicationError::InvalidInput {
+                        message: error.to_string(),
+                    }
+                })?;
+            self.remove_client_tool(request)?;
+            return Ok(phenix_application_interface::types::Acknowledged {}.to_value());
         }
         if operation.as_str() == InvokeCapability::ID {
             let request =
@@ -220,6 +248,90 @@ impl SdkApplicationService {
     pub fn handle(&self, invocation: ApplicationInvocation) {
         let response = self.invoke(&invocation.operation, invocation.input.clone());
         invocation.respond(response);
+    }
+
+    fn admit_client_tool(
+        &self,
+        request: ApplicationClientToolAddInput,
+    ) -> Result<ApplicationClientToolAdmission, ApplicationError> {
+        let ApplicationClientToolAddInput { session_id, tool } = request;
+        let ApplicationClientToolDefinition {
+            id,
+            description,
+            input,
+            output,
+            capabilities,
+            requires_permission,
+            invoke,
+        } = tool;
+        let PhenixValue::Callable(invoke) = invoke else {
+            return Err(ApplicationError::SchemaMismatch {
+                message: "client tool invoke must be a callable capability".to_owned(),
+            });
+        };
+        if !matches!(invoke.owner(), CapabilityOwnerId::Client(_)) {
+            return Err(ApplicationError::SchemaMismatch {
+                message: "client tool invoke must be owned by the connected client".to_owned(),
+            });
+        }
+        let callable_schema = Type::Callable {
+            contract: invoke.contract().clone(),
+            input: Box::new(input.clone()),
+            output: Box::new(output.clone()),
+        };
+        self.admit_client_callable(&invoke, callable_schema)?;
+        let tool = ClientToolDefinition::new(
+            CallableDescriptor {
+                id,
+                kind: CallableKind::Tool,
+                description,
+                input_schema: input,
+                output_schema: output,
+                capabilities: CapabilitySet(capabilities.into_iter().collect()),
+                policy: CallablePolicy {
+                    requires_permission,
+                },
+            },
+            invoke,
+        )
+        .map_err(|error| ApplicationError::InvalidInput {
+            message: error.to_string(),
+        })?;
+        let admission = self
+            .admissions
+            .lock()
+            .map_err(|_| ApplicationError::Failed {
+                message: "client tool admission registry lock is poisoned".to_owned(),
+            })?
+            .admit(session_id, tool)
+            .map_err(|error| ApplicationError::Conflict {
+                message: error.to_string(),
+            })?;
+        Ok(ApplicationClientToolAdmission {
+            admission_id: admission.id.to_string(),
+            callable_id: admission.tool.descriptor.id,
+        })
+    }
+
+    fn remove_client_tool(
+        &self,
+        request: ApplicationClientToolRemoveInput,
+    ) -> Result<(), ApplicationError> {
+        let admission_id = ClientToolAdmissionId::parse(request.admission_id).map_err(|error| {
+            ApplicationError::InvalidInput {
+                message: error.to_string(),
+            }
+        })?;
+        self.admissions
+            .lock()
+            .map_err(|_| ApplicationError::Failed {
+                message: "client tool admission registry lock is poisoned".to_owned(),
+            })?
+            .remove_from_session(&request.session_id, &admission_id)
+            .map_err(|error| ApplicationError::StaleReference {
+                value: error.to_string(),
+            })?;
+        Ok(())
     }
 
     fn admit_client_callables(
@@ -718,6 +830,7 @@ mod tests {
             },
             capabilities: capabilities.clone(),
             client_callbacks: callbacks,
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
         };
         let callable = client_callable();
         let schema = Type::Callable {
@@ -743,6 +856,68 @@ mod tests {
             worker.await.unwrap().unwrap().output,
             PhenixValue::String("ok".to_owned())
         );
+    }
+
+    #[tokio::test]
+    async fn client_tool_operations_admit_and_remove_a_client_callable() {
+        let capabilities = SharedCapabilityRegistry::default();
+        let (callbacks, _receiver) = ClientCapabilityCallbacks::bounded(1);
+        let service = SdkApplicationService {
+            sdk: ApplicationSdkValue {
+                schema: Type::Table(Default::default()),
+                value: PhenixValue::Table(Default::default()),
+            },
+            capabilities,
+            client_callbacks: callbacks,
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
+        };
+        let session = phenix_core::SessionId::parse("session-a").unwrap();
+        let input = ApplicationClientToolAddInput {
+            session_id: session.clone(),
+            tool: ApplicationClientToolDefinition {
+                id: phenix_core::CallableId::parse("fixture.client.echo").unwrap(),
+                description: "Echo a client value".to_owned(),
+                input: Type::U64,
+                output: Type::String,
+                capabilities: Vec::new(),
+                requires_permission: false,
+                invoke: PhenixValue::Callable(client_callable()),
+            },
+        };
+        let value = service
+            .invoke(
+                &ContractId::parse(AddClientTool::ID).unwrap(),
+                input.to_value(),
+            )
+            .unwrap();
+        let admission = ApplicationClientToolAdmission::from_value(&value).unwrap();
+        assert_eq!(admission.callable_id.as_str(), "fixture.client.echo");
+        assert_eq!(
+            service
+                .admissions
+                .lock()
+                .unwrap()
+                .descriptors(&session)
+                .len(),
+            1
+        );
+
+        service
+            .invoke(
+                &ContractId::parse(RemoveClientTool::ID).unwrap(),
+                ApplicationClientToolRemoveInput {
+                    session_id: session.clone(),
+                    admission_id: admission.admission_id,
+                }
+                .to_value(),
+            )
+            .unwrap();
+        assert!(service
+            .admissions
+            .lock()
+            .unwrap()
+            .descriptors(&session)
+            .is_empty());
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@
 
 use phenix_domain::{
     AuthenticationInput, AuthenticationMethodId, BackendCatalog, CallableDescriptor, CallableId,
-    ExecutionId, ModelTarget, SessionId,
+    ClientToolAdmissions, ExecutionId, ModelTarget, SessionId,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -87,6 +87,32 @@ impl PreparedToolSurface {
 }
 
 impl ToolProvision {
+    /// Add the session's ephemeral client-provided tools to the ordinary backend
+    /// tool provision. Duplicate ids are rejected before a backend observes an
+    /// ambiguous tool surface.
+    pub fn with_client_admissions(
+        mut self,
+        admissions: &ClientToolAdmissions,
+        session_id: &SessionId,
+    ) -> Result<Self, BackendError> {
+        let mut ids = self
+            .callables
+            .iter()
+            .map(|callable| callable.id.clone())
+            .collect::<BTreeSet<_>>();
+        for callable in admissions.descriptors(session_id) {
+            if !ids.insert(callable.id.clone()) {
+                return Err(BackendError::Protocol(format!(
+                    "duplicate provisioned callable {}",
+                    callable.id
+                )));
+            }
+            self.callables.push(callable);
+        }
+        self.callables.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(self)
+    }
+
     pub fn prepare(
         self,
         capabilities: &BackendCapabilities,
