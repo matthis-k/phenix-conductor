@@ -287,4 +287,32 @@ mod tests {
             .unwrap();
         assert!(admissions.admitted(&session, &callable).is_none());
     }
+
+    #[test]
+    fn unrelated_sessions_can_reuse_a_client_callable_id() {
+        let mut admissions = ClientToolAdmissions::default();
+        let first_session = SessionId::parse("session-a").unwrap();
+        let second_session = SessionId::parse("session-b").unwrap();
+        let first = admissions
+            .admit(
+                first_session.clone(),
+                definition("fixture.echo", "generation-a"),
+            )
+            .unwrap();
+        let second = admissions
+            .admit(
+                second_session.clone(),
+                definition("fixture.echo", "generation-b"),
+            )
+            .unwrap();
+
+        assert_eq!(
+            admissions.descriptors(&first_session),
+            vec![first.tool.descriptor]
+        );
+        assert_eq!(
+            admissions.descriptors(&second_session),
+            vec![second.tool.descriptor]
+        );
+    }
 }

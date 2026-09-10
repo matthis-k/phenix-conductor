@@ -574,6 +574,7 @@ pub async fn serve_sdk_application(
         let service = service.clone();
         tokio::task::spawn_blocking(move || service.handle(invocation));
     }
+    service.retire_client();
 }
 
 pub async fn serve_stdio(
@@ -1159,6 +1160,54 @@ mod tests {
             ),
             Err(ApplicationError::NotFound { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn closing_the_application_transport_retires_client_tool_admissions() {
+        let capabilities = SharedCapabilityRegistry::default();
+        let (callbacks, _receiver) = ClientCapabilityCallbacks::bounded(1);
+        let service = SdkApplicationService {
+            sdk: ApplicationSdkValue {
+                schema: Type::Table(Default::default()),
+                value: PhenixValue::Table(Default::default()),
+            },
+            capabilities,
+            client_callbacks: callbacks,
+            client_owner: ClientConnectionId::parse("fixture-client").unwrap(),
+            client_generation: CapabilityGenerationId::parse("fixture-generation").unwrap(),
+            admissions: Arc::new(Mutex::new(ClientToolAdmissions::default())),
+        };
+        let session = phenix_core::SessionId::parse("session-a").unwrap();
+        service
+            .invoke(
+                &ContractId::parse(AddClientTool::ID).unwrap(),
+                ApplicationClientToolAddInput {
+                    session_id: session.clone(),
+                    tool: ApplicationClientToolDefinition {
+                        id: phenix_core::CallableId::parse("fixture.client.echo").unwrap(),
+                        description: "Echo a client value".to_owned(),
+                        input: Type::U64,
+                        output: Type::String,
+                        capabilities: Vec::new(),
+                        requires_permission: false,
+                        invoke: PhenixValue::Callable(client_callable()),
+                    },
+                }
+                .to_value(),
+            )
+            .unwrap();
+        let observer = service.clone();
+        let (transport, receiver) = ChannelTransport::new(1);
+        let worker = tokio::spawn(serve_sdk_application(service, receiver));
+
+        drop(transport);
+        worker.await.unwrap();
+
+        assert!(observer.client_tool_descriptors(&session).is_empty());
+        assert_eq!(
+            observer.capabilities().schema(&client_callable()),
+            Err(CapabilityError::StaleReference(client_callable()))
+        );
     }
 
     #[tokio::test]
