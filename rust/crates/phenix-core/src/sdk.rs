@@ -11,8 +11,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
-    sync::{mpsc, Arc, Mutex},
-    thread,
+    sync::{Arc, Mutex},
 };
 
 const OBSERVABLE_GET_CONTRACT: &str = "phenix.observable-get@1";
@@ -671,22 +670,13 @@ fn register_observable_resource(
                 path: join_observable_path(&base_address.path, &path),
             };
             let callback_capabilities = listen_capabilities.clone();
-            let callback_listener = listener.clone();
-            let (deliveries, receiver) = mpsc::channel();
-            let _ = thread::Builder::new()
-                .name("phenix-observable-delivery".to_owned())
-                .spawn(move || {
-                    while let Ok(input) = receiver.recv() {
-                        let _ = callback_capabilities.invoke(CapabilityInvokeInput {
-                            callable: callback_listener.clone(),
-                            input,
-                        });
-                    }
-                });
             let callback = Arc::new(move |delivery: ObservationDelivery<'_>| {
                 let input = observation_delivery_value(delivery);
                 debug_assert!(observable_delivery_schema().parse(&input).is_ok());
-                let _ = deliveries.send(input);
+                let _ = callback_capabilities.invoke(CapabilityInvokeInput {
+                    callable: listener.clone(),
+                    input,
+                });
             });
             let subscription = listen_store
                 .subscribe(
@@ -1235,10 +1225,7 @@ mod tests {
         ComponentExport, ComponentId, ContractId, Key, ObservableRegistration, PhenixValue,
         PluginExecution, ReferenceId, RuntimeId, SharedCapabilityRegistry, SnapshotPolicy, Type,
     };
-    use std::{
-        sync::{mpsc, Arc, Mutex},
-        time::Duration,
-    };
+    use std::sync::{Arc, Mutex};
 
     fn plugin(value: &str, execution: PluginExecution) -> PluginManifest {
         PluginManifest {
@@ -1607,7 +1594,8 @@ mod tests {
             CapabilityGenerationId::parse("connection-1").unwrap(),
             ReferenceId::parse("listener-1").unwrap(),
         );
-        let (deliveries, receiver) = mpsc::channel();
+        let deliveries = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&deliveries);
         capabilities
             .register(
                 listener.clone(),
@@ -1618,7 +1606,7 @@ mod tests {
                 },
                 move |input| {
                     observable_delivery_schema().parse(&input).unwrap();
-                    deliveries.send(input).unwrap();
+                    recorded.lock().unwrap().push(input);
                     Ok(PhenixValue::Unit)
                 },
             )
@@ -1632,17 +1620,18 @@ mod tests {
         let PhenixValue::Callable(stop) = stop.output else {
             panic!("listen returns a callable stop handle");
         };
-        let initial = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(deliveries.lock().unwrap().len(), 1);
         store
             .transaction([&value_id], |transaction| {
                 transaction.replace(&value_id, ValuePath::root(), PhenixValue::U64(2))
             })
             .unwrap();
         {
-            let update = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
-            observable_delivery_schema().parse(&initial).unwrap();
-            observable_delivery_schema().parse(&update).unwrap();
-            let PhenixValue::Table(initial) = &initial else {
+            let deliveries = deliveries.lock().unwrap();
+            assert_eq!(deliveries.len(), 2);
+            observable_delivery_schema().parse(&deliveries[0]).unwrap();
+            observable_delivery_schema().parse(&deliveries[1]).unwrap();
+            let PhenixValue::Table(initial) = &deliveries[0] else {
                 panic!("initial delivery is a table");
             };
             assert_eq!(initial.get("commit_id"), Some(&PhenixValue::Option(None)));
@@ -1659,7 +1648,7 @@ mod tests {
                 &PhenixValue::U64(1)
             );
 
-            let PhenixValue::Table(update) = &update else {
+            let PhenixValue::Table(update) = &deliveries[1] else {
                 panic!("update delivery is a table");
             };
             assert_eq!(
@@ -1724,10 +1713,7 @@ mod tests {
                 transaction.replace(&value_id, ValuePath::root(), PhenixValue::U64(3))
             })
             .unwrap();
-        assert!(matches!(
-            receiver.recv_timeout(Duration::from_millis(50)),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        ));
+        assert_eq!(deliveries.lock().unwrap().len(), 2);
         assert!(matches!(
             capabilities.invoke(crate::CapabilityInvokeInput {
                 callable: stop,
