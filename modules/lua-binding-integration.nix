@@ -115,7 +115,13 @@ _: {
             assert(calls == 0, "Lua callback ran outside the host polling point")
 
             local stop = await(listen, "observable listen")
-            assert(calls == 1)
+            for _ = 1, 1000000 do
+              if calls == 1 then
+                break
+              end
+              poll_client()
+            end
+            assert(calls == 1, "initial observable delivery was not dispatched")
             assert(type(stop) == "function")
             await(stop(), "observable stop")
 
