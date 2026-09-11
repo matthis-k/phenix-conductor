@@ -586,7 +586,10 @@ impl UserData for Client {
                             )?;
                             Ok(Value::Nil)
                         }
-                        Err(std_mpsc::TryRecvError::Empty) => Ok(Value::Nil),
+                        Err(std_mpsc::TryRecvError::Empty) => {
+                            std::thread::yield_now();
+                            Ok(Value::Nil)
+                        }
                         Err(std_mpsc::TryRecvError::Disconnected) => {
                             Err(lua_error(this.state.failure()))
                         }
