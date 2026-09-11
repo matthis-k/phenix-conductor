@@ -77,6 +77,17 @@ _: {
               error(label .. ": timed out")
             end
 
+            local function await_callback(callback, label)
+              for _ = 1, 1000 do
+                if callback() then
+                  return
+                end
+                poll_client()
+                os.execute("sleep 0.01")
+              end
+              error(label .. ": timed out")
+            end
+
             local sdk = await(client:sdk(), "sdk get")
             assert(type(sdk) == "table")
             assert(type(sdk.fixture) == "table")
@@ -115,13 +126,7 @@ _: {
             assert(calls == 0, "Lua callback ran outside the host polling point")
 
             local stop = await(listen, "observable listen")
-            for _ = 1, 1000000 do
-              if calls == 1 then
-                break
-              end
-              poll_client()
-            end
-            assert(calls == 1, "initial observable delivery was not dispatched")
+            await_callback(function() return calls == 1 end, "initial observable delivery")
             assert(type(stop) == "function")
             await(stop(), "observable stop")
 
