@@ -107,7 +107,11 @@ where
 
 fn extension_matches<O: Operation>(method: &str) -> bool {
     let operation = ContractId::parse(O::ID).expect("static application operation id is valid");
-    method == extension_name(&operation)
+    let canonical = extension_name(&operation);
+    method == canonical
+        || canonical
+            .strip_prefix('_')
+            .is_some_and(|normalized| method == normalized)
 }
 
 #[cfg(test)]
@@ -199,6 +203,27 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, contract(RenameSession::ID));
         assert_eq!(calls[0].1, input.to_value());
+    }
+
+    #[tokio::test]
+    async fn extension_dispatch_accepts_acp_normalized_method_names() {
+        let input = rename_input();
+        let output = SessionInfo {
+            session_id: input.session_id.clone(),
+            title: Some("Renamed".to_owned()),
+            working_directory: "/workspace".to_owned(),
+        };
+        let (adapter, calls) = adapter(output.to_value(), &[RenameSession::CAPABILITY]);
+
+        adapter
+            .extension_request(request("phenix/session-rename@1", input.to_value()))
+            .await
+            .expect("normalized ACP extension request dispatches");
+
+        assert_eq!(
+            calls.borrow().as_slice(),
+            &[(contract(RenameSession::ID), input.to_value())]
+        );
     }
 
     #[tokio::test]
