@@ -297,7 +297,18 @@ impl SdkApplicationService {
             .map_err(|error| ApplicationError::SchemaMismatch {
                 message: error.to_string(),
             })?;
-            self.admit_client_callables(&schema, &request.input)?;
+            let Type::Callable {
+                input: input_schema, ..
+            } = &schema
+            else {
+                return Err(ApplicationError::SchemaMismatch {
+                    message: format!(
+                        "capability {} is registered with a non-callable schema",
+                        callable.id()
+                    ),
+                });
+            };
+            self.admit_client_callables(input_schema, &request.input)?;
             let result = self.capabilities.invoke(CoreCapabilityInvokeInput {
                 callable,
                 input: request.input,
