@@ -211,8 +211,8 @@ mod tests {
     #[test]
     fn model_surface_merges_runtime_and_client_tools_without_origin_metadata() {
         let (service, _callbacks, session_id) = admitted_service(false);
-        let tools = model_tool_surface(&service, &session_id, [runtime_tool("fixture.runtime")])
-            .unwrap();
+        let tools =
+            model_tool_surface(&service, &session_id, [runtime_tool("fixture.runtime")]).unwrap();
 
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].id.as_str(), "fixture.client.echo");
@@ -225,12 +225,9 @@ mod tests {
     #[test]
     fn model_surface_rejects_duplicate_effective_ids() {
         let (service, _callbacks, session_id) = admitted_service(false);
-        let error = model_tool_surface(
-            &service,
-            &session_id,
-            [runtime_tool("fixture.client.echo")],
-        )
-        .unwrap_err();
+        let error =
+            model_tool_surface(&service, &session_id, [runtime_tool("fixture.client.echo")])
+                .unwrap_err();
 
         assert!(matches!(error, ApplicationError::Conflict { .. }));
     }

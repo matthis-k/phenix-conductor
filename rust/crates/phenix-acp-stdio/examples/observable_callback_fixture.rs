@@ -8,8 +8,8 @@ use phenix_core::{
     CallableId, CapabilityGenerationId, ClientConnectionId, ContractId, ModelToolCall,
     ModelToolDescriptor, ObservableRegistration, ObservableStore, PhenixValue, PluginId,
     PluginManifest, ResolvedSdkContributions, RuntimeId, SdkContribution, SdkNamespace,
-    SdkObservableResource, SdkResourceId, SessionId, SharedCapabilityRegistry, SnapshotPolicy, Type,
-    ValueId, ValuePath,
+    SdkObservableResource, SdkResourceId, SessionId, SharedCapabilityRegistry, SnapshotPolicy,
+    Type, ValueId, ValuePath,
 };
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -78,12 +78,8 @@ async fn main() {
 
         let mut tools = None;
         for _ in 0..1000 {
-            let surface = model_tool_surface(
-                &tool_service,
-                &session_id,
-                [runtime_tool.clone()],
-            )
-            .expect("model tool surface builds");
+            let surface = model_tool_surface(&tool_service, &session_id, [runtime_tool.clone()])
+                .expect("model tool surface builds");
             if surface
                 .iter()
                 .any(|tool| tool.id.as_str() == "fixture.client.echo")
