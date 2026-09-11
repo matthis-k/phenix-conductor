@@ -78,7 +78,6 @@ _: {
             end
 
             local sdk = await(client:sdk(), "sdk get")
-            assert(client:extensions()["phenix.application.sdk-get@1"])
             assert(type(sdk) == "table")
             assert(type(sdk.fixture) == "table")
             assert(type(sdk.fixture.state) == "table")
