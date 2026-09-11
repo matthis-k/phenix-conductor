@@ -1,14 +1,17 @@
 use phenix_acp_stdio::{
-    serve_sdk_application, serve_stdio_with_events_and_callbacks, ChannelTransport,
-    ClientCapabilityCallbacks, SdkApplicationService,
+    execute_admitted_client_tool_call, model_tool_surface, serve_sdk_application,
+    serve_stdio_with_events_and_callbacks, ChannelTransport, ClientCapabilityCallbacks,
+    ClientCapabilityIdentity, SdkApplicationService,
 };
-use phenix_application_interface::{GetSdk, InvokeCapability, Operation};
+use phenix_application_interface::types::ExecutionChange;
 use phenix_core::{
-    CapabilityGenerationId, ContractId, ObservableRegistration, ObservableStore, PhenixValue,
-    PluginId, PluginManifest, ResolvedSdkContributions, RuntimeId, SdkContribution, SdkNamespace,
-    SdkObservableResource, SdkResourceId, SharedCapabilityRegistry, SnapshotPolicy, Type, ValueId,
-    ValuePath,
+    CallableId, CapabilityGenerationId, ClientConnectionId, ContractId, ModelToolCall,
+    ModelToolDescriptor, ObservableRegistration, ObservableStore, PhenixValue, PluginId,
+    PluginManifest, ResolvedSdkContributions, RuntimeId, SdkContribution, SdkNamespace,
+    SdkObservableResource, SdkResourceId, SessionId, SharedCapabilityRegistry, SnapshotPolicy, Type,
+    ValueId, ValuePath,
 };
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -54,8 +57,73 @@ async fn main() {
         CapabilityGenerationId::parse("fixture-generation")
             .expect("fixture generation id is valid"),
         client_callbacks,
+        ClientCapabilityIdentity::new(
+            ClientConnectionId::parse("lua-client-1").expect("fixture client id is valid"),
+            CapabilityGenerationId::parse("connection-1")
+                .expect("fixture client generation is valid"),
+        ),
     )
     .expect("fixture SDK service builds");
+
+    let tool_service = service.clone();
+    let tool_roundtrip = tokio::spawn(async move {
+        let session_id = SessionId::parse("fixture-session").expect("fixture session id is valid");
+        let runtime_tool = ModelToolDescriptor {
+            id: CallableId::parse("fixture.runtime.inspect")
+                .expect("fixture runtime tool id is valid"),
+            description: "Inspect the runtime fixture".to_owned(),
+            input_schema: Type::Unit,
+            output_schema: Type::Unit,
+        };
+
+        let mut tools = None;
+        for _ in 0..1000 {
+            let surface = model_tool_surface(
+                &tool_service,
+                &session_id,
+                [runtime_tool.clone()],
+            )
+            .expect("model tool surface builds");
+            if surface
+                .iter()
+                .any(|tool| tool.id.as_str() == "fixture.client.echo")
+            {
+                tools = Some(surface);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let tools = tools.expect("client tool becomes model-visible");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].id.as_str(), "fixture.client.echo");
+        assert_eq!(tools[1].id.as_str(), "fixture.runtime.inspect");
+
+        let service = tool_service.clone();
+        let change = tokio::task::spawn_blocking(move || {
+            execute_admitted_client_tool_call(
+                &service,
+                &session_id,
+                "fixture-execution",
+                ModelToolCall {
+                    call_id: "fixture-model-call".to_owned(),
+                    callable_id: CallableId::parse("fixture.client.echo")
+                        .expect("fixture client tool id is valid"),
+                    input: PhenixValue::String("hello".to_owned()),
+                },
+                |_| panic!("permission callback must not run for a permission-free fixture tool"),
+            )
+        })
+        .await
+        .expect("model tool worker joins");
+        assert_eq!(
+            change,
+            ExecutionChange::ToolResult {
+                call_id: "fixture-model-call".to_owned(),
+                output: PhenixValue::String("hello from Lua".to_owned()),
+            }
+        );
+    });
+
     let (transport, application_receiver) = ChannelTransport::new(8);
     let application = tokio::spawn(serve_sdk_application(service, application_receiver));
     let (_event_sender, event_receiver) = mpsc::channel(1);
@@ -63,15 +131,27 @@ async fn main() {
     serve_stdio_with_events_and_callbacks(
         transport,
         [
-            ContractId::parse(GetSdk::ID).expect("SDK get operation id is valid"),
-            ContractId::parse(InvokeCapability::ID)
-                .expect("capability invoke operation id is valid"),
-        ],
+            "discovery",
+            "sessions",
+            "prompt",
+            "sdk",
+            "observables",
+            "capabilities",
+            "callables",
+            "client-tools",
+        ]
+        .map(|name| {
+            ContractId::parse(format!("phenix.application.capability.{name}@1"))
+                .expect("fixture capability id is valid")
+        }),
         event_receiver,
         callback_receiver,
     )
     .await
     .expect("fixture ACP server exits cleanly");
 
+    tool_roundtrip
+        .await
+        .expect("model-to-client tool roundtrip completes");
     application.abort();
 }

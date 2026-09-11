@@ -77,6 +77,9 @@
             test -f ${supportedPhenix}/share/phenix/skills/pstack-LICENSE
             test -f ${supportedPhenix}/share/phenix/NOTICE.md
 
+            # Exercise the host-linked module through its packaged ACP fixture.
+            test -f ${self.checks.${system}.phenix-binding-lua-observable-callback}
+
             touch "$out"
           '';
     in

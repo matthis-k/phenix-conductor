@@ -64,6 +64,7 @@ impl PluginInstance for Replacement {
                 "provider".into(),
                 serde_json::json!("fixture.replacement").into(),
             )]),
+            tool_calls: Vec::new(),
         }))
         .map_err(|error| error.to_string())
     }
@@ -318,6 +319,7 @@ fn replacement_component_satisfies_the_same_basic_model_import_without_consumer_
         model: ModelId::parse("same-request").unwrap(),
         input: b"hello".to_vec().into(),
         options: BTreeMap::new(),
+        tools: Vec::new(),
     };
     let output = kernel
         .invoke(

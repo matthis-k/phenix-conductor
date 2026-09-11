@@ -1,13 +1,10 @@
 use crate::configuration::ExecutionConfigurationInterface;
-use crate::{
-    execution_manifest, AgentLoopCommand, AgentLoopResponse, ModelInvokeCommand,
-    ModelInvokeResponse, AGENT_LOOP_SERVICE, MODEL_ROUTING_SERVICE,
-};
+use crate::{execution_manifest, AgentLoopCommand, AgentLoopResponse, AGENT_LOOP_SERVICE};
 use phenix_core::{
     Authority, CapabilityId, ComponentExport, ComponentId, ComponentImport, ComponentInterface,
     ComponentManifest, InterfaceId, PluginId,
 };
-use phenix_sdk::ExecutionInterface;
+use phenix_sdk::{ExecutionInterface, ModelRoutingInterface};
 
 const EXECUTION_COMPONENT: &str = "phenix.execution";
 const EXECUTION_PLUGIN: &str = "phenix.execution";
@@ -24,19 +21,6 @@ impl ComponentInterface for AgentLoopInterface {
 
     fn schema() -> phenix_core::InterfaceSchema {
         phenix_core::InterfaceSchema::of::<AgentLoopCommand, AgentLoopResponse>()
-    }
-}
-
-pub(crate) struct ModelRoutingInterface;
-
-impl ComponentInterface for ModelRoutingInterface {
-    fn interface_id() -> InterfaceId {
-        InterfaceId::parse(MODEL_ROUTING_SERVICE)
-            .expect("static model routing interface id is valid")
-    }
-
-    fn schema() -> phenix_core::InterfaceSchema {
-        phenix_core::InterfaceSchema::of::<ModelInvokeCommand, ModelInvokeResponse>()
     }
 }
 

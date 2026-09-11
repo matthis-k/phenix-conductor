@@ -210,3 +210,25 @@ The direct ACP stdio migration may land before this binding. Switching `phenix-n
 - [x] transport stays below the Client SDK;
 - [x] durable runtime state remains Phenix-owned;
 - [ ] exact-head Source, Rust, Product, Docs, and Maintenance validation passes.
+
+## Client tool registration
+
+`phenix.tools.register(definition, handler)` takes an explicit `definition.client` and `session_id`. `client:tools().register(definition, handler)` binds the client once. Both return an asynchronous request. Poll that request to obtain the stop function; poll `stop()` to await removal.
+
+```lua
+local registration = phenix.tools.register({
+  client = client,
+  session_id = session_id,
+  id = "example.echo",
+  description = "Echo text from the client",
+  input = { type = "string" },
+  output = { type = "string" },
+  requires_permission = false,
+}, function(value)
+  return value
+end)
+```
+
+Schemas use the serialized `PhenixSchema` representation. The helper lifts the handler through the generic callable registry with those exact input/output schemas. Failed admission releases the local handler. Repeated registration polls return the same stop function; repeated stop calls share one removal request and retain its result or error. Successful removal releases the local handler. Direct application removal retains the remote stale-handle error.
+
+Frontend templates remain frontend-owned. Register them again for each active session and connection, producing fresh callable references. The binding never selects a global active client or session.
