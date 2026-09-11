@@ -74,41 +74,53 @@ impl phenix_core::PhenixContract for PhenixApplicationTypeCapabilityInvokeResult
 pub struct PhenixApplicationTypeCapabilityList1Type { pub r#capabilities: Vec<String>,pub r#interface: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeCapabilityList1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.capability-list@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural17 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
+pub struct Structural17 { pub r#capabilities: Vec<String>,pub r#description: String,pub r#id: String,pub r#input: phenix_core::PhenixValue,pub r#invoke: phenix_core::PhenixValue,pub r#output: phenix_core::PhenixValue,pub r#requires_permission: bool, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural18 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
+pub struct PhenixApplicationTypeClientToolAddInput1Type { pub r#session_id: String,pub r#tool: Structural17, }
+impl phenix_core::PhenixContract for PhenixApplicationTypeClientToolAddInput1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.client-tool-add-input@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural19 { pub r#text: String, }
+pub struct PhenixApplicationTypeClientToolAdmission1Type { pub r#admission_id: String,pub r#callable_id: String, }
+impl phenix_core::PhenixContract for PhenixApplicationTypeClientToolAdmission1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.client-tool-admission@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum PhenixApplicationTypeContent1Type { r#Image(Structural17),r#Resource(Structural18),r#Text(Structural19), }
+pub struct PhenixApplicationTypeClientToolDefinition1Type { pub r#capabilities: Vec<String>,pub r#description: String,pub r#id: String,pub r#input: phenix_core::PhenixValue,pub r#invoke: phenix_core::PhenixValue,pub r#output: phenix_core::PhenixValue,pub r#requires_permission: bool, }
+impl phenix_core::PhenixContract for PhenixApplicationTypeClientToolDefinition1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.client-tool-definition@1").expect("generated contract id is valid") } }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct PhenixApplicationTypeClientToolRemoveInput1Type { pub r#admission_id: String,pub r#session_id: String, }
+impl phenix_core::PhenixContract for PhenixApplicationTypeClientToolRemoveInput1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.client-tool-remove-input@1").expect("generated contract id is valid") } }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct Structural18 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct Structural19 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct Structural20 { pub r#text: String, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub enum PhenixApplicationTypeContent1Type { r#Image(Structural18),r#Resource(Structural19),r#Text(Structural20), }
 impl phenix_core::PhenixContract for PhenixApplicationTypeContent1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.content@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural20 { r#Error,r#Info,r#Warning, }
+pub enum Structural21 { r#Error,r#Info,r#Warning, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeDiagnostic1Type { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural20, }
+pub struct PhenixApplicationTypeDiagnostic1Type { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural21, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeDiagnostic1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.diagnostic@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural22 { r#Error,r#Info,r#Warning, }
+pub enum Structural23 { r#Error,r#Info,r#Warning, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural21 { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural22, }
+pub struct Structural22 { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural23, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeDiagnostics1Type { pub r#diagnostics: Vec<Structural21>, }
+pub struct PhenixApplicationTypeDiagnostics1Type { pub r#diagnostics: Vec<Structural22>, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeDiagnostics1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.diagnostics@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeElicitationRequest1Type { pub r#message: String,pub r#schema: phenix_core::PhenixValue,pub r#session_id: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeElicitationRequest1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.elicitation-request@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural23 { pub r#value: phenix_core::PhenixValue, }
+pub struct Structural24 { pub r#value: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum PhenixApplicationTypeElicitationResponse1Type { r#Accepted(Structural23),r#Cancelled,r#Declined, }
+pub enum PhenixApplicationTypeElicitationResponse1Type { r#Accepted(Structural24),r#Cancelled,r#Declined, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeElicitationResponse1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.elicitation-response@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeEmpty1Type {  }
 impl phenix_core::PhenixContract for PhenixApplicationTypeEmpty1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.empty@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural24 { pub r#fraction: Option<f64>,pub r#message: String, }
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural29 { pub r#message: String, }
+pub struct Structural25 { pub r#fraction: Option<f64>,pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural30 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -118,35 +130,35 @@ pub struct Structural32 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural33 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural34 { pub r#resource: String, }
+pub struct Structural34 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural35 { pub r#message: String, }
+pub struct Structural35 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural36 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural37 { pub r#value: String, }
+pub struct Structural37 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural38 { pub r#message: String, }
+pub struct Structural38 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural39 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural40 { pub r#value: String, }
+pub struct Structural40 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural41 { pub r#capability: String, }
+pub struct Structural41 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural42 { pub r#message: String, }
+pub struct Structural42 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural28 { r#Cancelled,r#Closed,r#Conflict(Structural29),r#Disconnected,r#Failed(Structural30),r#InvalidInput(Structural31),r#InvalidPath(Structural32),r#InvalidResponse(Structural33),r#NotFound(Structural34),r#PermissionDenied(Structural35),r#SchemaMismatch(Structural36),r#StaleReference(Structural37),r#SubscriptionCapacity,r#TransactionConflict(Structural38),r#Unauthenticated(Structural39),r#UnknownValue(Structural40),r#UnsupportedCapability(Structural41),r#UnsupportedSnapshotPolicy(Structural42), }
+pub struct Structural43 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural27 { pub r#error: Structural28, }
+pub enum Structural29 { r#Cancelled,r#Closed,r#Conflict(Structural30),r#Disconnected,r#Failed(Structural31),r#InvalidInput(Structural32),r#InvalidPath(Structural33),r#InvalidResponse(Structural34),r#NotFound(Structural35),r#PermissionDenied(Structural36),r#SchemaMismatch(Structural37),r#StaleReference(Structural38),r#SubscriptionCapacity,r#TransactionConflict(Structural39),r#Unauthenticated(Structural40),r#UnknownValue(Structural41),r#UnsupportedCapability(Structural42),r#UnsupportedSnapshotPolicy(Structural43), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural26 { r#Cancelled,r#Completed,r#Failed(Structural27),r#Pending,r#Running, }
+pub struct Structural28 { pub r#error: Structural29, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural25 { pub r#state: Structural26, }
+pub enum Structural27 { r#Cancelled,r#Completed,r#Failed(Structural28),r#Pending,r#Running, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural43 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
+pub struct Structural26 { pub r#state: Structural27, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural46 { pub r#message: String, }
+pub struct Structural44 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural47 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -156,34 +168,34 @@ pub struct Structural49 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural50 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural51 { pub r#resource: String, }
+pub struct Structural51 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural52 { pub r#message: String, }
+pub struct Structural52 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural53 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural54 { pub r#value: String, }
+pub struct Structural54 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural55 { pub r#message: String, }
+pub struct Structural55 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural56 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural57 { pub r#value: String, }
+pub struct Structural57 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural58 { pub r#capability: String, }
+pub struct Structural58 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural59 { pub r#message: String, }
+pub struct Structural59 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural45 { r#Cancelled,r#Closed,r#Conflict(Structural46),r#Disconnected,r#Failed(Structural47),r#InvalidInput(Structural48),r#InvalidPath(Structural49),r#InvalidResponse(Structural50),r#NotFound(Structural51),r#PermissionDenied(Structural52),r#SchemaMismatch(Structural53),r#StaleReference(Structural54),r#SubscriptionCapacity,r#TransactionConflict(Structural55),r#Unauthenticated(Structural56),r#UnknownValue(Structural57),r#UnsupportedCapability(Structural58),r#UnsupportedSnapshotPolicy(Structural59), }
+pub struct Structural60 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural44 { pub r#call_id: String,pub r#error: Structural45, }
+pub enum Structural46 { r#Cancelled,r#Closed,r#Conflict(Structural47),r#Disconnected,r#Failed(Structural48),r#InvalidInput(Structural49),r#InvalidPath(Structural50),r#InvalidResponse(Structural51),r#NotFound(Structural52),r#PermissionDenied(Structural53),r#SchemaMismatch(Structural54),r#StaleReference(Structural55),r#SubscriptionCapacity,r#TransactionConflict(Structural56),r#Unauthenticated(Structural57),r#UnknownValue(Structural58),r#UnsupportedCapability(Structural59),r#UnsupportedSnapshotPolicy(Structural60), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural60 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
+pub struct Structural45 { pub r#call_id: String,pub r#error: Structural46, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum PhenixApplicationTypeExecutionChange1Type { r#Progress(Structural24),r#State(Structural25),r#ToolCall(Structural43),r#ToolFailed(Structural44),r#ToolResult(Structural60), }
+pub struct Structural61 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub enum PhenixApplicationTypeExecutionChange1Type { r#Progress(Structural25),r#State(Structural26),r#ToolCall(Structural44),r#ToolFailed(Structural45),r#ToolResult(Structural61), }
 impl phenix_core::PhenixContract for PhenixApplicationTypeExecutionChange1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.execution-change@1").expect("generated contract id is valid") } }
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural64 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural65 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -193,37 +205,37 @@ pub struct Structural67 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural68 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural69 { pub r#resource: String, }
+pub struct Structural69 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural70 { pub r#message: String, }
+pub struct Structural70 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural71 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural72 { pub r#value: String, }
+pub struct Structural72 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural73 { pub r#message: String, }
+pub struct Structural73 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural74 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural75 { pub r#value: String, }
+pub struct Structural75 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural76 { pub r#capability: String, }
+pub struct Structural76 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural77 { pub r#message: String, }
+pub struct Structural77 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural63 { r#Cancelled,r#Closed,r#Conflict(Structural64),r#Disconnected,r#Failed(Structural65),r#InvalidInput(Structural66),r#InvalidPath(Structural67),r#InvalidResponse(Structural68),r#NotFound(Structural69),r#PermissionDenied(Structural70),r#SchemaMismatch(Structural71),r#StaleReference(Structural72),r#SubscriptionCapacity,r#TransactionConflict(Structural73),r#Unauthenticated(Structural74),r#UnknownValue(Structural75),r#UnsupportedCapability(Structural76),r#UnsupportedSnapshotPolicy(Structural77), }
+pub struct Structural78 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural62 { pub r#error: Structural63, }
+pub enum Structural64 { r#Cancelled,r#Closed,r#Conflict(Structural65),r#Disconnected,r#Failed(Structural66),r#InvalidInput(Structural67),r#InvalidPath(Structural68),r#InvalidResponse(Structural69),r#NotFound(Structural70),r#PermissionDenied(Structural71),r#SchemaMismatch(Structural72),r#StaleReference(Structural73),r#SubscriptionCapacity,r#TransactionConflict(Structural74),r#Unauthenticated(Structural75),r#UnknownValue(Structural76),r#UnsupportedCapability(Structural77),r#UnsupportedSnapshotPolicy(Structural78), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural61 { r#Cancelled,r#Completed,r#Failed(Structural62),r#Pending,r#Running, }
+pub struct Structural63 { pub r#error: Structural64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeExecutionInfo1Type { pub r#execution_id: String,pub r#parent: Option<String>,pub r#state: Structural61, }
+pub enum Structural62 { r#Cancelled,r#Completed,r#Failed(Structural63),r#Pending,r#Running, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct PhenixApplicationTypeExecutionInfo1Type { pub r#execution_id: String,pub r#parent: Option<String>,pub r#state: Structural62, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeExecutionInfo1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.execution-info@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeExecutionInput1Type { pub r#execution_id: String,pub r#session_id: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeExecutionInput1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.execution-input@1").expect("generated contract id is valid") } }
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural80 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural81 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -233,32 +245,32 @@ pub struct Structural83 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural84 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural85 { pub r#resource: String, }
+pub struct Structural85 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural86 { pub r#message: String, }
+pub struct Structural86 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural87 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural88 { pub r#value: String, }
+pub struct Structural88 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural89 { pub r#message: String, }
+pub struct Structural89 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural90 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural91 { pub r#value: String, }
+pub struct Structural91 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural92 { pub r#capability: String, }
+pub struct Structural92 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural93 { pub r#message: String, }
+pub struct Structural93 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural79 { r#Cancelled,r#Closed,r#Conflict(Structural80),r#Disconnected,r#Failed(Structural81),r#InvalidInput(Structural82),r#InvalidPath(Structural83),r#InvalidResponse(Structural84),r#NotFound(Structural85),r#PermissionDenied(Structural86),r#SchemaMismatch(Structural87),r#StaleReference(Structural88),r#SubscriptionCapacity,r#TransactionConflict(Structural89),r#Unauthenticated(Structural90),r#UnknownValue(Structural91),r#UnsupportedCapability(Structural92),r#UnsupportedSnapshotPolicy(Structural93), }
+pub struct Structural94 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural78 { pub r#error: Structural79, }
+pub enum Structural80 { r#Cancelled,r#Closed,r#Conflict(Structural81),r#Disconnected,r#Failed(Structural82),r#InvalidInput(Structural83),r#InvalidPath(Structural84),r#InvalidResponse(Structural85),r#NotFound(Structural86),r#PermissionDenied(Structural87),r#SchemaMismatch(Structural88),r#StaleReference(Structural89),r#SubscriptionCapacity,r#TransactionConflict(Structural90),r#Unauthenticated(Structural91),r#UnknownValue(Structural92),r#UnsupportedCapability(Structural93),r#UnsupportedSnapshotPolicy(Structural94), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum PhenixApplicationTypeExecutionState1Type { r#Cancelled,r#Completed,r#Failed(Structural78),r#Pending,r#Running, }
+pub struct Structural79 { pub r#error: Structural80, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub enum PhenixApplicationTypeExecutionState1Type { r#Cancelled,r#Completed,r#Failed(Structural79),r#Pending,r#Running, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeExecutionState1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.execution-state@1").expect("generated contract id is valid") } }
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural98 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural99 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -268,38 +280,38 @@ pub struct Structural101 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural102 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural103 { pub r#resource: String, }
+pub struct Structural103 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural104 { pub r#message: String, }
+pub struct Structural104 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural105 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural106 { pub r#value: String, }
+pub struct Structural106 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural107 { pub r#message: String, }
+pub struct Structural107 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural108 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural109 { pub r#value: String, }
+pub struct Structural109 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural110 { pub r#capability: String, }
+pub struct Structural110 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural111 { pub r#message: String, }
+pub struct Structural111 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural97 { r#Cancelled,r#Closed,r#Conflict(Structural98),r#Disconnected,r#Failed(Structural99),r#InvalidInput(Structural100),r#InvalidPath(Structural101),r#InvalidResponse(Structural102),r#NotFound(Structural103),r#PermissionDenied(Structural104),r#SchemaMismatch(Structural105),r#StaleReference(Structural106),r#SubscriptionCapacity,r#TransactionConflict(Structural107),r#Unauthenticated(Structural108),r#UnknownValue(Structural109),r#UnsupportedCapability(Structural110),r#UnsupportedSnapshotPolicy(Structural111), }
+pub struct Structural112 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural96 { pub r#error: Structural97, }
+pub enum Structural98 { r#Cancelled,r#Closed,r#Conflict(Structural99),r#Disconnected,r#Failed(Structural100),r#InvalidInput(Structural101),r#InvalidPath(Structural102),r#InvalidResponse(Structural103),r#NotFound(Structural104),r#PermissionDenied(Structural105),r#SchemaMismatch(Structural106),r#StaleReference(Structural107),r#SubscriptionCapacity,r#TransactionConflict(Structural108),r#Unauthenticated(Structural109),r#UnknownValue(Structural110),r#UnsupportedCapability(Structural111),r#UnsupportedSnapshotPolicy(Structural112), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural95 { r#Cancelled,r#Completed,r#Failed(Structural96),r#Pending,r#Running, }
+pub struct Structural97 { pub r#error: Structural98, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural94 { pub r#execution_id: String,pub r#parent: Option<String>,pub r#state: Structural95, }
+pub enum Structural96 { r#Cancelled,r#Completed,r#Failed(Structural97),r#Pending,r#Running, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeExecutionTree1Type { pub r#executions: Vec<Structural94>,pub r#session_id: String, }
+pub struct Structural95 { pub r#execution_id: String,pub r#parent: Option<String>,pub r#state: Structural96, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct PhenixApplicationTypeExecutionTree1Type { pub r#executions: Vec<Structural95>,pub r#session_id: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeExecutionTree1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.execution-tree@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural113 { pub r#fraction: Option<f64>,pub r#message: String, }
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural118 { pub r#message: String, }
+pub struct Structural114 { pub r#fraction: Option<f64>,pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural119 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -309,35 +321,35 @@ pub struct Structural121 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural122 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural123 { pub r#resource: String, }
+pub struct Structural123 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural124 { pub r#message: String, }
+pub struct Structural124 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural125 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural126 { pub r#value: String, }
+pub struct Structural126 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural127 { pub r#message: String, }
+pub struct Structural127 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural128 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural129 { pub r#value: String, }
+pub struct Structural129 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural130 { pub r#capability: String, }
+pub struct Structural130 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural131 { pub r#message: String, }
+pub struct Structural131 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural117 { r#Cancelled,r#Closed,r#Conflict(Structural118),r#Disconnected,r#Failed(Structural119),r#InvalidInput(Structural120),r#InvalidPath(Structural121),r#InvalidResponse(Structural122),r#NotFound(Structural123),r#PermissionDenied(Structural124),r#SchemaMismatch(Structural125),r#StaleReference(Structural126),r#SubscriptionCapacity,r#TransactionConflict(Structural127),r#Unauthenticated(Structural128),r#UnknownValue(Structural129),r#UnsupportedCapability(Structural130),r#UnsupportedSnapshotPolicy(Structural131), }
+pub struct Structural132 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural116 { pub r#error: Structural117, }
+pub enum Structural118 { r#Cancelled,r#Closed,r#Conflict(Structural119),r#Disconnected,r#Failed(Structural120),r#InvalidInput(Structural121),r#InvalidPath(Structural122),r#InvalidResponse(Structural123),r#NotFound(Structural124),r#PermissionDenied(Structural125),r#SchemaMismatch(Structural126),r#StaleReference(Structural127),r#SubscriptionCapacity,r#TransactionConflict(Structural128),r#Unauthenticated(Structural129),r#UnknownValue(Structural130),r#UnsupportedCapability(Structural131),r#UnsupportedSnapshotPolicy(Structural132), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural115 { r#Cancelled,r#Completed,r#Failed(Structural116),r#Pending,r#Running, }
+pub struct Structural117 { pub r#error: Structural118, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural114 { pub r#state: Structural115, }
+pub enum Structural116 { r#Cancelled,r#Completed,r#Failed(Structural117),r#Pending,r#Running, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural132 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
+pub struct Structural115 { pub r#state: Structural116, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural135 { pub r#message: String, }
+pub struct Structural133 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural136 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -347,49 +359,51 @@ pub struct Structural138 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural139 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural140 { pub r#resource: String, }
+pub struct Structural140 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural141 { pub r#message: String, }
+pub struct Structural141 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural142 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural143 { pub r#value: String, }
+pub struct Structural143 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural144 { pub r#message: String, }
+pub struct Structural144 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural145 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural146 { pub r#value: String, }
+pub struct Structural146 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural147 { pub r#capability: String, }
+pub struct Structural147 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural148 { pub r#message: String, }
+pub struct Structural148 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural134 { r#Cancelled,r#Closed,r#Conflict(Structural135),r#Disconnected,r#Failed(Structural136),r#InvalidInput(Structural137),r#InvalidPath(Structural138),r#InvalidResponse(Structural139),r#NotFound(Structural140),r#PermissionDenied(Structural141),r#SchemaMismatch(Structural142),r#StaleReference(Structural143),r#SubscriptionCapacity,r#TransactionConflict(Structural144),r#Unauthenticated(Structural145),r#UnknownValue(Structural146),r#UnsupportedCapability(Structural147),r#UnsupportedSnapshotPolicy(Structural148), }
+pub struct Structural149 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural133 { pub r#call_id: String,pub r#error: Structural134, }
+pub enum Structural135 { r#Cancelled,r#Closed,r#Conflict(Structural136),r#Disconnected,r#Failed(Structural137),r#InvalidInput(Structural138),r#InvalidPath(Structural139),r#InvalidResponse(Structural140),r#NotFound(Structural141),r#PermissionDenied(Structural142),r#SchemaMismatch(Structural143),r#StaleReference(Structural144),r#SubscriptionCapacity,r#TransactionConflict(Structural145),r#Unauthenticated(Structural146),r#UnknownValue(Structural147),r#UnsupportedCapability(Structural148),r#UnsupportedSnapshotPolicy(Structural149), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural149 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
+pub struct Structural134 { pub r#call_id: String,pub r#error: Structural135, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural112 { r#Progress(Structural113),r#State(Structural114),r#ToolCall(Structural132),r#ToolFailed(Structural133),r#ToolResult(Structural149), }
+pub struct Structural150 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeExecutionUpdate1Type { pub r#execution_id: String,pub r#sequence: u64,pub r#session_id: String,pub r#update: Structural112, }
+pub enum Structural113 { r#Progress(Structural114),r#State(Structural115),r#ToolCall(Structural133),r#ToolFailed(Structural134),r#ToolResult(Structural150), }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct PhenixApplicationTypeExecutionUpdate1Type { pub r#execution_id: String,pub r#sequence: u64,pub r#session_id: String,pub r#update: Structural113, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeExecutionUpdate1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.execution-update@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub enum PhenixApplicationTypeMessageRole1Type { r#Assistant,r#User, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeMessageRole1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.message-role@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural151 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
+pub struct Structural152 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural152 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
+pub struct Structural153 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural153 { pub r#text: String, }
+pub struct Structural154 { pub r#text: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural150 { r#Image(Structural151),r#Resource(Structural152),r#Text(Structural153), }
+pub enum Structural151 { r#Image(Structural152),r#Resource(Structural153),r#Text(Structural154), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural154 { r#Assistant,r#User, }
+pub enum Structural155 { r#Assistant,r#User, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeMessage1Type { pub r#content: Vec<Structural150>,pub r#role: Structural154, }
+pub struct PhenixApplicationTypeMessage1Type { pub r#content: Vec<Structural151>,pub r#role: Structural155, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeMessage1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.message@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeModelInfo1Type { pub r#description: Option<String>,pub r#id: String,pub r#name: String, }
@@ -398,298 +412,298 @@ impl phenix_core::PhenixContract for PhenixApplicationTypeModelInfo1Type { fn co
 pub struct PhenixApplicationTypeModelSelectInput1Type { pub r#model_id: String,pub r#session_id: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeModelSelectInput1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.model-select-input@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural155 { pub r#description: Option<String>,pub r#id: String,pub r#name: String, }
+pub struct Structural156 { pub r#description: Option<String>,pub r#id: String,pub r#name: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeModels1Type { pub r#available: Vec<Structural155>,pub r#selected: Option<String>, }
+pub struct PhenixApplicationTypeModels1Type { pub r#available: Vec<Structural156>,pub r#selected: Option<String>, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeModels1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.models@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural158 { pub r#key: String, }
+pub struct Structural159 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural159 { pub r#index: u64, }
+pub struct Structural160 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural160 { pub r#key: String, }
+pub struct Structural161 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural157 { r#Field(Structural158),r#Index(Structural159),r#MapKey(Structural160),r#OptionPayload,r#VariantPayload, }
+pub enum Structural158 { r#Field(Structural159),r#Index(Structural160),r#MapKey(Structural161),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural156 { pub r#segments: Vec<Structural157>, }
+pub struct Structural157 { pub r#segments: Vec<Structural158>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableAddress1Type { pub r#path: Structural156,pub r#value_id: String, }
+pub struct PhenixApplicationTypeObservableAddress1Type { pub r#path: Structural157,pub r#value_id: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableAddress1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-address@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural165 { pub r#key: String, }
+pub struct Structural166 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural166 { pub r#index: u64, }
+pub struct Structural167 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural167 { pub r#key: String, }
+pub struct Structural168 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural164 { r#Field(Structural165),r#Index(Structural166),r#MapKey(Structural167),r#OptionPayload,r#VariantPayload, }
+pub enum Structural165 { r#Field(Structural166),r#Index(Structural167),r#MapKey(Structural168),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural163 { pub r#segments: Vec<Structural164>, }
+pub struct Structural164 { pub r#segments: Vec<Structural165>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural162 { pub r#path: Structural163, }
+pub struct Structural163 { pub r#path: Structural164, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural161 { pub r#change: Structural162, }
+pub struct Structural162 { pub r#change: Structural163, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural172 { pub r#key: String, }
+pub struct Structural173 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural173 { pub r#index: u64, }
+pub struct Structural174 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural174 { pub r#key: String, }
+pub struct Structural175 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural171 { r#Field(Structural172),r#Index(Structural173),r#MapKey(Structural174),r#OptionPayload,r#VariantPayload, }
+pub enum Structural172 { r#Field(Structural173),r#Index(Structural174),r#MapKey(Structural175),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural170 { pub r#segments: Vec<Structural171>, }
+pub struct Structural171 { pub r#segments: Vec<Structural172>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural169 { pub r#path: Structural170,pub r#value: phenix_core::PhenixValue, }
+pub struct Structural170 { pub r#path: Structural171,pub r#value: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural168 { pub r#change: Structural169, }
+pub struct Structural169 { pub r#change: Structural170, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural179 { pub r#key: String, }
+pub struct Structural180 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural180 { pub r#index: u64, }
+pub struct Structural181 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural181 { pub r#key: String, }
+pub struct Structural182 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural178 { r#Field(Structural179),r#Index(Structural180),r#MapKey(Structural181),r#OptionPayload,r#VariantPayload, }
+pub enum Structural179 { r#Field(Structural180),r#Index(Structural181),r#MapKey(Structural182),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural177 { pub r#segments: Vec<Structural178>, }
+pub struct Structural178 { pub r#segments: Vec<Structural179>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural176 { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural177,pub r#start: u64, }
+pub struct Structural177 { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural178,pub r#start: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural175 { pub r#change: Structural176, }
+pub struct Structural176 { pub r#change: Structural177, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum PhenixApplicationTypeObservableChange1Type { r#Remove(Structural161),r#Replace(Structural168),r#Splice(Structural175), }
+pub enum PhenixApplicationTypeObservableChange1Type { r#Remove(Structural162),r#Replace(Structural169),r#Splice(Structural176), }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableChange1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-change@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural185 { pub r#key: String, }
+pub struct Structural186 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural186 { pub r#index: u64, }
+pub struct Structural187 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural187 { pub r#key: String, }
+pub struct Structural188 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural184 { r#Field(Structural185),r#Index(Structural186),r#MapKey(Structural187),r#OptionPayload,r#VariantPayload, }
+pub enum Structural185 { r#Field(Structural186),r#Index(Structural187),r#MapKey(Structural188),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural183 { pub r#segments: Vec<Structural184>, }
+pub struct Structural184 { pub r#segments: Vec<Structural185>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural182 { pub r#path: Structural183,pub r#value_id: String, }
+pub struct Structural183 { pub r#path: Structural184,pub r#value_id: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural195 { pub r#key: String, }
+pub struct Structural196 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural196 { pub r#index: u64, }
+pub struct Structural197 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural197 { pub r#key: String, }
+pub struct Structural198 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural194 { r#Field(Structural195),r#Index(Structural196),r#MapKey(Structural197),r#OptionPayload,r#VariantPayload, }
+pub enum Structural195 { r#Field(Structural196),r#Index(Structural197),r#MapKey(Structural198),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural193 { pub r#segments: Vec<Structural194>, }
+pub struct Structural194 { pub r#segments: Vec<Structural195>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural192 { pub r#path: Structural193, }
+pub struct Structural193 { pub r#path: Structural194, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural191 { pub r#change: Structural192, }
+pub struct Structural192 { pub r#change: Structural193, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural202 { pub r#key: String, }
+pub struct Structural203 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural203 { pub r#index: u64, }
+pub struct Structural204 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural204 { pub r#key: String, }
+pub struct Structural205 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural201 { r#Field(Structural202),r#Index(Structural203),r#MapKey(Structural204),r#OptionPayload,r#VariantPayload, }
+pub enum Structural202 { r#Field(Structural203),r#Index(Structural204),r#MapKey(Structural205),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural200 { pub r#segments: Vec<Structural201>, }
+pub struct Structural201 { pub r#segments: Vec<Structural202>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural199 { pub r#path: Structural200,pub r#value: phenix_core::PhenixValue, }
+pub struct Structural200 { pub r#path: Structural201,pub r#value: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural198 { pub r#change: Structural199, }
+pub struct Structural199 { pub r#change: Structural200, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural209 { pub r#key: String, }
+pub struct Structural210 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural210 { pub r#index: u64, }
+pub struct Structural211 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural211 { pub r#key: String, }
+pub struct Structural212 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural208 { r#Field(Structural209),r#Index(Structural210),r#MapKey(Structural211),r#OptionPayload,r#VariantPayload, }
+pub enum Structural209 { r#Field(Structural210),r#Index(Structural211),r#MapKey(Structural212),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural207 { pub r#segments: Vec<Structural208>, }
+pub struct Structural208 { pub r#segments: Vec<Structural209>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural206 { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural207,pub r#start: u64, }
+pub struct Structural207 { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural208,pub r#start: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural205 { pub r#change: Structural206, }
+pub struct Structural206 { pub r#change: Structural207, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural190 { r#Remove(Structural191),r#Replace(Structural198),r#Splice(Structural205), }
+pub enum Structural191 { r#Remove(Structural192),r#Replace(Structural199),r#Splice(Structural206), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural189 { pub r#changes: Vec<Structural190>, }
+pub struct Structural190 { pub r#changes: Vec<Structural191>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural212 { pub r#value: phenix_core::PhenixValue, }
+pub struct Structural213 { pub r#value: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural188 { r#Diff(Structural189),r#Full(Structural212), }
+pub enum Structural189 { r#Diff(Structural190),r#Full(Structural213), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableDelivery1Type { pub r#address: Structural182,pub r#commit_id: Option<u64>,pub r#from_version: u64,pub r#generation: u64,pub r#payload: Structural188,pub r#subscription_id: u64,pub r#value_id: String,pub r#version: u64, }
+pub struct PhenixApplicationTypeObservableDelivery1Type { pub r#address: Structural183,pub r#commit_id: Option<u64>,pub r#from_version: u64,pub r#generation: u64,pub r#payload: Structural189,pub r#subscription_id: u64,pub r#value_id: String,pub r#version: u64, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableDelivery1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-delivery@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural215 { pub r#key: String, }
+pub struct Structural216 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural216 { pub r#index: u64, }
+pub struct Structural217 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural217 { pub r#key: String, }
+pub struct Structural218 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural214 { r#Field(Structural215),r#Index(Structural216),r#MapKey(Structural217),r#OptionPayload,r#VariantPayload, }
+pub enum Structural215 { r#Field(Structural216),r#Index(Structural217),r#MapKey(Structural218),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural213 { pub r#segments: Vec<Structural214>, }
+pub struct Structural214 { pub r#segments: Vec<Structural215>, }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Object218(pub phenix_core::ObjectRef);
-impl phenix_core::ValueCodec for Object218 { fn phenix_type() -> phenix_core::PhenixSchema { phenix_core::PhenixSchema::Object { contract: phenix_core::ContractId::parse("phenix.observable@1").expect("generated object contract is valid") } } fn to_value(&self) -> phenix_core::PhenixValue { phenix_core::PhenixValue::Object(self.0.clone()) } fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> { <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value { phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!("validated object value"), } } }
-impl From<&Object218> for phenix_core::PhenixValue { fn from(value: &Object218) -> Self { <Object218 as phenix_core::ValueCodec>::to_value(value) } }
-impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for Object218 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::from_value(value.0) } }
-impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for Object218 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::project_from_value(value.0) } }
+pub struct Object219(pub phenix_core::ObjectRef);
+impl phenix_core::ValueCodec for Object219 { fn phenix_type() -> phenix_core::PhenixSchema { phenix_core::PhenixSchema::Object { contract: phenix_core::ContractId::parse("phenix.observable@1").expect("generated object contract is valid") } } fn to_value(&self) -> phenix_core::PhenixValue { phenix_core::PhenixValue::Object(self.0.clone()) } fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> { <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value { phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!("validated object value"), } } }
+impl From<&Object219> for phenix_core::PhenixValue { fn from(value: &Object219) -> Self { <Object219 as phenix_core::ValueCodec>::to_value(value) } }
+impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for Object219 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::from_value(value.0) } }
+impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for Object219 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::project_from_value(value.0) } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableGetInput1Type { pub r#path: Structural213,pub r#reference: Object218, }
+pub struct PhenixApplicationTypeObservableGetInput1Type { pub r#path: Structural214,pub r#reference: Object219, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableGetInput1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-get-input@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub enum PhenixApplicationTypeObservableInitial1Type { r#Full,r#None, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableInitial1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-initial@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural222 { pub r#key: String, }
+pub struct Structural223 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural223 { pub r#index: u64, }
+pub struct Structural224 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural224 { pub r#key: String, }
+pub struct Structural225 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural221 { r#Field(Structural222),r#Index(Structural223),r#MapKey(Structural224),r#OptionPayload,r#VariantPayload, }
+pub enum Structural222 { r#Field(Structural223),r#Index(Structural224),r#MapKey(Structural225),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural220 { pub r#segments: Vec<Structural221>, }
+pub struct Structural221 { pub r#segments: Vec<Structural222>, }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Object225(pub phenix_core::ObjectRef);
-impl phenix_core::ValueCodec for Object225 { fn phenix_type() -> phenix_core::PhenixSchema { phenix_core::PhenixSchema::Object { contract: phenix_core::ContractId::parse("phenix.observable@1").expect("generated object contract is valid") } } fn to_value(&self) -> phenix_core::PhenixValue { phenix_core::PhenixValue::Object(self.0.clone()) } fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> { <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value { phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!("validated object value"), } } }
-impl From<&Object225> for phenix_core::PhenixValue { fn from(value: &Object225) -> Self { <Object225 as phenix_core::ValueCodec>::to_value(value) } }
-impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for Object225 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::from_value(value.0) } }
-impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for Object225 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::project_from_value(value.0) } }
+pub struct Object226(pub phenix_core::ObjectRef);
+impl phenix_core::ValueCodec for Object226 { fn phenix_type() -> phenix_core::PhenixSchema { phenix_core::PhenixSchema::Object { contract: phenix_core::ContractId::parse("phenix.observable@1").expect("generated object contract is valid") } } fn to_value(&self) -> phenix_core::PhenixValue { phenix_core::PhenixValue::Object(self.0.clone()) } fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> { <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value { phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!("validated object value"), } } }
+impl From<&Object226> for phenix_core::PhenixValue { fn from(value: &Object226) -> Self { <Object226 as phenix_core::ValueCodec>::to_value(value) } }
+impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for Object226 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::from_value(value.0) } }
+impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for Object226 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::project_from_value(value.0) } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural226 { r#CopyOnChange,r#CurrentOnly, }
+pub enum Structural227 { r#CopyOnChange,r#CurrentOnly, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural219 { pub r#binding_path: Vec<String>,pub r#namespace: String,pub r#path: Structural220,pub r#reference: Object225,pub r#resource: String,pub r#schema: phenix_core::PhenixValue,pub r#snapshot_policy: Structural226,pub r#value_id: String,pub r#version: u64, }
+pub struct Structural220 { pub r#binding_path: Vec<String>,pub r#namespace: String,pub r#path: Structural221,pub r#reference: Object226,pub r#resource: String,pub r#schema: phenix_core::PhenixValue,pub r#snapshot_policy: Structural227,pub r#value_id: String,pub r#version: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableList1Type { pub r#resources: Vec<Structural219>, }
+pub struct PhenixApplicationTypeObservableList1Type { pub r#resources: Vec<Structural220>, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableList1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-list@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub enum PhenixApplicationTypeObservableMode1Type { r#Diff,r#Full, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableMode1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-mode@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural227 { pub r#key: String, }
+pub struct Structural228 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural228 { pub r#index: u64, }
+pub struct Structural229 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural229 { pub r#key: String, }
+pub struct Structural230 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum PhenixApplicationTypeObservablePathSegment1Type { r#Field(Structural227),r#Index(Structural228),r#MapKey(Structural229),r#OptionPayload,r#VariantPayload, }
+pub enum PhenixApplicationTypeObservablePathSegment1Type { r#Field(Structural228),r#Index(Structural229),r#MapKey(Structural230),r#OptionPayload,r#VariantPayload, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservablePathSegment1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-path-segment@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural231 { pub r#key: String, }
+pub struct Structural232 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural232 { pub r#index: u64, }
+pub struct Structural233 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural233 { pub r#key: String, }
+pub struct Structural234 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural230 { r#Field(Structural231),r#Index(Structural232),r#MapKey(Structural233),r#OptionPayload,r#VariantPayload, }
+pub enum Structural231 { r#Field(Structural232),r#Index(Structural233),r#MapKey(Structural234),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservablePath1Type { pub r#segments: Vec<Structural230>, }
+pub struct PhenixApplicationTypeObservablePath1Type { pub r#segments: Vec<Structural231>, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservablePath1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-path@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural240 { pub r#key: String, }
+pub struct Structural241 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural241 { pub r#index: u64, }
+pub struct Structural242 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural242 { pub r#key: String, }
+pub struct Structural243 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural239 { r#Field(Structural240),r#Index(Structural241),r#MapKey(Structural242),r#OptionPayload,r#VariantPayload, }
+pub enum Structural240 { r#Field(Structural241),r#Index(Structural242),r#MapKey(Structural243),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural238 { pub r#segments: Vec<Structural239>, }
+pub struct Structural239 { pub r#segments: Vec<Structural240>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural237 { pub r#path: Structural238, }
+pub struct Structural238 { pub r#path: Structural239, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural236 { pub r#change: Structural237, }
+pub struct Structural237 { pub r#change: Structural238, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural247 { pub r#key: String, }
+pub struct Structural248 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural248 { pub r#index: u64, }
+pub struct Structural249 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural249 { pub r#key: String, }
+pub struct Structural250 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural246 { r#Field(Structural247),r#Index(Structural248),r#MapKey(Structural249),r#OptionPayload,r#VariantPayload, }
+pub enum Structural247 { r#Field(Structural248),r#Index(Structural249),r#MapKey(Structural250),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural245 { pub r#segments: Vec<Structural246>, }
+pub struct Structural246 { pub r#segments: Vec<Structural247>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural244 { pub r#path: Structural245,pub r#value: phenix_core::PhenixValue, }
+pub struct Structural245 { pub r#path: Structural246,pub r#value: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural243 { pub r#change: Structural244, }
+pub struct Structural244 { pub r#change: Structural245, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural254 { pub r#key: String, }
+pub struct Structural255 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural255 { pub r#index: u64, }
+pub struct Structural256 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural256 { pub r#key: String, }
+pub struct Structural257 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural253 { r#Field(Structural254),r#Index(Structural255),r#MapKey(Structural256),r#OptionPayload,r#VariantPayload, }
+pub enum Structural254 { r#Field(Structural255),r#Index(Structural256),r#MapKey(Structural257),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural252 { pub r#segments: Vec<Structural253>, }
+pub struct Structural253 { pub r#segments: Vec<Structural254>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural251 { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural252,pub r#start: u64, }
+pub struct Structural252 { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural253,pub r#start: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural250 { pub r#change: Structural251, }
+pub struct Structural251 { pub r#change: Structural252, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural235 { r#Remove(Structural236),r#Replace(Structural243),r#Splice(Structural250), }
+pub enum Structural236 { r#Remove(Structural237),r#Replace(Structural244),r#Splice(Structural251), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural234 { pub r#changes: Vec<Structural235>, }
+pub struct Structural235 { pub r#changes: Vec<Structural236>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural257 { pub r#value: phenix_core::PhenixValue, }
+pub struct Structural258 { pub r#value: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum PhenixApplicationTypeObservablePayload1Type { r#Diff(Structural234),r#Full(Structural257), }
+pub enum PhenixApplicationTypeObservablePayload1Type { r#Diff(Structural235),r#Full(Structural258), }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservablePayload1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-payload@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural260 { pub r#key: String, }
+pub struct Structural261 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural261 { pub r#index: u64, }
+pub struct Structural262 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural262 { pub r#key: String, }
+pub struct Structural263 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural259 { r#Field(Structural260),r#Index(Structural261),r#MapKey(Structural262),r#OptionPayload,r#VariantPayload, }
+pub enum Structural260 { r#Field(Structural261),r#Index(Structural262),r#MapKey(Structural263),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural258 { pub r#segments: Vec<Structural259>, }
+pub struct Structural259 { pub r#segments: Vec<Structural260>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableRemove1Type { pub r#path: Structural258, }
+pub struct PhenixApplicationTypeObservableRemove1Type { pub r#path: Structural259, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableRemove1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-remove@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural265 { pub r#key: String, }
+pub struct Structural266 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural266 { pub r#index: u64, }
+pub struct Structural267 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural267 { pub r#key: String, }
+pub struct Structural268 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural264 { r#Field(Structural265),r#Index(Structural266),r#MapKey(Structural267),r#OptionPayload,r#VariantPayload, }
+pub enum Structural265 { r#Field(Structural266),r#Index(Structural267),r#MapKey(Structural268),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural263 { pub r#segments: Vec<Structural264>, }
+pub struct Structural264 { pub r#segments: Vec<Structural265>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableReplace1Type { pub r#path: Structural263,pub r#value: phenix_core::PhenixValue, }
+pub struct PhenixApplicationTypeObservableReplace1Type { pub r#path: Structural264,pub r#value: phenix_core::PhenixValue, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableReplace1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-replace@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural270 { pub r#key: String, }
+pub struct Structural271 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural271 { pub r#index: u64, }
+pub struct Structural272 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural272 { pub r#key: String, }
+pub struct Structural273 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural269 { r#Field(Structural270),r#Index(Structural271),r#MapKey(Structural272),r#OptionPayload,r#VariantPayload, }
+pub enum Structural270 { r#Field(Structural271),r#Index(Structural272),r#MapKey(Structural273),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural268 { pub r#segments: Vec<Structural269>, }
+pub struct Structural269 { pub r#segments: Vec<Structural270>, }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Object273(pub phenix_core::ObjectRef);
-impl phenix_core::ValueCodec for Object273 { fn phenix_type() -> phenix_core::PhenixSchema { phenix_core::PhenixSchema::Object { contract: phenix_core::ContractId::parse("phenix.observable@1").expect("generated object contract is valid") } } fn to_value(&self) -> phenix_core::PhenixValue { phenix_core::PhenixValue::Object(self.0.clone()) } fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> { <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value { phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!("validated object value"), } } }
-impl From<&Object273> for phenix_core::PhenixValue { fn from(value: &Object273) -> Self { <Object273 as phenix_core::ValueCodec>::to_value(value) } }
-impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for Object273 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::from_value(value.0) } }
-impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for Object273 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::project_from_value(value.0) } }
+pub struct Object274(pub phenix_core::ObjectRef);
+impl phenix_core::ValueCodec for Object274 { fn phenix_type() -> phenix_core::PhenixSchema { phenix_core::PhenixSchema::Object { contract: phenix_core::ContractId::parse("phenix.observable@1").expect("generated object contract is valid") } } fn to_value(&self) -> phenix_core::PhenixValue { phenix_core::PhenixValue::Object(self.0.clone()) } fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> { <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value { phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!("validated object value"), } } }
+impl From<&Object274> for phenix_core::PhenixValue { fn from(value: &Object274) -> Self { <Object274 as phenix_core::ValueCodec>::to_value(value) } }
+impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for Object274 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::from_value(value.0) } }
+impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for Object274 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::project_from_value(value.0) } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural274 { r#CopyOnChange,r#CurrentOnly, }
+pub enum Structural275 { r#CopyOnChange,r#CurrentOnly, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableResource1Type { pub r#binding_path: Vec<String>,pub r#namespace: String,pub r#path: Structural268,pub r#reference: Object273,pub r#resource: String,pub r#schema: phenix_core::PhenixValue,pub r#snapshot_policy: Structural274,pub r#value_id: String,pub r#version: u64, }
+pub struct PhenixApplicationTypeObservableResource1Type { pub r#binding_path: Vec<String>,pub r#namespace: String,pub r#path: Structural269,pub r#reference: Object274,pub r#resource: String,pub r#schema: phenix_core::PhenixValue,pub r#snapshot_policy: Structural275,pub r#value_id: String,pub r#version: u64, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableResource1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-resource@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub enum PhenixApplicationTypeObservableScope1Type { r#Exact,r#Recursive, }
@@ -698,109 +712,109 @@ impl phenix_core::PhenixContract for PhenixApplicationTypeObservableScope1Type {
 pub enum PhenixApplicationTypeObservableSnapshotPolicy1Type { r#CopyOnChange,r#CurrentOnly, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableSnapshotPolicy1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-snapshot-policy@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural277 { pub r#key: String, }
+pub struct Structural278 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural278 { pub r#index: u64, }
+pub struct Structural279 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural279 { pub r#key: String, }
+pub struct Structural280 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural276 { r#Field(Structural277),r#Index(Structural278),r#MapKey(Structural279),r#OptionPayload,r#VariantPayload, }
+pub enum Structural277 { r#Field(Structural278),r#Index(Structural279),r#MapKey(Structural280),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural275 { pub r#segments: Vec<Structural276>, }
+pub struct Structural276 { pub r#segments: Vec<Structural277>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableSplice1Type { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural275,pub r#start: u64, }
+pub struct PhenixApplicationTypeObservableSplice1Type { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural276,pub r#start: u64, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableSplice1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-splice@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural280 { r#Full,r#None, }
+pub enum Structural281 { r#Full,r#None, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural281 { r#Diff,r#Full, }
+pub enum Structural282 { r#Diff,r#Full, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural284 { pub r#key: String, }
+pub struct Structural285 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural285 { pub r#index: u64, }
+pub struct Structural286 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural286 { pub r#key: String, }
+pub struct Structural287 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural283 { r#Field(Structural284),r#Index(Structural285),r#MapKey(Structural286),r#OptionPayload,r#VariantPayload, }
+pub enum Structural284 { r#Field(Structural285),r#Index(Structural286),r#MapKey(Structural287),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural282 { pub r#segments: Vec<Structural283>, }
+pub struct Structural283 { pub r#segments: Vec<Structural284>, }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Object287(pub phenix_core::ObjectRef);
-impl phenix_core::ValueCodec for Object287 { fn phenix_type() -> phenix_core::PhenixSchema { phenix_core::PhenixSchema::Object { contract: phenix_core::ContractId::parse("phenix.observable@1").expect("generated object contract is valid") } } fn to_value(&self) -> phenix_core::PhenixValue { phenix_core::PhenixValue::Object(self.0.clone()) } fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> { <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value { phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!("validated object value"), } } }
-impl From<&Object287> for phenix_core::PhenixValue { fn from(value: &Object287) -> Self { <Object287 as phenix_core::ValueCodec>::to_value(value) } }
-impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for Object287 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::from_value(value.0) } }
-impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for Object287 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::project_from_value(value.0) } }
+pub struct Object288(pub phenix_core::ObjectRef);
+impl phenix_core::ValueCodec for Object288 { fn phenix_type() -> phenix_core::PhenixSchema { phenix_core::PhenixSchema::Object { contract: phenix_core::ContractId::parse("phenix.observable@1").expect("generated object contract is valid") } } fn to_value(&self) -> phenix_core::PhenixValue { phenix_core::PhenixValue::Object(self.0.clone()) } fn from_value(value: &phenix_core::PhenixValue) -> Result<Self, phenix_core::ValueError> { <Self as phenix_core::ValueCodec>::phenix_type().parse(value)?; match value { phenix_core::PhenixValue::Object(reference) => Ok(Self(reference.clone())), _ => unreachable!("validated object value"), } } }
+impl From<&Object288> for phenix_core::PhenixValue { fn from(value: &Object288) -> Self { <Object288 as phenix_core::ValueCodec>::to_value(value) } }
+impl TryFrom<phenix_core::Exact<&phenix_core::PhenixValue>> for Object288 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Exact<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::from_value(value.0) } }
+impl TryFrom<phenix_core::Project<&phenix_core::PhenixValue>> for Object288 { type Error = phenix_core::ValueError; fn try_from(value: phenix_core::Project<&phenix_core::PhenixValue>) -> Result<Self, Self::Error> { <Self as phenix_core::ValueCodec>::project_from_value(value.0) } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural288 { r#Exact,r#Recursive, }
+pub enum Structural289 { r#Exact,r#Recursive, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableSubscribeInput1Type { pub r#initial: Structural280,pub r#mode: Structural281,pub r#path: Structural282,pub r#reference: Object287,pub r#scope: Structural288, }
+pub struct PhenixApplicationTypeObservableSubscribeInput1Type { pub r#initial: Structural281,pub r#mode: Structural282,pub r#path: Structural283,pub r#reference: Object288,pub r#scope: Structural289, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableSubscribeInput1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-subscribe-input@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural293 { pub r#key: String, }
+pub struct Structural294 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural294 { pub r#index: u64, }
+pub struct Structural295 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural295 { pub r#key: String, }
+pub struct Structural296 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural292 { r#Field(Structural293),r#Index(Structural294),r#MapKey(Structural295),r#OptionPayload,r#VariantPayload, }
+pub enum Structural293 { r#Field(Structural294),r#Index(Structural295),r#MapKey(Structural296),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural291 { pub r#segments: Vec<Structural292>, }
+pub struct Structural292 { pub r#segments: Vec<Structural293>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural290 { pub r#path: Structural291,pub r#value_id: String, }
+pub struct Structural291 { pub r#path: Structural292,pub r#value_id: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural303 { pub r#key: String, }
+pub struct Structural304 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural304 { pub r#index: u64, }
+pub struct Structural305 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural305 { pub r#key: String, }
+pub struct Structural306 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural302 { r#Field(Structural303),r#Index(Structural304),r#MapKey(Structural305),r#OptionPayload,r#VariantPayload, }
+pub enum Structural303 { r#Field(Structural304),r#Index(Structural305),r#MapKey(Structural306),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural301 { pub r#segments: Vec<Structural302>, }
+pub struct Structural302 { pub r#segments: Vec<Structural303>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural300 { pub r#path: Structural301, }
+pub struct Structural301 { pub r#path: Structural302, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural299 { pub r#change: Structural300, }
+pub struct Structural300 { pub r#change: Structural301, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural310 { pub r#key: String, }
+pub struct Structural311 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural311 { pub r#index: u64, }
+pub struct Structural312 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural312 { pub r#key: String, }
+pub struct Structural313 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural309 { r#Field(Structural310),r#Index(Structural311),r#MapKey(Structural312),r#OptionPayload,r#VariantPayload, }
+pub enum Structural310 { r#Field(Structural311),r#Index(Structural312),r#MapKey(Structural313),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural308 { pub r#segments: Vec<Structural309>, }
+pub struct Structural309 { pub r#segments: Vec<Structural310>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural307 { pub r#path: Structural308,pub r#value: phenix_core::PhenixValue, }
+pub struct Structural308 { pub r#path: Structural309,pub r#value: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural306 { pub r#change: Structural307, }
+pub struct Structural307 { pub r#change: Structural308, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural317 { pub r#key: String, }
+pub struct Structural318 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural318 { pub r#index: u64, }
+pub struct Structural319 { pub r#index: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural319 { pub r#key: String, }
+pub struct Structural320 { pub r#key: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural316 { r#Field(Structural317),r#Index(Structural318),r#MapKey(Structural319),r#OptionPayload,r#VariantPayload, }
+pub enum Structural317 { r#Field(Structural318),r#Index(Structural319),r#MapKey(Structural320),r#OptionPayload,r#VariantPayload, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural315 { pub r#segments: Vec<Structural316>, }
+pub struct Structural316 { pub r#segments: Vec<Structural317>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural314 { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural315,pub r#start: u64, }
+pub struct Structural315 { pub r#delete_count: u64,pub r#inserted: Vec<phenix_core::PhenixValue>,pub r#path: Structural316,pub r#start: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural313 { pub r#change: Structural314, }
+pub struct Structural314 { pub r#change: Structural315, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural298 { r#Remove(Structural299),r#Replace(Structural306),r#Splice(Structural313), }
+pub enum Structural299 { r#Remove(Structural300),r#Replace(Structural307),r#Splice(Structural314), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural297 { pub r#changes: Vec<Structural298>, }
+pub struct Structural298 { pub r#changes: Vec<Structural299>, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural320 { pub r#value: phenix_core::PhenixValue, }
+pub struct Structural321 { pub r#value: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural296 { r#Diff(Structural297),r#Full(Structural320), }
+pub enum Structural297 { r#Diff(Structural298),r#Full(Structural321), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural289 { pub r#address: Structural290,pub r#commit_id: Option<u64>,pub r#from_version: u64,pub r#generation: u64,pub r#payload: Structural296,pub r#subscription_id: u64,pub r#value_id: String,pub r#version: u64, }
+pub struct Structural290 { pub r#address: Structural291,pub r#commit_id: Option<u64>,pub r#from_version: u64,pub r#generation: u64,pub r#payload: Structural297,pub r#subscription_id: u64,pub r#value_id: String,pub r#version: u64, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeObservableSubscriptionResult1Type { pub r#generation: u64,pub r#initial: Option<Structural289>,pub r#subscription_id: u64, }
+pub struct PhenixApplicationTypeObservableSubscriptionResult1Type { pub r#generation: u64,pub r#initial: Option<Structural290>,pub r#subscription_id: u64, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeObservableSubscriptionResult1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.observable-subscription-result@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeObservableUnsubscribeInput1Type { pub r#generation: u64,pub r#subscription_id: u64, }
@@ -818,20 +832,20 @@ impl phenix_core::PhenixContract for PhenixApplicationTypePermissionRequest1Type
 pub enum PhenixApplicationTypePermissionResponse1Type { r#AllowOnce,r#Cancelled,r#Deny, }
 impl phenix_core::PhenixContract for PhenixApplicationTypePermissionResponse1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.permission-response@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural322 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
+pub struct Structural323 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural323 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
+pub struct Structural324 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural324 { pub r#text: String, }
+pub struct Structural325 { pub r#text: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural321 { r#Image(Structural322),r#Resource(Structural323),r#Text(Structural324), }
+pub enum Structural322 { r#Image(Structural323),r#Resource(Structural324),r#Text(Structural325), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypePromptInput1Type { pub r#content: Vec<Structural321>,pub r#session_id: String, }
+pub struct PhenixApplicationTypePromptInput1Type { pub r#content: Vec<Structural322>,pub r#session_id: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypePromptInput1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.prompt-input@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural325 { r#Cancelled,r#EndTurn,r#MaxTokens,r#Refused, }
+pub enum Structural326 { r#Cancelled,r#EndTurn,r#MaxTokens,r#Refused, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypePromptResult1Type { pub r#execution_id: String,pub r#stop_reason: Structural325, }
+pub struct PhenixApplicationTypePromptResult1Type { pub r#execution_id: String,pub r#stop_reason: Structural326, }
 impl phenix_core::PhenixContract for PhenixApplicationTypePromptResult1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.prompt-result@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeProvenance1Type { pub r#execution_id: String,pub r#inputs: Vec<String>,pub r#model_id: Option<String>,pub r#outputs: Vec<String>,pub r#routing_profile: Option<String>, }
@@ -840,9 +854,9 @@ impl phenix_core::PhenixContract for PhenixApplicationTypeProvenance1Type { fn c
 pub struct PhenixApplicationTypeRoutingInfo1Type { pub r#id: String,pub r#name: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeRoutingInfo1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.routing-info@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural326 { pub r#id: String,pub r#name: String, }
+pub struct Structural327 { pub r#id: String,pub r#name: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeRoutingProfiles1Type { pub r#available: Vec<Structural326>,pub r#selected: Option<String>, }
+pub struct PhenixApplicationTypeRoutingProfiles1Type { pub r#available: Vec<Structural327>,pub r#selected: Option<String>, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeRoutingProfiles1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.routing-profiles@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeRoutingSelectInput1Type { pub r#profile_id: String,pub r#session_id: String, }
@@ -851,15 +865,13 @@ impl phenix_core::PhenixContract for PhenixApplicationTypeRoutingSelectInput1Typ
 pub struct PhenixApplicationTypeSdkValue1Type { pub r#schema: phenix_core::PhenixValue,pub r#value: phenix_core::PhenixValue, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSdkValue1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.sdk-value@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural329 { r#Error,r#Info,r#Warning, }
+pub enum Structural330 { r#Error,r#Info,r#Warning, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural328 { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural329, }
+pub struct Structural329 { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural330, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural327 { pub r#diagnostic: Structural328, }
+pub struct Structural328 { pub r#diagnostic: Structural329, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural332 { pub r#fraction: Option<f64>,pub r#message: String, }
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural337 { pub r#message: String, }
+pub struct Structural333 { pub r#fraction: Option<f64>,pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural338 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -869,35 +881,35 @@ pub struct Structural340 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural341 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural342 { pub r#resource: String, }
+pub struct Structural342 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural343 { pub r#message: String, }
+pub struct Structural343 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural344 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural345 { pub r#value: String, }
+pub struct Structural345 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural346 { pub r#message: String, }
+pub struct Structural346 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural347 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural348 { pub r#value: String, }
+pub struct Structural348 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural349 { pub r#capability: String, }
+pub struct Structural349 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural350 { pub r#message: String, }
+pub struct Structural350 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural336 { r#Cancelled,r#Closed,r#Conflict(Structural337),r#Disconnected,r#Failed(Structural338),r#InvalidInput(Structural339),r#InvalidPath(Structural340),r#InvalidResponse(Structural341),r#NotFound(Structural342),r#PermissionDenied(Structural343),r#SchemaMismatch(Structural344),r#StaleReference(Structural345),r#SubscriptionCapacity,r#TransactionConflict(Structural346),r#Unauthenticated(Structural347),r#UnknownValue(Structural348),r#UnsupportedCapability(Structural349),r#UnsupportedSnapshotPolicy(Structural350), }
+pub struct Structural351 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural335 { pub r#error: Structural336, }
+pub enum Structural337 { r#Cancelled,r#Closed,r#Conflict(Structural338),r#Disconnected,r#Failed(Structural339),r#InvalidInput(Structural340),r#InvalidPath(Structural341),r#InvalidResponse(Structural342),r#NotFound(Structural343),r#PermissionDenied(Structural344),r#SchemaMismatch(Structural345),r#StaleReference(Structural346),r#SubscriptionCapacity,r#TransactionConflict(Structural347),r#Unauthenticated(Structural348),r#UnknownValue(Structural349),r#UnsupportedCapability(Structural350),r#UnsupportedSnapshotPolicy(Structural351), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural334 { r#Cancelled,r#Completed,r#Failed(Structural335),r#Pending,r#Running, }
+pub struct Structural336 { pub r#error: Structural337, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural333 { pub r#state: Structural334, }
+pub enum Structural335 { r#Cancelled,r#Completed,r#Failed(Structural336),r#Pending,r#Running, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural351 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
+pub struct Structural334 { pub r#state: Structural335, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural354 { pub r#message: String, }
+pub struct Structural352 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural355 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -907,53 +919,55 @@ pub struct Structural357 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural358 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural359 { pub r#resource: String, }
+pub struct Structural359 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural360 { pub r#message: String, }
+pub struct Structural360 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural361 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural362 { pub r#value: String, }
+pub struct Structural362 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural363 { pub r#message: String, }
+pub struct Structural363 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural364 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural365 { pub r#value: String, }
+pub struct Structural365 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural366 { pub r#capability: String, }
+pub struct Structural366 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural367 { pub r#message: String, }
+pub struct Structural367 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural353 { r#Cancelled,r#Closed,r#Conflict(Structural354),r#Disconnected,r#Failed(Structural355),r#InvalidInput(Structural356),r#InvalidPath(Structural357),r#InvalidResponse(Structural358),r#NotFound(Structural359),r#PermissionDenied(Structural360),r#SchemaMismatch(Structural361),r#StaleReference(Structural362),r#SubscriptionCapacity,r#TransactionConflict(Structural363),r#Unauthenticated(Structural364),r#UnknownValue(Structural365),r#UnsupportedCapability(Structural366),r#UnsupportedSnapshotPolicy(Structural367), }
+pub struct Structural368 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural352 { pub r#call_id: String,pub r#error: Structural353, }
+pub enum Structural354 { r#Cancelled,r#Closed,r#Conflict(Structural355),r#Disconnected,r#Failed(Structural356),r#InvalidInput(Structural357),r#InvalidPath(Structural358),r#InvalidResponse(Structural359),r#NotFound(Structural360),r#PermissionDenied(Structural361),r#SchemaMismatch(Structural362),r#StaleReference(Structural363),r#SubscriptionCapacity,r#TransactionConflict(Structural364),r#Unauthenticated(Structural365),r#UnknownValue(Structural366),r#UnsupportedCapability(Structural367),r#UnsupportedSnapshotPolicy(Structural368), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural368 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
+pub struct Structural353 { pub r#call_id: String,pub r#error: Structural354, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural331 { r#Progress(Structural332),r#State(Structural333),r#ToolCall(Structural351),r#ToolFailed(Structural352),r#ToolResult(Structural368), }
+pub struct Structural369 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural330 { pub r#execution_id: String,pub r#update: Structural331, }
+pub enum Structural332 { r#Progress(Structural333),r#State(Structural334),r#ToolCall(Structural352),r#ToolFailed(Structural353),r#ToolResult(Structural369), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural372 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
+pub struct Structural331 { pub r#execution_id: String,pub r#update: Structural332, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural373 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
+pub struct Structural373 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural374 { pub r#text: String, }
+pub struct Structural374 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural371 { r#Image(Structural372),r#Resource(Structural373),r#Text(Structural374), }
+pub struct Structural375 { pub r#text: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural375 { r#Assistant,r#User, }
+pub enum Structural372 { r#Image(Structural373),r#Resource(Structural374),r#Text(Structural375), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural370 { pub r#content: Vec<Structural371>,pub r#role: Structural375, }
+pub enum Structural376 { r#Assistant,r#User, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural369 { pub r#message: Structural370, }
+pub struct Structural371 { pub r#content: Vec<Structural372>,pub r#role: Structural376, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural376 { pub r#title: String, }
+pub struct Structural370 { pub r#message: Structural371, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural377 { pub r#execution_id: String,pub r#text: String, }
+pub struct Structural377 { pub r#title: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum PhenixApplicationTypeSessionChange1Type { r#Closed,r#Diagnostic(Structural327),r#Execution(Structural330),r#Message(Structural369),r#Renamed(Structural376),r#TextDelta(Structural377), }
+pub struct Structural378 { pub r#execution_id: String,pub r#text: String, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub enum PhenixApplicationTypeSessionChange1Type { r#Closed,r#Diagnostic(Structural328),r#Execution(Structural331),r#Message(Structural370),r#Renamed(Structural377),r#TextDelta(Structural378), }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSessionChange1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.session-change@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeSessionCreateInput1Type { pub r#title: Option<String>,pub r#working_directory: String, }
@@ -968,9 +982,9 @@ impl phenix_core::PhenixContract for PhenixApplicationTypeSessionInput1Type { fn
 pub struct PhenixApplicationTypeSessionLineage1Type { pub r#children: Vec<String>,pub r#parent: Option<String>,pub r#session_id: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSessionLineage1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.session-lineage@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural378 { pub r#session_id: String,pub r#title: Option<String>,pub r#working_directory: String, }
+pub struct Structural379 { pub r#session_id: String,pub r#title: Option<String>,pub r#working_directory: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeSessionList1Type { pub r#next_cursor: Option<String>,pub r#sessions: Vec<Structural378>, }
+pub struct PhenixApplicationTypeSessionList1Type { pub r#next_cursor: Option<String>,pub r#sessions: Vec<Structural379>, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSessionList1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.session-list@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct PhenixApplicationTypeSessionRenameInput1Type { pub r#session_id: String,pub r#title: String, }
@@ -979,17 +993,15 @@ impl phenix_core::PhenixContract for PhenixApplicationTypeSessionRenameInput1Typ
 pub struct PhenixApplicationTypeSessionResumeInput1Type { pub r#after_sequence: Option<u64>,pub r#session_id: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSessionResumeInput1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.session-resume-input@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural379 { pub r#session_id: String,pub r#title: Option<String>,pub r#working_directory: String, }
+pub struct Structural380 { pub r#session_id: String,pub r#title: Option<String>,pub r#working_directory: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural384 { r#Error,r#Info,r#Warning, }
+pub enum Structural385 { r#Error,r#Info,r#Warning, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural383 { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural384, }
+pub struct Structural384 { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural385, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural382 { pub r#diagnostic: Structural383, }
+pub struct Structural383 { pub r#diagnostic: Structural384, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural387 { pub r#fraction: Option<f64>,pub r#message: String, }
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural392 { pub r#message: String, }
+pub struct Structural388 { pub r#fraction: Option<f64>,pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural393 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -999,35 +1011,35 @@ pub struct Structural395 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural396 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural397 { pub r#resource: String, }
+pub struct Structural397 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural398 { pub r#message: String, }
+pub struct Structural398 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural399 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural400 { pub r#value: String, }
+pub struct Structural400 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural401 { pub r#message: String, }
+pub struct Structural401 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural402 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural403 { pub r#value: String, }
+pub struct Structural403 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural404 { pub r#capability: String, }
+pub struct Structural404 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural405 { pub r#message: String, }
+pub struct Structural405 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural391 { r#Cancelled,r#Closed,r#Conflict(Structural392),r#Disconnected,r#Failed(Structural393),r#InvalidInput(Structural394),r#InvalidPath(Structural395),r#InvalidResponse(Structural396),r#NotFound(Structural397),r#PermissionDenied(Structural398),r#SchemaMismatch(Structural399),r#StaleReference(Structural400),r#SubscriptionCapacity,r#TransactionConflict(Structural401),r#Unauthenticated(Structural402),r#UnknownValue(Structural403),r#UnsupportedCapability(Structural404),r#UnsupportedSnapshotPolicy(Structural405), }
+pub struct Structural406 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural390 { pub r#error: Structural391, }
+pub enum Structural392 { r#Cancelled,r#Closed,r#Conflict(Structural393),r#Disconnected,r#Failed(Structural394),r#InvalidInput(Structural395),r#InvalidPath(Structural396),r#InvalidResponse(Structural397),r#NotFound(Structural398),r#PermissionDenied(Structural399),r#SchemaMismatch(Structural400),r#StaleReference(Structural401),r#SubscriptionCapacity,r#TransactionConflict(Structural402),r#Unauthenticated(Structural403),r#UnknownValue(Structural404),r#UnsupportedCapability(Structural405),r#UnsupportedSnapshotPolicy(Structural406), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural389 { r#Cancelled,r#Completed,r#Failed(Structural390),r#Pending,r#Running, }
+pub struct Structural391 { pub r#error: Structural392, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural388 { pub r#state: Structural389, }
+pub enum Structural390 { r#Cancelled,r#Completed,r#Failed(Structural391),r#Pending,r#Running, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural406 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
+pub struct Structural389 { pub r#state: Structural390, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural409 { pub r#message: String, }
+pub struct Structural407 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural410 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -1037,68 +1049,68 @@ pub struct Structural412 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural413 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural414 { pub r#resource: String, }
+pub struct Structural414 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural415 { pub r#message: String, }
+pub struct Structural415 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural416 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural417 { pub r#value: String, }
+pub struct Structural417 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural418 { pub r#message: String, }
+pub struct Structural418 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural419 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural420 { pub r#value: String, }
+pub struct Structural420 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural421 { pub r#capability: String, }
+pub struct Structural421 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural422 { pub r#message: String, }
+pub struct Structural422 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural408 { r#Cancelled,r#Closed,r#Conflict(Structural409),r#Disconnected,r#Failed(Structural410),r#InvalidInput(Structural411),r#InvalidPath(Structural412),r#InvalidResponse(Structural413),r#NotFound(Structural414),r#PermissionDenied(Structural415),r#SchemaMismatch(Structural416),r#StaleReference(Structural417),r#SubscriptionCapacity,r#TransactionConflict(Structural418),r#Unauthenticated(Structural419),r#UnknownValue(Structural420),r#UnsupportedCapability(Structural421),r#UnsupportedSnapshotPolicy(Structural422), }
+pub struct Structural423 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural407 { pub r#call_id: String,pub r#error: Structural408, }
+pub enum Structural409 { r#Cancelled,r#Closed,r#Conflict(Structural410),r#Disconnected,r#Failed(Structural411),r#InvalidInput(Structural412),r#InvalidPath(Structural413),r#InvalidResponse(Structural414),r#NotFound(Structural415),r#PermissionDenied(Structural416),r#SchemaMismatch(Structural417),r#StaleReference(Structural418),r#SubscriptionCapacity,r#TransactionConflict(Structural419),r#Unauthenticated(Structural420),r#UnknownValue(Structural421),r#UnsupportedCapability(Structural422),r#UnsupportedSnapshotPolicy(Structural423), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural423 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
+pub struct Structural408 { pub r#call_id: String,pub r#error: Structural409, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural386 { r#Progress(Structural387),r#State(Structural388),r#ToolCall(Structural406),r#ToolFailed(Structural407),r#ToolResult(Structural423), }
+pub struct Structural424 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural385 { pub r#execution_id: String,pub r#update: Structural386, }
+pub enum Structural387 { r#Progress(Structural388),r#State(Structural389),r#ToolCall(Structural407),r#ToolFailed(Structural408),r#ToolResult(Structural424), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural427 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
+pub struct Structural386 { pub r#execution_id: String,pub r#update: Structural387, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural428 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
+pub struct Structural428 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural429 { pub r#text: String, }
+pub struct Structural429 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural426 { r#Image(Structural427),r#Resource(Structural428),r#Text(Structural429), }
+pub struct Structural430 { pub r#text: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural430 { r#Assistant,r#User, }
+pub enum Structural427 { r#Image(Structural428),r#Resource(Structural429),r#Text(Structural430), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural425 { pub r#content: Vec<Structural426>,pub r#role: Structural430, }
+pub enum Structural431 { r#Assistant,r#User, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural424 { pub r#message: Structural425, }
+pub struct Structural426 { pub r#content: Vec<Structural427>,pub r#role: Structural431, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural431 { pub r#title: String, }
+pub struct Structural425 { pub r#message: Structural426, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural432 { pub r#execution_id: String,pub r#text: String, }
+pub struct Structural432 { pub r#title: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural381 { r#Closed,r#Diagnostic(Structural382),r#Execution(Structural385),r#Message(Structural424),r#Renamed(Structural431),r#TextDelta(Structural432), }
+pub struct Structural433 { pub r#execution_id: String,pub r#text: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural380 { pub r#sequence: u64,pub r#session_id: String,pub r#update: Structural381, }
+pub enum Structural382 { r#Closed,r#Diagnostic(Structural383),r#Execution(Structural386),r#Message(Structural425),r#Renamed(Structural432),r#TextDelta(Structural433), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeSessionSnapshot1Type { pub r#session: Structural379,pub r#through_sequence: u64,pub r#updates: Vec<Structural380>, }
+pub struct Structural381 { pub r#sequence: u64,pub r#session_id: String,pub r#update: Structural382, }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct PhenixApplicationTypeSessionSnapshot1Type { pub r#session: Structural380,pub r#through_sequence: u64,pub r#updates: Vec<Structural381>, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSessionSnapshot1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.session-snapshot@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural436 { r#Error,r#Info,r#Warning, }
+pub enum Structural437 { r#Error,r#Info,r#Warning, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural435 { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural436, }
+pub struct Structural436 { pub r#code: String,pub r#message: String,pub r#resource: Option<String>,pub r#severity: Structural437, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural434 { pub r#diagnostic: Structural435, }
+pub struct Structural435 { pub r#diagnostic: Structural436, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural439 { pub r#fraction: Option<f64>,pub r#message: String, }
-#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural444 { pub r#message: String, }
+pub struct Structural440 { pub r#fraction: Option<f64>,pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural445 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -1108,35 +1120,35 @@ pub struct Structural447 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural448 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural449 { pub r#resource: String, }
+pub struct Structural449 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural450 { pub r#message: String, }
+pub struct Structural450 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural451 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural452 { pub r#value: String, }
+pub struct Structural452 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural453 { pub r#message: String, }
+pub struct Structural453 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural454 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural455 { pub r#value: String, }
+pub struct Structural455 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural456 { pub r#capability: String, }
+pub struct Structural456 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural457 { pub r#message: String, }
+pub struct Structural457 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural443 { r#Cancelled,r#Closed,r#Conflict(Structural444),r#Disconnected,r#Failed(Structural445),r#InvalidInput(Structural446),r#InvalidPath(Structural447),r#InvalidResponse(Structural448),r#NotFound(Structural449),r#PermissionDenied(Structural450),r#SchemaMismatch(Structural451),r#StaleReference(Structural452),r#SubscriptionCapacity,r#TransactionConflict(Structural453),r#Unauthenticated(Structural454),r#UnknownValue(Structural455),r#UnsupportedCapability(Structural456),r#UnsupportedSnapshotPolicy(Structural457), }
+pub struct Structural458 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural442 { pub r#error: Structural443, }
+pub enum Structural444 { r#Cancelled,r#Closed,r#Conflict(Structural445),r#Disconnected,r#Failed(Structural446),r#InvalidInput(Structural447),r#InvalidPath(Structural448),r#InvalidResponse(Structural449),r#NotFound(Structural450),r#PermissionDenied(Structural451),r#SchemaMismatch(Structural452),r#StaleReference(Structural453),r#SubscriptionCapacity,r#TransactionConflict(Structural454),r#Unauthenticated(Structural455),r#UnknownValue(Structural456),r#UnsupportedCapability(Structural457),r#UnsupportedSnapshotPolicy(Structural458), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural441 { r#Cancelled,r#Completed,r#Failed(Structural442),r#Pending,r#Running, }
+pub struct Structural443 { pub r#error: Structural444, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural440 { pub r#state: Structural441, }
+pub enum Structural442 { r#Cancelled,r#Completed,r#Failed(Structural443),r#Pending,r#Running, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural458 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
+pub struct Structural441 { pub r#state: Structural442, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural461 { pub r#message: String, }
+pub struct Structural459 { pub r#call_id: String,pub r#callable_id: String,pub r#input: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural462 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
@@ -1146,55 +1158,57 @@ pub struct Structural464 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural465 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural466 { pub r#resource: String, }
+pub struct Structural466 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural467 { pub r#message: String, }
+pub struct Structural467 { pub r#resource: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural468 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural469 { pub r#value: String, }
+pub struct Structural469 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural470 { pub r#message: String, }
+pub struct Structural470 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub struct Structural471 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural472 { pub r#value: String, }
+pub struct Structural472 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural473 { pub r#capability: String, }
+pub struct Structural473 { pub r#value: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural474 { pub r#message: String, }
+pub struct Structural474 { pub r#capability: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural460 { r#Cancelled,r#Closed,r#Conflict(Structural461),r#Disconnected,r#Failed(Structural462),r#InvalidInput(Structural463),r#InvalidPath(Structural464),r#InvalidResponse(Structural465),r#NotFound(Structural466),r#PermissionDenied(Structural467),r#SchemaMismatch(Structural468),r#StaleReference(Structural469),r#SubscriptionCapacity,r#TransactionConflict(Structural470),r#Unauthenticated(Structural471),r#UnknownValue(Structural472),r#UnsupportedCapability(Structural473),r#UnsupportedSnapshotPolicy(Structural474), }
+pub struct Structural475 { pub r#message: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural459 { pub r#call_id: String,pub r#error: Structural460, }
+pub enum Structural461 { r#Cancelled,r#Closed,r#Conflict(Structural462),r#Disconnected,r#Failed(Structural463),r#InvalidInput(Structural464),r#InvalidPath(Structural465),r#InvalidResponse(Structural466),r#NotFound(Structural467),r#PermissionDenied(Structural468),r#SchemaMismatch(Structural469),r#StaleReference(Structural470),r#SubscriptionCapacity,r#TransactionConflict(Structural471),r#Unauthenticated(Structural472),r#UnknownValue(Structural473),r#UnsupportedCapability(Structural474),r#UnsupportedSnapshotPolicy(Structural475), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural475 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
+pub struct Structural460 { pub r#call_id: String,pub r#error: Structural461, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural438 { r#Progress(Structural439),r#State(Structural440),r#ToolCall(Structural458),r#ToolFailed(Structural459),r#ToolResult(Structural475), }
+pub struct Structural476 { pub r#call_id: String,pub r#output: phenix_core::PhenixValue, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural437 { pub r#execution_id: String,pub r#update: Structural438, }
+pub enum Structural439 { r#Progress(Structural440),r#State(Structural441),r#ToolCall(Structural459),r#ToolFailed(Structural460),r#ToolResult(Structural476), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural479 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
+pub struct Structural438 { pub r#execution_id: String,pub r#update: Structural439, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural480 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
+pub struct Structural480 { pub r#data: phenix_core::Bytes,pub r#mime_type: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural481 { pub r#text: String, }
+pub struct Structural481 { pub r#mime_type: Option<String>,pub r#text: Option<String>,pub r#uri: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural478 { r#Image(Structural479),r#Resource(Structural480),r#Text(Structural481), }
+pub struct Structural482 { pub r#text: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural482 { r#Assistant,r#User, }
+pub enum Structural479 { r#Image(Structural480),r#Resource(Structural481),r#Text(Structural482), }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural477 { pub r#content: Vec<Structural478>,pub r#role: Structural482, }
+pub enum Structural483 { r#Assistant,r#User, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural476 { pub r#message: Structural477, }
+pub struct Structural478 { pub r#content: Vec<Structural479>,pub r#role: Structural483, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural483 { pub r#title: String, }
+pub struct Structural477 { pub r#message: Structural478, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural484 { pub r#execution_id: String,pub r#text: String, }
+pub struct Structural484 { pub r#title: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub enum Structural433 { r#Closed,r#Diagnostic(Structural434),r#Execution(Structural437),r#Message(Structural476),r#Renamed(Structural483),r#TextDelta(Structural484), }
+pub struct Structural485 { pub r#execution_id: String,pub r#text: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeSessionUpdate1Type { pub r#sequence: u64,pub r#session_id: String,pub r#update: Structural433, }
+pub enum Structural434 { r#Closed,r#Diagnostic(Structural435),r#Execution(Structural438),r#Message(Structural477),r#Renamed(Structural484),r#TextDelta(Structural485), }
+#[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
+pub struct PhenixApplicationTypeSessionUpdate1Type { pub r#sequence: u64,pub r#session_id: String,pub r#update: Structural434, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSessionUpdate1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.session-update@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub enum PhenixApplicationTypeSeverity1Type { r#Error,r#Info,r#Warning, }
@@ -1206,9 +1220,9 @@ impl phenix_core::PhenixContract for PhenixApplicationTypeSkillActivateInput1Typ
 pub struct PhenixApplicationTypeSkillInfo1Type { pub r#active: bool,pub r#description: String,pub r#id: String,pub r#name: String, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSkillInfo1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.skill-info@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct Structural485 { pub r#active: bool,pub r#description: String,pub r#id: String,pub r#name: String, }
+pub struct Structural486 { pub r#active: bool,pub r#description: String,pub r#id: String,pub r#name: String, }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
-pub struct PhenixApplicationTypeSkills1Type { pub r#skills: Vec<Structural485>, }
+pub struct PhenixApplicationTypeSkills1Type { pub r#skills: Vec<Structural486>, }
 impl phenix_core::PhenixContract for PhenixApplicationTypeSkills1Type { fn contract_id() -> phenix_core::ContractId { phenix_core::ContractId::parse("phenix.application.type.skills@1").expect("generated contract id is valid") } }
 #[derive(Clone, Debug, PartialEq, phenix_sdk_macros::PhenixValue)]
 pub enum PhenixApplicationTypeStopReason1Type { r#Cancelled,r#EndTurn,r#MaxTokens,r#Refused, }
@@ -1227,6 +1241,10 @@ pub fn type_schemas() -> std::collections::BTreeMap<phenix_core::ContractId, phe
 (<PhenixApplicationTypeCapabilityInvokeInput1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeCapabilityInvokeInput1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
 (<PhenixApplicationTypeCapabilityInvokeResult1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeCapabilityInvokeResult1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
 (<PhenixApplicationTypeCapabilityList1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeCapabilityList1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
+(<PhenixApplicationTypeClientToolAddInput1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeClientToolAddInput1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
+(<PhenixApplicationTypeClientToolAdmission1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeClientToolAdmission1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
+(<PhenixApplicationTypeClientToolDefinition1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeClientToolDefinition1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
+(<PhenixApplicationTypeClientToolRemoveInput1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeClientToolRemoveInput1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
 (<PhenixApplicationTypeContent1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeContent1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
 (<PhenixApplicationTypeDiagnostic1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeDiagnostic1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
 (<PhenixApplicationTypeDiagnostics1Type as phenix_core::PhenixContract>::contract_id(), <PhenixApplicationTypeDiagnostics1Type as phenix_core::HasPhenixSchema>::phenix_schema()),
@@ -1311,6 +1329,12 @@ impl PhenixApplicationCapabilities1Operation { pub async fn invoke<T: phenix_app
 pub struct PhenixApplicationCapabilityInvoke1Operation;
 impl phenix_application_interface::Operation for PhenixApplicationCapabilityInvoke1Operation { const ID: &'static str = "phenix.application.capability-invoke@1"; const CAPABILITY: &'static str = "phenix.application.capability.capabilities@1"; type Input = PhenixApplicationTypeCapabilityInvokeInput1Type; type Output = PhenixApplicationTypeCapabilityInvokeResult1Type; }
 impl PhenixApplicationCapabilityInvoke1Operation { pub async fn invoke<T: phenix_application_interface::ApplicationTransport>(client: &phenix_application_interface::ApplicationClient<T>, input: PhenixApplicationTypeCapabilityInvokeInput1Type) -> Result<PhenixApplicationTypeCapabilityInvokeResult1Type, phenix_application_interface::types::ApplicationError> { client.invoke::<Self>(input).await } }
+pub struct PhenixApplicationClientToolAdd1Operation;
+impl phenix_application_interface::Operation for PhenixApplicationClientToolAdd1Operation { const ID: &'static str = "phenix.application.client-tool-add@1"; const CAPABILITY: &'static str = "phenix.application.capability.client-tools@1"; type Input = PhenixApplicationTypeClientToolAddInput1Type; type Output = PhenixApplicationTypeClientToolAdmission1Type; }
+impl PhenixApplicationClientToolAdd1Operation { pub async fn invoke<T: phenix_application_interface::ApplicationTransport>(client: &phenix_application_interface::ApplicationClient<T>, input: PhenixApplicationTypeClientToolAddInput1Type) -> Result<PhenixApplicationTypeClientToolAdmission1Type, phenix_application_interface::types::ApplicationError> { client.invoke::<Self>(input).await } }
+pub struct PhenixApplicationClientToolRemove1Operation;
+impl phenix_application_interface::Operation for PhenixApplicationClientToolRemove1Operation { const ID: &'static str = "phenix.application.client-tool-remove@1"; const CAPABILITY: &'static str = "phenix.application.capability.client-tools@1"; type Input = PhenixApplicationTypeClientToolRemoveInput1Type; type Output = PhenixApplicationTypeAcknowledged1Type; }
+impl PhenixApplicationClientToolRemove1Operation { pub async fn invoke<T: phenix_application_interface::ApplicationTransport>(client: &phenix_application_interface::ApplicationClient<T>, input: PhenixApplicationTypeClientToolRemoveInput1Type) -> Result<PhenixApplicationTypeAcknowledged1Type, phenix_application_interface::types::ApplicationError> { client.invoke::<Self>(input).await } }
 pub struct PhenixApplicationDiagnostics1Operation;
 impl phenix_application_interface::Operation for PhenixApplicationDiagnostics1Operation { const ID: &'static str = "phenix.application.diagnostics@1"; const CAPABILITY: &'static str = "phenix.application.capability.diagnostics@1"; type Input = PhenixApplicationTypeEmpty1Type; type Output = PhenixApplicationTypeDiagnostics1Type; }
 impl PhenixApplicationDiagnostics1Operation { pub async fn invoke<T: phenix_application_interface::ApplicationTransport>(client: &phenix_application_interface::ApplicationClient<T>, input: PhenixApplicationTypeEmpty1Type) -> Result<PhenixApplicationTypeDiagnostics1Type, phenix_application_interface::types::ApplicationError> { client.invoke::<Self>(input).await } }
@@ -1395,6 +1419,7 @@ pub const PHENIXAPPLICATIONPERMISSION1CALLBACKRESPONSE: &str = "phenix.applicati
 pub struct PhenixApplicationCapabilityAuthentication1Capability; impl PhenixApplicationCapabilityAuthentication1Capability { pub const ID: &'static str = "phenix.application.capability.authentication@1"; }
 pub struct PhenixApplicationCapabilityCallables1Capability; impl PhenixApplicationCapabilityCallables1Capability { pub const ID: &'static str = "phenix.application.capability.callables@1"; }
 pub struct PhenixApplicationCapabilityCapabilities1Capability; impl PhenixApplicationCapabilityCapabilities1Capability { pub const ID: &'static str = "phenix.application.capability.capabilities@1"; }
+pub struct PhenixApplicationCapabilityClientTools1Capability; impl PhenixApplicationCapabilityClientTools1Capability { pub const ID: &'static str = "phenix.application.capability.client-tools@1"; }
 pub struct PhenixApplicationCapabilityDiagnostics1Capability; impl PhenixApplicationCapabilityDiagnostics1Capability { pub const ID: &'static str = "phenix.application.capability.diagnostics@1"; }
 pub struct PhenixApplicationCapabilityDiscovery1Capability; impl PhenixApplicationCapabilityDiscovery1Capability { pub const ID: &'static str = "phenix.application.capability.discovery@1"; }
 pub struct PhenixApplicationCapabilityElicitation1Capability; impl PhenixApplicationCapabilityElicitation1Capability { pub const ID: &'static str = "phenix.application.capability.elicitation@1"; }

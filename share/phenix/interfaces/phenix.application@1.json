@@ -43,6 +43,18 @@
       "error": "phenix.application.error@1",
       "capability": "phenix.application.capability.capabilities@1"
     },
+    "phenix.application.client-tool-add@1": {
+      "input": "phenix.application.type.client-tool-add-input@1",
+      "output": "phenix.application.type.client-tool-admission@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.client-tools@1"
+    },
+    "phenix.application.client-tool-remove@1": {
+      "input": "phenix.application.type.client-tool-remove-input@1",
+      "output": "phenix.application.type.acknowledged@1",
+      "error": "phenix.application.error@1",
+      "capability": "phenix.application.capability.client-tools@1"
+    },
     "phenix.application.diagnostics@1": {
       "input": "phenix.application.type.empty@1",
       "output": "phenix.application.type.diagnostics@1",
@@ -221,6 +233,12 @@
     "phenix.application.capability.capabilities@1": {
       "dependencies": [
         "phenix.application.capability.discovery@1"
+      ]
+    },
+    "phenix.application.capability.client-tools@1": {
+      "dependencies": [
+        "phenix.application.capability.capabilities@1",
+        "phenix.application.capability.sessions@1"
       ]
     },
     "phenix.application.capability.diagnostics@1": {
@@ -601,6 +619,94 @@
           }
         },
         "interface": {
+          "type": "string"
+        }
+      }
+    },
+    "phenix.application.type.client-tool-add-input@1": {
+      "type": "table",
+      "value": {
+        "session_id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "table",
+          "value": {
+            "capabilities": {
+              "type": "list",
+              "value": {
+                "type": "string"
+              }
+            },
+            "description": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "input": {
+              "type": "any"
+            },
+            "invoke": {
+              "type": "any"
+            },
+            "output": {
+              "type": "any"
+            },
+            "requires_permission": {
+              "type": "bool"
+            }
+          }
+        }
+      }
+    },
+    "phenix.application.type.client-tool-admission@1": {
+      "type": "table",
+      "value": {
+        "admission_id": {
+          "type": "string"
+        },
+        "callable_id": {
+          "type": "string"
+        }
+      }
+    },
+    "phenix.application.type.client-tool-definition@1": {
+      "type": "table",
+      "value": {
+        "capabilities": {
+          "type": "list",
+          "value": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "type": "any"
+        },
+        "invoke": {
+          "type": "any"
+        },
+        "output": {
+          "type": "any"
+        },
+        "requires_permission": {
+          "type": "bool"
+        }
+      }
+    },
+    "phenix.application.type.client-tool-remove-input@1": {
+      "type": "table",
+      "value": {
+        "admission_id": {
+          "type": "string"
+        },
+        "session_id": {
           "type": "string"
         }
       }

@@ -6,6 +6,8 @@
 //! background thread. Lua applications poll request handles to receive results
 //! and ordered updates, so the binding never invokes a host event loop itself.
 
+mod tools;
+
 use agent_client_protocol::schema::v1::{
     CancelNotification, CloseSessionRequest, ContentBlock, ListSessionsRequest, LoadSessionRequest,
     NewSessionRequest, PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest,
@@ -382,6 +384,7 @@ struct Request {
     result: Option<CommandResult>,
     local_callables: Option<Rc<RefCell<LocalCallables>>>,
     listener_lifecycle: Option<ListenerLifecycle>,
+    tool_registration: Option<tools::Registration>,
 }
 
 #[derive(Clone)]
@@ -402,6 +405,7 @@ impl Request {
             result: None,
             local_callables,
             listener_lifecycle: None,
+            tool_registration: None,
         }
     }
 
@@ -434,6 +438,7 @@ impl Request {
 
 impl UserData for Client {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("tools", |lua, this, ()| tools::bind(lua, this.clone()));
         methods.add_method("capabilities", |lua, this, ()| {
             capabilities(lua, &this.state)
         });
@@ -473,13 +478,6 @@ impl UserData for Client {
         });
         methods.add_method("sdk", |lua, this, ()| {
             let operation = ContractId::parse(GetSdk::ID).expect("static application operation id");
-            if !this
-                .state
-                .supports_extension(&operation)
-                .map_err(lua_error)?
-            {
-                return Err(lua_error(BindingError::unsupported(&operation)));
-            }
             let request = request_for(
                 &this.state,
                 Some(Rc::clone(&this.local_callables)),
@@ -581,7 +579,10 @@ impl UserData for Client {
                             )?;
                             Ok(Value::Nil)
                         }
-                        Err(std_mpsc::TryRecvError::Empty) => Ok(Value::Nil),
+                        Err(std_mpsc::TryRecvError::Empty) => {
+                            std::thread::yield_now();
+                            Ok(Value::Nil)
+                        }
                         Err(std_mpsc::TryRecvError::Disconnected) => {
                             Err(lua_error(this.state.failure()))
                         }
@@ -681,6 +682,9 @@ impl UserData for Request {
         methods.add_method_mut("poll", |lua, this, ()| match this.poll() {
             None => Ok(MultiValue::new()),
             Some(Ok(response)) => {
+                if let Some(registration) = &mut this.tool_registration {
+                    return registration.project(lua, response);
+                }
                 let listener_to_remove = match &this.listener_lifecycle {
                     Some(ListenerLifecycle::RemoveOnSuccess(listener)) => {
                         if let Some(local_callables) = &this.local_callables {
@@ -699,7 +703,12 @@ impl UserData for Request {
                     response,
                 )
             }
-            Some(Err(error)) => error_values(lua, &error),
+            Some(Err(error)) => {
+                if let Some(registration) = &this.tool_registration {
+                    registration.release();
+                }
+                error_values(lua, &error)
+            }
         });
     }
 }
@@ -1942,6 +1951,7 @@ fn phenix(lua: &Lua) -> LuaResult<Table> {
     let exports = lua.create_table()?;
     exports.set("interface_id", INTERFACE_ID)?;
     exports.set("descriptor", descriptor(lua)?)?;
+    exports.set("tools", tools::exports(lua)?)?;
     exports.set(
         "connect",
         lua.create_function(|_lua, options: Table| connect(options))?,
@@ -2176,6 +2186,44 @@ mod tests {
         assert_eq!(input.input, PhenixValue::U64(7));
         assert_eq!(output_schema, Type::String);
     }
+
+    #[test]
+    fn sdk_request_can_queue_before_extension_negotiation() {
+        let lua = Lua::new();
+        let (commands, mut receiver) = mpsc::unbounded();
+        let (_updates_sender, updates) = std_mpsc::channel();
+        let (_extension_sender, extension_updates) = std_mpsc::channel();
+        let (_callback_sender, callbacks) = std_mpsc::channel();
+        let client = Client {
+            state: Arc::new(ClientState {
+                commands,
+                updates: Mutex::new(updates),
+                extension_updates: Mutex::new(extension_updates),
+                callbacks: Mutex::new(callbacks),
+                capabilities: Mutex::new(BTreeSet::new()),
+                extensions: Mutex::new(BTreeSet::new()),
+                terminal_error: Mutex::new(None),
+                owner: ClientConnectionId::parse("fixture-client").unwrap(),
+                generation: CapabilityGenerationId::parse("generation-1").unwrap(),
+            }),
+            local_callables: Rc::new(RefCell::new(LocalCallables::default())),
+        };
+        lua.globals()
+            .set("client", lua.create_userdata(client).unwrap())
+            .unwrap();
+
+        let _: mlua::AnyUserData = lua.load("return client:sdk()").eval().unwrap();
+        let command = futures::executor::block_on(receiver.next()).unwrap();
+        let Command::Application {
+            operation, input, ..
+        } = command
+        else {
+            panic!("SDK call must enqueue an application request");
+        };
+        assert_eq!(operation.as_str(), GetSdk::ID);
+        assert_eq!(input, Empty {}.to_value());
+    }
+
     #[test]
     fn sdk_response_projects_callable_leaves_with_their_paired_schema() {
         let lua = Lua::new();

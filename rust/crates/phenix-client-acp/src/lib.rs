@@ -933,7 +933,7 @@ impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
                 agent_client_protocol::on_receive_notification!(),
             )
             .on_receive_request(
-                async move |request: AgentRequest, responder, _connection| {
+                async move |request: AgentRequest, responder, connection| {
                     let AgentRequest::ExtMethodRequest(request) = request else {
                         return Err(agent_client_protocol::Error::invalid_params().data(
                             "ACP peer sent a non-extension request to the Phenix callback handler",
@@ -950,14 +950,24 @@ impl<T: ConnectTo<AcpRole> + 'static> StreamClient<T> {
                             agent_client_protocol::Error::invalid_params()
                                 .data("ACP peer sent an extension callback before initialize completed")
                         })?;
-                    let response = callbacks
-                        .receive(request, &extensions)
-                        .await
-                        .map_err(callback_error_to_acp)?;
-                    let response = serde_json::to_value(response).map_err(|error| {
-                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    let callbacks = callbacks.clone();
+                    connection.spawn(async move {
+                        let response = callbacks
+                            .receive(request, &extensions)
+                            .await
+                            .map_err(callback_error_to_acp)
+                            .and_then(|response| {
+                                serde_json::to_value(response).map_err(|error| {
+                                    agent_client_protocol::Error::internal_error()
+                                        .data(error.to_string())
+                                })
+                            });
+                        match response {
+                            Ok(response) => responder.respond(response),
+                            Err(error) => responder.respond_with_error(error),
+                        }
                     })?;
-                    responder.respond(response)
+                    Ok(())
                 },
                 agent_client_protocol::on_receive_request!(),
             )

@@ -3,8 +3,8 @@ pub use phenix_core::{
     ModelInferenceResponse, MODEL_INFERENCE_SERVICE,
 };
 use phenix_core::{
-    Bytes, CallableId, ComponentInterface, InterfaceId, ModelId, PhenixValue, PluginId,
-    RoutingProfileId, ServiceId,
+    Bytes, CallableId, ComponentInterface, InterfaceId, ModelId, ModelToolDescriptor, PhenixValue,
+    PluginId, RoutingProfileId, ServiceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -55,6 +55,8 @@ pub enum ModelCommand {
         profile_id: RoutingProfileId,
         callable_id: Option<CallableId>,
         input: Bytes,
+        #[serde(default)]
+        tools: Vec<ModelToolDescriptor>,
     },
 }
 

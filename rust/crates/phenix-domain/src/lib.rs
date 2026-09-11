@@ -61,11 +61,13 @@ macro_rules! domain_id_type {
 }
 
 mod attempts;
+mod client_tools;
 mod debug;
 mod failures;
 mod workspace;
 
 pub use attempts::*;
+pub use client_tools::*;
 pub use debug::*;
 pub use failures::*;
 pub use phenix_core::{CallableId, ModelId, PhenixSchema, PhenixValue, RoutingProfileId, SkillId};

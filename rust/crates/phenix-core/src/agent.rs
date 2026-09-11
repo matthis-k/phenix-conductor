@@ -16,12 +16,35 @@ pub struct ModelInferenceRequest {
     pub input: Bytes,
     #[serde(default)]
     pub options: BTreeMap<String, PhenixValue>,
+    /// The complete model-visible tool surface for this inference turn.
+    #[serde(default)]
+    pub tools: Vec<ModelToolDescriptor>,
 }
 
 #[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelInferenceResponse {
     pub output: Bytes,
     pub provider_metadata: BTreeMap<String, PhenixValue>,
+    /// Structured tool calls emitted by the provider, in provider order.
+    #[serde(default)]
+    pub tool_calls: Vec<ModelToolCall>,
+}
+
+/// Backend-neutral metadata presented to a model for one ordinary callable.
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ModelToolDescriptor {
+    pub id: CallableId,
+    pub description: String,
+    pub input_schema: PhenixSchema,
+    pub output_schema: PhenixSchema,
+}
+
+/// A typed request to invoke an ordinary model-visible callable.
+#[derive(phenix_sdk_macros::PhenixValue, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelToolCall {
+    pub call_id: String,
+    pub callable_id: CallableId,
+    pub input: PhenixValue,
 }
 
 pub struct ModelInferenceInterface;

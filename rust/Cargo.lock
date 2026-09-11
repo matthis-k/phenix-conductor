@@ -1595,6 +1595,7 @@ dependencies = [
  "phenix-adapter-acp",
  "phenix-application-interface",
  "phenix-core",
+ "phenix-domain",
  "serde_json",
  "tokio",
 ]

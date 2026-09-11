@@ -80,6 +80,7 @@ impl PluginInstance for Provider {
         serde_json::to_vec(&PhenixValue::from(&ModelInferenceResponse {
             output: Bytes::new(output.as_bytes().to_vec()),
             provider_metadata: BTreeMap::new(),
+            tool_calls: Vec::new(),
         }))
         .map_err(|error| error.to_string())
     }

@@ -242,6 +242,7 @@ impl PluginInstance for ModelProvider {
                 "model".into(),
                 PhenixValue::String(request.model.as_str().to_owned()),
             )]),
+            tool_calls: Vec::new(),
         };
         serde_json::to_vec(&PhenixValue::from(&response)).map_err(|error| error.to_string())
     }
@@ -453,6 +454,7 @@ fn supported_harness_routes_model_inference_and_tool_calls_through_plugins() {
             profile_id: RoutingProfileId::parse("parity").unwrap(),
             callable_id: None,
             input: b"hello".to_vec().into(),
+            tools: Vec::new(),
         },
     );
     match output {

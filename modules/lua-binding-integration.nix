@@ -77,15 +77,16 @@ _: {
               error(label .. ": timed out")
             end
 
-            local negotiated = false
-            for _ = 1, 1000000 do
-              if client:extensions()["phenix.application.sdk-get@1"] then
-                negotiated = true
-                break
+            local function await_callback(callback, label)
+              for _ = 1, 1000 do
+                if callback() then
+                  return
+                end
+                poll_client()
+                os.execute("sleep 0.01")
               end
-              poll_client()
+              error(label .. ": timed out")
             end
-            assert(negotiated, "SDK extension was not negotiated")
 
             local sdk = await(client:sdk(), "sdk get")
             assert(type(sdk) == "table")
@@ -125,9 +126,62 @@ _: {
             assert(calls == 0, "Lua callback ran outside the host polling point")
 
             local stop = await(listen, "observable listen")
-            assert(calls == 1)
+            await_callback(function() return calls == 1 end, "initial observable delivery")
             assert(type(stop) == "function")
             await(stop(), "observable stop")
+
+            local tool_calls = 0
+            local registration = phenix.tools.register({
+              client = client,
+              session_id = "fixture-session",
+              id = "fixture.client.echo",
+              description = "Echo text through the Lua host",
+              input = { type = "string" },
+              output = { type = "string" },
+            }, function(value)
+              tool_calls = tool_calls + 1
+              return value .. " from Lua"
+            end)
+            local remove = await(registration, "tool registration")
+            assert(type(remove) == "function")
+            assert(await(registration, "repeat registration poll") == remove)
+
+            -- Resolve public operation names from the authoritative descriptor.
+            local application = client:application()
+            local function operation(id)
+              return application[phenix.descriptor.operations[id].name]
+            end
+            local list = operation("phenix.application.callable-list@1")
+            local invoke = operation("phenix.application.callable-invoke@1")
+            local listed = await(list({ session_id = "fixture-session" }), "tool list")
+            assert(#listed.callables == 1)
+            assert(listed.callables[1].id == "fixture.client.echo")
+
+            -- The fixture host presents the admitted tool through the ordinary
+            -- model surface and executes the resulting typed ModelToolCall.
+            await_callback(function() return tool_calls == 1 end, "model tool invocation")
+
+            local removal = remove()
+            assert(remove() == removal, "stop must share one removal request")
+            await(removal, "tool removal")
+            assert(await(list({ session_id = "fixture-session" }), "list after stop").callables[1] == nil)
+            local stale = invoke({
+              session_id = "fixture-session",
+              callable_id = "fixture.client.echo",
+              input = "removed",
+            })
+            local rejected = false
+            for _ = 1, 1000000 do
+              poll_client()
+              local result = pack(stale:poll())
+              if result.n > 0 then
+                assert(result[2] ~= nil, "removed tool must reject invocation")
+                rejected = true
+                break
+              end
+            end
+            assert(rejected)
+            assert(tool_calls == 1)
             LUA
             touch "$out"
           '';

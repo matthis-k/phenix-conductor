@@ -205,7 +205,7 @@ pub trait Backend: Send {
         ))
     }
 
-    /// Dispose any persistent native conversation associated with a stable
+    /// Dispose any persistent native conversation associated with one stable
     /// Phenix session. This operation is deliberately idempotent so the
     /// conductor can fan a terminal session close out to every registered
     /// backend without tracking which fixed targets the session previously
