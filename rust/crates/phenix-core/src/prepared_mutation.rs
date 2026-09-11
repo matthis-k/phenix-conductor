@@ -157,9 +157,7 @@ impl PreparedMutationScope {
         operation: impl FnOnce() -> T,
     ) -> T {
         let thread = thread::current().id();
-        self.coordinators
-            .lock()
-            .push((thread, coordinator.clone()));
+        self.coordinators.lock().push((thread, coordinator.clone()));
         let _guard = PreparedMutationCoordinatorGuard {
             scope: self,
             thread,
