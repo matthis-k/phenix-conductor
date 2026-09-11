@@ -2,11 +2,11 @@ use crate::{
     Authority, Exact, GraphGenerationId, NamespaceTransaction, PhenixValue, PluginId, Project,
     ResourceNamespace, TransactionOp, Type, TypeKind, ValueCodec, ValueError,
 };
+use parking_lot::Mutex;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     collections::BTreeMap,
     fmt::{self, Display, Formatter},
-    sync::Mutex,
     thread::{self, ThreadId},
 };
 
@@ -129,11 +129,7 @@ struct PreparedMutationCoordinatorGuard<'a> {
 
 impl Drop for PreparedMutationCoordinatorGuard<'_> {
     fn drop(&mut self) {
-        let mut coordinators = self
-            .scope
-            .coordinators
-            .lock()
-            .expect("prepared mutation coordinator mutex poisoned");
+        let mut coordinators = self.scope.coordinators.lock();
         let position = coordinators
             .iter()
             .rposition(|(thread, _)| thread == &self.thread)
@@ -163,7 +159,6 @@ impl PreparedMutationScope {
         let thread = thread::current().id();
         self.coordinators
             .lock()
-            .expect("prepared mutation coordinator mutex poisoned")
             .push((thread, coordinator.clone()));
         let _guard = PreparedMutationCoordinatorGuard {
             scope: self,
@@ -176,7 +171,6 @@ impl PreparedMutationScope {
         let thread = thread::current().id();
         self.coordinators
             .lock()
-            .expect("prepared mutation coordinator mutex poisoned")
             .iter()
             .rev()
             .find(|(candidate, _)| candidate == &thread)
@@ -192,10 +186,7 @@ impl PreparedMutationScope {
         authority: &Authority,
     ) -> Result<PreparedMutationHandle, String> {
         let coordinator = self.coordinator(owner);
-        let mut prepared = self
-            .prepared
-            .lock()
-            .expect("prepared mutation registry mutex poisoned");
+        let mut prepared = self.prepared.lock();
         loop {
             let handle = PreparedMutationHandle::generate()?;
             if prepared.contains_key(&handle) {
@@ -225,10 +216,7 @@ impl PreparedMutationScope {
         &self,
         handles: &[PreparedMutationHandle],
     ) -> Result<Vec<PreparedMutation>, PreparedMutationHandle> {
-        let mut prepared = self
-            .prepared
-            .lock()
-            .expect("prepared mutation registry mutex poisoned");
+        let mut prepared = self.prepared.lock();
         let mut participants = Vec::with_capacity(handles.len());
         let mut missing = None;
         for handle in handles {
@@ -245,10 +233,7 @@ impl PreparedMutationScope {
     }
 
     pub(crate) fn clear(&self) {
-        self.prepared
-            .lock()
-            .expect("prepared mutation registry mutex poisoned")
-            .clear();
+        self.prepared.lock().clear();
     }
 }
 
