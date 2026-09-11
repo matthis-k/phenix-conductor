@@ -77,17 +77,8 @@ _: {
               error(label .. ": timed out")
             end
 
-            local negotiated = false
-            for _ = 1, 1000000 do
-              if client:extensions()["phenix.application.sdk-get@1"] then
-                negotiated = true
-                break
-              end
-              poll_client()
-            end
-            assert(negotiated, "SDK extension was not negotiated")
-
             local sdk = await(client:sdk(), "sdk get")
+            assert(client:extensions()["phenix.application.sdk-get@1"])
             assert(type(sdk) == "table")
             assert(type(sdk.fixture) == "table")
             assert(type(sdk.fixture.state) == "table")

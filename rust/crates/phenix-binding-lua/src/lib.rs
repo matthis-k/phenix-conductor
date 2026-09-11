@@ -478,13 +478,6 @@ impl UserData for Client {
         });
         methods.add_method("sdk", |lua, this, ()| {
             let operation = ContractId::parse(GetSdk::ID).expect("static application operation id");
-            if !this
-                .state
-                .supports_extension(&operation)
-                .map_err(lua_error)?
-            {
-                return Err(lua_error(BindingError::unsupported(&operation)));
-            }
             let request = request_for(
                 &this.state,
                 Some(Rc::clone(&this.local_callables)),
@@ -2193,6 +2186,44 @@ mod tests {
         assert_eq!(input.input, PhenixValue::U64(7));
         assert_eq!(output_schema, Type::String);
     }
+
+    #[test]
+    fn sdk_request_can_queue_before_extension_negotiation() {
+        let lua = Lua::new();
+        let (commands, mut receiver) = mpsc::unbounded();
+        let (_updates_sender, updates) = std_mpsc::channel();
+        let (_extension_sender, extension_updates) = std_mpsc::channel();
+        let (_callback_sender, callbacks) = std_mpsc::channel();
+        let client = Client {
+            state: Arc::new(ClientState {
+                commands,
+                updates: Mutex::new(updates),
+                extension_updates: Mutex::new(extension_updates),
+                callbacks: Mutex::new(callbacks),
+                capabilities: Mutex::new(BTreeSet::new()),
+                extensions: Mutex::new(BTreeSet::new()),
+                terminal_error: Mutex::new(None),
+                owner: ClientConnectionId::parse("fixture-client").unwrap(),
+                generation: CapabilityGenerationId::parse("generation-1").unwrap(),
+            }),
+            local_callables: Rc::new(RefCell::new(LocalCallables::default())),
+        };
+        lua.globals()
+            .set("client", lua.create_userdata(client).unwrap())
+            .unwrap();
+
+        let _: mlua::AnyUserData = lua.load("return client:sdk()").eval().unwrap();
+        let command = futures::executor::block_on(receiver.next()).unwrap();
+        let Command::Application {
+            operation, input, ..
+        } = command
+        else {
+            panic!("SDK call must enqueue an application request");
+        };
+        assert_eq!(operation.as_str(), GetSdk::ID);
+        assert_eq!(input, Empty {}.to_value());
+    }
+
     #[test]
     fn sdk_response_projects_callable_leaves_with_their_paired_schema() {
         let lua = Lua::new();
