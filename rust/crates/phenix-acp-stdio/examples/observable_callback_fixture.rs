@@ -71,6 +71,7 @@ async fn main() {
             "sessions",
             "prompt",
             "sdk",
+            "observables",
             "capabilities",
             "callables",
             "client-tools",
