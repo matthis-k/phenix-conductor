@@ -4,6 +4,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
+    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, Sender},
@@ -228,7 +229,7 @@ impl Display for EventError {
 
 impl Error for EventError {}
 
-const DEFAULT_DELIVERY_CAPACITY: usize = 64;
+const DEFAULT_DELIVERY_CAPACITY: NonZeroUsize = NonZeroUsize::new(64).unwrap();
 
 struct PendingDelivery {
     event: EventEnvelope,
@@ -249,7 +250,7 @@ pub struct EventBus {
     next_delivery: Arc<AtomicU64>,
     subscription_revision: Arc<AtomicU64>,
     in_flight: Arc<AtomicUsize>,
-    delivery_capacity: usize,
+    delivery_capacity: NonZeroUsize,
 }
 
 impl Default for EventBus {
@@ -269,11 +270,7 @@ impl fmt::Debug for EventBus {
 
 impl EventBus {
     #[must_use]
-    pub fn with_capacity(delivery_capacity: usize) -> Self {
-        assert!(
-            delivery_capacity > 0,
-            "event delivery capacity must be positive"
-        );
+    pub fn with_capacity(delivery_capacity: NonZeroUsize) -> Self {
         Self {
             kernel_subscribers: Arc::new(Mutex::new(Vec::new())),
             subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
@@ -561,9 +558,9 @@ impl EventBus {
     fn reserve_delivery(&self) -> Result<(), EventError> {
         let mut current = self.in_flight.load(Ordering::Acquire);
         loop {
-            if current >= self.delivery_capacity {
+            if current >= self.delivery_capacity.get() {
                 return Err(EventError::QueueSaturated {
-                    capacity: self.delivery_capacity,
+                    capacity: self.delivery_capacity.get(),
                 });
             }
             match self.in_flight.compare_exchange_weak(
@@ -1085,7 +1082,7 @@ mod tests {
 
     #[test]
     fn admission_is_bounded_and_reports_a_terminal_status() {
-        let bus = EventBus::with_capacity(1);
+        let bus = EventBus::with_capacity(NonZeroUsize::new(1).unwrap());
         let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
         let handler_gate = Arc::clone(&gate);
         bus.replace_subscriptions([EventSubscription {
