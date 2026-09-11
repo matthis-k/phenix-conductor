@@ -1724,7 +1724,10 @@ mod tests {
                 transaction.replace(&value_id, ValuePath::root(), PhenixValue::U64(3))
             })
             .unwrap();
-        assert_eq!(deliveries.lock().unwrap().len(), 2);
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
         assert!(matches!(
             capabilities.invoke(crate::CapabilityInvokeInput {
                 callable: stop,
