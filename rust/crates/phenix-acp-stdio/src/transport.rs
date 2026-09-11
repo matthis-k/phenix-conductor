@@ -726,17 +726,26 @@ pub async fn serve_stdio_with_events_and_callbacks(
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |request: ClientRequest, responder, _cx| {
+            async move |request: ClientRequest, responder, connection| {
                 let ClientRequest::ExtMethodRequest(request) = request else {
                     return Err(Error::method_not_found());
                 };
-                let response = extension_adapter
-                    .extension_request(request)
-                    .await
-                    .map_err(application_error_to_acp)?;
-                let response = serde_json::to_value(response)
-                    .map_err(|error| Error::internal_error().data(error.to_string()))?;
-                responder.respond(response)
+                let extension_adapter = Arc::clone(&extension_adapter);
+                connection.spawn(async move {
+                    let response = extension_adapter
+                        .extension_request(request)
+                        .await
+                        .map_err(application_error_to_acp)
+                        .and_then(|response| {
+                            serde_json::to_value(response)
+                                .map_err(|error| Error::internal_error().data(error.to_string()))
+                        });
+                    match response {
+                        Ok(response) => responder.respond(response),
+                        Err(error) => responder.respond_with_error(error),
+                    }
+                })?;
+                Ok(())
             },
             agent_client_protocol::on_receive_request!(),
         )
