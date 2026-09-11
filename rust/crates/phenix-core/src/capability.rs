@@ -2,12 +2,12 @@ use crate::{
     CallableRef, CapabilityGenerationId, CapabilityOwnerId, PhenixValue, ReferenceId, Type,
     ValueError,
 };
+use parking_lot::Mutex;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    error::Error,
-    fmt::{self, Display, Formatter},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
+use thiserror::Error;
 
 /// The transport-neutral input to a capability invocation.
 #[derive(Clone, Debug, PartialEq)]
@@ -96,48 +96,25 @@ pub struct CapabilityRegistry {
 #[derive(Clone, Default)]
 pub struct SharedCapabilityRegistry(Arc<Mutex<CapabilityRegistry>>);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum CapabilityError {
+    #[error("unknown capability reference {}", .0.id())]
     UnknownReference(CallableRef),
+    #[error("stale capability reference {}", .0.id())]
     StaleReference(CallableRef),
+    #[error("duplicate capability reference {}", .0.id())]
     DuplicateReference(CallableRef),
+    #[error("capability schema mismatch: {message}")]
     SchemaMismatch { message: String },
+    #[error("capability provider failed: {message}")]
     ProviderFailed { message: String },
+    #[error("capability invocation cancelled")]
     Cancelled,
+    #[error("capability provider disconnected")]
     Disconnected,
+    #[error("capability provider queue is full")]
     QueueFull,
 }
-
-impl Display for CapabilityError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownReference(reference) => {
-                write!(formatter, "unknown capability reference {}", reference.id())
-            }
-            Self::StaleReference(reference) => {
-                write!(formatter, "stale capability reference {}", reference.id())
-            }
-            Self::DuplicateReference(reference) => {
-                write!(
-                    formatter,
-                    "duplicate capability reference {}",
-                    reference.id()
-                )
-            }
-            Self::SchemaMismatch { message } => {
-                write!(formatter, "capability schema mismatch: {message}")
-            }
-            Self::ProviderFailed { message } => {
-                write!(formatter, "capability provider failed: {message}")
-            }
-            Self::Cancelled => formatter.write_str("capability invocation cancelled"),
-            Self::Disconnected => formatter.write_str("capability provider disconnected"),
-            Self::QueueFull => formatter.write_str("capability provider queue is full"),
-        }
-    }
-}
-
-impl Error for CapabilityError {}
 
 impl CapabilityRegistry {
     /// Registers one callable for its exact owner generation.
@@ -290,44 +267,28 @@ impl SharedCapabilityRegistry {
         schema: Type,
         handler: impl CapabilityHandler + 'static,
     ) -> Result<(), CapabilityError> {
-        self.0
-            .lock()
-            .expect("capability registry lock poisoned")
-            .register(reference, schema, handler)
+        self.0.lock().register(reference, schema, handler)
     }
 
     pub fn retire(&self, owner: CapabilityOwnerId, generation: CapabilityGenerationId) {
-        self.0
-            .lock()
-            .expect("capability registry lock poisoned")
-            .retire(owner, generation);
+        self.0.lock().retire(owner, generation);
     }
 
     pub fn unregister(&self, reference: &CallableRef) -> bool {
-        self.0
-            .lock()
-            .expect("capability registry lock poisoned")
-            .unregister(reference)
+        self.0.lock().unregister(reference)
     }
 
     pub fn invoke(
         &self,
         invocation: CapabilityInvokeInput,
     ) -> Result<CapabilityInvokeResult, CapabilityError> {
-        let prepared = self
-            .0
-            .lock()
-            .expect("capability registry lock poisoned")
-            .prepare(invocation)?;
+        let prepared = self.0.lock().prepare(invocation)?;
         prepared.invoke()
     }
 
     /// Returns the authoritative callable schema for one live reference.
     pub fn schema(&self, reference: &CallableRef) -> Result<Type, CapabilityError> {
-        self.0
-            .lock()
-            .expect("capability registry lock poisoned")
-            .schema(reference)
+        self.0.lock().schema(reference)
     }
 }
 
