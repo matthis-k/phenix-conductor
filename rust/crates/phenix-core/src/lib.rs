@@ -220,38 +220,3 @@ pub use typed_component::{
     ComponentInterface, ComponentInvocationError, InterfaceCompatibility, InterfaceSchema,
     InterfaceSchemaMismatch,
 };
-
-/// Rule used by a configuration frontend for source identity.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceIdentityRule {
-    RequiredNonEmpty,
-}
-
-/// Rule used for a configuration frontend's source revision identity.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceRevisionRule {
-    RequiredExact,
-}
-
-/// Rule used when stable configuration is materialized before activation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StableMaterializationRule {
-    MaterializedOnly,
-}
-
-impl ConfigurationFrontendMetadata {
-    /// Stable configuration must identify its source explicitly.
-    pub const fn source_identity_rule(&self) -> SourceIdentityRule {
-        SourceIdentityRule::RequiredNonEmpty
-    }
-
-    /// Stable configuration must carry an exact source revision identity.
-    pub const fn source_revision_rule(&self) -> SourceRevisionRule {
-        SourceRevisionRule::RequiredExact
-    }
-
-    /// Environment bindings cannot alter the stable semantic configuration.
-    pub const fn stable_materialization_rule(&self) -> StableMaterializationRule {
-        StableMaterializationRule::MaterializedOnly
-    }
-}
