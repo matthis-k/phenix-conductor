@@ -1,101 +1,74 @@
-# Neovim client ABI precedence
+# Neovim client value/capability precedence
+
+status: partial
 
 ## Purpose
 
-This file records the ABI revision that applies to `spec/nvim-client.md` and `spec/nvim-client-implementation.md` after `spec/value-capability-sdk.md`.
+This file defines the runtime-facing ABI precedence for `spec/nvim-client.md`. Product behavior stays in that document. Mechanical implementation details stay in `spec/nvim-client-implementation.md`.
 
-Read the global value-capability spec first. The older Neovim product/interaction details remain authoritative, but any dependency on a callback-specific or generated-operation-specific semantic model is superseded.
+Read `spec/value-capability-sdk.md` first.
 
-## Fixed client boundary
+## Boundary
 
 ```lua
 local phenix = require("phenix")
 local frontend = require("phenix_nvim")
 ```
 
-`phenix` exposes the generic SDK `(PhenixSchema, PhenixValue)` graph. Nested structural tables form namespaces. Behavior is represented by callable capability proxies. `phenix_nvim` owns editor/UI behavior only.
+The native module projects the generic `(PhenixSchema, PhenixValue)` SDK graph into Lua. Structural values become ordinary tables. Behavior becomes callable proxies. Observable resources expose value-level `get`/`listen` behavior. Lua functions crossing the runtime boundary are lifted to client-owned `CallableRef`s.
 
-Do not create `clients/nvim/lua/phenix/init.lua` or any Lua module that shadows the native binding.
+`phenix_nvim` owns editor behavior only.
 
-## Runtime adapter revision
+## Runtime adapter
 
-`phenix_nvim.runtime` should:
+The runtime adapter must:
 
-1. connect native client;
-2. retrieve the SDK value graph;
-3. retain the authoritative schema alongside projected values;
-4. consume nested callable proxies/resource tables;
-5. run one bounded host dispatch loop for pending native requests/capability invocations/observable work;
-6. keep all Lua execution on Neovim main thread.
+1. connect through the native client;
+2. retrieve and retain the SDK value graph;
+3. use callable proxies or thin wrappers for application behavior;
+4. use observable value resources for runtime projections;
+5. dispatch lifted Lua callbacks only on the Neovim main thread;
+6. discard client-owned refs/subscriptions when their connection generation retires.
 
-Thin wrappers around SDK callable proxies are allowed. Handwritten ACP framing, protocol method ids, or duplicated schemas are not.
+Do not duplicate schema or operation ids in frontend Lua.
 
-## Observable revision
+## Observables
 
-Observable state still powers transcript/session projections, but the frontend should consume the #503 value-level surface, for example:
+Transcript/session projections consume value-level resources:
 
 ```lua
 local current = phenix.sessions.state.get()
 local stop = phenix.sessions.state.listen(opts, function(change)
-  ...
+  -- update projection
 end)
 ```
 
-The listener is an ordinary Lua function lifted by the generic callable ABI. The frontend does not manage a separate observable callback protocol.
+The listener is a normal Lua function lifted by the generic capability ABI. A missing production observable must be fixed in the owning SDK contribution, not replaced with a private frontend event database.
 
-## Permission and elicitation revision
+## Permission and elicitation handlers
 
-Frontend permission/questionnaire handlers should use the generic local-callable host mechanism from #503.
+Runtime-facing UI handlers use the same generic local-callable mechanism. ACP permission/elicitation mapping stays below the frontend.
 
-Transport-specific ACP permission/elicitation mapping remains below the frontend. `phenix_nvim` sees one semantic handler API and returns only valid typed responses.
+The frontend returns typed responses only. Presentation errors or cancellation never broaden authority.
 
-## Client-tool revision
+## Client tools
 
-Where #504 references future client tools, assume #505 semantics:
+Where frontend or later integration code exposes Neovim behavior as model-visible tools, use #505 semantics:
 
 ```text
-Lua handler
--> lifted CallableRef
+Lua function
+-> client-owned CallableRef
 -> tool-definition value
 -> session admission
+-> ordinary model tool
 ```
 
-Do not depend on a dedicated `ClientCallableRequest` protocol.
+No dedicated client callback registry or client-tool protocol is allowed.
 
-## Product semantics unchanged
+## Compatibility paths
 
-The following parts of the existing #504 handoff remain unchanged and should be implemented exactly:
+The native binding may expose standard ACP session helpers. They can bridge incomplete application/SDK coverage during implementation, but they are not a second semantic source of truth. The completed #504 path uses the generic SDK value graph for Phenix-specific runtime behavior and observables.
 
-- conductor is canonical package source;
-- standalone `phenix-nvim` is deterministic one-way mirror;
-- separate transcript and compose buffers;
-- `Reference` inserts context at remembered compose cursor and never sends;
-- ordered compose segments;
-- selection snapshots captured at reference time;
-- explicit `@...` references may remain live references where specified;
-- image attachments are first-class and preview is optional;
-- one explicit Send;
-- runtime is authoritative for transcript/session/model/tool/edit state;
-- transcript prose is real Markdown;
-- structured transcript nodes retain identity/extmarks;
-- incremental streaming updates instead of full-buffer rerender per token;
-- manual scrolling disables follow-tail;
-- runtime-backed native diff review;
-- restart/resume durable session;
-- no optional third-party plugin required for MVP.
+## Completion
 
-## Migration guidance
-
-Delete/replace old standalone transport/protocol ownership as already specified.
-
-For every migrated module:
-
-```text
-frontend-only UI/unsent compose state -> may remain local
-runtime/application truth -> project from SDK/observable value surface
-missing runtime field -> fix upstream contract, do not create private Lua schema
-```
-
-## Completion requirement
-
-#504 is complete only if the original product acceptance scenario works while all runtime interaction goes through the value/capability SDK rather than handwritten protocol or the superseded callback model.
+This precedence is satisfied when the packaged Neovim acceptance flow uses the generic value/capability SDK for runtime-facing Phenix behavior, with no handwritten protocol, private application schemas, or background-thread Lua execution.
