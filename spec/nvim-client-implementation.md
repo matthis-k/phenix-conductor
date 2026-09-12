@@ -97,6 +97,8 @@ One worker owns mutable runtime application state. Requests arrive through the e
 
 Do not hold kernel/plugin locks while waiting for a client-owned capability callback.
 
+The worker dispatches long-running prompts and retains their reply handles while continuing to service cancel, capability completion, review decisions, and observable reads. It never waits for an entire prompt inside the application receive loop. Runtime events return through the worker for ordered projection commits.
+
 Queue policy:
 
 ```text
@@ -174,24 +176,31 @@ For each `SessionUpdate`:
 1. find the projection by `session_id`;
 2. require `update.sequence == projection.through_sequence + 1`;
 3. append the exact update;
-4. set `through_sequence = update.sequence`;
-5. commit one observable transaction.
+4. apply `Renamed` to `projection.session.title`;
+5. set `through_sequence = update.sequence`;
+6. commit one observable transaction.
 
 If the projection is absent or the sequence is not the expected next value, do not guess. Fetch a full `ResumeSession { after_sequence = nil }`, replace that one session projection, then continue.
+
+Serialize each session's repair with its incoming updates. After replacement, discard buffered updates at or below the snapshot watermark; append only the contiguous suffix above it. A remaining gap triggers another full repair. Never append the triggering update twice.
 
 A `Closed` update remains in the projection. The frontend may hide closed sessions from the default picker, but history remains runtime-owned.
 
 ### Client gap recovery
 
-The frontend tracks both observable version and `SessionProjection.through_sequence`.
+The resolved generic `get()` result is `{ version, value }`, where `value` is `SessionProjectionState`. The frontend tracks this observable version separately from each `SessionProjection.through_sequence`. Native callable proxies return request handles; the one polling loop resolves them before consuming their results.
+
+Install `listen` with root path, recursive scope, diff mode, and an initial full delivery. That delivery supplies the subscription identity, version, and baseline together. A preliminary `get()` may populate the UI, but it is not the subscription baseline.
 
 On an observable delivery gap, malformed diff, or per-session sequence gap:
 
-1. stop applying diffs;
-2. call `phenix.sessions.state.get()`;
-3. rebuild the local projection from the full value;
-4. replace the expected observable version;
-5. resume listening.
+1. stop applying diffs and retire the old subscription locally;
+2. request its stop callable and call `phenix.sessions.state.get()`;
+3. rebuild from the resolved `{ version, value }`;
+4. install a new listener with an initial full delivery;
+5. replace the baseline with that delivery, then accept only matching-subscription diffs whose `from_version` equals the stored version.
+
+Ignore late deliveries from retired subscriptions. This closes the read/subscribe race without adding replay semantics to the generic observable ABI.
 
 Rendered buffer text is never used to recover identity.
 
@@ -262,6 +271,24 @@ The ACP adapter maps standard ACP permission/elicitation callbacks to these same
 ### Frontend behavior
 
 At connect time, `runtime.lua` lifts two Lua functions and registers them once. Those functions dispatch to #504's built-in UI. #506 may replace presentation behind the same frontend-local dispatcher.
+
+### Deferred host completion
+
+The current native binding calls a lifted Lua function synchronously and immediately converts its return value. #504 must extend that host-local implementation before asynchronous interaction UIs can work.
+
+Add `phenix.defer(start)`, which captures `start(resolve, reject)` in an opaque, host-local deferred result. A lifted callback may return either its ordinary schema-convertible value or this deferred result. The binding consumes the marker once, reserves a pending-reply slot, then runs `start` to begin frontend work without blocking. Overflow fails before `start` runs. Reusing a consumed marker fails structurally. The binding retains the callback reply until settlement, then converts the resolved value against the original output schema. `reject(message)` produces the existing typed capability execution failure. The marker never becomes a `PhenixValue`, callable argument, persisted value, or wire type.
+
+Only `phenix_nvim.runtime` accesses this helper and exposes `runtime.defer(start)` to frontend controllers. Permission, elicitation, and #506 asynchronous tool wrappers use it. Ordinary synchronous callbacks keep their existing behavior.
+
+Rules:
+
+- retain at most 64 pending deferred replies per connection; overflow returns the existing queue-full failure;
+- start and settlement run on the Neovim main thread through the existing polling/main-loop dispatch;
+- the first resolve/reject wins, including synchronous settlement during `start`; later settlement is ignored and diagnosed;
+- a throw before settlement rejects; a throw after settlement is diagnostic only;
+- disconnect or cancellation settles the retained reply once with the existing structural failure and releases the host reference;
+- a late UI completion after retirement has no runtime effect;
+- no nested `vim.wait`, blocking host poll, second timer, or background-thread Lua call.
 
 Permission validation:
 
@@ -521,7 +548,7 @@ Unsupported callable/object/map/recursive-unbounded/compound-union shapes fail w
 
 ## Sessions and status
 
-`session.lua` is presentation-only. It lists `SessionInfo`, lets the user choose one, then calls runtime resume/select.
+`sessions.lua` is presentation-only. It lists `SessionInfo`, lets the user choose one, then calls runtime resume/select.
 
 Status is a pure read of cached frontend projection:
 
@@ -554,6 +581,9 @@ The mirror check compares the exported file set and content hashes, excluding th
 - `SessionProjectionState` initializes from full resume and appends ordered updates;
 - unknown/gapped session update repairs through full resume before publication;
 - one observable transaction corresponds to one accepted session update or one repair replacement;
+- rename updates both the event history and projected session title;
+- a repair snapshot covering buffered updates does not append them twice;
+- a pending prompt permits cancel, review decisions, and callback completion;
 - multimodal `PromptInput` round-trips Text + Resource + Image in order;
 - handler registration rejects wrong contract, wrong owner, stale generation, and disconnected owner;
 - disconnect retires handlers and pending client callbacks;
@@ -571,6 +601,10 @@ The mirror check compares the exported file set and content hashes, excluding th
 - in-flight send never clears newer edits;
 - session observable full/diff updates produce stable transcript nodes;
 - observable or session sequence gap performs full get/rebuild;
+- mutation between get and listen is included in the new initial full baseline;
+- retired subscription deliveries cannot overwrite the new baseline;
+- deferred interaction settles only once and validates its eventual output;
+- deferred queue overflow, cancellation, and disconnect release pending replies;
 - tool lifecycle keeps one node per call id;
 - manual scroll disables follow-tail and end-of-buffer restores it;
 - permission close/error returns Cancelled;
@@ -606,7 +640,7 @@ No fixture-only code path may satisfy the final product check.
 1. Add application projection and review/interaction passive types.
 2. Implement the configured Harness application worker and `phenix-acp` binary.
 3. Publish `phenix.sessions.state` from `phenix-plugin-api` and wire its reducer.
-4. Add interaction-handler registration and client-generation validation.
+4. Add deferred host callback completion, interaction-handler registration, and client-generation validation.
 5. Add execution-owned durable review lifecycle and application mapping.
 6. Replace `runtime.lua` ACP helper semantics with descriptor-backed application + SDK observable semantics.
 7. Finish ordered multimodal Send.
