@@ -190,42 +190,78 @@ impl DelegationContract {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DelegationContractError {
-    #[error("delegation contract requires at least one component")]
     NoComponents,
-    #[error("delegation contract requires at least one acceptance criterion")]
     NoAcceptanceCriteria,
-    #[error("duplicate delegation component: {0}")]
     DuplicateComponent(DelegationComponentId),
-    #[error("component {component} declares interface {interface} twice")]
     DuplicateInterface {
         component: DelegationComponentId,
         interface: DelegationInterfaceId,
     },
-    #[error("component {component} owns element {element} twice")]
     DuplicateOwnedElement {
         component: DelegationComponentId,
         element: DelegationElementId,
     },
-    #[error("delegation component {source} references unknown component {target}")]
     UnknownRelatedComponent {
         source: DelegationComponentId,
         target: DelegationComponentId,
     },
-    #[error("delegation component {component} references unknown interface {target}")]
     UnknownInterfaceTarget {
         component: DelegationComponentId,
         target: DelegationInterfaceId,
     },
-    #[error("delegation component {component} references unknown owned element {target}")]
     UnknownOwnedElementTarget {
         component: DelegationComponentId,
         target: DelegationElementId,
     },
-    #[error("escalation references unknown component {0}")]
     UnknownEscalationComponent(DelegationComponentId),
 }
+
+impl Display for DelegationContractError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoComponents => {
+                f.write_str("delegation contract requires at least one component")
+            }
+            Self::NoAcceptanceCriteria => {
+                f.write_str("delegation contract requires at least one acceptance criterion")
+            }
+            Self::DuplicateComponent(id) => write!(f, "duplicate delegation component: {id}"),
+            Self::DuplicateInterface {
+                component,
+                interface,
+            } => write!(
+                f,
+                "component {component} declares interface {interface} twice"
+            ),
+            Self::DuplicateOwnedElement { component, element } => {
+                write!(f, "component {component} owns element {element} twice")
+            }
+            Self::UnknownRelatedComponent { source, target } => {
+                write!(
+                    f,
+                    "delegation component {source} references unknown component {target}"
+                )
+            }
+            Self::UnknownInterfaceTarget { component, target } => {
+                write!(
+                    f,
+                    "delegation component {component} references unknown interface {target}"
+                )
+            }
+            Self::UnknownOwnedElementTarget { component, target } => write!(
+                f,
+                "delegation component {component} references unknown owned element {target}"
+            ),
+            Self::UnknownEscalationComponent(component) => {
+                write!(f, "escalation references unknown component {component}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DelegationContractError {}
 
 fn validate_component(
     component: &DelegationComponent,
