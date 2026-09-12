@@ -12,6 +12,7 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
 use mcp_bridge::{BridgeToolRequest, ToolBridge};
+use parking_lot::Mutex;
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
     BackendSession, BackendSessionRequest, PreparedToolSurface, ToolPresentation,
@@ -26,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 
@@ -211,9 +212,7 @@ struct CancellationState {
 fn arm_cancellation(
     cancellation: &Mutex<CancellationState>,
 ) -> Result<Option<ArmedCancellation>, BackendError> {
-    let mut cancellation = cancellation
-        .lock()
-        .map_err(|_| BackendError::Protocol("ACP cancellation state lock poisoned".to_owned()))?;
+    let mut cancellation = cancellation.lock();
     if cancellation.signal.is_some() {
         return Err(BackendError::Protocol(
             "ACP backend session is already executing".to_owned(),
@@ -231,18 +230,14 @@ fn arm_cancellation(
 }
 
 fn disarm_cancellation(cancellation: &Mutex<CancellationState>) -> Result<(), BackendError> {
-    let mut cancellation = cancellation
-        .lock()
-        .map_err(|_| BackendError::Protocol("ACP cancellation state lock poisoned".to_owned()))?;
+    let mut cancellation = cancellation.lock();
     cancellation.signal = None;
     cancellation.requested = false;
     Ok(())
 }
 
 fn request_cancellation(cancellation: &Mutex<CancellationState>) -> Result<(), BackendError> {
-    let mut cancellation = cancellation
-        .lock()
-        .map_err(|_| BackendError::Protocol("ACP cancellation state lock poisoned".to_owned()))?;
+    let mut cancellation = cancellation.lock();
     cancellation.requested = true;
     if let Some(signal) = cancellation.signal.as_ref() {
         let _ = signal.send(CancellationSignal::Cancel);
@@ -365,12 +360,8 @@ impl AcpPersistentSession {
                     .to_owned(),
             ));
         }
-        *self.model.lock().map_err(|_| {
-            BackendError::Protocol("ACP persistent model lock poisoned".to_owned())
-        })? = model;
-        *self.tools.lock().map_err(|_| {
-            BackendError::Protocol("ACP persistent tool surface lock poisoned".to_owned())
-        })? = tools;
+        *self.model.lock() = model;
+        *self.tools.lock() = tools;
         Ok(())
     }
 }
@@ -384,18 +375,8 @@ impl BackendSession for AcpPersistentSession {
         let Some(cancellation) = arm_cancellation(&self.cancellation)? else {
             return Ok(());
         };
-        let model = self
-            .model
-            .lock()
-            .map_err(|_| BackendError::Protocol("ACP persistent model lock poisoned".to_owned()))?
-            .clone();
-        let tools = self
-            .tools
-            .lock()
-            .map_err(|_| {
-                BackendError::Protocol("ACP persistent tool surface lock poisoned".to_owned())
-            })?
-            .clone();
+        let model = self.model.lock().clone();
+        let tools = self.tools.lock().clone();
         let (events, event_rx) = mpsc::channel();
         let send_result = self.commands.send(PersistentCommand {
             model,
@@ -698,10 +679,8 @@ async fn run_persistent_session(
         .on_receive_notification(
             async move |notification: SessionNotification, _connection| {
                 if let Some(event) = normalize_update(notification.update) {
-                    if let Ok(events) = notification_events.lock() {
-                        if let Some(events) = events.as_ref() {
-                            let _ = events.send(WorkerMessage::Event(event));
-                        }
+                    if let Some(events) = notification_events.lock().as_ref() {
+                        let _ = events.send(WorkerMessage::Event(event));
                     }
                 }
                 Ok(())
@@ -826,20 +805,12 @@ async fn run_persistent_session(
                     current_model = Some(command.model.model.as_str().to_owned());
                 }
 
-                {
-                    let mut active = active_events.lock().map_err(|_| {
-                        agent_client_protocol::Error::internal_error()
-                            .data("persistent ACP event sink lock poisoned")
-                    })?;
-                    *active = Some(command.events.clone());
-                }
+                *active_events.lock() = Some(command.events.clone());
                 if bridge_available {
                     if let Err(error) =
                         bridge.bind_execution(&command.tools, command.events.clone())
                     {
-                        if let Ok(mut active) = active_events.lock() {
-                            *active = None;
-                        }
+                        *active_events.lock() = None;
                         let message = error.to_string();
                         let _ = command.events.send(WorkerMessage::Done(Err(error)));
                         return Err(agent_client_protocol::Error::internal_error().data(message));
@@ -859,9 +830,7 @@ async fn run_persistent_session(
                     .await;
                 bridge.unbind_execution();
                 drop(cancel_forwarder);
-                if let Ok(mut active) = active_events.lock() {
-                    *active = None;
-                }
+                *active_events.lock() = None;
                 match prompt_result {
                     Ok(_) => {
                         let _ = command.events.send(WorkerMessage::Done(Ok(())));

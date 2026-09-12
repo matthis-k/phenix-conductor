@@ -12,6 +12,7 @@ use genai::chat::{
 };
 use genai::resolver::AuthResolver;
 use genai::Client as ProviderClient;
+use parking_lot::Mutex;
 use phenix_backend::{
     Backend, BackendCapabilities, BackendError, BackendEvent, BackendExecutionRequest, BackendHost,
     BackendSession, BackendSessionRequest, PreparedToolSurface, ToolInvocation, ToolPresentation,
@@ -26,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub const BACKEND_ID: &str = "phenix";
 
@@ -398,14 +399,8 @@ impl PhenixSession {
         model: ModelTarget,
         tools: PreparedToolSurface,
     ) -> Result<(), BackendError> {
-        *self
-            .model
-            .lock()
-            .map_err(|_| BackendError::Protocol("Phenix model lock poisoned".to_owned()))? = model;
-        *self
-            .tools
-            .lock()
-            .map_err(|_| BackendError::Protocol("Phenix tool lock poisoned".to_owned()))? = tools;
+        *self.model.lock() = model;
+        *self.tools.lock() = tools;
         Ok(())
     }
 
@@ -414,21 +409,9 @@ impl PhenixSession {
         prompt: String,
         host: &mut dyn BackendHost,
     ) -> Result<Vec<ChatMessage>, BackendError> {
-        let model = self
-            .model
-            .lock()
-            .map_err(|_| BackendError::Protocol("Phenix model lock poisoned".to_owned()))?
-            .clone();
-        let tools = self
-            .tools
-            .lock()
-            .map_err(|_| BackendError::Protocol("Phenix tool lock poisoned".to_owned()))?
-            .clone();
-        let mut history = self
-            .history
-            .lock()
-            .map_err(|_| BackendError::Protocol("Phenix history lock poisoned".to_owned()))?
-            .clone();
+        let model = self.model.lock().clone();
+        let tools = self.tools.lock().clone();
+        let mut history = self.history.lock().clone();
         history.push(ChatMessage::user(prompt));
 
         let provider = if model.provider.as_str() == oauth::PROVIDER {
@@ -539,10 +522,7 @@ impl BackendSession for PhenixSession {
         host: &mut dyn BackendHost,
     ) -> Result<(), BackendError> {
         {
-            let mut active = self
-                .active
-                .lock()
-                .map_err(|_| BackendError::Protocol("Phenix active lock poisoned".to_owned()))?;
+            let mut active = self.active.lock();
             if *active {
                 return Err(BackendError::Protocol(
                     "Phenix backend session is already executing".to_owned(),
@@ -554,15 +534,9 @@ impl BackendSession for PhenixSession {
         let result = self
             .runtime
             .block_on(self.execute_turn(request.prompt, host));
-        if let Ok(mut active) = self.active.lock() {
-            *active = false;
-        }
+        *self.active.lock() = false;
         if let Ok(history) = &result {
-            *self
-                .history
-                .lock()
-                .map_err(|_| BackendError::Protocol("Phenix history lock poisoned".to_owned()))? =
-                history.clone();
+            *self.history.lock() = history.clone();
         }
         result.map(|_| ())
     }

@@ -1,5 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+use std::num::NonZeroU64;
 use syn::{Fields, ItemStruct, LitStr};
 
 pub(crate) fn expand(args: TokenStream, input: TokenStream) -> syn::Result<TokenStream> {
@@ -38,12 +39,9 @@ pub(crate) fn validate_interface_id(value: &str) -> Result<(), &'static str> {
     }) {
         return Err("interface id contains unsupported characters");
     }
-    let version = version
-        .parse::<u64>()
+    version
+        .parse::<NonZeroU64>()
         .map_err(|_| "interface id version must be a positive integer")?;
-    if version == 0 {
-        return Err("interface id version must be a positive integer");
-    }
     Ok(())
 }
 

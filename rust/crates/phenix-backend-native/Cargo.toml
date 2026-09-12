@@ -12,6 +12,7 @@ base64.workspace = true
 futures.workspace = true
 genai.workspace = true
 getrandom.workspace = true
+parking_lot.workspace = true
 phenix-backend = { path = "../phenix-backend" }
 phenix-domain = { path = "../phenix-domain" }
 reqwest.workspace = true

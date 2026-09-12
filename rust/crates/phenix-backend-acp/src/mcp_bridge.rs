@@ -4,13 +4,14 @@ use agent_client_protocol::schema::v1::{
     McpConnectionId, McpServer, McpServerAcp, MessageMcpNotification, MessageMcpRequest,
     MessageMcpResponse,
 };
+use parking_lot::Mutex;
 use phenix_backend::{
     BackendError, PreparedToolSurface, ToolInvocation, ToolPresentation, ToolResult,
 };
 use phenix_domain::{CallableDescriptor, PhenixSchema};
 use serde_json::{json, value::RawValue, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 
 const SERVER_ID: &str = "phenix-tools";
 const SERVER_NAME: &str = "Phenix tools";
@@ -40,10 +41,7 @@ impl ToolBridge {
                 "ACP tool bridge requires the negotiated ACP extension presentation".to_owned(),
             ));
         }
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| BackendError::Protocol("ACP tool bridge lock poisoned".to_owned()))?;
+        let mut state = self.state.lock();
         state.callables = tools
             .callables()
             .iter()
@@ -59,18 +57,12 @@ impl ToolBridge {
         worker: mpsc::Sender<WorkerMessage>,
     ) -> Result<(), BackendError> {
         self.provision(tools)?;
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| BackendError::Protocol("ACP tool bridge lock poisoned".to_owned()))?;
-        state.worker = Some(worker);
+        self.state.lock().worker = Some(worker);
         Ok(())
     }
 
     pub(super) fn unbind_execution(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.worker = None;
-        }
+        self.state.lock().worker = None;
     }
 
     pub(super) fn connect(
@@ -81,9 +73,7 @@ impl ToolBridge {
             return Err(agent_client_protocol::Error::invalid_params()
                 .data(format!("unknown Phenix MCP server {}", request.server_id)));
         }
-        let mut state = self.state.lock().map_err(|_| {
-            agent_client_protocol::Error::internal_error().data("ACP tool bridge lock poisoned")
-        })?;
+        let mut state = self.state.lock();
         state.next_connection += 1;
         let connection_id = format!("phenix-tools-{}", state.next_connection);
         state.connections.insert(connection_id.clone());
@@ -94,10 +84,10 @@ impl ToolBridge {
         &self,
         request: DisconnectMcpRequest,
     ) -> Result<DisconnectMcpResponse, agent_client_protocol::Error> {
-        let mut state = self.state.lock().map_err(|_| {
-            agent_client_protocol::Error::internal_error().data("ACP tool bridge lock poisoned")
-        })?;
-        state.connections.remove(request.connection_id.0.as_ref());
+        self.state
+            .lock()
+            .connections
+            .remove(request.connection_id.0.as_ref());
         Ok(DisconnectMcpResponse::new())
     }
 
@@ -139,10 +129,12 @@ impl ToolBridge {
         &self,
         connection_id: &McpConnectionId,
     ) -> Result<(), agent_client_protocol::Error> {
-        let state = self.state.lock().map_err(|_| {
-            agent_client_protocol::Error::internal_error().data("ACP tool bridge lock poisoned")
-        })?;
-        if state.connections.contains(connection_id.0.as_ref()) {
+        if self
+            .state
+            .lock()
+            .connections
+            .contains(connection_id.0.as_ref())
+        {
             Ok(())
         } else {
             Err(agent_client_protocol::Error::invalid_params()
@@ -151,9 +143,7 @@ impl ToolBridge {
     }
 
     fn list_tools(&self) -> Result<Value, agent_client_protocol::Error> {
-        let state = self.state.lock().map_err(|_| {
-            agent_client_protocol::Error::internal_error().data("ACP tool bridge lock poisoned")
-        })?;
+        let state = self.state.lock();
         let tools = state
             .callables
             .values()
@@ -185,9 +175,7 @@ impl ToolBridge {
             .unwrap_or_else(|| json!({}));
 
         let (callable, worker) = {
-            let state = self.state.lock().map_err(|_| {
-                agent_client_protocol::Error::internal_error().data("ACP tool bridge lock poisoned")
-            })?;
+            let state = self.state.lock();
             let callable = state.callables.get(name).ok_or_else(|| {
                 agent_client_protocol::Error::invalid_params().data(format!(
                     "tool is not provisioned for this execution: {name}"
