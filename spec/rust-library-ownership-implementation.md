@@ -49,13 +49,17 @@ Checked against current upstream documentation on 2026-09-11. Versions are evide
 
 ## Decisions and work in this PR
 
-- `thiserror`: adopted where it removes complete `Display`/`Error`/`From` boilerplate without changing taxonomy or messages. Conductor build/serve errors, backend errors, client-tool errors, debug serialization errors, provider credential-store/runtime errors, application-interface errors, context-catalog errors, language-service errors, event delivery errors, observable errors, memory-plugin errors, persistence-provider errors, artifact-revision parse errors, plugin-build plan errors, plugin-build execution/store errors, and SDK provider errors are migrated in the current sweep.
+- `thiserror`: adopted where it removes complete `Display`/`Error`/`From` boilerplate without changing taxonomy or messages. Conductor build/serve errors, backend errors, client-tool errors, debug serialization errors, provider credential-store/runtime errors, application-interface errors, context-catalog errors, language-service errors, event delivery errors, observable errors, memory-plugin errors, persistence-provider errors, artifact-revision parse errors, plugin-build plan errors, plugin-build execution/store errors, and SDK provider errors are migrated in the current sweep. `DelegationContractError` intentionally keeps its manual implementation because its public `UnknownRelatedComponent { source, target }` field would be interpreted by `thiserror` as an error source; renaming that public field solely for the derive would change the API.
 - `parking_lot`: capability/prepared-mutation registries, ACP MCP bridge and backend session/cancellation state, `EventBus` receipt/subscription/causality state, `TaskRuntime` ownership/call registries, `ObservableStore` state, native-backend session model/tool/history/active state, core runtime plugin-instance/persistence/invocation-trace/provenance state, and `phenix-client-acp` ordered-update and negotiated-extension metadata state use the same non-poisoning synchronous lock policy. Domain cancellation, delivery, transaction, observation, lifecycle, and ownership semantics are unchanged. The persistence-bootstrap recording mutex remains intentionally test-local.
 - `nutype`: not adopted as a blanket identifier replacement. Core's existing identifier machinery also owns Phenix-specific schema/value-codec behavior, and replacing it would still require a Phenix wrapper while changing generated error surfaces. The duplicate domain `SessionId` has been removed in favor of core's canonical `SessionId`; this intentionally tightens domain session IDs to the existing core character policy and is covered by a wire-deserialization regression test. Other duplicated validated IDs remain active consolidation work before reconsidering a derive crate.
 - `NonZero` integer types: positive interface identifiers and SDK interface/resource schema/migration parsers now parse directly into `NonZeroU64`/`NonZeroU32` rather than accepting zero and rejecting it in a second step. Public wire values and diagnostics are unchanged. Wider configuration metadata/contract-version boundaries remain active work because converting their public struct fields requires a coordinated constructor/API sweep.
+- Option contracts: `phenix-plugin-options` now imports and reexports the canonical SDK option IDs, scopes, values, definitions, commands, responses, and `OptionsInterface`. The plugin owns only persistence, precedence, validation policy, and resolution state. This removes the second serde/value-codec/type implementation while keeping existing plugin import paths usable.
+- Plugin macro path: the old `plugin_attr.rs -> plugin_attr_legacy.rs` forwarding layer is removed. The existing implementation is now the canonical `plugin_attr.rs`; there is no second compatibility entrypoint to maintain.
 - `tokio_util::sync::CancellationToken`: rejected for the current core `TaskRuntime`. The runtime is deliberately thread-based and its cancellation handles are coupled to task ownership, authority attenuation, graph generation, and kernel cancellation events. A Tokio-oriented primitive would not replace those semantics and would add another runtime-adjacent mechanism. Revisit only if `TaskRuntime` itself moves to an async execution model.
+- `petgraph`: rejected for the current `ComponentGraph` implementation. The graph contract requires lexicographically deterministic ready-node selection and diagnostics containing the concrete cycle path. `petgraph::algo::toposort` supplies neither contract directly; retaining the existing `BTreeMap`/`BTreeSet` implementation is smaller than adding a second ordering/cycle layer around `petgraph`. Revisit if the graph grows beyond these mechanics.
 - `rmcp`: remains an active migration. Current upstream is async/Tokio and newer than the bridge's hand-written MCP revision, so adoption must replace protocol parsing/dispatch deliberately rather than merely adding a dependency beside the existing state machine.
 - Provider HTTP/bytes ownership now uses `http::{Method, StatusCode, HeaderMap}`, `url::Url`, and `bytes::Bytes` directly in `ProviderRequest`/`ProviderResponse`. The local method enum, string header maps, byte-vector transport boundary, and conversion-only `send_http` loops are removed. Endpoint identity/validation and provider error/rate-limit normalization remain Phenix-owned.
+- Dead binding code: the unreferenced `phenix-binding-lua/src/error.rs` duplicate is removed; the live binding error representation remains in the compiled module until its broader binding split is addressed.
 
 ## Active implementation checklist
 
@@ -70,7 +74,7 @@ Checked against current upstream documentation on 2026-09-11. Versions are evide
 
 ### Graphs and cancellation
 
-- [ ] Replace generic DAG/cycle/topological mechanics with `petgraph` where it reduces code while keeping Phenix node/edge/provider/authority semantics.
+- [x] Keep the current deterministic `ComponentGraph` mechanics; reject `petgraph` because preserving ordered ready-node selection and concrete cycle-path diagnostics would require keeping the custom mechanics around it.
 - [x] Keep explicit cancellation handles in the current thread-based `TaskRuntime`; reject `tokio_util::sync::CancellationToken` until the runtime model itself becomes async.
 
 ### Provider/protocol boundaries
@@ -86,7 +90,7 @@ Checked against current upstream documentation on 2026-09-11. Versions are evide
 - [ ] Replace the custom general-purpose byte wrapper with `bytes::Bytes` where semantic behavior and serde/codec contracts can be preserved.
 - [ ] Consolidate digest/revision representations so raw hash strings do not leak across artifact/workspace boundaries.
 - [ ] Use `EnumSet` only for truly closed feature/presentation sets; do not convert open capability namespaces.
-- [ ] Remove duplicated option-domain ownership and import/reexport canonical SDK option contract types.
+- [x] Remove duplicated option-domain ownership and import/reexport canonical SDK option contract types.
 
 ### Proc macros, serde, persistence, builders
 
@@ -95,10 +99,11 @@ Checked against current upstream documentation on 2026-09-11. Versions are evide
 - [ ] Use `serde_path_to_error`/`serde_with` at configuration boundaries where they improve diagnostics or remove custom parsing mechanics.
 - [ ] Evaluate `rusqlite_migration` against current persistence transaction semantics; adopt only if it does not obscure Phenix durable migration meaning.
 - [ ] Use `bon`, `derive_more`, and `strum` selectively where they delete repeated mechanical code; do not introduce them as blanket style dependencies.
+- [x] Remove the legacy plugin-attribute forwarding path; the implementation now lives at the canonical macro module path.
 
 ### Cleanup and verification
 
-- [ ] Delete obsolete compatibility/legacy macro paths uncovered by the migration.
+- [x] Delete the obsolete plugin macro compatibility path and the unreferenced Lua binding error duplicate found by this sweep.
 - [ ] Remove dependencies and helper modules made dead by upstream crate adoption.
 - [ ] Update the original audit where recommendations were rejected or superseded.
 - [ ] Measure final hand-maintained Rust LOC delta against this snapshot.
