@@ -172,7 +172,7 @@ pub enum ComponentInvocationError {
         interface: InterfaceId,
     },
     #[error("{0}")]
-    Graph(crate::ComponentGraphError),
+    Graph(#[from] crate::ComponentGraphError),
     #[error("component interface {interface} is not invokable: {message}")]
     InvalidInterface {
         interface: InterfaceId,
@@ -181,21 +181,9 @@ pub enum ComponentInvocationError {
     #[error("component request encoding failed: {0}")]
     Encode(String),
     #[error("{0}")]
-    Kernel(KernelError),
+    Kernel(#[from] KernelError),
     #[error("component response decoding failed: {0}")]
     Decode(String),
-}
-
-impl From<KernelError> for ComponentInvocationError {
-    fn from(error: KernelError) -> Self {
-        Self::Kernel(error)
-    }
-}
-
-impl From<crate::ComponentGraphError> for ComponentInvocationError {
-    fn from(error: crate::ComponentGraphError) -> Self {
-        Self::Graph(error)
-    }
 }
 
 impl ResolvedImportHandle {

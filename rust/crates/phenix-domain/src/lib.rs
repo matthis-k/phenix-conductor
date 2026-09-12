@@ -79,18 +79,11 @@ pub use workspace::*;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("identifier must not be empty")]
 pub struct InvalidId;
-
-impl Display for InvalidId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str("identifier must not be empty")
-    }
-}
-
-impl std::error::Error for InvalidId {}
 
 domain_id_type!(ExecutionId);
 domain_id_type!(OrchestrationNodeId);

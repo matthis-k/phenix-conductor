@@ -2,6 +2,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
+use std::{num::NonZeroU64, str::FromStr};
 use syn::ext::IdentExt;
 use syn::{
     parse_macro_input, parse_quote, Data, DeriveInput, Fields, Generics, Ident, LitStr, Type,
@@ -180,12 +181,7 @@ fn validate_contract_id(value: &str) -> Result<(), &'static str> {
     }) {
         return Err("contract id contains unsupported characters");
     }
-    let version = version
-        .parse::<u64>()
-        .map_err(|_| "contract id version must be a positive integer")?;
-    if version == 0 {
-        return Err("contract id version must be a positive integer");
-    }
+    NonZeroU64::from_str(version).map_err(|_| "contract id version must be a positive integer")?;
     Ok(())
 }
 

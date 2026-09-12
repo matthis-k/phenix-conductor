@@ -1692,6 +1692,7 @@ dependencies = [
  "phenix-domain",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -1753,6 +1754,7 @@ dependencies = [
  "phenix-plugin-catalog",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
