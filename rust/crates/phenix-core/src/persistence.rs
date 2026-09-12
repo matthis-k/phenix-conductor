@@ -74,8 +74,7 @@ pub struct SchemaMigration {
 #[derive(Debug, thiserror::Error)]
 pub enum PersistenceError {
     #[error("local persistence: {0}")]
-    #[from]
-    Sql(rusqlite::Error),
+    Sql(#[from] rusqlite::Error),
     #[error("durable namespace {namespace} is owned by {owner}")]
     NamespaceCollision {
         namespace: ResourceNamespace,
