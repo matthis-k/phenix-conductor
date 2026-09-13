@@ -305,18 +305,26 @@ fn credential_from_tokens(tokens: CodexToken) -> Result<StoredCredential, String
     })
 }
 
-/// Decode a JWT's claims WITHOUT verifying its signature.
+/// Decode a JWT's claims WITHOUT verifying its signature or validating its
+/// claims.
 ///
 /// The Codex id/access tokens carry account identity and expiry claims that are
 /// not independently verifiable here (no JWKS/public key is configured for the
-/// ChatGPT issuer), so claim extraction is intentionally unverified. Any
-/// signature or expiry enforcement must be added separately before the token is
-/// trusted for authorization; merely reading `exp` does not validate expiry.
+/// ChatGPT issuer), so claim extraction is intentionally unverified. Every
+/// validation switch is disabled (signature, expiry, audience, not-before, and
+/// the required-claim set), so `exp` is read but not enforced and a token that
+/// carries an `aud` claim is not rejected. This helper is extraction-only:
+/// it must never be used to authorize, and any signature/claims verification
+/// must be added separately before the token is trusted.
 fn jwt_payload(token: &str) -> Option<serde_json::Value> {
-    use jsonwebtoken::{Algorithm, DecodingKey, Validation};
+    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
     let mut validation = Validation::new(Algorithm::RS256);
     validation.insecure_disable_signature_validation();
-    jsonwebtoken::decode::<serde_json::Value>(
+    validation.validate_exp = false;
+    validation.validate_aud = false;
+    validation.validate_nbf = false;
+    validation.required_spec_claims.clear();
+    decode::<serde_json::Value>(
         token,
         // No public key is used: signature validation is disabled above.
         &DecodingKey::from_secret(b"unused"),
@@ -399,5 +407,95 @@ impl<'c> AsyncHttpClient<'c> for ReqwestHttp {
                 .body(body.to_vec())
                 .map_err(oauth2::HttpClientError::Http)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn expiry(delta_secs: i64) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_add_signed(delta_secs)
+    }
+
+    /// Build a deterministic HS256 JWT with the given claims (signature is not
+    /// relevant to extraction, but the token must be well formed).
+    fn token(claims: serde_json::Value) -> String {
+        let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+        jsonwebtoken::encode(
+            &header,
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(b"fixture"),
+        )
+        .expect("fixture token encodes")
+    }
+
+    #[test]
+    fn extraction_reads_account_id_from_id_and_access_tokens() {
+        let id_token = token(serde_json::json!({
+            "chatgpt_account_id": "account-123",
+            "exp": expiry(60 * 60),
+        }));
+        assert_eq!(
+            account_id_from_token(&id_token).as_deref(),
+            Some("account-123")
+        );
+
+        let access_token = token(serde_json::json!({
+            "https://api.openai.com/auth": { "chatgpt_account_id": "account-456" },
+            "exp": expiry(60 * 60),
+        }));
+        assert_eq!(
+            account_id_from_token(&access_token).as_deref(),
+            Some("account-456")
+        );
+        assert_eq!(token_expiry(&access_token), Some(expiry(60 * 60)));
+    }
+
+    #[test]
+    fn extraction_does_not_reject_audience_bearing_tokens() {
+        let token = token(serde_json::json!({
+            "iss": "https://auth.openai.com",
+            "aud": "https://api.openai.com",
+            "chatgpt_account_id": "account-aud",
+            "exp": expiry(60 * 60),
+        }));
+        assert_eq!(
+            account_id_from_token(&token).as_deref(),
+            Some("account-aud")
+        );
+    }
+
+    #[test]
+    fn extraction_does_not_reject_expired_claims() {
+        let expired = token(serde_json::json!({
+            "chatgpt_account_id": "account-expired",
+            "exp": expiry(-60 * 60),
+        }));
+        assert_eq!(
+            account_id_from_token(&expired).as_deref(),
+            Some("account-expired")
+        );
+        assert_eq!(token_expiry(&expired), Some(expiry(-60 * 60)));
+    }
+
+    #[test]
+    fn malformed_tokens_yield_no_claims() {
+        assert!(jwt_payload("not-a-jwt").is_none());
+        assert!(jwt_payload("a.b.c.d").is_none());
+        assert!(jwt_payload("").is_none());
+        let bad_payload = token(serde_json::json!({ "exp": "not-a-number" }));
+        assert!(token_expiry(&bad_payload).is_none());
+    }
+
+    #[test]
+    fn missing_account_id_reads_as_none() {
+        let token = token(serde_json::json!({ "exp": expiry(60 * 60) }));
+        assert_eq!(account_id_from_token(&token), None);
     }
 }
