@@ -11,7 +11,7 @@ Keep each execution within the resolved model's actual context capacity without 
 ## Order of operations
 
 1. avoid unnecessary injection;
-2. delegate bounded independent work when semantically appropriate;
+2. honor an explicit bounded delegation plan when semantically appropriate;
 3. deterministic pruning;
 4. structured result collapse;
 5. reuse valid compact memory/checkpoint nodes;
@@ -33,7 +33,9 @@ Keep each execution within the resolved model's actual context capacity without 
 - Later compaction may consume a prior checkpoint as an optimization, but provenance continues to resolve to raw durable source ranges rather than summary-only ancestry.
 - `context.expand@1` may progressively rehydrate a checkpoint into child summaries, events, or exact raw sources when more detail is needed.
 - Context compaction does not imply long-term memory promotion. Promotion is a separate memory state transition.
-- Provider context-overflow errors trigger an emergency prune/compact/retry path.
+- A confirmed provider rejection for context overflow permits one emergency
+  prune/compact retry on that target. It shares the root budget and never reruns
+  completed tool effects. Unknown dispatch outcomes follow `model-turn-protocol.md`.
 - Context pressure may inform planning but never auto-spawns child executions solely due to a token threshold.
 
 ## Failure semantics
@@ -41,6 +43,39 @@ Keep each execution within the resolved model's actual context capacity without 
 A failed compaction never replaces or discards the detailed active context it was asked to compact. The caller may prune further, choose another compatible provider/route according to pinned policy, or fail with explicit context exhaustion.
 
 Failure to expand a compact node is visible and never causes the node's summary to be presented as exact source evidence.
+
+## Admission and commit boundary
+
+Compute the mandatory floor before optional admission. It includes current
+instructions, the active request and fixed constraints, selected schemas, required
+tool-call/result groups, output reserve, and safety margin. If the floor cannot fit,
+use the bounded routing rule in `model-routing.md` or return context exhaustion.
+Truncating pinned text is not a valid fallback.
+
+Keep tool-call/result groups structurally complete. A pending call and its identity
+remain pinned until resolved. Deduplication may share payload storage but preserves
+each call occurrence and its result binding.
+
+Prepare compaction against an immutable projection/source/configuration revision.
+Commit the new checkpoint and active projection reference atomically only if that
+revision is still current. Cancellation, steering, authority changes, or concurrent
+context updates discard the stale proposal. Preserve the detailed projection on
+failure and reassemble using current authorized state.
+
+Persist exact artifacts before replacing their bytes with references. Retention
+keeps referenced sources reachable while an active execution or retained checkpoint
+requires expansion. Permission revocation still applies at resolution time. Missing
+or revoked sources produce typed unavailable evidence, never fabricated expansion.
+
+The portable baseline works without model-backed compaction: deterministic omission,
+typed collapse, exact references, and bounded exhaustion handling remain available.
+Use the helper-call rules in `model-routing.md` for summarization. Default: one
+summarization call per compaction attempt, no recursive compaction of that call.
+Slice 11 learned reducers remain optional.
+
+Backend context-control modes from `model-turn-protocol.md` govern how a committed
+projection becomes effective. An append-only or opaque session cannot claim an
+old context item was removed without an acknowledged replacement/reset operation.
 
 ## Invariants
 
