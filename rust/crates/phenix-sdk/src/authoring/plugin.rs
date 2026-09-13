@@ -261,28 +261,12 @@ impl Display for HookName {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EventEmitError {
+    #[error("event payload encoding failed: {0}")]
     Encode(String),
-    Dispatch(EventError),
-}
-
-impl Display for EventEmitError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Encode(message) => write!(f, "event payload encoding failed: {message}"),
-            Self::Dispatch(error) => Display::fmt(error, f),
-        }
-    }
-}
-
-impl Error for EventEmitError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Encode(_) => None,
-            Self::Dispatch(error) => Some(error),
-        }
-    }
+    #[error("{0}")]
+    Dispatch(#[from] EventError),
 }
 
 #[derive(Clone)]
