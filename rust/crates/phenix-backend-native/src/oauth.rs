@@ -5,6 +5,7 @@ use oauth2::{
     AsyncHttpClient, AuthUrl, AuthorizationCode, ClientId, HttpRequest, HttpResponse,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
@@ -65,7 +66,10 @@ impl CodexOAuth {
         Ok(Some(AuthData::RequestOverride {
             url: RESPONSES_URL.to_owned(),
             headers: Headers::from([
-                ("Authorization", format!("Bearer {access_token}")),
+                (
+                    "Authorization",
+                    format!("Bearer {}", access_token.expose_secret()),
+                ),
                 ("ChatGPT-Account-ID", account_id),
                 ("originator", "phenix".to_owned()),
                 ("version", env!("CARGO_PKG_VERSION").to_owned()),
@@ -252,7 +256,7 @@ async fn refresh(
     };
     let client = codex_client("http://localhost/oauth/callback")?;
     let response = client
-        .exchange_refresh_token(&RefreshToken::new(refresh_token.clone()))
+        .exchange_refresh_token(&RefreshToken::new(refresh_token.expose_secret().to_owned()))
         .request_async(&ReqwestHttp)
         .await
         .map_err(|error| format!("OAuth token refresh failed: {error}"))?;
@@ -260,16 +264,20 @@ async fn refresh(
     let refreshed_refresh = response
         .refresh_token()
         .map(|token| token.secret().to_owned())
-        .unwrap_or(refresh_token);
-    let refreshed_id = response.extra_fields().id_token.clone().unwrap_or(id_token);
+        .unwrap_or_else(|| refresh_token.expose_secret().to_owned());
+    let refreshed_id = response
+        .extra_fields()
+        .id_token
+        .clone()
+        .unwrap_or_else(|| id_token.expose_secret().to_owned());
     let account_id = account_id_from_token(&refreshed_id)
         .or_else(|| account_id_from_token(&refreshed_access))
         .unwrap_or(account_id);
     let expires_at = token_expiry(&refreshed_access).unwrap_or(unix_time()?.saturating_add(3600));
     let refreshed = StoredCredential::OAuth {
-        access_token: refreshed_access,
-        refresh_token: refreshed_refresh,
-        id_token: refreshed_id,
+        access_token: SecretString::from(refreshed_access),
+        refresh_token: SecretString::from(refreshed_refresh),
+        id_token: SecretString::from(refreshed_id),
         account_id,
         expires_at,
     };
@@ -289,9 +297,9 @@ fn credential_from_tokens(tokens: CodexToken) -> Result<StoredCredential, String
         .ok_or_else(|| "OAuth token does not identify a ChatGPT account".to_owned())?;
     let expires_at = token_expiry(&access_token).unwrap_or(unix_time()?.saturating_add(3600));
     Ok(StoredCredential::OAuth {
-        access_token,
-        refresh_token,
-        id_token,
+        access_token: SecretString::from(access_token),
+        refresh_token: SecretString::from(refresh_token),
+        id_token: SecretString::from(id_token),
         account_id,
         expires_at,
     })

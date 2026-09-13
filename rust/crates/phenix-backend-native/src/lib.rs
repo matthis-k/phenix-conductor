@@ -565,7 +565,8 @@ fn provider_has_valid_auth(
     if providers::is_api_key_auth_provider(provider) {
         let stored_key = matches!(
             stored,
-            Some(StoredCredential::ApiKey { ref secret }) if !secret.trim().is_empty()
+            Some(StoredCredential::ApiKey { ref secret })
+                if !secrecy::ExposeSecret::expose_secret(secret).trim().is_empty()
         );
         return Ok(stored_key || providers::environment_authenticated(provider));
     }
@@ -679,9 +680,9 @@ mod tests {
             .save_oauth(
                 oauth::PROVIDER,
                 StoredCredential::OAuth {
-                    access_token: "access".to_owned(),
-                    refresh_token: "refresh".to_owned(),
-                    id_token: "id".to_owned(),
+                    access_token: secrecy::SecretString::from("access".to_owned()),
+                    refresh_token: secrecy::SecretString::from("refresh".to_owned()),
+                    id_token: secrecy::SecretString::from("id".to_owned()),
                     account_id: "account".to_owned(),
                     expires_at: u64::MAX,
                 },
