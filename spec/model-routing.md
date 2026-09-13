@@ -243,6 +243,59 @@ A concrete selection that cannot satisfy hard requirements fails. It does not si
 
 A routed selection with no eligible candidates fails with enough structured information to explain which hard constraints removed the candidates.
 
+## Context negotiation and bounded recovery
+
+Context supplies model-independent demand before routing: mandatory material,
+optional material, required content/tool capabilities, and requested output.
+Coarse demand uses bytes/content kinds and estimate provenance, not a token count
+silently shared across tokenizers. Mandatory demand is a hard eligibility input;
+optional full-history size is not an irreducible minimum.
+
+Routing returns a concrete target and a pinned effective capability/limit snapshot
+as defined in `model-turn-protocol.md`. Context then materializes a target-specific
+projection, including schema overhead, output reserve, and safety margin.
+
+If the projection cannot fit after permitted reduction, routed selection may try
+the next eligible target from the same pinned policy. Default: at most two distinct
+targets per logical turn, each attempted once for admission. Concrete selection
+never changes target. If all attempts fail, return typed context exhaustion with
+the required floor and available capacity.
+
+Use adapter/model limit metadata or an explicitly configured conservative limit.
+If capacity is unknown, expose that fact and use bounded best-effort admission only
+where the request permits it. A strict fit guarantee requires known/configured
+limits. Price or usage unknown cannot be treated as free when enforcing a hard
+monetary budget; require a conservative cost bound or reject that candidate.
+
+Persist the route decision, profile/configuration generation, capability snapshot,
+and projection revision together for each dispatch attempt. Recheck availability
+and authority at dispatch. A changed capability snapshot requires rematerialization.
+Active executions retain their pinned profile after its contributor disconnects;
+removal affects new resolutions. Revoked authority takes effect immediately.
+
+## Helper-call defaults
+
+The normal Harness publishes one default profile through the same typed contribution
+path as custom profiles. It uses the product's selected deployment. No second model,
+provider credential, local inference server, or learned estimator is required.
+
+Classifier, summarizer, verifier, and worker requests carry distinct task kinds.
+An explicit callable target takes precedence; otherwise helpers inherit the selected
+deployment when compatible. A concrete root selection also stays concrete for its
+helpers unless the user configured a separate helper policy.
+
+Helpers use isolated requests with minimal context, fixed budgets, and no tools
+unless their task requires authorized tools. They cannot run root recovery.
+Classifier and summarizer calls cannot recursively compact or delegate themselves.
+Nested worker delegation requires explicit ordinary orchestration policy and stays
+within the same root budget and depth limits. Strict parsing works
+without native structured-output support; invalid output follows the caller's
+bounded failure path. A backend unable to isolate a helper cannot run that helper.
+
+Unavailable optional helpers leave deterministic execution available. An incompatible
+required verifier or worker returns a typed failure. Optional estimator failure uses
+the deterministic ranker; it does not change hard eligibility rules.
+
 ## Required regressions
 
 - concrete selection reaches the requested target without profile lookup;

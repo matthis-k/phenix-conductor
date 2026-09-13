@@ -24,36 +24,50 @@ The profile adds composition rules where those contracts do not already decide b
 
 ## Default pipeline
 
-```text
-exact sources + task state + memory + code intelligence
-                        |
-                        v
-               budgeted delta recall
-                        |
-              +---------+---------+
-              |                   |
-       tool/skill discovery   delegated explorer
-              |                   |
-              +---------+---------+
-                        |
-                  ingestion gate
-           parse | dedupe | artifact | prune
-                        |
-                        v
-               cache-stable context
-                        |
-                     solver
-                        |
-                typed/lazy tools
-                        |
-               retention lifecycle
-                        |
-              batched compaction
-                        |
-                 next cache epoch
-```
+1. For a new root, apply the structural sufficiency gate and optional fallback
+   recovery from `fallback-memory-recall.md`, then bind the workspace.
+2. Build model-independent demand from canonical task state and selected exact
+   sources. Memory and code intelligence contribute only when requested by context
+   policy; they are not unconditional startup queries.
+3. Resolve the target and effective backend capabilities, then materialize and
+   admit the model-specific projection using `model-routing.md`.
+4. Run any explicitly planned bounded child through the ordinary worker runtime.
+   Its result reenters the same admission path before the parent model call.
+5. Execute the model turn and authorized tools. Apply retention and transactional
+   compaction for later turns. Attribute all helper and child costs to the task.
 
 The system should prevent unnecessary bytes from entering model context before it tries to summarize bytes already admitted.
+
+## Out-of-box baseline
+
+The normal Harness composes the first-party services below. Kernel-only composition
+remains explicit. Providers are bound by typed interfaces; replacing one does not
+require loading its first-party implementation as a dependency.
+
+| Concern | Default | Optional improvement / unavailable behavior |
+| --- | --- | --- |
+| Model selection | existing selected authenticated deployment and deterministic routing | helper targets and learned estimates are optional; missing authentication yields normal setup guidance |
+| Context | deterministic assembly, exact dedupe, typed collapse, artifact references | model compaction/reducers require declared capabilities; mandatory context still must fit |
+| Memory | existing per-workspace store, exact/lexical recall, provenance and freshness | embeddings, reranking and external databases are optional; no match means ordinary discovery |
+| Recovery | cold gate plus at most one compatible isolated classifier call | no history, missing provider or invalid output means ordinary discovery; no guessed workspace |
+| Tools | bounded common tools and authorized catalog discovery/load operations | native deferred schemas optional; host loads selected schemas on the next turn |
+| Code | authorized file/search/patch operations and exact file revisions | installed language providers add semantic actions; unsupported languages stay usable |
+| Delegation | available through ordinary worker contracts | automatic exploration and smaller-model routing are off until measured and configured |
+| Usage/cache | record available counters and estimate provenance | missing cache/usage reporting remains unknown and disables evidence-based cache decisions |
+
+Ordinary discovery means inspecting authorized live state and available owner
+services, then asking a focused question if the missing target remains unresolved.
+It does not mean scanning every repository or silently expanding memory scope.
+
+The baseline needs no embedding service, GPU, vector database, remote analyzer,
+second model credential, or network access beyond the chosen model and requested
+task tools. Optional services must not perform downloads or block startup merely
+because their plugin is installed. Report configured, effective, degraded, or
+disabled status through ordinary inspection, with stable reason codes.
+
+Package the default services and their artifact/reference resolver together. Product
+tests must exercise fresh state, one model fixture, no optional providers, a second
+session with reusable evidence, and an explicitly stripped composition.
 
 ## Ownership
 
@@ -81,7 +95,7 @@ Use this order before model-backed compression:
 3. reuse an exact unchanged observation instead of inserting duplicate bytes;
 4. parse structured outputs into typed results;
 5. move large exact payloads to durable artifacts and insert a compact view plus reference;
-6. delegate bounded exploration when it would otherwise pollute the solver history;
+6. admit results from explicitly planned bounded exploration;
 7. apply task-aware code pruning only to material that remains too large;
 8. use model-backed compaction only after deterministic reduction.
 
@@ -114,7 +128,8 @@ Rules:
 
 - Keep cacheable prefix bytes and ordering deterministic.
 - Put volatile material after stable material where provider semantics allow it.
-- Append environment or policy changes when doing so preserves semantics; do not rewrite old turns only to update them.
+- Append environment changes when semantics permit. Authority/instruction changes
+  rebuild affected context immediately, even when that invalidates the cache.
 - Do not regenerate a rolling summary every turn.
 - Compact in batches when context pressure, reasoning quality, or expected future cost justifies a new cache epoch.
 - A compaction decision accounts for provider cache-read cost, cache-write or fresh-prefill cost, expected remaining turns, context pressure, and quality risk.
@@ -144,6 +159,12 @@ The default Harness should not place every tool schema in every model request.
 Expose a small stable set of common tools plus a searchable catalog. Load full schemas only for selected tools when the provider and model support deferred discovery. Providers without deferred tool loading receive the smallest task-relevant deterministic set.
 
 Tool catalog ordering and schema serialization must be stable within a cache epoch.
+
+The portable catalog exposes authorized discovery and schema loading as ordinary
+typed tools. A discovery result is a descriptor, not invocation authority. Loading
+rebuilds the next request's admitted schema set. If the backend cannot change tools
+mid-session, reset/replay only when supported, or keep a bounded fixed set and report
+unsupported dynamic loading. Never hide a required tool with no retrieval path.
 
 ### Results
 
@@ -190,6 +211,15 @@ Exploration results may enter repository memory only through the normal memory p
 
 The default implementation should reuse ordinary Phenix workers. Do not depend on a separate explorer runtime.
 
+Attach the typed contract to the ordinary worker task with a selected target,
+attenuated authority, scoped references, deadline, attempt limit, and reserved share
+of the root budget. Children, helper calls, retries, and verification share that
+budget; parallel children cannot each spend the full remainder. Pin fixed design
+constraints in the child projection. Check result size and evidence access before
+parent admission. Oversized results use artifacts; invalid results escalate through
+ordinary worker failure handling. Parent cancellation stops children using existing
+lifecycle rules. Unknown child usage is accounted as unknown, not zero savings.
+
 ## Code intelligence
 
 Current language facts remain owned by the existing language-intelligence contract. Add a first-party code-intelligence provider for repository-wide structure and history rather than moving code semantics into Core.
@@ -226,6 +256,13 @@ The first Rust implementation should consume existing language facts from rust-a
 
 The normalized Phenix identity remains stable across providers so memory and task state do not depend on one external graph engine.
 
+Provider symbol IDs map to workspace/repository-scoped logical IDs; they are not
+portable identities themselves. Record analyzer/index version and exact source
+revision. Unsaved buffers and dirty worktrees need distinct revision identities.
+Ambiguous rename/split/merge evidence creates tentative lineage and revalidation,
+not a forced identity merge. When analyzers are absent or stale, exact file/revision
+references remain usable and semantic identity guarantees are reported unavailable.
+
 ## Structured code actions
 
 Prefer semantic reads and edits when language support is available:
@@ -240,6 +277,12 @@ remove entity
 ```
 
 The runtime applies syntax-preserving mechanical edits. Raw file reads and textual patches remain fallback operations.
+
+Structured edits resolve the current entity under write authority, compare the
+expected source revision, and apply through the existing transactional workspace
+path. A revision mismatch returns a typed conflict before mutation. The adapter
+must declare its supported language/actions; unsupported actions use explicit
+textual operations rather than pretending to preserve syntax or semantics.
 
 ## Repository and task memory
 
@@ -276,6 +319,12 @@ A constrained remote agent may not have Phenix code intelligence or durable loca
 - exact references or links the remote environment can resolve.
 
 The export is a projection. Phenix state remains authoritative.
+
+Negotiate reference resolution with the recipient. Inline bounded required evidence
+when its references are not resolvable there. If required material cannot fit, return
+typed budget exhaustion. A delta identifies the exact base checkpoint/content hash;
+when the recipient lacks that base, send a budgeted full packet. Imported summaries
+are derived context and cannot restore authority or establish exact source facts.
 
 ## Learned reducers
 

@@ -147,6 +147,88 @@ Structural mismatches return errors and emit the existing mismatch event path. T
 
 ## Provider adapters
 
+### Effective capabilities
+
+A model provider performs inference. An agent backend may also own a conversation,
+tools, and an internal agent loop. These are separate capabilities. An ACP transport
+or a persistent session alone does not prove prompt, tool, or budget control.
+
+Resolve a typed capability snapshot for the selected deployment and adapter
+generation. Effective capabilities are the intersection of model support, adapter
+support, and execution policy. Unknown support cannot satisfy a hard requirement.
+Capability changes invalidate prepared requests before dispatch.
+
+Extend the existing backend/model contracts rather than adding another backend
+registry. The snapshot distinguishes these semantic modes:
+
+| Concern | Modes |
+| --- | --- |
+| Context control | replaceable portable turns; append-only session with explicit reset/replay; opaque managed session |
+| Tool control | host-mediated allow-listed calls; isolated backend tools with equivalent enforceable authority; uncontrolled tools |
+| Usage visibility | complete normalized usage; partial usage; unavailable |
+| Capacity | known deployment limits; configured conservative limits; unknown |
+| Optional operations | isolated inference, structured output, streaming, cancellation, exact source resolution, deferred schemas, native compaction, provider cache support |
+
+Required task content, tool authority, and fixed constraints must be enforceable.
+Reject an incompatible backend before dispatch. Optional efficiency operations may
+degrade to the portable path and emit a stable reason.
+
+For replaceable turns, Phenix sends the current complete projection. For append-only
+sessions, the adapter tracks the acknowledged projection revision and sends only a
+valid delta. A rewrite requires acknowledged reset/replay. Sending a full projection
+as another user message is not a context replacement.
+
+Opaque managed sessions may receive a bounded task packet and return observations.
+Their internal context and tool bytes are outside Phenix accounting. Report that
+coverage as partial; do not claim complete prompt enforcement, internal compaction,
+or replay from a packet alone. Tasks requiring those guarantees need a backend that
+exposes them. Unknown-cost opaque calls cannot satisfy an enforced total cost cap.
+
+An opaque backend used as a child must support a fresh isolated session and an
+enforceable attenuated authority boundary. Host tool mediation does not restrict
+separate backend-owned tools. Reject the child when those tools cannot be disabled
+or isolated under the same authority.
+
+### Optional provider state
+
+Provider cache handles and native compaction payloads are adapter-owned accelerators.
+Their compatibility key includes deployment, adapter version, configuration and
+authority generation, and covered projection revision. Drop incompatible handles
+when switching targets. Reconstruct from portable durable turns and exact sources.
+An unchanged covered prefix may reuse its handle with an appended suffix when the
+adapter supports that operation; a new whole-projection revision alone is not a
+cache miss.
+
+Use native compaction only when its adapter declares the covered range, preserves
+mandatory context and tool-call validity, and retains a portable recovery path.
+An opaque payload does not become a portable checkpoint or long-term memory.
+
+### Usage and retries
+
+Usage fields carry availability and provenance: reported, estimated, or unavailable.
+Unavailable is not zero. Adapters normalize whether cached input is included in
+input totals and reasoning is included in output totals. Aggregation must not add
+overlapping fields. Preserve provider counters separately when conversion is lossy.
+
+Record execution, parent execution, logical turn, attempt, task kind, and target.
+Streaming usage updates replace cumulative counters for the same attempt; they are
+not added as independent turns. Record failed, cancelled, and unknown-outcome
+attempts, including helper calls. Unknown cost remains unknown in aggregate reports.
+
+Persist request identity before dispatch. A transport disconnect after possible
+acceptance has an unknown outcome. Reconcile by adapter request identity when
+supported; otherwise expose the uncertainty and apply explicit retry policy.
+Do not replay tool side effects or promise exactly-once external inference.
+
+### Adapter conformance
+
+Deterministic fixtures must exercise portable turns, append-only reset/replay, and
+opaque managed sessions. Prove capability rejection, partial usage, tool authority,
+target switching, incompatible opaque-state discard, and unknown dispatch outcomes.
+An optimization-only capability missing from a fixture must preserve ordinary work.
+
+### Mapping ownership
+
 A provider adapter owns:
 
 - mapping portable roles to provider roles
